@@ -34,6 +34,12 @@ import (
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 var cfgFile string
 
 var rootCmd = &cobra.Command{
@@ -156,6 +162,14 @@ var pullCmd = &cobra.Command{Use: "pull", Short: "Pull remote app config to loca
 var diffCmd = &cobra.Command{Use: "diff", Short: "Diff local vs remote config", RunE: runDiff}
 var syncCmd = &cobra.Command{Use: "sync", Short: "Sync local dir to remote", RunE: runSync}
 
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print version information",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("simpledeploy %s (commit: %s, built: %s)\n", version, commit, date)
+	},
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "/etc/simpledeploy/config.yaml", "config file path")
 
@@ -225,7 +239,7 @@ func init() {
 	contextCmd.AddCommand(contextAddCmd, contextUseCmd, contextListCmd)
 	rootCmd.AddCommand(contextCmd, pullCmd, diffCmd, syncCmd)
 
-	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd)
+	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd, versionCmd)
 }
 
 func main() {
