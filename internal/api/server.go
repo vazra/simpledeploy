@@ -19,6 +19,8 @@ type Server struct {
 	rateLimiter     *auth.RateLimiter
 	backupScheduler *backup.Scheduler
 	docker          docker.Client
+	appsDir         string
+	reconciler      reconciler
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -78,6 +80,11 @@ func (s *Server) routes() {
 	// Logs (WebSocket)
 	s.mux.Handle("GET /api/apps/{slug}/logs", s.authMiddleware(
 		s.appAccessMiddleware(http.HandlerFunc(s.handleLogs))))
+
+	// Deploy / remove / compose
+	s.mux.Handle("POST /api/apps/deploy", s.authMiddleware(http.HandlerFunc(s.handleDeploy)))
+	s.mux.Handle("DELETE /api/apps/{slug}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRemoveApp))))
+	s.mux.Handle("GET /api/apps/{slug}/compose", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetCompose))))
 
 	// Webhooks
 	s.mux.Handle("GET /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleListWebhooks)))
