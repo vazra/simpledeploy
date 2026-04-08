@@ -5,3 +5,8 @@ bin/
 ui/node_modules/
 ui/dist/
 cmd/simpledeploy/ui_dist/
+
+
+dist/
+
+docs/superpowers
