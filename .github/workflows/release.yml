@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: go
+
+  goreleaser:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build UI
+        run: make ui-build
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  update-apt-repo:
+    needs: [release-please, goreleaser]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download .deb files from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#v}"
+          mkdir -p debs
+          gh release download "$TAG" \
+            --repo vazra/simpledeploy \
+            --pattern "*.deb" \
+            --dir debs
+
+      - name: Checkout apt-repo
+        uses: actions/checkout@v4
+        with:
+          repository: vazra/apt-repo
+          token: ${{ secrets.APT_REPO_TOKEN }}
+          path: apt-repo
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.APT_GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Update APT repository
+        run: |
+          # Copy debs to pool
+          mkdir -p apt-repo/pool/main/s/simpledeploy
+          cp debs/*.deb apt-repo/pool/main/s/simpledeploy/
+
+          cd apt-repo
+
+          # Generate Packages for each arch
+          for arch in amd64 arm64; do
+            mkdir -p dists/stable/main/binary-${arch}
+            dpkg-scanpackages --arch ${arch} pool/ > dists/stable/main/binary-${arch}/Packages
+            gzip -k -f dists/stable/main/binary-${arch}/Packages
+          done
+
+          # Generate Release
+          cd dists/stable
+          apt-ftparchive release . > Release
+
+          # Sign
+          GPG_KEY_ID=$(gpg --list-keys --with-colons | grep '^pub' | head -1 | cut -d: -f5)
+          gpg --batch --yes --default-key "$GPG_KEY_ID" --detach-sign -a -o Release.gpg Release
+          gpg --batch --yes --default-key "$GPG_KEY_ID" --clearsign -o InRelease Release
+
+      - name: Push apt-repo
+        run: |
+          cd apt-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "update: simpledeploy ${{ needs.release-please.outputs.tag_name }}"
+          git push
