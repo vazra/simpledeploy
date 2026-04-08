@@ -9,6 +9,35 @@
 
 ## Installation
 
+### macOS (Homebrew)
+
+```bash
+brew install vazra/tap/simpledeploy
+```
+
+### Ubuntu/Debian (APT)
+
+```bash
+# Add GPG key
+curl -fsSL https://vazra.github.io/apt-repo/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/vazra.gpg
+
+# Add repository
+echo "deb [signed-by=/usr/share/keyrings/vazra.gpg arch=$(dpkg --print-architecture)] https://vazra.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/vazra.list
+
+# Install
+sudo apt update && sudo apt install simpledeploy
+```
+
+Updates arrive via `apt update && apt upgrade`.
+
+### Linux (manual download)
+
+```bash
+# Download latest release (replace amd64 with arm64 if needed)
+curl -L https://github.com/vazra/simpledeploy/releases/latest/download/simpledeploy_linux_amd64.tar.gz | tar xz
+sudo mv simpledeploy /usr/local/bin/
+```
+
 ### Build from Source
 
 ```bash
@@ -19,6 +48,12 @@ sudo cp bin/simpledeploy /usr/local/bin/
 ```
 
 Requires Go 1.22+ and Node.js 18+.
+
+### Verify Installation
+
+```bash
+simpledeploy version
+```
 
 ## Server Setup
 
