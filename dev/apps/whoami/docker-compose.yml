@@ -1,0 +1,9 @@
+services:
+  web:
+    image: traefik/whoami:latest
+    ports:
+      - "9001:80"
+    labels:
+      simpledeploy.domain: "whoami.localhost"
+      simpledeploy.port: "80"
+    restart: unless-stopped

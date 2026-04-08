@@ -1,4 +1,4 @@
-.PHONY: build build-go test clean ui-build
+.PHONY: build build-go test clean ui-build dev dev-ui dev-server
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -17,6 +17,14 @@ build-go:
 
 test:
 	go test ./...
+
+dev: dev-server
+
+dev-server: build-go
+	./bin/simpledeploy serve --config config.dev.yaml
+
+dev-ui:
+	cd ui && npm run dev
 
 clean:
 	rm -rf bin/ cmd/simpledeploy/ui_dist

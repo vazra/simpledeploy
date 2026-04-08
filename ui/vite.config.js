@@ -3,5 +3,12 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 export default defineConfig({
   plugins: [svelte()],
-  build: { outDir: 'dist', emptyOutDir: true }
+  build: { outDir: 'dist', emptyOutDir: true },
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': 'http://localhost:8443',
+      '/ws': { target: 'ws://localhost:8443', ws: true }
+    }
+  }
 })
