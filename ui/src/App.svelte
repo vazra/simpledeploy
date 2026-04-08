@@ -1,5 +1,6 @@
 <script>
   import Router from 'svelte-spa-router'
+  import Toast from './components/Toast.svelte'
   import Login from './routes/Login.svelte'
   import Dashboard from './routes/Dashboard.svelte'
   import AppDetail from './routes/AppDetail.svelte'
@@ -18,3 +19,4 @@
 </script>
 
 <Router {routes} />
+<Toast />
