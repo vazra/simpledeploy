@@ -4,17 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/vazra/simpledeploy/internal/store"
 )
 
 type Server struct {
-	mux  *http.ServeMux
-	port int
+	mux   *http.ServeMux
+	port  int
+	store *store.Store
 }
 
-func NewServer(port int) *Server {
+func NewServer(port int, st *store.Store) *Server {
 	s := &Server{
-		mux:  http.NewServeMux(),
-		port: port,
+		mux:   http.NewServeMux(),
+		port:  port,
+		store: st,
 	}
 	s.routes()
 	return s
