@@ -40,6 +40,9 @@ jobs:
       - name: Build UI
         run: make ui-build
 
+      - name: Reset git state after UI build
+        run: git checkout -- .
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
