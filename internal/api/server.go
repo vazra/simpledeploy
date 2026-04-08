@@ -26,6 +26,8 @@ func NewServer(port int, st *store.Store) *Server {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/apps", s.handleListApps)
+	s.mux.HandleFunc("GET /api/apps/{slug}", s.handleGetApp)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
