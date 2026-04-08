@@ -13,6 +13,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/reconciler"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -104,8 +105,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("docker ping: %w", err)
 	}
 
+	proxyCfg := proxy.CaddyConfig{
+		ListenAddr: cfg.ListenAddr,
+		TLSMode:    cfg.TLS.Mode,
+		TLSEmail:   cfg.TLS.Email,
+	}
+	caddyProxy := proxy.NewCaddyProxy(proxyCfg)
+	defer caddyProxy.Stop()
+
 	dep := deployer.New(dc)
-	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
+	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir)
 
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
