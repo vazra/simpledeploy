@@ -7,9 +7,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/vazra/simpledeploy/internal/api"
+	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
@@ -55,6 +57,52 @@ var listCmd = &cobra.Command{
 	RunE:  runList,
 }
 
+var usersCmd = &cobra.Command{
+	Use:   "users",
+	Short: "Manage users",
+}
+
+var usersCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a user",
+	RunE:  runUsersCreate,
+}
+
+var usersListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List users",
+	RunE:  runUsersList,
+}
+
+var usersDeleteCmd = &cobra.Command{
+	Use:   "delete",
+	Short: "Delete a user",
+	RunE:  runUsersDelete,
+}
+
+var apikeyCmd = &cobra.Command{
+	Use:   "apikey",
+	Short: "Manage API keys",
+}
+
+var apikeyCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create an API key",
+	RunE:  runAPIKeyCreate,
+}
+
+var apikeyListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List API keys",
+	RunE:  runAPIKeyList,
+}
+
+var apikeyRevokeCmd = &cobra.Command{
+	Use:   "revoke",
+	Short: "Revoke an API key",
+	RunE:  runAPIKeyRevoke,
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "/etc/simpledeploy/config.yaml", "config file path")
 
@@ -65,7 +113,31 @@ func init() {
 	removeCmd.Flags().String("name", "", "app name to remove")
 	removeCmd.MarkFlagRequired("name")
 
-	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd)
+	usersCreateCmd.Flags().String("username", "", "username")
+	usersCreateCmd.Flags().String("password", "", "password")
+	usersCreateCmd.Flags().String("role", "viewer", "role: super_admin, admin, viewer")
+	usersCreateCmd.MarkFlagRequired("username")
+	usersCreateCmd.MarkFlagRequired("password")
+
+	usersDeleteCmd.Flags().Int64("id", 0, "user ID")
+	usersDeleteCmd.MarkFlagRequired("id")
+
+	usersCmd.AddCommand(usersCreateCmd, usersListCmd, usersDeleteCmd)
+
+	apikeyCreateCmd.Flags().String("name", "", "key name")
+	apikeyCreateCmd.Flags().Int64("user-id", 0, "user ID")
+	apikeyCreateCmd.MarkFlagRequired("name")
+	apikeyCreateCmd.MarkFlagRequired("user-id")
+
+	apikeyRevokeCmd.Flags().Int64("id", 0, "key ID")
+	apikeyRevokeCmd.MarkFlagRequired("id")
+
+	apikeyListCmd.Flags().Int64("user-id", 0, "user ID")
+	apikeyListCmd.MarkFlagRequired("user-id")
+
+	apikeyCmd.AddCommand(apikeyCreateCmd, apikeyListCmd, apikeyRevokeCmd)
+
+	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd)
 }
 
 func main() {
@@ -94,6 +166,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer db.Close()
+
+	jwtSecret := cfg.MasterSecret
+	if jwtSecret == "" {
+		jwtSecret = "simpledeploy-default-secret"
+	}
+	jwtMgr := auth.NewJWTManager(jwtSecret, 24*time.Hour)
+	rl := auth.NewRateLimiter(10, time.Minute)
 
 	dc, err := docker.NewClient()
 	if err != nil {
@@ -135,7 +214,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	srv := api.NewServer(cfg.ManagementPort, db)
+	count, _ := db.UserCount()
+	if count == 0 {
+		fmt.Printf("No users found. Create one at: POST http://localhost:%d/api/setup\n", cfg.ManagementPort)
+	}
+
+	srv := api.NewServer(cfg.ManagementPort, db, jwtMgr, rl)
 	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
 	return srv.ListenAndServe()
 }
@@ -301,6 +385,151 @@ func runList(cmd *cobra.Command, args []string) error {
 	for _, a := range apps {
 		fmt.Printf("%-20s %-10s %-30s\n", a.Name, a.Status, a.Domain)
 	}
+	return nil
+}
+
+func runUsersCreate(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	username, _ := cmd.Flags().GetString("username")
+	password, _ := cmd.Flags().GetString("password")
+	role, _ := cmd.Flags().GetString("role")
+
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	user, err := db.CreateUser(username, hash, role)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("created user %q (id=%d, role=%s)\n", user.Username, user.ID, user.Role)
+	return nil
+}
+
+func runUsersList(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	users, err := db.ListUsers()
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%-5s %-20s %-15s\n", "ID", "USERNAME", "ROLE")
+	for _, u := range users {
+		fmt.Printf("%-5d %-20s %-15s\n", u.ID, u.Username, u.Role)
+	}
+	return nil
+}
+
+func runUsersDelete(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	id, _ := cmd.Flags().GetInt64("id")
+	if err := db.DeleteUser(id); err != nil {
+		return err
+	}
+
+	fmt.Printf("deleted user %d\n", id)
+	return nil
+}
+
+func runAPIKeyCreate(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	name, _ := cmd.Flags().GetString("name")
+	userID, _ := cmd.Flags().GetInt64("user-id")
+
+	plaintext, hash, err := auth.GenerateAPIKey()
+	if err != nil {
+		return err
+	}
+
+	_, err = db.CreateAPIKey(userID, hash, name)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("API key created: %s\n", plaintext)
+	fmt.Println("Save this key - it won't be shown again.")
+	return nil
+}
+
+func runAPIKeyList(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	userID, _ := cmd.Flags().GetInt64("user-id")
+	keys, err := db.ListAPIKeysByUser(userID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%-5s %-20s\n", "ID", "NAME")
+	for _, k := range keys {
+		fmt.Printf("%-5d %-20s\n", k.ID, k.Name)
+	}
+	return nil
+}
+
+func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	id, _ := cmd.Flags().GetInt64("id")
+	if err := db.DeleteAPIKey(id); err != nil {
+		return err
+	}
+
+	fmt.Printf("revoked API key %d\n", id)
 	return nil
 }
 
