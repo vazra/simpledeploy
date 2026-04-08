@@ -53,6 +53,11 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/apikeys", s.authMiddleware(http.HandlerFunc(s.handleListAPIKeys)))
 	s.mux.Handle("POST /api/apikeys", s.authMiddleware(http.HandlerFunc(s.handleCreateAPIKey)))
 	s.mux.Handle("DELETE /api/apikeys/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteAPIKey)))
+
+	// Metrics
+	s.mux.Handle("GET /api/metrics/system", s.authMiddleware(http.HandlerFunc(s.handleSystemMetrics)))
+	s.mux.Handle("GET /api/apps/{slug}/metrics", s.authMiddleware(
+		s.appAccessMiddleware(http.HandlerFunc(s.handleAppMetrics))))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
