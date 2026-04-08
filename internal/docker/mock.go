@@ -128,3 +128,19 @@ func (m *MockClient) ContainerList(_ context.Context, _ container.ListOptions) (
 	}
 	return out, nil
 }
+
+const mockStatsJSON = `{
+	"cpu_stats":{"cpu_usage":{"total_usage":200000000},"system_cpu_usage":2000000000,"online_cpus":2},
+	"precpu_stats":{"cpu_usage":{"total_usage":100000000},"system_cpu_usage":1000000000},
+	"memory_stats":{"usage":52428800,"limit":1073741824},
+	"networks":{"eth0":{"rx_bytes":1024,"tx_bytes":2048}},
+	"blkio_stats":{"io_service_bytes_recursive":[{"op":"Read","value":4096},{"op":"Write","value":8192}]}
+}`
+
+func (m *MockClient) ContainerStats(_ context.Context, _ string) (container.StatsResponseReader, error) {
+	m.record("ContainerStats")
+	return container.StatsResponseReader{
+		Body:   io.NopCloser(strings.NewReader(mockStatsJSON)),
+		OSType: "linux",
+	}, nil
+}

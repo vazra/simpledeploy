@@ -21,6 +21,7 @@ type Client interface {
 	ContainerStop(ctx context.Context, id string, opts container.StopOptions) error
 	ContainerRemove(ctx context.Context, id string, opts container.RemoveOptions) error
 	ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error)
+	ContainerStats(ctx context.Context, containerID string) (container.StatsResponseReader, error)
 }
 
 type DockerClient struct {
@@ -81,4 +82,8 @@ func (c *DockerClient) ContainerRemove(ctx context.Context, id string, opts cont
 
 func (c *DockerClient) ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error) {
 	return c.cli.ContainerList(ctx, opts)
+}
+
+func (c *DockerClient) ContainerStats(ctx context.Context, id string) (container.StatsResponseReader, error) {
+	return c.cli.ContainerStats(ctx, id, false)
 }
