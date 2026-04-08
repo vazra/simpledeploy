@@ -1,0 +1,331 @@
+package store
+
+import (
+	"database/sql"
+	"fmt"
+	"time"
+)
+
+type Webhook struct {
+	ID               int64
+	Name, Type, URL  string
+	TemplateOverride string
+	HeadersJSON      string
+	CreatedAt        time.Time
+}
+
+type AlertRule struct {
+	ID          int64
+	AppID       *int64
+	Metric      string
+	Operator    string
+	Threshold   float64
+	DurationSec int
+	WebhookID   int64
+	Enabled     bool
+	CreatedAt   time.Time
+}
+
+type AlertHistory struct {
+	ID         int64
+	RuleID     int64
+	FiredAt    time.Time
+	ResolvedAt *time.Time
+	Value      float64
+}
+
+func (s *Store) CreateWebhook(w *Webhook) error {
+	err := s.db.QueryRow(`
+		INSERT INTO webhooks (name, type, url, template_override, headers_json)
+		VALUES (?, ?, ?, ?, ?)
+		RETURNING id, created_at
+	`, w.Name, w.Type, w.URL, nullString(w.TemplateOverride), nullString(w.HeadersJSON)).
+		Scan(&w.ID, &w.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("create webhook: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) GetWebhook(id int64) (*Webhook, error) {
+	var w Webhook
+	var tmpl, hdrs sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, name, type, url, template_override, headers_json, created_at
+		FROM webhooks WHERE id = ?
+	`, id).Scan(&w.ID, &w.Name, &w.Type, &w.URL, &tmpl, &hdrs, &w.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("webhook %d not found", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get webhook: %w", err)
+	}
+	if tmpl.Valid {
+		w.TemplateOverride = tmpl.String
+	}
+	if hdrs.Valid {
+		w.HeadersJSON = hdrs.String
+	}
+	return &w, nil
+}
+
+func (s *Store) ListWebhooks() ([]Webhook, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, type, url, template_override, headers_json, created_at
+		FROM webhooks ORDER BY id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	var whs []Webhook
+	for rows.Next() {
+		var w Webhook
+		var tmpl, hdrs sql.NullString
+		if err := rows.Scan(&w.ID, &w.Name, &w.Type, &w.URL, &tmpl, &hdrs, &w.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan webhook: %w", err)
+		}
+		if tmpl.Valid {
+			w.TemplateOverride = tmpl.String
+		}
+		if hdrs.Valid {
+			w.HeadersJSON = hdrs.String
+		}
+		whs = append(whs, w)
+	}
+	return whs, rows.Err()
+}
+
+func (s *Store) DeleteWebhook(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete webhook: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("webhook %d not found", id)
+	}
+	return nil
+}
+
+func (s *Store) CreateAlertRule(r *AlertRule) error {
+	var appID interface{}
+	if r.AppID != nil {
+		appID = *r.AppID
+	}
+	enabled := 0
+	if r.Enabled {
+		enabled = 1
+	}
+	err := s.db.QueryRow(`
+		INSERT INTO alert_rules (app_id, metric, operator, threshold, duration_sec, webhook_id, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		RETURNING id, created_at
+	`, appID, r.Metric, r.Operator, r.Threshold, r.DurationSec, r.WebhookID, enabled).
+		Scan(&r.ID, &r.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("create alert rule: %w", err)
+	}
+	return nil
+}
+
+func scanAlertRule(row interface {
+	Scan(...any) error
+}) (AlertRule, error) {
+	var r AlertRule
+	var appID sql.NullInt64
+	var enabled int
+	if err := row.Scan(
+		&r.ID, &appID, &r.Metric, &r.Operator, &r.Threshold,
+		&r.DurationSec, &r.WebhookID, &enabled, &r.CreatedAt,
+	); err != nil {
+		return AlertRule{}, err
+	}
+	if appID.Valid {
+		id := appID.Int64
+		r.AppID = &id
+	}
+	r.Enabled = enabled != 0
+	return r, nil
+}
+
+func (s *Store) ListAlertRules(appID *int64) ([]AlertRule, error) {
+	var rows *sql.Rows
+	var err error
+	if appID == nil {
+		rows, err = s.db.Query(`
+			SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at
+			FROM alert_rules ORDER BY id
+		`)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at
+			FROM alert_rules WHERE app_id = ? ORDER BY id
+		`, *appID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list alert rules: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []AlertRule
+	for rows.Next() {
+		r, err := scanAlertRule(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan alert rule: %w", err)
+		}
+		rules = append(rules, r)
+	}
+	return rules, rows.Err()
+}
+
+func (s *Store) ListActiveAlertRules() ([]AlertRule, error) {
+	rows, err := s.db.Query(`
+		SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at
+		FROM alert_rules WHERE enabled = 1 ORDER BY id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list active alert rules: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []AlertRule
+	for rows.Next() {
+		r, err := scanAlertRule(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan alert rule: %w", err)
+		}
+		rules = append(rules, r)
+	}
+	return rules, rows.Err()
+}
+
+func (s *Store) UpdateAlertRule(r *AlertRule) error {
+	var appID interface{}
+	if r.AppID != nil {
+		appID = *r.AppID
+	}
+	enabled := 0
+	if r.Enabled {
+		enabled = 1
+	}
+	res, err := s.db.Exec(`
+		UPDATE alert_rules
+		SET app_id=?, metric=?, operator=?, threshold=?, duration_sec=?, webhook_id=?, enabled=?
+		WHERE id=?
+	`, appID, r.Metric, r.Operator, r.Threshold, r.DurationSec, r.WebhookID, enabled, r.ID)
+	if err != nil {
+		return fmt.Errorf("update alert rule: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("alert rule %d not found", r.ID)
+	}
+	return nil
+}
+
+func (s *Store) DeleteAlertRule(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM alert_rules WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete alert rule: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("alert rule %d not found", id)
+	}
+	return nil
+}
+
+func (s *Store) CreateAlertHistory(ruleID int64, value float64) (*AlertHistory, error) {
+	var h AlertHistory
+	h.RuleID = ruleID
+	h.Value = value
+	err := s.db.QueryRow(`
+		INSERT INTO alert_history (rule_id, value)
+		VALUES (?, ?)
+		RETURNING id, fired_at
+	`, ruleID, value).Scan(&h.ID, &h.FiredAt)
+	if err != nil {
+		return nil, fmt.Errorf("create alert history: %w", err)
+	}
+	return &h, nil
+}
+
+func (s *Store) ResolveAlert(historyID int64) error {
+	res, err := s.db.Exec(`
+		UPDATE alert_history SET resolved_at = datetime('now') WHERE id = ?
+	`, historyID)
+	if err != nil {
+		return fmt.Errorf("resolve alert: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("alert history %d not found", historyID)
+	}
+	return nil
+}
+
+func (s *Store) GetActiveAlert(ruleID int64) (*AlertHistory, error) {
+	var h AlertHistory
+	err := s.db.QueryRow(`
+		SELECT id, rule_id, fired_at, resolved_at, value
+		FROM alert_history
+		WHERE rule_id = ? AND resolved_at IS NULL
+		ORDER BY fired_at DESC LIMIT 1
+	`, ruleID).Scan(&h.ID, &h.RuleID, &h.FiredAt, new(sql.NullTime), &h.Value)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get active alert: %w", err)
+	}
+	return &h, nil
+}
+
+func (s *Store) ListAlertHistory(ruleID *int64, limit int) ([]AlertHistory, error) {
+	var rows *sql.Rows
+	var err error
+	if ruleID == nil {
+		rows, err = s.db.Query(`
+			SELECT id, rule_id, fired_at, resolved_at, value
+			FROM alert_history ORDER BY fired_at DESC LIMIT ?
+		`, limit)
+	} else {
+		rows, err = s.db.Query(`
+			SELECT id, rule_id, fired_at, resolved_at, value
+			FROM alert_history WHERE rule_id = ? ORDER BY fired_at DESC LIMIT ?
+		`, *ruleID, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list alert history: %w", err)
+	}
+	defer rows.Close()
+
+	var hist []AlertHistory
+	for rows.Next() {
+		var h AlertHistory
+		var resolvedAt sql.NullTime
+		if err := rows.Scan(&h.ID, &h.RuleID, &h.FiredAt, &resolvedAt, &h.Value); err != nil {
+			return nil, fmt.Errorf("scan alert history: %w", err)
+		}
+		if resolvedAt.Valid {
+			t := resolvedAt.Time
+			h.ResolvedAt = &t
+		}
+		hist = append(hist, h)
+	}
+	return hist, rows.Err()
+}
