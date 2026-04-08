@@ -6,15 +6,17 @@ import (
 	"net/http"
 
 	"github.com/vazra/simpledeploy/internal/auth"
+	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
 type Server struct {
-	mux         *http.ServeMux
-	port        int
-	store       *store.Store
-	jwt         *auth.JWTManager
-	rateLimiter *auth.RateLimiter
+	mux             *http.ServeMux
+	port            int
+	store           *store.Store
+	jwt             *auth.JWTManager
+	rateLimiter     *auth.RateLimiter
+	backupScheduler *backup.Scheduler
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -27,6 +29,11 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 	}
 	s.routes()
 	return s
+}
+
+// SetBackupScheduler sets the backup scheduler (can be nil).
+func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
+	s.backupScheduler = sched
 }
 
 func (s *Server) routes() {
@@ -76,6 +83,16 @@ func (s *Server) routes() {
 
 	// Alert history
 	s.mux.Handle("GET /api/alerts/history", s.authMiddleware(http.HandlerFunc(s.handleListAlertHistory)))
+
+	// Backup configs
+	s.mux.Handle("GET /api/apps/{slug}/backups/configs", s.authMiddleware(http.HandlerFunc(s.handleListBackupConfigs)))
+	s.mux.Handle("POST /api/apps/{slug}/backups/configs", s.authMiddleware(http.HandlerFunc(s.handleCreateBackupConfig)))
+	s.mux.Handle("DELETE /api/backups/configs/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteBackupConfig)))
+
+	// Backup runs
+	s.mux.Handle("GET /api/apps/{slug}/backups/runs", s.authMiddleware(http.HandlerFunc(s.handleListBackupRuns)))
+	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackup)))
+	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

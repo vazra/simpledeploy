@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/alerts"
 	"github.com/vazra/simpledeploy/internal/api"
 	"github.com/vazra/simpledeploy/internal/auth"
+	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
@@ -107,6 +109,29 @@ var apikeyRevokeCmd = &cobra.Command{
 	RunE:  runAPIKeyRevoke,
 }
 
+var backupCmd = &cobra.Command{
+	Use:   "backup",
+	Short: "Manage backups",
+}
+
+var backupRunCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Trigger backup",
+	RunE:  runBackupNow,
+}
+
+var backupListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List backup runs",
+	RunE:  runBackupList,
+}
+
+var restoreCmd = &cobra.Command{
+	Use:   "restore",
+	Short: "Restore from backup",
+	RunE:  runRestore,
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "/etc/simpledeploy/config.yaml", "config file path")
 
@@ -141,7 +166,19 @@ func init() {
 
 	apikeyCmd.AddCommand(apikeyCreateCmd, apikeyListCmd, apikeyRevokeCmd)
 
-	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd)
+	backupRunCmd.Flags().String("app", "", "app slug")
+	backupRunCmd.MarkFlagRequired("app")
+
+	backupListCmd.Flags().String("app", "", "app slug")
+	backupListCmd.MarkFlagRequired("app")
+
+	restoreCmd.Flags().String("app", "", "app slug")
+	restoreCmd.MarkFlagRequired("app")
+	restoreCmd.Flags().Int64("id", 0, "backup run ID")
+	restoreCmd.MarkFlagRequired("id")
+
+	backupCmd.AddCommand(backupRunCmd, backupListCmd)
+	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd)
 }
 
 func main() {
@@ -267,7 +304,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("No users found. Create one at: POST http://localhost:%d/api/setup\n", cfg.ManagementPort)
 	}
 
+	backupSched := backup.NewScheduler(db)
+	backupSched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
+	backupSched.RegisterStrategy("volume", backup.NewVolumeStrategy("/data"))
+	backupSched.RegisterTargetFactory("local", func(configJSON string) (backup.Target, error) {
+		return backup.NewLocalTarget(filepath.Join(cfg.DataDir, "backups")), nil
+	})
+	backupSched.RegisterTargetFactory("s3", func(configJSON string) (backup.Target, error) {
+		var s3cfg backup.S3Config
+		json.Unmarshal([]byte(configJSON), &s3cfg)
+		return backup.NewS3Target(s3cfg)
+	})
+	if err := backupSched.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "backup scheduler: %v\n", err)
+	}
+	defer backupSched.Stop()
+
 	srv := api.NewServer(cfg.ManagementPort, db, jwtMgr, rl)
+	srv.SetBackupScheduler(backupSched)
 	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
 	return srv.ListenAndServe()
 }
@@ -578,6 +632,113 @@ func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("revoked API key %d\n", id)
+	return nil
+}
+
+func newBackupScheduler(cfg *config.Config, db *store.Store) *backup.Scheduler {
+	sched := backup.NewScheduler(db)
+	sched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
+	sched.RegisterStrategy("volume", backup.NewVolumeStrategy("/data"))
+	sched.RegisterTargetFactory("local", func(configJSON string) (backup.Target, error) {
+		return backup.NewLocalTarget(filepath.Join(cfg.DataDir, "backups")), nil
+	})
+	sched.RegisterTargetFactory("s3", func(configJSON string) (backup.Target, error) {
+		var s3cfg backup.S3Config
+		json.Unmarshal([]byte(configJSON), &s3cfg)
+		return backup.NewS3Target(s3cfg)
+	})
+	return sched
+}
+
+func runBackupNow(cmd *cobra.Command, args []string) error {
+	appSlug, _ := cmd.Flags().GetString("app")
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	app, err := db.GetAppBySlug(appSlug)
+	if err != nil {
+		return fmt.Errorf("get app: %w", err)
+	}
+	appID := app.ID
+	cfgs, err := db.ListBackupConfigs(&appID)
+	if err != nil {
+		return fmt.Errorf("list backup configs: %w", err)
+	}
+	if len(cfgs) == 0 {
+		return fmt.Errorf("no backup config for app %s", appSlug)
+	}
+
+	sched := newBackupScheduler(cfg, db)
+	if err := sched.RunBackup(cmd.Context(), cfgs[0].ID); err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
+	fmt.Printf("backup completed for app %s\n", appSlug)
+	return nil
+}
+
+func runBackupList(cmd *cobra.Command, args []string) error {
+	appSlug, _ := cmd.Flags().GetString("app")
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	app, err := db.GetAppBySlug(appSlug)
+	if err != nil {
+		return fmt.Errorf("get app: %w", err)
+	}
+	appID := app.ID
+	backupCfgs, err := db.ListBackupConfigs(&appID)
+	if err != nil {
+		return fmt.Errorf("list backup configs: %w", err)
+	}
+
+	fmt.Printf("%-5s %-10s %-12s %-30s\n", "ID", "STATUS", "SIZE", "STARTED")
+	for _, bcfg := range backupCfgs {
+		runs, err := db.ListBackupRuns(bcfg.ID)
+		if err != nil {
+			return fmt.Errorf("list runs: %w", err)
+		}
+		for _, r := range runs {
+			size := ""
+			if r.SizeBytes != nil {
+				size = fmt.Sprintf("%d", *r.SizeBytes)
+			}
+			fmt.Printf("%-5d %-10s %-12s %-30s\n", r.ID, r.Status, size, r.StartedAt.Format("2006-01-02 15:04:05"))
+		}
+	}
+	return nil
+}
+
+func runRestore(cmd *cobra.Command, args []string) error {
+	runID, _ := cmd.Flags().GetInt64("id")
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	sched := newBackupScheduler(cfg, db)
+	if err := sched.RunRestore(cmd.Context(), runID); err != nil {
+		return fmt.Errorf("restore: %w", err)
+	}
+	fmt.Printf("restore completed for run %d\n", runID)
 	return nil
 }
 
