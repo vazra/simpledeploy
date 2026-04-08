@@ -79,19 +79,8 @@ go test ./internal/store/ -run TestUpsert  # specific test
 
 ## Commit Messages
 
-Follow Conventional Commits format:
+Use Conventional Commits: `type(scope): description`
 
-- `feat:` for new features
-- `feat(scope):` for scoped features (e.g., `feat(api):`, `feat(cli):`, `feat(ui):`)
-- `fix:` for bug fixes
-- `docs:` for documentation, plans, specs
-- `test:` for tests
-- `refactor:` for code refactoring
-- `chore:` for build/deps/tooling
+Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`
 
-Examples:
-- `feat(api): add user authentication endpoints`
-- `feat(cli): add deployment status command`
-- `fix: resolve race condition in metrics writer`
-- `docs: update API documentation`
-- `test: add backup scheduler tests`
+Scopes: `api`, `cli`, `ui`, or omit if not scoped.
