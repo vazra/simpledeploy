@@ -58,6 +58,10 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/metrics/system", s.authMiddleware(http.HandlerFunc(s.handleSystemMetrics)))
 	s.mux.Handle("GET /api/apps/{slug}/metrics", s.authMiddleware(
 		s.appAccessMiddleware(http.HandlerFunc(s.handleAppMetrics))))
+
+	// Request stats
+	s.mux.Handle("GET /api/apps/{slug}/requests", s.authMiddleware(
+		s.appAccessMiddleware(http.HandlerFunc(s.handleAppRequests))))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

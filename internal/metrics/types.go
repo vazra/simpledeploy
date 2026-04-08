@@ -16,6 +16,16 @@ type MetricPoint struct {
 	Tier        string
 }
 
+type RequestStat struct {
+	AppID       int64
+	Timestamp   time.Time
+	StatusCode  int
+	LatencyMs   float64
+	Method      string
+	PathPattern string
+	Tier        string
+}
+
 const (
 	TierRaw = "raw"
 	Tier1m  = "1m"

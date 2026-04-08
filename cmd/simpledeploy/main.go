@@ -213,6 +213,25 @@ func runServe(cmd *cobra.Command, args []string) error {
 	tiers := parseTierConfigs(cfg.Metrics.Tiers)
 	rollup := metrics.NewRollupManager(db, tiers)
 
+	// request stats pipeline
+	reqStatsCh := make(chan proxy.RequestStatEvent, 1000)
+	proxy.RequestStatsCh = reqStatsCh
+
+	domainLookup := func(domain string) (int64, error) {
+		apps, err := db.ListApps()
+		if err != nil {
+			return 0, err
+		}
+		for _, a := range apps {
+			if a.Domain == domain {
+				return a.ID, nil
+			}
+		}
+		return 0, fmt.Errorf("unknown domain: %s", domain)
+	}
+	reqWriter := metrics.NewRequestStatsWriter(db, reqStatsCh, domainLookup, 200)
+	reqRollup := metrics.NewReqStatsRollupManager(db, tiers)
+
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
@@ -235,6 +254,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go collector.Run(ctx, 10*time.Second)
 	go writer.Run(ctx, 10*time.Second)
 	go rollup.Run(ctx)
+	go reqWriter.Run(ctx, 5*time.Second)
+	go reqRollup.Run(ctx)
 
 	count, _ := db.UserCount()
 	if count == 0 {

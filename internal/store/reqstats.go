@@ -3,21 +3,15 @@ package store
 import (
 	"fmt"
 	"time"
+
+	"github.com/vazra/simpledeploy/internal/metrics"
 )
 
-// RequestStat holds a single HTTP request observation.
-type RequestStat struct {
-	AppID       int64
-	Timestamp   time.Time
-	StatusCode  int
-	LatencyMs   float64
-	Method      string
-	PathPattern string
-	Tier        string
-}
+// RequestStat is an alias for metrics.RequestStat for backward compatibility.
+type RequestStat = metrics.RequestStat
 
 // InsertRequestStats batch-inserts request stats in a single transaction.
-func (s *Store) InsertRequestStats(stats []RequestStat) error {
+func (s *Store) InsertRequestStats(stats []metrics.RequestStat) error {
 	if len(stats) == 0 {
 		return nil
 	}
@@ -59,7 +53,7 @@ func (s *Store) InsertRequestStats(stats []RequestStat) error {
 }
 
 // QueryRequestStats returns request stats for the given app, tier, and time range.
-func (s *Store) QueryRequestStats(appID int64, tier string, from, to time.Time) ([]RequestStat, error) {
+func (s *Store) QueryRequestStats(appID int64, tier string, from, to time.Time) ([]metrics.RequestStat, error) {
 	rows, err := s.db.Query(`
 		SELECT app_id, timestamp, status_code, latency_ms, method, path_pattern
 		FROM request_stats
@@ -74,9 +68,9 @@ func (s *Store) QueryRequestStats(appID int64, tier string, from, to time.Time) 
 	}
 	defer rows.Close()
 
-	var result []RequestStat
+	var result []metrics.RequestStat
 	for rows.Next() {
-		var st RequestStat
+		var st metrics.RequestStat
 		var ts string
 		if err := rows.Scan(
 			&st.AppID, &ts, &st.StatusCode, &st.LatencyMs, &st.Method, &st.PathPattern,
