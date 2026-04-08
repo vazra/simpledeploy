@@ -32,6 +32,9 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 func (s *Server) routes() {
 	// Public routes
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
 
 	// Protected routes
 	s.mux.Handle("GET /api/apps", s.authMiddleware(
