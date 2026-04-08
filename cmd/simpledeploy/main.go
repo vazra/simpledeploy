@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/metrics"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/reconciler"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -195,6 +198,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 	dep := deployer.New(dc)
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir)
 
+	// metrics pipeline
+	metricsCh := make(chan metrics.MetricPoint, 500)
+
+	appLookup := func(slug string) (int64, error) {
+		app, err := db.GetAppBySlug(slug)
+		if err != nil {
+			return 0, err
+		}
+		return app.ID, nil
+	}
+	collector := metrics.NewCollector(dc, appLookup, metricsCh)
+	writer := metrics.NewWriter(db, metricsCh, 100)
+	tiers := parseTierConfigs(cfg.Metrics.Tiers)
+	rollup := metrics.NewRollupManager(db, tiers)
+
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
@@ -213,6 +231,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "reconciler watch: %v\n", err)
 		}
 	}()
+
+	go collector.Run(ctx, 10*time.Second)
+	go writer.Run(ctx, 10*time.Second)
+	go rollup.Run(ctx)
 
 	count, _ := db.UserCount()
 	if count == 0 {
@@ -531,6 +553,30 @@ func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("revoked API key %d\n", id)
 	return nil
+}
+
+func parseTierConfigs(cfgTiers []config.MetricsTier) []metrics.TierConfig {
+	var tiers []metrics.TierConfig
+	for _, t := range cfgTiers {
+		retention, err := time.ParseDuration(t.Retention)
+		if err != nil {
+			retention = parseDuration(t.Retention)
+		}
+		tiers = append(tiers, metrics.TierConfig{
+			Name:      t.Name,
+			Retention: retention,
+		})
+	}
+	return tiers
+}
+
+func parseDuration(s string) time.Duration {
+	if strings.HasSuffix(s, "d") {
+		days, _ := strconv.Atoi(strings.TrimSuffix(s, "d"))
+		return time.Duration(days) * 24 * time.Hour
+	}
+	d, _ := time.ParseDuration(s)
+	return d
 }
 
 // copyCompose reads the compose file at src and writes it to
