@@ -1,0 +1,10 @@
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    labels:
+      simpledeploy.domain: "example.com"
+      simpledeploy.port: "8080"
+      simpledeploy.tls: "letsencrypt"
+    restart: always

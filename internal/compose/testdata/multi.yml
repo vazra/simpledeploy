@@ -1,0 +1,29 @@
+services:
+  web:
+    image: myapp:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://db:5432/app
+    depends_on:
+      - db
+    labels:
+      simpledeploy.domain: "myapp.com"
+      simpledeploy.port: "3000"
+    restart: unless-stopped
+
+  db:
+    image: postgres:15
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: secret
+    labels:
+      simpledeploy.backup.strategy: "dump"
+      simpledeploy.backup.schedule: "0 2 * * *"
+      simpledeploy.backup.target: "s3://mybucket/backups"
+      simpledeploy.backup.retention: "7d"
+    restart: always
+
+volumes:
+  pgdata:
