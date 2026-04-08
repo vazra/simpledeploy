@@ -80,8 +80,13 @@ func TestBuildConfigWithRoutes(t *testing.T) {
 			t.Errorf("route[%d] host: got %q, want %q", i, host, wantDomains[i])
 		}
 
-		handle := r["handle"].([]interface{})[0].(map[string]interface{})
-		dial := handle["upstreams"].([]interface{})[0].(map[string]interface{})["dial"].(string)
+		// handlers: [ratelimit, metrics, reverse_proxy]
+		handleList := r["handle"].([]interface{})
+		if len(handleList) != 3 {
+			t.Fatalf("route[%d] handle: got %d handlers, want 3", i, len(handleList))
+		}
+		rp := handleList[2].(map[string]interface{})
+		dial := rp["upstreams"].([]interface{})[0].(map[string]interface{})["dial"].(string)
 		if dial != wantDials[i] {
 			t.Errorf("route[%d] dial: got %q, want %q", i, dial, wantDials[i])
 		}

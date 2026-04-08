@@ -39,11 +39,17 @@ func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 	}
 }
 
-// SetRoutes stores routes and reloads Caddy config.
+// SetRoutes stores routes, configures rate limiters, and reloads Caddy config.
 func (c *CaddyProxy) SetRoutes(routes []Route) error {
 	c.mu.Lock()
 	c.routes = routes
 	c.mu.Unlock()
+
+	for _, r := range routes {
+		if r.RateLimit != nil {
+			RateLimiters.Set(r.Domain, r.RateLimit)
+		}
+	}
 	return c.reload()
 }
 
@@ -77,22 +83,25 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	c.mu.Unlock()
 
 	for _, r := range routes {
+		handlers := []interface{}{
+			map[string]interface{}{"handler": "simpledeploy_ratelimit"},
+			map[string]interface{}{"handler": "simpledeploy_metrics"},
+			map[string]interface{}{
+				"handler": "reverse_proxy",
+				"upstreams": []interface{}{
+					map[string]interface{}{
+						"dial": r.Upstream,
+					},
+				},
+			},
+		}
 		caddyRoutes = append(caddyRoutes, map[string]interface{}{
 			"match": []interface{}{
 				map[string]interface{}{
 					"host": []string{r.Domain},
 				},
 			},
-			"handle": []interface{}{
-				map[string]interface{}{
-					"handler": "reverse_proxy",
-					"upstreams": []interface{}{
-						map[string]interface{}{
-							"dial": r.Upstream,
-						},
-					},
-				},
-			},
+			"handle": handlers,
 		})
 	}
 

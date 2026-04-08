@@ -2,16 +2,27 @@ package proxy
 
 import (
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
 
 // Route holds routing config for a deployed app.
 type Route struct {
-	AppSlug  string
-	Domain   string
-	Upstream string // "localhost:{port}"
-	TLS      string // "auto", "custom", "off"
+	AppSlug   string
+	Domain    string
+	Upstream  string // "localhost:{port}"
+	TLS       string // "auto", "custom", "off"
+	RateLimit *RateLimitConfig
+}
+
+// RateLimitConfig holds parsed rate-limit settings for a route.
+type RateLimitConfig struct {
+	Requests int
+	Window   time.Duration
+	Burst    int
+	By       string
 }
 
 // ResolveRoute derives a Route from an AppConfig.
@@ -31,12 +42,32 @@ func ResolveRoute(app *compose.AppConfig) (*Route, error) {
 		tls = "auto"
 	}
 
-	return &Route{
+	route := &Route{
 		AppSlug:  app.Name,
 		Domain:   app.Domain,
 		Upstream: "localhost:" + hostPort,
 		TLS:      tls,
-	}, nil
+	}
+
+	if app.RateLimit.Requests != "" {
+		requests, _ := strconv.Atoi(app.RateLimit.Requests)
+		window, _ := time.ParseDuration(app.RateLimit.Window)
+		burst, _ := strconv.Atoi(app.RateLimit.Burst)
+		by := app.RateLimit.By
+		if by == "" {
+			by = "ip"
+		}
+		if requests > 0 {
+			route.RateLimit = &RateLimitConfig{
+				Requests: requests,
+				Window:   window,
+				Burst:    burst,
+				By:       by,
+			}
+		}
+	}
+
+	return route, nil
 }
 
 // resolveHostPort finds the host port from app.Services port mappings.
