@@ -9,6 +9,7 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -30,7 +31,8 @@ func newTestEnv(t *testing.T) (*Reconciler, *docker.MockClient, *store.Store, st
 	// temp apps dir
 	appsDir := t.TempDir()
 
-	r := New(st, d, appsDir)
+	mockProxy := proxy.NewMockProxy()
+	r := New(st, d, mockProxy, appsDir)
 	return r, mock, st, appsDir
 }
 
@@ -43,6 +45,8 @@ func writeComposeFile(t *testing.T, dir, appName string) {
 	content := `services:
   web:
     image: nginx:latest
+    ports:
+      - "80:80"
     labels:
       simpledeploy.domain: "` + appName + `.example.com"
       simpledeploy.port: "80"
@@ -140,6 +144,33 @@ func TestReconcileMultipleApps(t *testing.T) {
 	}
 	if !slugs["beta"] {
 		t.Error("expected beta in store")
+	}
+}
+
+func TestReconcileUpdatesProxyRoutes(t *testing.T) {
+	r, _, _, appsDir := newTestEnv(t)
+
+	writeComposeFile(t, appsDir, "myapp")
+	r.Reconcile(context.Background())
+
+	mockProxy := r.proxy.(*proxy.MockProxy)
+	if !mockProxy.HasRoute("myapp.example.com") {
+		t.Error("expected proxy route for myapp.example.com")
+	}
+}
+
+func TestReconcileRemoveUpdatesProxy(t *testing.T) {
+	r, _, _, appsDir := newTestEnv(t)
+
+	writeComposeFile(t, appsDir, "myapp")
+	r.Reconcile(context.Background())
+
+	os.RemoveAll(filepath.Join(appsDir, "myapp"))
+	r.Reconcile(context.Background())
+
+	mockProxy := r.proxy.(*proxy.MockProxy)
+	if mockProxy.HasRoute("myapp.example.com") {
+		t.Error("expected proxy route removed")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -16,12 +17,13 @@ import (
 type Reconciler struct {
 	store    *store.Store
 	deployer *deployer.Deployer
+	proxy    proxy.Proxy // can be nil
 	appsDir  string
 }
 
 // New creates a Reconciler.
-func New(st *store.Store, d *deployer.Deployer, appsDir string) *Reconciler {
-	return &Reconciler{store: st, deployer: d, appsDir: appsDir}
+func New(st *store.Store, d *deployer.Deployer, p proxy.Proxy, appsDir string) *Reconciler {
+	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir}
 }
 
 // Reconcile diffs the apps directory against the store and deploys/removes as needed.
@@ -59,7 +61,25 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		}
 	}
 
+	if r.proxy != nil {
+		r.updateProxyRoutes(desired)
+	}
+
 	return nil
+}
+
+func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
+	var routes []proxy.Route
+	for _, app := range apps {
+		route, err := proxy.ResolveRoute(app)
+		if err != nil {
+			continue // app without domain, skip
+		}
+		routes = append(routes, *route)
+	}
+	if err := r.proxy.SetRoutes(routes); err != nil {
+		fmt.Fprintf(os.Stderr, "reconciler: update proxy routes: %v\n", err)
+	}
 }
 
 // DeployOne deploys a single app from a compose file path.

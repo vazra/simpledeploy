@@ -105,7 +105,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	dep := deployer.New(dc)
-	rec := reconciler.New(db, dep, cfg.AppsDir)
+	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
 
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
@@ -175,7 +175,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	defer dc.Close()
 
 	dep := deployer.New(dc)
-	rec := reconciler.New(db, dep, cfg.AppsDir)
+	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
 	ctx := cmd.Context()
 
 	file, _ := cmd.Flags().GetString("file")
@@ -250,7 +250,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	defer dc.Close()
 
 	dep := deployer.New(dc)
-	rec := reconciler.New(db, dep, cfg.AppsDir)
+	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
 
 	if err := rec.RemoveOne(cmd.Context(), name); err != nil {
 		return fmt.Errorf("remove %s: %w", name, err)
