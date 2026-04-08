@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vazra/simpledeploy/internal/alerts"
 	"github.com/vazra/simpledeploy/internal/api"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/config"
@@ -256,6 +257,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go rollup.Run(ctx)
 	go reqWriter.Run(ctx, 5*time.Second)
 	go reqRollup.Run(ctx)
+
+	dispatcher := alerts.NewWebhookDispatcher()
+	evaluator := alerts.NewEvaluator(db, db, db, dispatcher)
+	go evaluator.Run(ctx, 30*time.Second)
 
 	count, _ := db.UserCount()
 	if count == 0 {

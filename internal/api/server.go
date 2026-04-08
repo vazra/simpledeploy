@@ -62,6 +62,20 @@ func (s *Server) routes() {
 	// Request stats
 	s.mux.Handle("GET /api/apps/{slug}/requests", s.authMiddleware(
 		s.appAccessMiddleware(http.HandlerFunc(s.handleAppRequests))))
+
+	// Webhooks
+	s.mux.Handle("GET /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleListWebhooks)))
+	s.mux.Handle("POST /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleCreateWebhook)))
+	s.mux.Handle("DELETE /api/webhooks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteWebhook)))
+
+	// Alert rules
+	s.mux.Handle("GET /api/alerts/rules", s.authMiddleware(http.HandlerFunc(s.handleListAlertRules)))
+	s.mux.Handle("POST /api/alerts/rules", s.authMiddleware(http.HandlerFunc(s.handleCreateAlertRule)))
+	s.mux.Handle("PUT /api/alerts/rules/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateAlertRule)))
+	s.mux.Handle("DELETE /api/alerts/rules/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteAlertRule)))
+
+	// Alert history
+	s.mux.Handle("GET /api/alerts/history", s.authMiddleware(http.HandlerFunc(s.handleListAlertHistory)))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
