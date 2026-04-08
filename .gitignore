@@ -2,3 +2,6 @@ bin/
 *.db
 *.db-wal
 *.db-shm
+ui/node_modules/
+ui/dist/
+cmd/simpledeploy/ui_dist/

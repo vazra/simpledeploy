@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
@@ -42,6 +44,25 @@ func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
 
 // SetDocker sets the docker client.
 func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
+
+// SetUIFS serves the embedded SPA with fallback to index.html.
+func (s *Server) SetUIFS(fsys fs.FS) {
+	fileServer := http.FileServer(http.FS(fsys))
+	s.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path != "/" {
+			f, err := fsys.Open(strings.TrimPrefix(path, "/"))
+			if err == nil {
+				f.Close()
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// SPA fallback
+		r.URL.Path = "/index.html"
+		fileServer.ServeHTTP(w, r)
+	}))
+}
 
 func (s *Server) routes() {
 	// Public routes

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -371,6 +372,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetDocker(dc)
 	srv.SetAppsDir(cfg.AppsDir)
 	srv.SetReconciler(rec)
+
+	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
+	srv.SetUIFS(distFS)
+
 	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
 	return srv.ListenAndServe()
 }
