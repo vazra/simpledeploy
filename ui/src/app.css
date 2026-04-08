@@ -56,3 +56,12 @@
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
 }
+
+@keyframes slide-panel {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-slide-panel {
+  animation: slide-panel 0.2s ease-out;
+}
