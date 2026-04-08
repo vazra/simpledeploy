@@ -1,5 +1,64 @@
 # Changelog
 
+## [1.1.0](https://github.com/vazra/simpledeploy/compare/v1.0.0...v1.1.0) (2026-04-08)
+
+
+### Features
+
+* alert evaluator with condition checking ([dbf247c](https://github.com/vazra/simpledeploy/commit/dbf247c1299fab1dd8107f55a50a95577bcfd28e))
+* alerts store: webhooks, rules, history ([569862d](https://github.com/vazra/simpledeploy/commit/569862d3d3d53dce8be8726277f102666193ae8f))
+* **api:** alert API endpoints and wire evaluator ([f213a25](https://github.com/vazra/simpledeploy/commit/f213a257201c2da4c9c4dc11a3f47b85c423dcd3))
+* **api:** API server with health endpoint ([2e2eea7](https://github.com/vazra/simpledeploy/commit/2e2eea73a6f581039abf688da9562ce6c0e92dc4))
+* **api:** app list/get API endpoints ([802b60f](https://github.com/vazra/simpledeploy/commit/802b60fa8b0fba573c3baa8f4c4e674db48c2eac))
+* **api:** auth endpoints: login, logout, setup ([d28b3b0](https://github.com/vazra/simpledeploy/commit/d28b3b0bc3f3a7b420fc15f83bde95e65276f509))
+* **api:** auth store: users, API keys, app access ([924cb84](https://github.com/vazra/simpledeploy/commit/924cb847379e0082c071821c316d72d8a6f5689f))
+* **api:** auth utilities: password, JWT, API keys, rate limiter ([35044e9](https://github.com/vazra/simpledeploy/commit/35044e941dc07e3f853e157fb71cd9a51a9d0c3c))
+* **api:** Caddy rate limiter handler with per-domain config ([34d61bc](https://github.com/vazra/simpledeploy/commit/34d61bc03a1e051f528c1702c8db29d899533e5f))
+* **api:** Caddy request metrics handler with path normalization ([bf3bffe](https://github.com/vazra/simpledeploy/commit/bf3bffe5584dd6d9c95a3d71d9008811a481b3ad))
+* **api:** deploy, remove, and compose API endpoints ([20a4160](https://github.com/vazra/simpledeploy/commit/20a41606b6119179278d807b2b9960eea1a92074))
+* **api:** deployer to translate compose specs to Docker API calls ([72c5122](https://github.com/vazra/simpledeploy/commit/72c5122f63422546f9e5d1d7ab54c3d0bf80fd58))
+* **api:** HTTP client for remote API access ([53ce0ea](https://github.com/vazra/simpledeploy/commit/53ce0ea9e02f41ad6d67628bb5e24930ef040244))
+* **api:** metrics query API endpoints ([e53ab82](https://github.com/vazra/simpledeploy/commit/e53ab823e22ad8aeb7a1b0cce47aa73788633bae))
+* **api:** request stats writer, API endpoint, and wire pipeline ([a7e3879](https://github.com/vazra/simpledeploy/commit/a7e38798fe1ae51b2da64cdd458c37fec796f1bd))
+* **api:** Svelte SPA with auth, layout, API client, Go embed ([2910b7e](https://github.com/vazra/simpledeploy/commit/2910b7e114008d66dee4d83ce3120c593373d3d2))
+* **api:** user and API key management endpoints ([02cca0f](https://github.com/vazra/simpledeploy/commit/02cca0fbeff09c3703bbf19ee11132bf455c119e))
+* app CRUD operations and labels table ([059f85e](https://github.com/vazra/simpledeploy/commit/059f85ed5ff3e23bc2802ca48d36a29edd0d6d0e))
+* app detail page with metrics charts and log viewer ([6b20162](https://github.com/vazra/simpledeploy/commit/6b20162a4140ff1d1b0a2180843f6780772f4554))
+* auth and app access middleware ([1423bcd](https://github.com/vazra/simpledeploy/commit/1423bcdba04ec587d0af750834e8776e0744a622))
+* backup store: configs and runs ([796ea27](https://github.com/vazra/simpledeploy/commit/796ea272e3f442e3bdf1669eee77c6bc411651bc))
+* backup strategies and targets ([cb7edf1](https://github.com/vazra/simpledeploy/commit/cb7edf124df0de3ea0ee7e5868b511ff8fd5d3f1))
+* backup, alert, and user management pages ([13a502e](https://github.com/vazra/simpledeploy/commit/13a502e3f4c15fcc8c594b025f557cf0481fd6e4))
+* **cli:** add version command with ldflags support ([a80a59a](https://github.com/vazra/simpledeploy/commit/a80a59acde22aaac50c00553da1940b543b2d4e1))
+* **cli:** apply, remove, list CLI commands and wire reconciler ([e563726](https://github.com/vazra/simpledeploy/commit/e5637266464e89e4526288f4cc03d8396715a222))
+* **cli:** backup scheduler, API, CLI commands ([4795769](https://github.com/vazra/simpledeploy/commit/47957699cef2b7ed61c019066734c3830eabe512))
+* **cli:** context, pull, diff, sync CLI commands ([8cc192b](https://github.com/vazra/simpledeploy/commit/8cc192b3b0ee5c8ed1ccf9d4e0d02e40e37e32b4))
+* client context management ([217b336](https://github.com/vazra/simpledeploy/commit/217b336519bb037adf60b6a70b7acdacc6cdbf2e))
+* **cli:** full documentation set ([dd8b92c](https://github.com/vazra/simpledeploy/commit/dd8b92ce38b9b9175f9d7b3dc71eac220022daaf))
+* **cli:** log streaming via WebSocket and CLI ([ba3ece4](https://github.com/vazra/simpledeploy/commit/ba3ece42ab252295515d024a14d0ca062fe98002))
+* **cli:** Phase 1 foundation implementation plan ([971b740](https://github.com/vazra/simpledeploy/commit/971b740d7fee0f1db6a752a99a49217f0f628015))
+* **cli:** Phase 2 reconciler implementation plan ([6362e2c](https://github.com/vazra/simpledeploy/commit/6362e2c4cb1bbaafdb431a957058831caad1abce))
+* **cli:** simpledeploy design spec ([1de40a5](https://github.com/vazra/simpledeploy/commit/1de40a5ab7aeb0ebb54d54475e1a227241cda278))
+* **cli:** users and apikey CLI commands, wire auth into serve ([ddf7a1c](https://github.com/vazra/simpledeploy/commit/ddf7a1cba768685185fb4dff5c797badb3e8002e))
+* compose file parser with label extraction ([c993bad](https://github.com/vazra/simpledeploy/commit/c993bad8ed3e8f6f760e751a30aca1493dc0a897))
+* config parsing with defaults and YAML loading ([2f843c1](https://github.com/vazra/simpledeploy/commit/2f843c17dc6b4cb8e1966b5c083c71a7657ff4f2))
+* dashboard with system metrics and app list ([fb85b46](https://github.com/vazra/simpledeploy/commit/fb85b46b08544425d47106ebab32adc7f1bd90b9))
+* Docker client wrapper with Ping and interface ([4e0d1cb](https://github.com/vazra/simpledeploy/commit/4e0d1cb7016890dc303ad2ff864c2a8a8dbc8b10))
+* gitignore for bin and db files ([742ac29](https://github.com/vazra/simpledeploy/commit/742ac2987830e19aafcd47ac20da3d79b385bc5f))
+* metrics collector for system and container stats ([9b458c5](https://github.com/vazra/simpledeploy/commit/9b458c5b419e2bd1945ad22db0c0797e8fa0618d))
+* metrics rollup and pruning ([f634b96](https://github.com/vazra/simpledeploy/commit/f634b969f3f5f6ff9a1e79726e365d8edebc9aad))
+* metrics types, store table, and query methods ([afc47d2](https://github.com/vazra/simpledeploy/commit/afc47d21825d1981ea409395c7a84fe90e63f755))
+* metrics writer with buffered channel and batch inserts ([7c4e5b2](https://github.com/vazra/simpledeploy/commit/7c4e5b282fc8b02e5e4e25439e681ece090a2d3c))
+* proxy route types and upstream resolution ([1d51aad](https://github.com/vazra/simpledeploy/commit/1d51aad7ea0b2603fb021759b07a3d5d478a510b))
+* reconciler with directory watcher and debounce ([fbafdcc](https://github.com/vazra/simpledeploy/commit/fbafdccf42d54bfa2c95eb93b5789a050d18b77b))
+* request stats store with tiered rollup ([4c2c67d](https://github.com/vazra/simpledeploy/commit/4c2c67df862221eac6941f945e44ac001ed6df0d))
+* SQLite store with WAL mode and migration runner ([852bab3](https://github.com/vazra/simpledeploy/commit/852bab31f7259e98e0f30eea9a717d477f124e28))
+* webhook dispatch with built-in templates ([ae054b5](https://github.com/vazra/simpledeploy/commit/ae054b56bf097617bc75cd6c729442ecdd117b10))
+
+
+### Bug Fixes
+
+* reset git state after UI build to avoid dirty goreleaser ([164ed2f](https://github.com/vazra/simpledeploy/commit/164ed2f0b84162b85cd15eb5ed5d99d5f95850c0))
+
 ## 1.0.0 (2026-04-08)
 
 
