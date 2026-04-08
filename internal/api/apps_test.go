@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -18,8 +20,19 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
-	srv := NewServer(0, s)
+	jwtMgr := auth.NewJWTManager("test-secret", time.Hour)
+	srv := NewServer(0, s, jwtMgr, nil)
 	return srv, s
+}
+
+// superAdminCookie generates a session cookie for a super_admin user.
+func superAdminCookie(t *testing.T, jwtMgr *auth.JWTManager) *http.Cookie {
+	t.Helper()
+	token, err := jwtMgr.Generate(1, "admin", "super_admin")
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+	return &http.Cookie{Name: "session", Value: token}
 }
 
 func TestListAppsEndpoint(t *testing.T) {
@@ -27,7 +40,9 @@ func TestListAppsEndpoint(t *testing.T) {
 	s.UpsertApp(&store.App{Name: "app1", Slug: "app1", ComposePath: "/tmp/1.yml", Status: "running", Domain: "app1.example.com"}, nil)
 	s.UpsertApp(&store.App{Name: "app2", Slug: "app2", ComposePath: "/tmp/2.yml", Status: "stopped"}, nil)
 
+	cookie := superAdminCookie(t, srv.jwt)
 	req := httptest.NewRequest(http.MethodGet, "/api/apps", nil)
+	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
@@ -46,7 +61,9 @@ func TestGetAppEndpoint(t *testing.T) {
 	srv, s := newTestServer(t)
 	s.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", ComposePath: "/tmp/1.yml", Status: "running", Domain: "myapp.example.com"}, nil)
 
+	cookie := superAdminCookie(t, srv.jwt)
 	req := httptest.NewRequest(http.MethodGet, "/api/apps/myapp", nil)
+	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
@@ -63,9 +80,12 @@ func TestGetAppEndpoint(t *testing.T) {
 
 func TestGetAppNotFound(t *testing.T) {
 	srv, _ := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
 	req := httptest.NewRequest(http.MethodGet, "/api/apps/nonexistent", nil)
+	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
+	// super_admin bypasses app access check, so store returns 404 from handleGetApp
 	if w.Code != 404 {
 		t.Fatalf("status = %d, want 404", w.Code)
 	}
@@ -73,7 +93,9 @@ func TestGetAppNotFound(t *testing.T) {
 
 func TestListAppsEmpty(t *testing.T) {
 	srv, _ := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
 	req := httptest.NewRequest(http.MethodGet, "/api/apps", nil)
+	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 	if w.Code != 200 {
