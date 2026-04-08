@@ -14,12 +14,16 @@ import (
 	"syscall"
 	"time"
 
+	"bufio"
+	"bytes"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
 	"github.com/vazra/simpledeploy/internal/alerts"
 	"github.com/vazra/simpledeploy/internal/api"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
+	"github.com/vazra/simpledeploy/internal/client"
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
@@ -142,6 +146,15 @@ var logsCmd = &cobra.Command{
 	RunE:  runLogs,
 }
 
+var contextCmd = &cobra.Command{Use: "context", Short: "Manage remote contexts"}
+var contextAddCmd = &cobra.Command{Use: "add <name>", Short: "Add context", Args: cobra.ExactArgs(1), RunE: runContextAdd}
+var contextUseCmd = &cobra.Command{Use: "use <name>", Short: "Switch context", Args: cobra.ExactArgs(1), RunE: runContextUse}
+var contextListCmd = &cobra.Command{Use: "list", Short: "List contexts", RunE: runContextList}
+
+var pullCmd = &cobra.Command{Use: "pull", Short: "Pull remote app config to local files", RunE: runPull}
+var diffCmd = &cobra.Command{Use: "diff", Short: "Diff local vs remote config", RunE: runDiff}
+var syncCmd = &cobra.Command{Use: "sync", Short: "Sync local dir to remote", RunE: runSync}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "/etc/simpledeploy/config.yaml", "config file path")
 
@@ -192,6 +205,24 @@ func init() {
 	logsCmd.Flags().BoolP("follow", "f", true, "follow log output")
 	logsCmd.Flags().String("tail", "100", "number of lines")
 	logsCmd.Flags().String("service", "", "service name")
+
+	contextAddCmd.Flags().String("url", "", "server URL")
+	contextAddCmd.Flags().String("api-key", "", "API key")
+	contextAddCmd.MarkFlagRequired("url")
+	contextAddCmd.MarkFlagRequired("api-key")
+
+	pullCmd.Flags().String("app", "", "app to pull")
+	pullCmd.Flags().Bool("all", false, "pull all apps")
+	pullCmd.Flags().StringP("output", "o", ".", "output directory")
+
+	diffCmd.Flags().String("app", "", "app to diff")
+	diffCmd.Flags().StringP("dir", "d", "", "directory to diff")
+
+	syncCmd.Flags().StringP("dir", "d", "", "directory to sync")
+	syncCmd.MarkFlagRequired("dir")
+
+	contextCmd.AddCommand(contextAddCmd, contextUseCmd, contextListCmd)
+	rootCmd.AddCommand(contextCmd, pullCmd, diffCmd, syncCmd)
 
 	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd)
 }
@@ -338,6 +369,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv := api.NewServer(cfg.ManagementPort, db, jwtMgr, rl)
 	srv.SetBackupScheduler(backupSched)
 	srv.SetDocker(dc)
+	srv.SetAppsDir(cfg.AppsDir)
+	srv.SetReconciler(rec)
 	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
 	return srv.ListenAndServe()
 }
@@ -801,6 +834,237 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("[%s] %s", streamType, string(line))
 	}
+	return nil
+}
+
+func getRemoteClient() (*client.Client, error) {
+	cfg, err := client.LoadClientConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctx, err := cfg.GetCurrentContext()
+	if err != nil {
+		return nil, fmt.Errorf("no remote context configured, run: simpledeploy context add")
+	}
+	return client.New(ctx.URL, ctx.APIKey), nil
+}
+
+func runContextAdd(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	url, _ := cmd.Flags().GetString("url")
+	apiKey, _ := cmd.Flags().GetString("api-key")
+	cfg, _ := client.LoadClientConfig()
+	cfg.AddContext(name, url, apiKey)
+	return client.SaveClientConfig(cfg)
+}
+
+func runContextUse(cmd *cobra.Command, args []string) error {
+	cfg, _ := client.LoadClientConfig()
+	if err := cfg.UseContext(args[0]); err != nil {
+		return err
+	}
+	return client.SaveClientConfig(cfg)
+}
+
+func runContextList(cmd *cobra.Command, args []string) error {
+	cfg, _ := client.LoadClientConfig()
+	for name, ctx := range cfg.Contexts {
+		marker := " "
+		if name == cfg.CurrentContext {
+			marker = "*"
+		}
+		fmt.Printf("%s %-20s %s\n", marker, name, ctx.URL)
+	}
+	return nil
+}
+
+func runPull(cmd *cobra.Command, args []string) error {
+	rc, err := getRemoteClient()
+	if err != nil {
+		return err
+	}
+	outputDir, _ := cmd.Flags().GetString("output")
+	appName, _ := cmd.Flags().GetString("app")
+	all, _ := cmd.Flags().GetBool("all")
+
+	pullOne := func(slug string) error {
+		data, err := rc.GetAppCompose(slug)
+		if err != nil {
+			return fmt.Errorf("get compose for %s: %w", slug, err)
+		}
+		dir := filepath.Join(outputDir, slug)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		dest := filepath.Join(dir, "docker-compose.yml")
+		if err := os.WriteFile(dest, data, 0644); err != nil {
+			return err
+		}
+		fmt.Printf("pulled %s -> %s\n", slug, dest)
+		return nil
+	}
+
+	if appName != "" {
+		return pullOne(appName)
+	}
+	if all {
+		apps, err := rc.ListApps()
+		if err != nil {
+			return fmt.Errorf("list apps: %w", err)
+		}
+		for _, a := range apps {
+			if err := pullOne(a.Slug); err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("must specify --app or --all")
+}
+
+func runDiff(cmd *cobra.Command, args []string) error {
+	rc, err := getRemoteClient()
+	if err != nil {
+		return err
+	}
+	appName, _ := cmd.Flags().GetString("app")
+	dir, _ := cmd.Flags().GetString("dir")
+
+	diffOne := func(slug, localPath string) error {
+		local, err := os.ReadFile(localPath)
+		if err != nil {
+			return fmt.Errorf("read local %s: %w", localPath, err)
+		}
+		remote, err := rc.GetAppCompose(slug)
+		if err != nil {
+			return fmt.Errorf("get remote compose for %s: %w", slug, err)
+		}
+		if bytes.Equal(local, remote) {
+			fmt.Printf("%s: matches\n", slug)
+			return nil
+		}
+		fmt.Printf("%s: differs\n", slug)
+		localLines := splitLines(local)
+		remoteLines := splitLines(remote)
+		maxLines := len(localLines)
+		if len(remoteLines) > maxLines {
+			maxLines = len(remoteLines)
+		}
+		for i := 0; i < maxLines; i++ {
+			var l, r string
+			if i < len(localLines) {
+				l = localLines[i]
+			}
+			if i < len(remoteLines) {
+				r = remoteLines[i]
+			}
+			if l != r {
+				fmt.Printf("  local  %d: %s\n", i+1, l)
+				fmt.Printf("  remote %d: %s\n", i+1, r)
+			}
+		}
+		return nil
+	}
+
+	if appName != "" {
+		localPath := filepath.Join(".", appName, "docker-compose.yml")
+		if dir != "" {
+			localPath = filepath.Join(dir, appName, "docker-compose.yml")
+		}
+		return diffOne(appName, localPath)
+	}
+	if dir != "" {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return fmt.Errorf("read dir: %w", err)
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			localPath := filepath.Join(dir, e.Name(), "docker-compose.yml")
+			if _, err := os.Stat(localPath); os.IsNotExist(err) {
+				continue
+			}
+			if err := diffOne(e.Name(), localPath); err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("must specify --app or -d")
+}
+
+func splitLines(data []byte) []string {
+	var lines []string
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
+	}
+	return lines
+}
+
+func runSync(cmd *cobra.Command, args []string) error {
+	rc, err := getRemoteClient()
+	if err != nil {
+		return err
+	}
+	dir, _ := cmd.Flags().GetString("dir")
+
+	// collect local apps
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read dir: %w", err)
+	}
+	localApps := make(map[string]string)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		composePath := filepath.Join(dir, e.Name(), "docker-compose.yml")
+		if _, err := os.Stat(composePath); os.IsNotExist(err) {
+			continue
+		}
+		localApps[e.Name()] = composePath
+	}
+
+	// list remote apps
+	remoteApps, err := rc.ListApps()
+	if err != nil {
+		return fmt.Errorf("list remote apps: %w", err)
+	}
+	remoteSet := make(map[string]struct{})
+	for _, a := range remoteApps {
+		remoteSet[a.Slug] = struct{}{}
+	}
+
+	// deploy local apps
+	for name, composePath := range localApps {
+		data, err := os.ReadFile(composePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sync %s: read compose: %v\n", name, err)
+			continue
+		}
+		if err := rc.DeployApp(name, data); err != nil {
+			fmt.Fprintf(os.Stderr, "sync %s: deploy: %v\n", name, err)
+			continue
+		}
+		fmt.Printf("synced %s\n", name)
+	}
+
+	// remove remote apps not in local dir
+	for _, a := range remoteApps {
+		if _, ok := localApps[a.Slug]; !ok {
+			fmt.Printf("removing remote app %s (not in local dir)\n", a.Slug)
+			if err := rc.RemoveApp(a.Slug); err != nil {
+				fmt.Fprintf(os.Stderr, "remove %s: %v\n", a.Slug, err)
+				continue
+			}
+			fmt.Printf("removed %s\n", a.Slug)
+		}
+	}
+
+	fmt.Printf("sync complete: %d local, %d remote\n", len(localApps), len(remoteSet))
 	return nil
 }
 
