@@ -76,3 +76,22 @@ go test ./internal/store/ -run TestUpsert  # specific test
 4. Add API endpoints in `internal/api/`
 5. Add CLI commands in `cmd/simpledeploy/main.go`
 6. Add UI page in `ui/src/routes/`
+
+## Commit Messages
+
+Follow Conventional Commits format:
+
+- `feat:` for new features
+- `feat(scope):` for scoped features (e.g., `feat(api):`, `feat(cli):`, `feat(ui):`)
+- `fix:` for bug fixes
+- `docs:` for documentation, plans, specs
+- `test:` for tests
+- `refactor:` for code refactoring
+- `chore:` for build/deps/tooling
+
+Examples:
+- `feat(api): add user authentication endpoints`
+- `feat(cli): add deployment status command`
+- `fix: resolve race condition in metrics writer`
+- `docs: update API documentation`
+- `test: add backup scheduler tests`
