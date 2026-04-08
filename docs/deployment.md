@@ -93,7 +93,13 @@ sudo mkdir -p /etc/simpledeploy/apps
 
 ### 4. Run with systemd
 
-Create `/etc/systemd/system/simpledeploy.service`:
+If installed via `.deb` package (APT), the systemd service is already installed. Just enable and start:
+
+```bash
+sudo systemctl enable --now simpledeploy
+```
+
+If installed manually, create `/etc/systemd/system/simpledeploy.service`:
 
 ```ini
 [Unit]
@@ -111,7 +117,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Enable and start:
+Then enable and start:
 
 ```bash
 sudo systemctl daemon-reload

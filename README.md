@@ -1,8 +1,45 @@
 # SimpleDeploy
 
+[![CI](https://github.com/vazra/simpledeploy/actions/workflows/ci.yml/badge.svg)](https://github.com/vazra/simpledeploy/actions/workflows/ci.yml)
+[![Release](https://github.com/vazra/simpledeploy/releases/latest/badge.svg)](https://github.com/vazra/simpledeploy/releases/latest)
+
 Lightweight deployment manager for Docker Compose apps. Single binary with built-in reverse proxy, automatic TLS, metrics, backups, alerts, and a web dashboard.
 
 Designed for small VPS instances. Targets ~60MB RAM for 10-20 apps.
+
+## Install
+
+### macOS
+
+```bash
+brew install vazra/tap/simpledeploy
+```
+
+### Ubuntu/Debian
+
+```bash
+curl -fsSL https://vazra.github.io/apt-repo/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/vazra.gpg
+echo "deb [signed-by=/usr/share/keyrings/vazra.gpg arch=$(dpkg --print-architecture)] https://vazra.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/vazra.list
+sudo apt update && sudo apt install simpledeploy
+```
+
+### Linux (binary)
+
+```bash
+curl -L https://github.com/vazra/simpledeploy/releases/latest/download/simpledeploy_linux_amd64.tar.gz | tar xz
+sudo mv simpledeploy /usr/local/bin/
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/vazra/simpledeploy.git
+cd simpledeploy
+make build
+# binary at bin/simpledeploy
+```
+
+Requires Go 1.22+ and Node.js 18+.
 
 ## Features
 
@@ -21,21 +58,10 @@ Designed for small VPS instances. Targets ~60MB RAM for 10-20 apps.
 
 ## Quick Start
 
-### Install
-
-```bash
-# Build from source
-git clone https://github.com/vazra/simpledeploy.git
-cd simpledeploy
-make build
-
-# Binary at bin/simpledeploy
-```
-
 ### Server Setup
 
 ```bash
-# Generate default config
+# Generate config
 simpledeploy init --config /etc/simpledeploy/config.yaml
 
 # Edit config (set domain, TLS email, master secret)
@@ -45,7 +71,11 @@ vim /etc/simpledeploy/config.yaml
 simpledeploy serve --config /etc/simpledeploy/config.yaml
 ```
 
-On first run, simpledeploy prints a setup URL. Create the initial admin account via `POST /api/setup` or the web UI.
+If installed via `.deb`, a systemd service is included. Enable with:
+
+```bash
+sudo systemctl enable --now simpledeploy
+```
 
 ### Deploy an App
 
@@ -77,20 +107,17 @@ simpledeploy apply -f docker-compose.yml --name myapp
 ### Create Users and API Keys
 
 ```bash
-# Create admin user
 simpledeploy users create --username admin --password secret --role super_admin
-
-# Create API key for CLI/automation
 simpledeploy apikey create --name "ci-deploy" --user-id 1
 ```
 
 ## Documentation
 
+- [Deployment Guide](docs/deployment.md)
 - [Configuration Reference](docs/configuration.md)
 - [CLI Reference](docs/cli.md)
 - [API Reference](docs/api.md)
 - [Compose Labels](docs/compose-labels.md)
-- [Deployment Guide](docs/deployment.md)
 
 ## Architecture
 
@@ -105,13 +132,6 @@ simpledeploy (single process)
 +-- Alert evaluator (checks thresholds every 30s, fires webhooks)
 +-- SQLite (WAL mode, all state)
 ```
-
-## Requirements
-
-- Go 1.22+ (build)
-- Node.js 18+ (UI build)
-- Docker (runtime)
-- Linux recommended for production (macOS for development)
 
 ## License
 

@@ -195,6 +195,17 @@ simpledeploy apikey revoke --id 3
 
 API keys authenticate CLI and API requests via `Authorization: Bearer sd_...` header.
 
+## Utility Commands
+
+### `simpledeploy version`
+
+Print version, commit hash, and build date.
+
+```bash
+simpledeploy version
+# simpledeploy 1.2.0 (commit: abc1234, built: 2026-04-08T18:00:00Z)
+```
+
 ## Global Flags
 
 | Flag | Default | Description |
