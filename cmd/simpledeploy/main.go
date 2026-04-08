@@ -317,12 +317,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	proxy.RequestStatsCh = reqStatsCh
 
 	domainLookup := func(domain string) (int64, error) {
+		host, _, _ := strings.Cut(domain, ":")
 		apps, err := db.ListApps()
 		if err != nil {
 			return 0, err
 		}
 		for _, a := range apps {
-			if a.Domain == domain {
+			if a.Domain == host {
 				return a.ID, nil
 			}
 		}
