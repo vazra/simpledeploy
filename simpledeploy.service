@@ -1,0 +1,13 @@
+[Unit]
+Description=SimpleDeploy
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/simpledeploy serve --config /etc/simpledeploy/config.yaml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

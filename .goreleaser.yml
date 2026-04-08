@@ -1,0 +1,73 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: simpledeploy
+    main: ./cmd/simpledeploy
+    binary: simpledeploy
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.ShortCommit}}
+      - -X main.date={{.Date}}
+    hooks:
+      pre:
+        - cmd: echo "UI assets must be pre-built before GoReleaser runs"
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "simpledeploy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+nfpms:
+  - id: deb
+    package_name: simpledeploy
+    vendor: Vazra
+    homepage: https://github.com/vazra/simpledeploy
+    maintainer: Vazra <hello@vazra.dev>
+    description: Lightweight deployment manager for Docker Compose apps
+    license: MIT
+    formats:
+      - deb
+    bindir: /usr/local/bin
+    contents:
+      - src: ./simpledeploy.service
+        dst: /lib/systemd/system/simpledeploy.service
+        type: config
+    scripts:
+      postinstall: ./packaging/postinstall.sh
+      preremove: ./packaging/preremove.sh
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: vazra
+    name: simpledeploy
+
+brews:
+  - name: simpledeploy
+    repository:
+      owner: vazra
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/vazra/simpledeploy
+    description: Lightweight deployment manager for Docker Compose apps
+    license: MIT
+    install: |
+      bin.install "simpledeploy"
+    test: |
+      system "#{bin}/simpledeploy", "version"
