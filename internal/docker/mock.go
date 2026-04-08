@@ -1,7 +1,9 @@
 package docker
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"strings"
@@ -143,4 +145,16 @@ func (m *MockClient) ContainerStats(_ context.Context, _ string) (container.Stat
 		Body:   io.NopCloser(strings.NewReader(mockStatsJSON)),
 		OSType: "linux",
 	}, nil
+}
+
+func (m *MockClient) ContainerLogs(_ context.Context, id string, _ container.LogsOptions) (io.ReadCloser, error) {
+	m.record(fmt.Sprintf("ContainerLogs:%s", id))
+	var buf bytes.Buffer
+	line := []byte("2026-04-08T12:00:00Z test log line\n")
+	header := make([]byte, 8)
+	header[0] = 1 // stdout
+	binary.BigEndian.PutUint32(header[4:], uint32(len(line)))
+	buf.Write(header)
+	buf.Write(line)
+	return io.NopCloser(&buf), nil
 }

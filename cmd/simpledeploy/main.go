@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
 	"github.com/vazra/simpledeploy/internal/alerts"
 	"github.com/vazra/simpledeploy/internal/api"
@@ -132,6 +135,13 @@ var restoreCmd = &cobra.Command{
 	RunE:  runRestore,
 }
 
+var logsCmd = &cobra.Command{
+	Use:   "logs [app]",
+	Short: "Stream app logs",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runLogs,
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "/etc/simpledeploy/config.yaml", "config file path")
 
@@ -178,7 +188,12 @@ func init() {
 	restoreCmd.MarkFlagRequired("id")
 
 	backupCmd.AddCommand(backupRunCmd, backupListCmd)
-	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd)
+
+	logsCmd.Flags().BoolP("follow", "f", true, "follow log output")
+	logsCmd.Flags().String("tail", "100", "number of lines")
+	logsCmd.Flags().String("service", "", "service name")
+
+	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd)
 }
 
 func main() {
@@ -322,6 +337,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	srv := api.NewServer(cfg.ManagementPort, db, jwtMgr, rl)
 	srv.SetBackupScheduler(backupSched)
+	srv.SetDocker(dc)
 	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
 	return srv.ListenAndServe()
 }
@@ -739,6 +755,52 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("restore: %w", err)
 	}
 	fmt.Printf("restore completed for run %d\n", runID)
+	return nil
+}
+
+func runLogs(cmd *cobra.Command, args []string) error {
+	appName := args[0]
+	follow, _ := cmd.Flags().GetBool("follow")
+	tail, _ := cmd.Flags().GetString("tail")
+	service, _ := cmd.Flags().GetString("service")
+	if service == "" {
+		service = "web"
+	}
+
+	dc, err := docker.NewClient()
+	if err != nil {
+		return fmt.Errorf("connect to docker: %w", err)
+	}
+	defer dc.Close()
+
+	containerName := fmt.Sprintf("simpledeploy-%s-%s", appName, service)
+
+	reader, err := dc.ContainerLogs(cmd.Context(), containerName, container.LogsOptions{
+		ShowStdout: true, ShowStderr: true,
+		Follow: follow, Tail: tail, Timestamps: true,
+	})
+	if err != nil {
+		return fmt.Errorf("container logs: %w", err)
+	}
+	defer reader.Close()
+
+	hdr := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(reader, hdr); err != nil {
+			break
+		}
+		size := binary.BigEndian.Uint32(hdr[4:8])
+		line := make([]byte, size)
+		if _, err := io.ReadFull(reader, line); err != nil {
+			break
+		}
+
+		streamType := "stdout"
+		if hdr[0] == 2 {
+			streamType = "stderr"
+		}
+		fmt.Printf("[%s] %s", streamType, string(line))
+	}
 	return nil
 }
 

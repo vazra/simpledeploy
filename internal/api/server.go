@@ -7,6 +7,7 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
+	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -17,6 +18,7 @@ type Server struct {
 	jwt             *auth.JWTManager
 	rateLimiter     *auth.RateLimiter
 	backupScheduler *backup.Scheduler
+	docker          docker.Client
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -35,6 +37,9 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
 	s.backupScheduler = sched
 }
+
+// SetDocker sets the docker client.
+func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
 
 func (s *Server) routes() {
 	// Public routes
@@ -69,6 +74,10 @@ func (s *Server) routes() {
 	// Request stats
 	s.mux.Handle("GET /api/apps/{slug}/requests", s.authMiddleware(
 		s.appAccessMiddleware(http.HandlerFunc(s.handleAppRequests))))
+
+	// Logs (WebSocket)
+	s.mux.Handle("GET /api/apps/{slug}/logs", s.authMiddleware(
+		s.appAccessMiddleware(http.HandlerFunc(s.handleLogs))))
 
 	// Webhooks
 	s.mux.Handle("GET /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleListWebhooks)))
