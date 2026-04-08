@@ -41,6 +41,18 @@ func (s *Server) routes() {
 		http.HandlerFunc(s.handleListApps)))
 	s.mux.Handle("GET /api/apps/{slug}", s.authMiddleware(
 		s.appAccessMiddleware(http.HandlerFunc(s.handleGetApp))))
+
+	// User management (auth + super_admin)
+	s.mux.Handle("GET /api/users", s.authMiddleware(http.HandlerFunc(s.handleListUsers)))
+	s.mux.Handle("POST /api/users", s.authMiddleware(http.HandlerFunc(s.handleCreateUser)))
+	s.mux.Handle("DELETE /api/users/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteUser)))
+	s.mux.Handle("POST /api/users/{id}/access", s.authMiddleware(http.HandlerFunc(s.handleGrantAccess)))
+	s.mux.Handle("DELETE /api/users/{id}/access/{slug}", s.authMiddleware(http.HandlerFunc(s.handleRevokeAccess)))
+
+	// API key management (auth)
+	s.mux.Handle("GET /api/apikeys", s.authMiddleware(http.HandlerFunc(s.handleListAPIKeys)))
+	s.mux.Handle("POST /api/apikeys", s.authMiddleware(http.HandlerFunc(s.handleCreateAPIKey)))
+	s.mux.Handle("DELETE /api/apikeys/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteAPIKey)))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
