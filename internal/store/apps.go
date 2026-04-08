@@ -58,6 +58,29 @@ func (s *Store) UpsertApp(app *App, labels map[string]string) error {
 	return tx.Commit()
 }
 
+// GetAppByID returns the app with the given id or an error if not found.
+func (s *Store) GetAppByID(id int64) (*App, error) {
+	var a App
+	var domain sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, name, slug, compose_path, status, domain, created_at, updated_at
+		FROM apps WHERE id = ?
+	`, id).Scan(
+		&a.ID, &a.Name, &a.Slug, &a.ComposePath, &a.Status,
+		&domain, &a.CreatedAt, &a.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("app %d not found", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get app by id: %w", err)
+	}
+	if domain.Valid {
+		a.Domain = domain.String
+	}
+	return &a, nil
+}
+
 // GetAppBySlug returns the app with the given slug or an error if not found.
 func (s *Store) GetAppBySlug(slug string) (*App, error) {
 	var a App
