@@ -3,7 +3,7 @@
 </script>
 
 <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
-  <div class="absolute inset-0 bg-black/60" onclick={onCancel}></div>
+  <button class="absolute inset-0 bg-black/60" onclick={onCancel} aria-label="Close"></button>
   <div class="relative bg-surface-2 border border-border rounded-lg p-6 min-w-80 max-w-md shadow-xl">
     <h3 class="text-base font-semibold text-text-primary mb-2">{title}</h3>
     <p class="text-sm text-text-secondary mb-5">{message}</p>
