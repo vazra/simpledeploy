@@ -60,11 +60,12 @@
   }
 
   let currentTheme = 'dark'
+  let mounted = false
 
   onMount(() => {
+    mounted = true
     const unsub = effectiveTheme.subscribe((t) => {
       currentTheme = t
-      if (canvas) createChart(t)
     })
     return () => {
       unsub()
@@ -73,13 +74,8 @@
   })
 
   $effect(() => {
-    if (canvas && data && data.length > 0) {
-      if (!chart) {
-        createChart(currentTheme)
-      } else {
-        chart.data.datasets[0].data = data
-        chart.update()
-      }
+    if (mounted && canvas && data) {
+      createChart(currentTheme)
     }
   })
 </script>
