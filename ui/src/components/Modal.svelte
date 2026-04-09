@@ -1,6 +1,12 @@
 <script>
   let { title = 'Confirm', message = '', onConfirm = () => {}, onCancel = () => {} } = $props()
+
+  function onKeydown(e) {
+    if (e.key === 'Escape') onCancel()
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
   <button class="absolute inset-0 bg-black/60" onclick={onCancel} aria-label="Close"></button>

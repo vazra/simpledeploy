@@ -15,7 +15,6 @@
   let memHistory = $state([])
   let loading = $state(true)
   let latestMetrics = $state(null)
-  let alertRules = $state([])
   let alertHistory = $state([])
   let backupRunsByApp = $state({})
   let appMetricsMap = $state({})
@@ -63,15 +62,13 @@
     const now = new Date().toISOString()
     const from = new Date(Date.now() - rangeMs[timeRange]).toISOString()
 
-    const [appsRes, metricsRes, rulesRes, histRes] = await Promise.all([
+    const [appsRes, metricsRes, histRes] = await Promise.all([
       api.listApps(),
       api.systemMetrics(from, now),
-      api.listAlertRules(),
       api.alertHistory(),
     ])
 
     apps = appsRes.data || []
-    alertRules = rulesRes.data || []
     alertHistory = histRes.data || []
 
     const metricsData = metricsRes.data || []
@@ -150,7 +147,7 @@
 
   let activeAlerts = $derived((alertHistory || []).filter((h) => !h.resolved_at))
 
-  let recentBackups = $derived(() => {
+  let recentBackups = $derived.by(() => {
     const all = []
     for (const [slug, runs] of Object.entries(backupRunsByApp)) {
       for (const run of runs.slice(0, 3)) {
@@ -160,7 +157,7 @@
     return all.sort((a, b) => new Date(b.started_at) - new Date(a.started_at)).slice(0, 5)
   })
 
-  let filteredApps = $derived(() => {
+  let filteredApps = $derived.by(() => {
     let result = apps
     if (filterStatus !== 'all') {
       result = result.filter((a) => a.Status === filterStatus)
@@ -183,13 +180,13 @@
 <Layout>
   {#if loading}
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-      <Skeleton type="card" count={4} />
+      {#each Array(4) as _}<Skeleton type="card" />{/each}
     </div>
     <div class="grid grid-cols-3 gap-3 mb-4">
-      <Skeleton type="card" count={3} />
+      {#each Array(3) as _}<Skeleton type="card" />{/each}
     </div>
     <div class="grid grid-cols-2 gap-3">
-      <Skeleton type="chart" count={2} />
+      {#each Array(2) as _}<Skeleton type="chart" />{/each}
     </div>
   {:else}
     <!-- System Health -->
@@ -252,7 +249,7 @@
           </div>
         {:else}
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {#each filteredApps() as app}
+            {#each filteredApps as app}
               <AppCard {app} metrics={appMetricsMap[app.Slug]} />
             {/each}
           </div>
@@ -288,11 +285,11 @@
             <h3 class="text-sm font-semibold text-text-primary">Recent Backups</h3>
             <a href="#/backups" class="text-xs text-accent hover:underline">View all</a>
           </div>
-          {#if recentBackups().length === 0}
+          {#if recentBackups.length === 0}
             <p class="text-xs text-text-secondary">No backup runs</p>
           {:else}
             <div class="flex flex-col gap-2">
-              {#each recentBackups() as run}
+              {#each recentBackups as run}
                 <div class="flex items-center gap-2 text-xs">
                   <span class="w-1.5 h-1.5 rounded-full shrink-0 {run.status === 'completed' ? 'bg-success' : run.status === 'failed' ? 'bg-danger' : 'bg-warning'}"></span>
                   <span class="text-text-primary truncate">{run.slug}</span>

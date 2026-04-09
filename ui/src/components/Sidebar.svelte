@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import { sidebarExpanded } from '../lib/stores/sidebar.js'
   import ThemeToggle from './ThemeToggle.svelte'
   import { api } from '../lib/api.js'
@@ -17,9 +18,10 @@
     currentPath = window.location.hash.slice(1) || '/'
   }
 
-  if (typeof window !== 'undefined') {
+  onMount(() => {
     window.addEventListener('hashchange', updatePath)
-  }
+    return () => window.removeEventListener('hashchange', updatePath)
+  })
 
   function isActive(path) {
     if (path === '/') return currentPath === '/'

@@ -1,6 +1,12 @@
 <script>
   let { title = '', open = false, onclose = () => {}, children } = $props()
+
+  function onKeydown(e) {
+    if (open && e.key === 'Escape') onclose()
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 {#if open}
   <div class="fixed inset-0 z-40" role="dialog" aria-modal="true">

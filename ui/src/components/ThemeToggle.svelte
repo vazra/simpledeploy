@@ -13,7 +13,7 @@
 
 <button
   onclick={cycle}
-  class="flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors"
+  class="relative flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors"
   title="Theme: {$themePreference}"
   aria-label="Toggle theme"
 >
