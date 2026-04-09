@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -31,7 +32,7 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) error {
 			projectLabel: app.Name,
 		},
 	})
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "already exists") {
 		return fmt.Errorf("create network: %w", err)
 	}
 
@@ -108,6 +109,17 @@ func (d *Deployer) deployService(ctx context.Context, appName, netName string, s
 	}
 
 	ctrName := fmt.Sprintf("simpledeploy-%s-%s", appName, svc.Name)
+
+	// Remove existing container if present (redeploy case)
+	existing, _ := d.docker.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("name", ctrName)),
+	})
+	for _, c := range existing {
+		_ = d.docker.ContainerStop(ctx, c.ID, container.StopOptions{})
+		_ = d.docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{})
+	}
+
 	resp, err := d.docker.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, ctrName)
 	if err != nil {
 		return fmt.Errorf("create container %s: %w", ctrName, err)
