@@ -294,7 +294,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	caddyProxy := proxy.NewCaddyProxy(proxyCfg)
 	defer caddyProxy.Stop()
 
-	dep := deployer.New(dc)
+	dep, err := deployer.New(&deployer.ExecRunner{})
+	if err != nil {
+		return fmt.Errorf("init deployer: %w", err)
+	}
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir)
 
 	// metrics pipeline
@@ -432,13 +435,10 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	dc, err := docker.NewClient()
+	dep, err := deployer.New(&deployer.ExecRunner{})
 	if err != nil {
-		return fmt.Errorf("connect to docker: %w", err)
+		return fmt.Errorf("init deployer: %w", err)
 	}
-	defer dc.Close()
-
-	dep := deployer.New(dc)
 	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
 	ctx := cmd.Context()
 
@@ -507,13 +507,10 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	dc, err := docker.NewClient()
+	dep, err := deployer.New(&deployer.ExecRunner{})
 	if err != nil {
-		return fmt.Errorf("connect to docker: %w", err)
+		return fmt.Errorf("init deployer: %w", err)
 	}
-	defer dc.Close()
-
-	dep := deployer.New(dc)
 	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
 
 	if err := rec.RemoveOne(cmd.Context(), name); err != nil {
