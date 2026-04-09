@@ -59,23 +59,29 @@
     })
   }
 
+  let currentTheme = 'dark'
+
   onMount(() => {
-    let currentTheme
     const unsub = effectiveTheme.subscribe((t) => {
       currentTheme = t
       if (canvas) createChart(t)
     })
-    return unsub
-  })
-
-  $effect(() => {
-    if (chart && data) {
-      chart.data.datasets[0].data = data
-      chart.update('none')
+    return () => {
+      unsub()
+      if (chart) { chart.destroy(); chart = null }
     }
   })
 
-  onDestroy(() => { if (chart) chart.destroy() })
+  $effect(() => {
+    if (canvas && data && data.length > 0) {
+      if (!chart) {
+        createChart(currentTheme)
+      } else {
+        chart.data.datasets[0].data = data
+        chart.update()
+      }
+    }
+  })
 </script>
 
 <div class="bg-surface-2 border border-border rounded-lg p-4">
