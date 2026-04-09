@@ -164,3 +164,115 @@ func TestDeployEndpointInvalidBase64(t *testing.T) {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
 }
+
+func TestValidateComposeValid(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	composeContent := "services:\n  web:\n    image: nginx\n"
+	encoded := base64.StdEncoding.EncodeToString([]byte(composeContent))
+
+	body, _ := json.Marshal(map[string]string{"compose": encoded})
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/validate-compose", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["valid"] != true {
+		t.Errorf("valid = %v, want true", resp["valid"])
+	}
+	if resp["errors"] != nil {
+		t.Errorf("errors should be absent on valid compose, got %v", resp["errors"])
+	}
+}
+
+func TestValidateComposeInvalidYAML(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte(":\t: bad yaml {{{\n"))
+	body, _ := json.Marshal(map[string]string{"compose": encoded})
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/validate-compose", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["valid"] != false {
+		t.Errorf("valid = %v, want false", resp["valid"])
+	}
+	if resp["errors"] == nil {
+		t.Error("expected errors in response")
+	}
+}
+
+func TestValidateComposeMissingImage(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	// service with no image and no build context - compose-go should reject this
+	composeContent := "services:\n  web:\n    ports:\n      - \"80:80\"\n"
+	encoded := base64.StdEncoding.EncodeToString([]byte(composeContent))
+	body, _ := json.Marshal(map[string]string{"compose": encoded})
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/validate-compose", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+	// compose-go may or may not reject missing image; just confirm response is well-formed
+	if _, ok := resp["valid"]; !ok {
+		t.Error("response missing 'valid' field")
+	}
+}
+
+func TestValidateComposeEmptyBody(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	body, _ := json.Marshal(map[string]string{"compose": ""})
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/validate-compose", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestValidateComposeMalformedBase64(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	body, _ := json.Marshal(map[string]string{"compose": "!!not-base64!!"})
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/validate-compose", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}

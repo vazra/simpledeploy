@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/vazra/simpledeploy/internal/compose"
 )
 
 type reconciler interface {
@@ -82,6 +84,58 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleValidateCompose(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Compose string `json:"compose"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if body.Compose == "" {
+		http.Error(w, "compose is required", http.StatusBadRequest)
+		return
+	}
+
+	composeData, err := base64.StdEncoding.DecodeString(body.Compose)
+	if err != nil {
+		http.Error(w, "invalid base64 compose data", http.StatusBadRequest)
+		return
+	}
+
+	tmpFile, err := os.CreateTemp("", "validate-compose-*.yml")
+	if err != nil {
+		http.Error(w, "failed to create temp file", http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.Write(composeData); err != nil {
+		tmpFile.Close()
+		http.Error(w, "failed to write temp file", http.StatusInternalServerError)
+		return
+	}
+	tmpFile.Close()
+
+	type validateResponse struct {
+		Valid  bool     `json:"valid"`
+		Errors []string `json:"errors,omitempty"`
+	}
+
+	_, parseErr := compose.ParseFile(tmpFile.Name(), "validate")
+	if parseErr != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(validateResponse{
+			Valid:  false,
+			Errors: []string{parseErr.Error()},
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(validateResponse{Valid: true})
 }
 
 func (s *Server) handleGetCompose(w http.ResponseWriter, r *http.Request) {
