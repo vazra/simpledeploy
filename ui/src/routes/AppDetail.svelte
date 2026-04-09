@@ -31,6 +31,7 @@
   let removing = $state(false)
   let backupConfigs = $state([])
   let backupRuns = $state([])
+  let services = $state([])
   let restoreTarget = $state(null)
   let showBackupForm = $state(false)
   let showRestartModal = $state(false)
@@ -55,6 +56,7 @@
     app = res.data
     loading = false
     loadRequests()
+    loadServices()
   }
 
   async function loadMetrics() {
@@ -68,6 +70,11 @@
     netTxData = data.map((m) => ({ x: new Date(m.timestamp), y: m.net_tx || 0 }))
     diskReadData = data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_read || 0 }))
     diskWriteData = data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_write || 0 }))
+  }
+
+  async function loadServices() {
+    const res = await api.getAppServices(slug)
+    services = res.data || []
   }
 
   async function loadRequests() {
@@ -259,6 +266,25 @@
               <div class="flex gap-2 text-xs px-2 py-1.5 bg-surface-1 rounded">
                 <span class="text-text-secondary min-w-48 break-all">{key}</span>
                 <span class="text-text-primary break-all">{val}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if services.length > 0}
+        <div class="bg-surface-2 border border-border rounded-lg p-4 mb-4">
+          <h3 class="text-sm font-semibold text-text-primary mb-3">Services</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {#each services as svc}
+              <div class="flex items-center justify-between bg-surface-1 rounded px-3 py-2">
+                <span class="text-sm text-text-primary font-mono">{svc.service}</span>
+                <div class="flex items-center gap-2">
+                  <Badge variant={svc.state === 'running' ? 'success' : svc.state === 'exited' ? 'danger' : 'warning'}>{svc.state}</Badge>
+                  {#if svc.health}
+                    <Badge variant={svc.health === 'healthy' ? 'success' : svc.health === 'unhealthy' ? 'danger' : 'info'}>{svc.health}</Badge>
+                  {/if}
+                </div>
               </div>
             {/each}
           </div>

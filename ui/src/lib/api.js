@@ -91,6 +91,7 @@ export const api = {
   startApp: (slug) => requestWithToast('POST', `/apps/${slug}/start`, null, 'App started'),
   pullApp: (slug) => requestWithToast('POST', `/apps/${slug}/pull`, null, 'Images pulled & redeployed'),
   scaleApp: (slug, scales) => requestWithToast('POST', `/apps/${slug}/scale`, { scales }, 'App scaled'),
+  getAppServices: (slug) => request('GET', `/apps/${slug}/services`),
 
   // Metrics
   systemMetrics: (from, to) => request('GET', `/metrics/system?from=${from}&to=${to}`),
