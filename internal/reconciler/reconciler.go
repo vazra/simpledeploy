@@ -8,21 +8,26 @@ import (
 	"strings"
 
 	"github.com/vazra/simpledeploy/internal/compose"
-	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
+// AppDeployer is the interface the reconciler uses to deploy and remove apps.
+type AppDeployer interface {
+	Deploy(ctx context.Context, app *compose.AppConfig) error
+	Teardown(ctx context.Context, projectName string) error
+}
+
 // Reconciler syncs the apps directory with the running containers and store.
 type Reconciler struct {
 	store    *store.Store
-	deployer *deployer.Deployer
+	deployer AppDeployer
 	proxy    proxy.Proxy // can be nil
 	appsDir  string
 }
 
 // New creates a Reconciler.
-func New(st *store.Store, d *deployer.Deployer, p proxy.Proxy, appsDir string) *Reconciler {
+func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string) *Reconciler {
 	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir}
 }
 
