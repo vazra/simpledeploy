@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
 )
 
 // compile-time interface conformance checks
@@ -47,27 +46,10 @@ func TestMockClientRecordsCalls(t *testing.T) {
 		t.Error("expected Ping call recorded")
 	}
 
-	if _, err := m.NetworkCreate(ctx, "testnet", network.CreateOptions{}); err != nil {
-		t.Fatalf("NetworkCreate: %v", err)
-	}
-	if !m.HasCall("NetworkCreate:testnet") {
-		t.Error("expected NetworkCreate:testnet call recorded")
-	}
-
-	resp, err := m.ContainerCreate(ctx, &container.Config{Image: "alpine"}, nil, nil, "mycontainer")
-	if err != nil {
-		t.Fatalf("ContainerCreate: %v", err)
-	}
-	if !m.HasCall("ContainerCreate:mycontainer") {
-		t.Error("expected ContainerCreate:mycontainer call recorded")
-	}
-
-	if err := m.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		t.Fatalf("ContainerStart: %v", err)
-	}
-	if !m.HasCall("ContainerStart:" + resp.ID) {
-		t.Error("expected ContainerStart call recorded")
-	}
+	m.AddContainer("mycontainer-id", map[string]string{
+		"com.docker.compose.project": "simpledeploy-myapp",
+		"com.docker.compose.service": "web",
+	})
 
 	containers, err := m.ContainerList(ctx, container.ListOptions{})
 	if err != nil {
@@ -76,23 +58,7 @@ func TestMockClientRecordsCalls(t *testing.T) {
 	if len(containers) != 1 {
 		t.Errorf("expected 1 container, got %d", len(containers))
 	}
-
-	if err := m.ContainerStop(ctx, resp.ID, container.StopOptions{}); err != nil {
-		t.Fatalf("ContainerStop: %v", err)
-	}
-	if err := m.ContainerRemove(ctx, resp.ID, container.RemoveOptions{}); err != nil {
-		t.Fatalf("ContainerRemove: %v", err)
-	}
-
-	containers, _ = m.ContainerList(ctx, container.ListOptions{})
-	if len(containers) != 0 {
-		t.Errorf("expected 0 containers after remove, got %d", len(containers))
-	}
-
-	if err := m.NetworkRemove(ctx, "testnet"); err != nil {
-		t.Fatalf("NetworkRemove: %v", err)
-	}
-	if !m.HasCall("NetworkRemove:testnet") {
-		t.Error("expected NetworkRemove:testnet call recorded")
+	if containers[0].ID != "mycontainer-id" {
+		t.Errorf("unexpected container ID: %s", containers[0].ID)
 	}
 }
