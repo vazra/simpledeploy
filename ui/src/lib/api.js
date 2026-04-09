@@ -2,6 +2,35 @@ import { toasts } from './stores/toast.js'
 
 const BASE = '/api'
 
+async function requestText(method, path, body = null) {
+  const opts = {
+    method,
+    headers: {},
+    credentials: 'include',
+  }
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json'
+    opts.body = JSON.stringify(body)
+  }
+  try {
+    const res = await fetch(BASE + path, opts)
+    if (res.status === 401) {
+      if (!window.location.hash.includes('login')) {
+        window.location.hash = '#/login'
+      }
+      return { data: null, error: 'Unauthorized' }
+    }
+    if (!res.ok) {
+      const text = await res.text()
+      return { data: null, error: text || `HTTP ${res.status}` }
+    }
+    const data = await res.text()
+    return { data, error: null }
+  } catch (err) {
+    return { data: null, error: err.message }
+  }
+}
+
 async function request(method, path, body = null) {
   const opts = {
     method,
@@ -55,6 +84,8 @@ export const api = {
   getApp: (slug) => request('GET', `/apps/${slug}`),
   removeApp: (slug) => requestWithToast('DELETE', `/apps/${slug}`, null, 'App removed'),
   deploy: (name, compose) => requestWithToast('POST', '/apps/deploy', { name, compose }, 'App deployed'),
+  getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
+  validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
 
   // Metrics
   systemMetrics: (from, to) => request('GET', `/metrics/system?from=${from}&to=${to}`),
