@@ -13,6 +13,7 @@ type App struct {
 	ComposePath string
 	Status      string
 	Domain      string
+	ComposeHash string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -27,16 +28,17 @@ func (s *Store) UpsertApp(app *App, labels map[string]string) error {
 
 	var id int64
 	err = tx.QueryRow(`
-		INSERT INTO apps (name, slug, compose_path, status, domain, updated_at)
-		VALUES (?, ?, ?, ?, ?, datetime('now'))
+		INSERT INTO apps (name, slug, compose_path, status, domain, compose_hash, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
 		ON CONFLICT(slug) DO UPDATE SET
 			name         = excluded.name,
 			compose_path = excluded.compose_path,
 			status       = excluded.status,
 			domain       = excluded.domain,
+			compose_hash = excluded.compose_hash,
 			updated_at   = excluded.updated_at
 		RETURNING id
-	`, app.Name, app.Slug, app.ComposePath, app.Status, nullString(app.Domain)).Scan(&id)
+	`, app.Name, app.Slug, app.ComposePath, app.Status, nullString(app.Domain), app.ComposeHash).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("upsert app: %w", err)
 	}
@@ -63,11 +65,11 @@ func (s *Store) GetAppByID(id int64) (*App, error) {
 	var a App
 	var domain sql.NullString
 	err := s.db.QueryRow(`
-		SELECT id, name, slug, compose_path, status, domain, created_at, updated_at
+		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
 		FROM apps WHERE id = ?
 	`, id).Scan(
 		&a.ID, &a.Name, &a.Slug, &a.ComposePath, &a.Status,
-		&domain, &a.CreatedAt, &a.UpdatedAt,
+		&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("app %d not found", id)
@@ -86,11 +88,11 @@ func (s *Store) GetAppBySlug(slug string) (*App, error) {
 	var a App
 	var domain sql.NullString
 	err := s.db.QueryRow(`
-		SELECT id, name, slug, compose_path, status, domain, created_at, updated_at
+		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
 		FROM apps WHERE slug = ?
 	`, slug).Scan(
 		&a.ID, &a.Name, &a.Slug, &a.ComposePath, &a.Status,
-		&domain, &a.CreatedAt, &a.UpdatedAt,
+		&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("app %q not found", slug)
@@ -107,7 +109,7 @@ func (s *Store) GetAppBySlug(slug string) (*App, error) {
 // ListApps returns all apps ordered by name.
 func (s *Store) ListApps() ([]App, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, slug, compose_path, status, domain, created_at, updated_at
+		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
 		FROM apps ORDER BY name
 	`)
 	if err != nil {
@@ -121,7 +123,7 @@ func (s *Store) ListApps() ([]App, error) {
 		var domain sql.NullString
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Slug, &a.ComposePath, &a.Status,
-			&domain, &a.CreatedAt, &a.UpdatedAt,
+			&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan app: %w", err)
 		}
