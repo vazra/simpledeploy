@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -63,7 +64,7 @@ func (c *Collector) CollectSystem() (MetricPoint, error) {
 
 // CollectContainers collects metrics for all simpledeploy containers.
 func (c *Collector) CollectContainers(ctx context.Context) ([]MetricPoint, error) {
-	f := filters.NewArgs(filters.Arg("label", "simpledeploy.project"))
+	f := filters.NewArgs(filters.Arg("label", "com.docker.compose.project"))
 	containers, err := c.docker.ContainerList(ctx, container.ListOptions{Filters: f})
 	if err != nil {
 		return nil, fmt.Errorf("ContainerList: %w", err)
@@ -127,9 +128,10 @@ func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Su
 		}
 	}
 
-	// Map container to app via simpledeploy.project label
+	// Map container to app via compose project label
 	var appID *int64
-	if slug, ok := ctr.Labels["simpledeploy.project"]; ok && slug != "" && c.appLookup != nil {
+	if project, ok := ctr.Labels["com.docker.compose.project"]; ok && project != "" && c.appLookup != nil {
+		slug := strings.TrimPrefix(project, "simpledeploy-")
 		if id, err := c.appLookup(slug); err == nil {
 			appID = &id
 		}
