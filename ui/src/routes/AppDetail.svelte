@@ -3,6 +3,7 @@
   import Layout from '../components/Layout.svelte'
   import MetricsChart from '../components/MetricsChart.svelte'
   import LogViewer from '../components/LogViewer.svelte'
+  import ConfigTab from '../components/ConfigTab.svelte'
   import StatCard from '../components/StatCard.svelte'
   import Badge from '../components/Badge.svelte'
   import Button from '../components/Button.svelte'
@@ -39,7 +40,7 @@
   let bCron = $state('0 2 * * *')
   let bRetention = $state(7)
 
-  const tabs = ['overview', 'logs', 'metrics', 'backups']
+  const tabs = ['overview', 'logs', 'metrics', 'backups', 'config']
   const rangeMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 }
 
   onMount(loadApp)
@@ -334,6 +335,8 @@
           </div>
         {/if}
       </div>
+    {:else if activeTab === 'config'}
+      <ConfigTab {slug} />
     {/if}
 
     {#if showDeleteModal}
