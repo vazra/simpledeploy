@@ -2,104 +2,84 @@ package deployer
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
-	"github.com/vazra/simpledeploy/internal/docker"
 )
 
-func singleServiceApp() *compose.AppConfig {
-	return &compose.AppConfig{
-		Name: "myapp",
-		Services: []compose.ServiceConfig{
-			{
-				Name:  "web",
-				Image: "nginx:latest",
-				Ports: []compose.PortMapping{
-					{Host: "8080", Container: "80", Protocol: "tcp"},
-				},
-				Environment: map[string]string{"ENV": "prod"},
-				Volumes:     []compose.VolumeMount{{Source: "/data", Target: "/app/data"}},
-				Restart:     "always",
-			},
-		},
-	}
-}
-
-func TestDeployCreatesNetworkAndContainers(t *testing.T) {
-	mock := docker.NewMockClient()
-	d := New(mock)
-	ctx := context.Background()
-
-	app := singleServiceApp()
-	if err := d.Deploy(ctx, app); err != nil {
-		t.Fatalf("Deploy: %v", err)
-	}
-
-	if !mock.HasCall("NetworkCreate:simpledeploy-myapp") {
-		t.Error("expected NetworkCreate:simpledeploy-myapp")
-	}
-	if !mock.HasCall("ImagePull:nginx:latest") {
-		t.Error("expected ImagePull:nginx:latest")
-	}
-	if !mock.HasCall("ContainerCreate:simpledeploy-myapp-web") {
-		t.Error("expected ContainerCreate:simpledeploy-myapp-web")
-	}
-	// ContainerStart is called with the ID returned from ContainerCreate
-	ctrID := "simpledeploy-myapp-web-id"
-	if !mock.HasCall("ContainerStart:" + ctrID) {
-		t.Errorf("expected ContainerStart:%s", ctrID)
-	}
-}
-
-func TestDeployMultipleServices(t *testing.T) {
-	mock := docker.NewMockClient()
-	d := New(mock)
-	ctx := context.Background()
+func TestDeployCallsComposeUp(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
 
 	app := &compose.AppConfig{
-		Name: "multi",
-		Services: []compose.ServiceConfig{
-			{Name: "api", Image: "api:v1"},
-			{Name: "db", Image: "postgres:15"},
-		},
+		Name:        "myapp",
+		ComposePath: "/apps/myapp/docker-compose.yml",
 	}
 
-	if err := d.Deploy(ctx, app); err != nil {
+	if err := d.Deploy(context.Background(), app); err != nil {
 		t.Fatalf("Deploy: %v", err)
 	}
 
-	if !mock.HasCall("ContainerCreate:simpledeploy-multi-api") {
-		t.Error("expected ContainerCreate:simpledeploy-multi-api")
+	if !mock.HasCall("docker", "compose", "up", "-d", "--force-recreate", "--remove-orphans") {
+		t.Errorf("expected docker compose up call, got: %+v", mock.Calls)
 	}
-	if !mock.HasCall("ContainerCreate:simpledeploy-multi-db") {
-		t.Error("expected ContainerCreate:simpledeploy-multi-db")
+	if !mock.HasCall("docker", "-p", "simpledeploy-myapp") {
+		t.Errorf("expected project name simpledeploy-myapp, got: %+v", mock.Calls)
 	}
 }
 
-func TestTeardownRemovesContainersAndNetwork(t *testing.T) {
-	mock := docker.NewMockClient()
-	d := New(mock)
-	ctx := context.Background()
+func TestTeardownCallsComposeDown(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
 
-	// Deploy first so containers exist in the mock
-	app := singleServiceApp()
-	if err := d.Deploy(ctx, app); err != nil {
-		t.Fatalf("Deploy: %v", err)
-	}
-
-	if err := d.Teardown(ctx, "myapp"); err != nil {
+	if err := d.Teardown(context.Background(), "myapp"); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
 
-	ctrID := "simpledeploy-myapp-web-id"
-	if !mock.HasCall("ContainerStop:" + ctrID) {
-		t.Errorf("expected ContainerStop:%s", ctrID)
+	if !mock.HasCall("docker", "compose", "down", "--remove-orphans") {
+		t.Errorf("expected docker compose down call, got: %+v", mock.Calls)
 	}
-	if !mock.HasCall("ContainerRemove:" + ctrID) {
-		t.Errorf("expected ContainerRemove:%s", ctrID)
+	if !mock.HasCall("docker", "-p", "simpledeploy-myapp") {
+		t.Errorf("expected project name simpledeploy-myapp, got: %+v", mock.Calls)
 	}
-	if !mock.HasCall("NetworkRemove:simpledeploy-myapp") {
-		t.Error("expected NetworkRemove:simpledeploy-myapp")
+}
+
+func TestDeployPropagatesError(t *testing.T) {
+	mock := &MockRunner{Err: fmt.Errorf("compose failed")}
+	d := &Deployer{runner: mock}
+
+	app := &compose.AppConfig{
+		Name:        "myapp",
+		ComposePath: "/apps/myapp/docker-compose.yml",
+	}
+
+	err := d.Deploy(context.Background(), app)
+	if err == nil {
+		t.Fatal("expected error from Deploy")
+	}
+	if !strings.Contains(err.Error(), "compose failed") {
+		t.Errorf("expected 'compose failed' in error, got: %v", err)
+	}
+}
+
+func TestNewVerifiesComposeAvailable(t *testing.T) {
+	mock := &MockRunner{}
+	_, err := New(mock)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if !mock.HasCall("docker", "compose", "version") {
+		t.Error("expected docker compose version check")
+	}
+}
+
+func TestNewFailsWhenComposeUnavailable(t *testing.T) {
+	mock := &MockRunner{Err: fmt.Errorf("not found")}
+	_, err := New(mock)
+	if err == nil {
+		t.Fatal("expected error from New when compose unavailable")
 	}
 }
