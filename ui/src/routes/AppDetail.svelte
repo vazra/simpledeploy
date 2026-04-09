@@ -33,6 +33,10 @@
   let backupRuns = $state([])
   let restoreTarget = $state(null)
   let showBackupForm = $state(false)
+  let showRestartModal = $state(false)
+  let showScaleModal = $state(false)
+  let actionLoading = $state('')
+  let scaleInputs = $state({})
 
   // Backup form
   let bStrategy = $state('postgres')
@@ -115,6 +119,47 @@
     loadBackups()
   }
 
+  async function handleRestart() {
+    actionLoading = 'restart'
+    await api.restartApp(slug)
+    actionLoading = ''
+    showRestartModal = false
+    loadApp()
+  }
+
+  async function handleStop() {
+    actionLoading = 'stop'
+    await api.stopApp(slug)
+    actionLoading = ''
+    loadApp()
+  }
+
+  async function handleStart() {
+    actionLoading = 'start'
+    await api.startApp(slug)
+    actionLoading = ''
+    loadApp()
+  }
+
+  async function handlePull() {
+    actionLoading = 'pull'
+    await api.pullApp(slug)
+    actionLoading = ''
+    loadApp()
+  }
+
+  async function handleScale() {
+    actionLoading = 'scale'
+    const scales = {}
+    for (const [svc, n] of Object.entries(scaleInputs)) {
+      scales[svc] = parseInt(n) || 1
+    }
+    await api.scaleApp(slug, scales)
+    actionLoading = ''
+    showScaleModal = false
+    loadApp()
+  }
+
   $effect(() => {
     if (activeTab === 'metrics') loadMetrics()
     if (activeTab === 'backups') loadBackups()
@@ -138,6 +183,14 @@
           <Badge variant={app.Status === 'running' ? 'success' : app.Status === 'error' ? 'danger' : 'default'}>{app.Status}</Badge>
         </div>
         <div class="flex items-center gap-2">
+          {#if app.Status === 'running'}
+            <Button variant="secondary" size="sm" onclick={() => showRestartModal = true} loading={actionLoading === 'restart'}>Restart</Button>
+            <Button variant="secondary" size="sm" onclick={handleStop} loading={actionLoading === 'stop'}>Stop</Button>
+          {:else if app.Status === 'stopped'}
+            <Button variant="primary" size="sm" onclick={handleStart} loading={actionLoading === 'start'}>Start</Button>
+          {/if}
+          <Button variant="secondary" size="sm" onclick={handlePull} loading={actionLoading === 'pull'}>Pull &amp; Update</Button>
+          <Button variant="secondary" size="sm" onclick={() => { scaleInputs = {}; showScaleModal = true }}>Scale</Button>
           <Button variant="danger" size="sm" onclick={() => showDeleteModal = true}>Delete</Button>
         </div>
       </div>
@@ -345,6 +398,38 @@
 
     {#if restoreTarget}
       <Modal title="Confirm Restore" message="This will restore the backup. Are you sure?" onConfirm={confirmRestore} onCancel={() => restoreTarget = null} />
+    {/if}
+
+    {#if showRestartModal}
+      <Modal title="Restart App" message="This will force-recreate all containers for {app.Name}. Continue?" onConfirm={handleRestart} onCancel={() => showRestartModal = false} />
+    {/if}
+
+    {#if showScaleModal}
+      <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+        <button class="absolute inset-0 bg-black/60" onclick={() => showScaleModal = false} aria-label="Close"></button>
+        <div class="relative bg-surface-2 border border-border rounded-lg p-6 min-w-80 max-w-md shadow-xl">
+          <h3 class="text-base font-semibold text-text-primary mb-4">Scale Services</h3>
+          <div class="space-y-3 mb-5">
+            {#each app.Services || ['web'] as svc}
+              {@const name = typeof svc === 'string' ? svc : svc.Name || svc}
+              <div class="flex items-center gap-3">
+                <label class="text-sm text-text-secondary w-24">{name}</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={scaleInputs[name] ?? 1}
+                  oninput={(e) => scaleInputs = {...scaleInputs, [name]: e.currentTarget.value}}
+                  class="w-20 px-2.5 py-1.5 bg-input-bg border border-border rounded text-sm text-text-primary"
+                />
+              </div>
+            {/each}
+          </div>
+          <div class="flex justify-end gap-2">
+            <button onclick={() => showScaleModal = false} class="px-3 py-1.5 text-sm border border-border rounded-md text-text-secondary hover:text-text-primary transition-colors">Cancel</button>
+            <Button onclick={handleScale} loading={actionLoading === 'scale'}>Apply</Button>
+          </div>
+        </div>
+      </div>
     {/if}
   {/if}
 </Layout>

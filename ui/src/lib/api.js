@@ -86,6 +86,11 @@ export const api = {
   deploy: (name, compose) => requestWithToast('POST', '/apps/deploy', { name, compose }, 'App deployed'),
   getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
+  restartApp: (slug) => requestWithToast('POST', `/apps/${slug}/restart`, null, 'App restarted'),
+  stopApp: (slug) => requestWithToast('POST', `/apps/${slug}/stop`, null, 'App stopped'),
+  startApp: (slug) => requestWithToast('POST', `/apps/${slug}/start`, null, 'App started'),
+  pullApp: (slug) => requestWithToast('POST', `/apps/${slug}/pull`, null, 'Images pulled & redeployed'),
+  scaleApp: (slug, scales) => requestWithToast('POST', `/apps/${slug}/scale`, { scales }, 'App scaled'),
 
   // Metrics
   systemMetrics: (from, to) => request('GET', `/metrics/system?from=${from}&to=${to}`),
