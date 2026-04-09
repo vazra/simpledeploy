@@ -234,6 +234,54 @@ func TestReconcileRemoveUpdatesProxy(t *testing.T) {
 	}
 }
 
+func TestReconcileRedeploysOnChange(t *testing.T) {
+	r, mock, _, appsDir := newTestEnv(t)
+	ctx := context.Background()
+
+	writeComposeFile(t, appsDir, "myapp")
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+	if !mock.hasCall("Deploy:myapp") {
+		t.Fatal("expected initial Deploy:myapp")
+	}
+
+	composePath := filepath.Join(appsDir, "myapp", "docker-compose.yml")
+	os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"\n"), 0644)
+
+	mock.mu.Lock()
+	mock.calls = nil
+	mock.mu.Unlock()
+
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if !mock.hasCall("Deploy:myapp") {
+		t.Error("expected redeploy after compose change")
+	}
+}
+
+func TestReconcileSkipsUnchanged(t *testing.T) {
+	r, mock, _, appsDir := newTestEnv(t)
+	ctx := context.Background()
+
+	writeComposeFile(t, appsDir, "myapp")
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+
+	mock.mu.Lock()
+	mock.calls = nil
+	mock.mu.Unlock()
+
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if mock.hasCall("Deploy:myapp") {
+		t.Error("should NOT redeploy unchanged app")
+	}
+}
+
 func TestWatcherTriggersReconcile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping watcher test in short mode")

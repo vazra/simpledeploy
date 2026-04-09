@@ -2,6 +2,8 @@ package reconciler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,16 +50,24 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("list apps: %w", err)
 	}
 
-	currentMap := make(map[string]struct{}, len(current))
+	currentMap := make(map[string]store.App, len(current))
 	for _, a := range current {
-		currentMap[a.Slug] = struct{}{}
+		currentMap[a.Slug] = a
 	}
 
-	// deploy new apps
+	// deploy new or changed apps
 	for slug, cfg := range desired {
-		if _, exists := currentMap[slug]; !exists {
+		existing, exists := currentMap[slug]
+		if !exists {
 			if err := r.deployApp(ctx, slug, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "reconciler: deploy %s: %v\n", slug, err)
+			}
+			continue
+		}
+		hash, _ := hashFile(cfg.ComposePath)
+		if hash != "" && hash != existing.ComposeHash {
+			if err := r.deployApp(ctx, slug, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "reconciler: redeploy %s: %v\n", slug, err)
 			}
 		}
 	}
@@ -213,17 +223,28 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		}
 	}
 
+	hash, _ := hashFile(cfg.ComposePath)
 	app := &store.App{
 		Name:        slug,
 		Slug:        slug,
 		ComposePath: cfg.ComposePath,
 		Status:      "running",
 		Domain:      cfg.Domain,
+		ComposeHash: hash,
 	}
 	if err := r.store.UpsertApp(app, labels); err != nil {
 		return fmt.Errorf("upsert app: %w", err)
 	}
 	return nil
+}
+
+func hashFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
 }
 
 // removeApp calls deployer.Teardown then deletes the app from the store.
