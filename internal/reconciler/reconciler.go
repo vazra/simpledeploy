@@ -169,6 +169,42 @@ func (r *Reconciler) AppServices(ctx context.Context, slug string) ([]deployer.S
 	return r.deployer.Status(ctx, slug)
 }
 
+func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int64) error {
+	ver, err := r.store.GetComposeVersion(versionID)
+	if err != nil {
+		return fmt.Errorf("get version: %w", err)
+	}
+
+	composePath := filepath.Join(r.appsDir, slug, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte(ver.Content), 0644); err != nil {
+		return fmt.Errorf("write compose: %w", err)
+	}
+
+	cfg, err := compose.ParseFile(composePath, slug)
+	if err != nil {
+		return fmt.Errorf("parse compose: %w", err)
+	}
+
+	if err := r.deployApp(ctx, slug, cfg); err != nil {
+		return fmt.Errorf("redeploy: %w", err)
+	}
+
+	r.store.CreateDeployEvent(slug, "rollback", nil, fmt.Sprintf("rollback to version %d", ver.Version))
+	return nil
+}
+
+func (r *Reconciler) ListVersions(ctx context.Context, slug string) ([]store.ComposeVersion, error) {
+	app, err := r.store.GetAppBySlug(slug)
+	if err != nil {
+		return nil, err
+	}
+	return r.store.ListComposeVersions(app.ID)
+}
+
+func (r *Reconciler) ListDeployEvents(ctx context.Context, slug string) ([]store.DeployEvent, error) {
+	return r.store.ListDeployEvents(slug)
+}
+
 func (r *Reconciler) loadAppConfig(slug string) (*compose.AppConfig, error) {
 	composePath := filepath.Join(r.appsDir, slug, "docker-compose.yml")
 	cfg, err := compose.ParseFile(composePath, slug)
@@ -241,6 +277,15 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	if err := r.store.UpsertApp(app, labels); err != nil {
 		return fmt.Errorf("upsert app: %w", err)
 	}
+
+	// Store compose version
+	content, _ := os.ReadFile(cfg.ComposePath)
+	if len(content) > 0 {
+		r.store.CreateComposeVersion(app.ID, string(content), hash)
+	}
+	// Log deploy event
+	r.store.CreateDeployEvent(slug, "deploy", nil, "")
+
 	return nil
 }
 
