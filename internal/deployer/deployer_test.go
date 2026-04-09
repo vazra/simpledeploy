@@ -22,7 +22,7 @@ func TestDeployCallsComposeUp(t *testing.T) {
 		t.Fatalf("Deploy: %v", err)
 	}
 
-	if !mock.HasCall("docker", "compose", "up", "-d", "--force-recreate", "--remove-orphans") {
+	if !mock.HasCall("docker", "compose", "up", "-d", "--remove-orphans") {
 		t.Errorf("expected docker compose up call, got: %+v", mock.Calls)
 	}
 	if !mock.HasCall("docker", "-p", "simpledeploy-myapp") {

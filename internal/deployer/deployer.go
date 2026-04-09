@@ -27,7 +27,6 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) error {
 		"-f", app.ComposePath,
 		"-p", project,
 		"up", "-d",
-		"--force-recreate",
 		"--remove-orphans",
 	}
 	_, stderr, err := d.runner.Run(ctx, "docker", args...)
