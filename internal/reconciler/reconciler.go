@@ -16,6 +16,11 @@ import (
 type AppDeployer interface {
 	Deploy(ctx context.Context, app *compose.AppConfig) error
 	Teardown(ctx context.Context, projectName string) error
+	Restart(ctx context.Context, app *compose.AppConfig) error
+	Stop(ctx context.Context, projectName string) error
+	Start(ctx context.Context, projectName string) error
+	Pull(ctx context.Context, app *compose.AppConfig) error
+	Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error
 }
 
 // Reconciler syncs the apps directory with the running containers and store.
@@ -99,6 +104,62 @@ func (r *Reconciler) DeployOne(ctx context.Context, composePath, appName string)
 // RemoveOne removes a single app by slug.
 func (r *Reconciler) RemoveOne(ctx context.Context, appName string) error {
 	return r.removeApp(ctx, appName)
+}
+
+func (r *Reconciler) RestartOne(ctx context.Context, slug string) error {
+	cfg, err := r.loadAppConfig(slug)
+	if err != nil {
+		return err
+	}
+	if err := r.deployer.Restart(ctx, cfg); err != nil {
+		return fmt.Errorf("restart: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "running")
+}
+
+func (r *Reconciler) StopOne(ctx context.Context, slug string) error {
+	if err := r.deployer.Stop(ctx, slug); err != nil {
+		return fmt.Errorf("stop: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "stopped")
+}
+
+func (r *Reconciler) StartOne(ctx context.Context, slug string) error {
+	if err := r.deployer.Start(ctx, slug); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "running")
+}
+
+func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
+	cfg, err := r.loadAppConfig(slug)
+	if err != nil {
+		return err
+	}
+	if err := r.deployer.Pull(ctx, cfg); err != nil {
+		return fmt.Errorf("pull: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "running")
+}
+
+func (r *Reconciler) ScaleOne(ctx context.Context, slug string, scales map[string]int) error {
+	cfg, err := r.loadAppConfig(slug)
+	if err != nil {
+		return err
+	}
+	if err := r.deployer.Scale(ctx, cfg, scales); err != nil {
+		return fmt.Errorf("scale: %w", err)
+	}
+	return nil
+}
+
+func (r *Reconciler) loadAppConfig(slug string) (*compose.AppConfig, error) {
+	composePath := filepath.Join(r.appsDir, slug, "docker-compose.yml")
+	cfg, err := compose.ParseFile(composePath, slug)
+	if err != nil {
+		return nil, fmt.Errorf("parse compose for %s: %w", slug, err)
+	}
+	return cfg, nil
 }
 
 // scanAppsDir reads subdirectories and parses each docker-compose.yml.

@@ -32,6 +32,41 @@ func (m *mockDeployer) Teardown(_ context.Context, name string) error {
 	return nil
 }
 
+func (m *mockDeployer) Restart(_ context.Context, app *compose.AppConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Restart:"+app.Name)
+	return nil
+}
+
+func (m *mockDeployer) Stop(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Stop:"+name)
+	return nil
+}
+
+func (m *mockDeployer) Start(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Start:"+name)
+	return nil
+}
+
+func (m *mockDeployer) Pull(_ context.Context, app *compose.AppConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Pull:"+app.Name)
+	return nil
+}
+
+func (m *mockDeployer) Scale(_ context.Context, app *compose.AppConfig, _ map[string]int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Scale:"+app.Name)
+	return nil
+}
+
 func (m *mockDeployer) hasCall(prefix string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
