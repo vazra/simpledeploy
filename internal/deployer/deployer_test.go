@@ -83,3 +83,64 @@ func TestNewFailsWhenComposeUnavailable(t *testing.T) {
 		t.Fatal("expected error from New when compose unavailable")
 	}
 }
+
+func TestRestartCallsForceRecreate(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	if err := d.Restart(context.Background(), app); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if !mock.HasCall("docker", "compose", "up", "--force-recreate") {
+		t.Errorf("expected --force-recreate, got: %+v", mock.Calls)
+	}
+}
+
+func TestStopCallsComposeStop(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	if err := d.Stop(context.Background(), "myapp"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !mock.HasCall("docker", "compose", "stop") {
+		t.Errorf("expected compose stop, got: %+v", mock.Calls)
+	}
+}
+
+func TestStartCallsComposeStart(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	if err := d.Start(context.Background(), "myapp"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !mock.HasCall("docker", "compose", "start") {
+		t.Errorf("expected compose start, got: %+v", mock.Calls)
+	}
+}
+
+func TestPullCallsPullThenUp(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	if err := d.Pull(context.Background(), app); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if !mock.HasCall("docker", "compose", "pull") {
+		t.Errorf("expected compose pull, got: %+v", mock.Calls)
+	}
+	if !mock.HasCall("docker", "compose", "up", "-d") {
+		t.Errorf("expected compose up after pull, got: %+v", mock.Calls)
+	}
+}
+
+func TestScaleCallsComposeUpWithScale(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	if err := d.Scale(context.Background(), app, map[string]int{"web": 3}); err != nil {
+		t.Fatalf("Scale: %v", err)
+	}
+	if !mock.HasCall("docker", "compose", "up", "--no-recreate", "--scale") {
+		t.Errorf("expected compose up --scale, got: %+v", mock.Calls)
+	}
+}
