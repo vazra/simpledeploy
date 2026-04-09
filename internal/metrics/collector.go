@@ -20,17 +20,69 @@ import (
 // Return (0, err) when the app is not found.
 type AppLookup func(slug string) (int64, error)
 
+type StatusSyncer interface {
+	ListApps() ([]StatusApp, error)
+	UpdateAppStatus(slug, status string) error
+}
+
+type StatusApp struct {
+	Slug   string
+	Status string
+}
+
 // Collector gathers system and container metrics.
 type Collector struct {
-	docker    docker.Client
-	appLookup AppLookup
-	out       chan<- MetricPoint
+	docker       docker.Client
+	appLookup    AppLookup
+	statusSyncer StatusSyncer
+	out          chan<- MetricPoint
 }
 
 // NewCollector creates a new Collector.
 // appLookup may be nil; if so, AppID will always be nil.
 func NewCollector(dc docker.Client, appLookup AppLookup, out chan<- MetricPoint) *Collector {
 	return &Collector{docker: dc, appLookup: appLookup, out: out}
+}
+
+func (c *Collector) SetStatusSyncer(ss StatusSyncer) {
+	c.statusSyncer = ss
+}
+
+func (c *Collector) syncStatus(ctx context.Context) {
+	if c.statusSyncer == nil {
+		return
+	}
+	apps, err := c.statusSyncer.ListApps()
+	if err != nil {
+		log.Printf("metrics: syncStatus ListApps: %v", err)
+		return
+	}
+
+	f := filters.NewArgs(filters.Arg("label", "com.docker.compose.project"))
+	containers, err := c.docker.ContainerList(ctx, container.ListOptions{Filters: f})
+	if err != nil {
+		log.Printf("metrics: syncStatus ContainerList: %v", err)
+		return
+	}
+
+	running := make(map[string]bool)
+	for _, ctr := range containers {
+		if project, ok := ctr.Labels["com.docker.compose.project"]; ok {
+			slug := strings.TrimPrefix(project, "simpledeploy-")
+			running[slug] = true
+		}
+	}
+
+	for _, app := range apps {
+		if app.Status == "stopped" {
+			continue
+		}
+		if running[app.Slug] && app.Status != "running" {
+			c.statusSyncer.UpdateAppStatus(app.Slug, "running")
+		} else if !running[app.Slug] && app.Status == "running" {
+			c.statusSyncer.UpdateAppStatus(app.Slug, "error")
+		}
+	}
 }
 
 // CollectSystem collects host-level CPU, memory metrics.
@@ -183,6 +235,7 @@ func (c *Collector) Run(ctx context.Context, interval time.Duration) {
 					return
 				}
 			}
+			c.syncStatus(ctx)
 		}
 	}
 }

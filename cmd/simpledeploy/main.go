@@ -311,6 +311,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return app.ID, nil
 	}
 	collector := metrics.NewCollector(dc, appLookup, metricsCh)
+	collector.SetStatusSyncer(&statusSyncAdapter{store: db})
 	writer := metrics.NewWriter(db, metricsCh, 100)
 	tiers := parseTierConfigs(cfg.Metrics.Tiers)
 	rollup := metrics.NewRollupManager(db, tiers)
@@ -1128,4 +1129,24 @@ func copyCompose(src, appsDir, name string) (string, error) {
 	}
 
 	return dest, nil
+}
+
+type statusSyncAdapter struct {
+	store *store.Store
+}
+
+func (a *statusSyncAdapter) ListApps() ([]metrics.StatusApp, error) {
+	apps, err := a.store.ListApps()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]metrics.StatusApp, len(apps))
+	for i, app := range apps {
+		result[i] = metrics.StatusApp{Slug: app.Slug, Status: app.Status}
+	}
+	return result, nil
+}
+
+func (a *statusSyncAdapter) UpdateAppStatus(slug, status string) error {
+	return a.store.UpdateAppStatus(slug, status)
 }
