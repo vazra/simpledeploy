@@ -10,6 +10,7 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/store"
 )
 
 type reconciler interface {
@@ -21,6 +22,9 @@ type reconciler interface {
 	PullOne(ctx context.Context, slug string) error
 	ScaleOne(ctx context.Context, slug string, scales map[string]int) error
 	AppServices(ctx context.Context, slug string) ([]deployer.ServiceStatus, error)
+	RollbackOne(ctx context.Context, slug string, versionID int64) error
+	ListVersions(ctx context.Context, slug string) ([]store.ComposeVersion, error)
+	ListDeployEvents(ctx context.Context, slug string) ([]store.DeployEvent, error)
 }
 
 func (s *Server) SetAppsDir(dir string) { s.appsDir = dir }

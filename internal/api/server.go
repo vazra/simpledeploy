@@ -116,6 +116,11 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/apps/{slug}/scale", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleScale))))
 	s.mux.Handle("GET /api/apps/{slug}/services", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetServices))))
 
+	// Deploy history
+	s.mux.Handle("GET /api/apps/{slug}/versions", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListVersions))))
+	s.mux.Handle("POST /api/apps/{slug}/rollback", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRollback))))
+	s.mux.Handle("GET /api/apps/{slug}/events", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListDeployEvents))))
+
 	// Webhooks
 	s.mux.Handle("GET /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleListWebhooks)))
 	s.mux.Handle("POST /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleCreateWebhook)))

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/store"
 )
 
 type mockReconcilerFull struct {
@@ -47,6 +49,18 @@ func (m *mockReconcilerFull) ScaleOne(_ context.Context, slug string, _ map[stri
 func (m *mockReconcilerFull) AppServices(_ context.Context, slug string) ([]deployer.ServiceStatus, error) {
 	m.calls = append(m.calls, "AppServices:"+slug)
 	return []deployer.ServiceStatus{{Service: "web", State: "running", Health: "healthy"}}, nil
+}
+func (m *mockReconcilerFull) RollbackOne(_ context.Context, slug string, versionID int64) error {
+	m.calls = append(m.calls, fmt.Sprintf("RollbackOne:%s:%d", slug, versionID))
+	return nil
+}
+func (m *mockReconcilerFull) ListVersions(_ context.Context, slug string) ([]store.ComposeVersion, error) {
+	m.calls = append(m.calls, "ListVersions:"+slug)
+	return []store.ComposeVersion{}, nil
+}
+func (m *mockReconcilerFull) ListDeployEvents(_ context.Context, slug string) ([]store.DeployEvent, error) {
+	m.calls = append(m.calls, "ListDeployEvents:"+slug)
+	return []store.DeployEvent{}, nil
 }
 
 func newActionTestServer(t *testing.T) (*Server, *mockReconcilerFull) {
@@ -132,6 +146,23 @@ func TestScaleEndpoint(t *testing.T) {
 	}
 	if len(mock.calls) == 0 || mock.calls[0] != "ScaleOne:myapp" {
 		t.Errorf("expected ScaleOne:myapp, got: %v", mock.calls)
+	}
+}
+
+func TestRollbackEndpoint(t *testing.T) {
+	srv, mock := newActionTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+	body, _ := json.Marshal(map[string]any{"version_id": 5})
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/myapp/rollback", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if len(mock.calls) == 0 || mock.calls[0] != "RollbackOne:myapp:5" {
+		t.Errorf("expected RollbackOne:myapp:5, got: %v", mock.calls)
 	}
 }
 

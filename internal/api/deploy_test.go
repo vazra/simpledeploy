@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/store"
 )
 
 type mockReconciler struct{}
@@ -24,6 +25,13 @@ func (m *mockReconciler) StartOne(_ context.Context, _ string) error            
 func (m *mockReconciler) PullOne(_ context.Context, _ string) error                              { return nil }
 func (m *mockReconciler) ScaleOne(_ context.Context, _ string, _ map[string]int) error           { return nil }
 func (m *mockReconciler) AppServices(_ context.Context, _ string) ([]deployer.ServiceStatus, error) {
+	return nil, nil
+}
+func (m *mockReconciler) RollbackOne(_ context.Context, _ string, _ int64) error { return nil }
+func (m *mockReconciler) ListVersions(_ context.Context, _ string) ([]store.ComposeVersion, error) {
+	return nil, nil
+}
+func (m *mockReconciler) ListDeployEvents(_ context.Context, _ string) ([]store.DeployEvent, error) {
 	return nil, nil
 }
 
