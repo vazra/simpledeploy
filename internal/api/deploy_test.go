@@ -10,12 +10,22 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/vazra/simpledeploy/internal/deployer"
 )
 
 type mockReconciler struct{}
 
-func (m *mockReconciler) DeployOne(_ context.Context, _, _ string) error { return nil }
-func (m *mockReconciler) RemoveOne(_ context.Context, _ string) error    { return nil }
+func (m *mockReconciler) DeployOne(_ context.Context, _, _ string) error                         { return nil }
+func (m *mockReconciler) RemoveOne(_ context.Context, _ string) error                            { return nil }
+func (m *mockReconciler) RestartOne(_ context.Context, _ string) error                           { return nil }
+func (m *mockReconciler) StopOne(_ context.Context, _ string) error                              { return nil }
+func (m *mockReconciler) StartOne(_ context.Context, _ string) error                             { return nil }
+func (m *mockReconciler) PullOne(_ context.Context, _ string) error                              { return nil }
+func (m *mockReconciler) ScaleOne(_ context.Context, _ string, _ map[string]int) error           { return nil }
+func (m *mockReconciler) AppServices(_ context.Context, _ string) ([]deployer.ServiceStatus, error) {
+	return nil, nil
+}
 
 func newDeployTestServer(t *testing.T) (*Server, string) {
 	t.Helper()

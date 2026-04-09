@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -23,6 +24,7 @@ type AppDeployer interface {
 	Start(ctx context.Context, projectName string) error
 	Pull(ctx context.Context, app *compose.AppConfig) error
 	Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error
+	Status(ctx context.Context, projectName string) ([]deployer.ServiceStatus, error)
 }
 
 // Reconciler syncs the apps directory with the running containers and store.
@@ -161,6 +163,10 @@ func (r *Reconciler) ScaleOne(ctx context.Context, slug string, scales map[strin
 		return fmt.Errorf("scale: %w", err)
 	}
 	return nil
+}
+
+func (r *Reconciler) AppServices(ctx context.Context, slug string) ([]deployer.ServiceStatus, error) {
+	return r.deployer.Status(ctx, slug)
 }
 
 func (r *Reconciler) loadAppConfig(slug string) (*compose.AppConfig, error) {

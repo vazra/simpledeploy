@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -65,6 +66,13 @@ func (m *mockDeployer) Scale(_ context.Context, app *compose.AppConfig, _ map[st
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Scale:"+app.Name)
 	return nil
+}
+
+func (m *mockDeployer) Status(_ context.Context, name string) ([]deployer.ServiceStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Status:"+name)
+	return nil, nil
 }
 
 func (m *mockDeployer) hasCall(prefix string) bool {

@@ -108,6 +108,14 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/apps/{slug}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRemoveApp))))
 	s.mux.Handle("GET /api/apps/{slug}/compose", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetCompose))))
 
+	// App actions
+	s.mux.Handle("POST /api/apps/{slug}/restart", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRestart))))
+	s.mux.Handle("POST /api/apps/{slug}/stop", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleStop))))
+	s.mux.Handle("POST /api/apps/{slug}/start", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleStart))))
+	s.mux.Handle("POST /api/apps/{slug}/pull", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePull))))
+	s.mux.Handle("POST /api/apps/{slug}/scale", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleScale))))
+	s.mux.Handle("GET /api/apps/{slug}/services", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetServices))))
+
 	// Webhooks
 	s.mux.Handle("GET /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleListWebhooks)))
 	s.mux.Handle("POST /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleCreateWebhook)))

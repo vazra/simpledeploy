@@ -144,3 +144,15 @@ func TestScaleCallsComposeUpWithScale(t *testing.T) {
 		t.Errorf("expected compose up --scale, got: %+v", mock.Calls)
 	}
 }
+
+func TestStatusCallsComposePs(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	_, err := d.Status(context.Background(), "myapp")
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if !mock.HasCall("docker", "compose", "ps", "--format", "json") {
+		t.Errorf("expected compose ps call, got: %+v", mock.Calls)
+	}
+}

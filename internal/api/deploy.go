@@ -9,11 +9,18 @@ import (
 	"path/filepath"
 
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/deployer"
 )
 
 type reconciler interface {
 	DeployOne(ctx context.Context, composePath, appName string) error
 	RemoveOne(ctx context.Context, appName string) error
+	RestartOne(ctx context.Context, slug string) error
+	StopOne(ctx context.Context, slug string) error
+	StartOne(ctx context.Context, slug string) error
+	PullOne(ctx context.Context, slug string) error
+	ScaleOne(ctx context.Context, slug string, scales map[string]int) error
+	AppServices(ctx context.Context, slug string) ([]deployer.ServiceStatus, error)
 }
 
 func (s *Server) SetAppsDir(dir string) { s.appsDir = dir }
