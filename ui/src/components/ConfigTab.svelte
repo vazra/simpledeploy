@@ -19,11 +19,20 @@
   let loading = $state(true)
   let saving = $state(false)
   let showDiff = $state(false)
+  let hasValidationErrors = $state(false)
+
+  function normalizeYaml(str) {
+    try { return yaml.dump(yaml.load(str), { lineWidth: -1 }) } catch { return str }
+  }
+
+  function encodeBase64(str) {
+    return btoa(String.fromCodePoint(...new TextEncoder().encode(str)))
+  }
 
   onMount(async () => {
     const res = await api.getCompose(slug)
     if (res.error) { toasts.error('Failed to load compose'); return }
-    originalYaml = res.data
+    originalYaml = normalizeYaml(res.data)
     currentYaml = res.data
     try {
       compose = yaml.load(res.data) || {}
@@ -72,7 +81,7 @@
       }
     }
 
-    if (yamlStr === originalYaml) {
+    if (normalizeYaml(yamlStr) === originalYaml) {
       toasts.info('No changes to deploy')
       return
     }
@@ -83,13 +92,12 @@
 
   async function confirmDeploy() {
     saving = true
-    const encoded = btoa(currentYaml)
+    const encoded = encodeBase64(currentYaml)
     const res = await api.deploy(slug, encoded)
     saving = false
     showDiff = false
     if (!res.error) {
-      originalYaml = currentYaml
-      toasts.success('Changes deployed')
+      originalYaml = normalizeYaml(currentYaml)
     }
   }
 </script>
@@ -113,7 +121,7 @@
   </div>
 
   {#if mode === 'visual'}
-    <VisualEditor {compose} onchange={(updated) => { compose = updated }} />
+    <VisualEditor {compose} onchange={(updated) => { compose = updated }} onerrors={(errs) => { hasValidationErrors = Object.keys(errs).length > 0 }} />
   {:else}
     <YamlEditor value={currentYaml} error={yamlError} onchange={(val) => {
       currentYaml = val
@@ -122,7 +130,7 @@
   {/if}
 
   <div class="sticky bottom-0 bg-surface-0 border-t border-border py-3 mt-4 flex justify-end">
-    <Button onclick={handleSave} loading={saving}>Save &amp; Deploy</Button>
+    <Button onclick={handleSave} loading={saving} disabled={mode === 'visual' && hasValidationErrors}>Save &amp; Deploy</Button>
   </div>
 {/if}
 

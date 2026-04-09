@@ -2,7 +2,7 @@
   import AccordionSection from './AccordionSection.svelte'
   import RepeatableField from './RepeatableField.svelte'
 
-  let { compose = {}, onchange = () => {} } = $props()
+  let { compose = {}, onchange = () => {}, onerrors = () => {} } = $props()
 
   // ---- Errors ----
   let errors = $state({})
@@ -14,12 +14,14 @@
 
   function setError(key, msg) {
     errors = { ...errors, [key]: msg }
+    onerrors(errors)
   }
 
   function clearError(key) {
     const next = { ...errors }
     delete next[key]
     errors = next
+    onerrors(errors)
   }
 
   function emitChange(updated) {
@@ -328,10 +330,10 @@
           <label class="block text-xs text-text-secondary mb-1">Rate Limit - Requests</label>
           <input
             type="number"
-            value={getLabel(firstService, 'rate_limit.requests')}
+            value={getLabel(firstService, 'ratelimit.requests')}
             placeholder="100"
             oninput={(e) => {
-              if (validateNonNeg(e.currentTarget.value, 'sd.rl.requests')) setLabel('rate_limit.requests', e.currentTarget.value)
+              if (validateNonNeg(e.currentTarget.value, 'sd.rl.requests')) setLabel('ratelimit.requests', e.currentTarget.value)
             }}
             class={inputCls('sd.rl.requests')}
           />
@@ -347,9 +349,9 @@
           <label class="block text-xs text-text-secondary mb-1">Rate Limit - Window</label>
           <input
             type="text"
-            value={getLabel(firstService, 'rate_limit.window')}
+            value={getLabel(firstService, 'ratelimit.window')}
             placeholder="1m"
-            oninput={(e) => setLabel('rate_limit.window', e.currentTarget.value)}
+            oninput={(e) => setLabel('ratelimit.window', e.currentTarget.value)}
             class={inputCls('sd.rl.window')}
           />
           <p class="text-xs text-text-muted mt-0.5">Time window, e.g. 1m, 5m, 1h</p>
@@ -360,10 +362,10 @@
           <label class="block text-xs text-text-secondary mb-1">Rate Limit - Burst</label>
           <input
             type="number"
-            value={getLabel(firstService, 'rate_limit.burst')}
+            value={getLabel(firstService, 'ratelimit.burst')}
             placeholder="20"
             oninput={(e) => {
-              if (validateNonNeg(e.currentTarget.value, 'sd.rl.burst')) setLabel('rate_limit.burst', e.currentTarget.value)
+              if (validateNonNeg(e.currentTarget.value, 'sd.rl.burst')) setLabel('ratelimit.burst', e.currentTarget.value)
             }}
             class={inputCls('sd.rl.burst')}
           />
@@ -378,8 +380,8 @@
         <div>
           <label class="block text-xs text-text-secondary mb-1">Rate Limit - By</label>
           <select
-            value={getLabel(firstService, 'rate_limit.by') || 'ip'}
-            onchange={(e) => setLabel('rate_limit.by', e.currentTarget.value)}
+            value={getLabel(firstService, 'ratelimit.by') || 'ip'}
+            onchange={(e) => setLabel('ratelimit.by', e.currentTarget.value)}
             class={inputCls('sd.rl.by')}
           >
             <option value="ip">ip</option>
@@ -393,10 +395,10 @@
           <label class="block text-xs text-text-secondary mb-1">Alert CPU %</label>
           <input
             type="number"
-            value={getLabel(firstService, 'alert.cpu_pct')}
+            value={getLabel(firstService, 'alert.cpu')}
             placeholder="80"
             oninput={(e) => {
-              if (validatePct(e.currentTarget.value, 'sd.alert.cpu')) setLabel('alert.cpu_pct', e.currentTarget.value)
+              if (validatePct(e.currentTarget.value, 'sd.alert.cpu')) setLabel('alert.cpu', e.currentTarget.value)
             }}
             class={inputCls('sd.alert.cpu')}
           />
@@ -412,10 +414,10 @@
           <label class="block text-xs text-text-secondary mb-1">Alert Memory %</label>
           <input
             type="number"
-            value={getLabel(firstService, 'alert.mem_pct')}
+            value={getLabel(firstService, 'alert.memory')}
             placeholder="80"
             oninput={(e) => {
-              if (validatePct(e.currentTarget.value, 'sd.alert.mem')) setLabel('alert.mem_pct', e.currentTarget.value)
+              if (validatePct(e.currentTarget.value, 'sd.alert.mem')) setLabel('alert.memory', e.currentTarget.value)
             }}
             class={inputCls('sd.alert.mem')}
           />
