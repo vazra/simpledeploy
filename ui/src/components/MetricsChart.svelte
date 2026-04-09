@@ -25,7 +25,7 @@
       data: {
         datasets: [{
           label,
-          data,
+          data: [...data],
           borderColor: color,
           backgroundColor: color + '20',
           fill: true,
