@@ -54,6 +54,7 @@ export const api = {
   listApps: () => request('GET', '/apps'),
   getApp: (slug) => request('GET', `/apps/${slug}`),
   removeApp: (slug) => requestWithToast('DELETE', `/apps/${slug}`, null, 'App removed'),
+  deploy: (name, compose) => requestWithToast('POST', '/apps/deploy', { name, compose }, 'App deployed'),
 
   // Metrics
   systemMetrics: (from, to) => request('GET', `/metrics/system?from=${from}&to=${to}`),
