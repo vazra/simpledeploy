@@ -92,6 +92,9 @@ export const api = {
   pullApp: (slug) => requestWithToast('POST', `/apps/${slug}/pull`, null, 'Images pulled & redeployed'),
   scaleApp: (slug, scales) => requestWithToast('POST', `/apps/${slug}/scale`, { scales }, 'App scaled'),
   getAppServices: (slug) => request('GET', `/apps/${slug}/services`),
+  getComposeVersions: (slug) => request('GET', `/apps/${slug}/versions`),
+  rollbackApp: (slug, versionId) => requestWithToast('POST', `/apps/${slug}/rollback`, { version_id: versionId }, 'Rolled back'),
+  getDeployEvents: (slug) => request('GET', `/apps/${slug}/events`),
 
   // Metrics
   systemMetrics: (from, to) => request('GET', `/metrics/system?from=${from}&to=${to}`),
