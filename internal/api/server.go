@@ -23,6 +23,7 @@ type Server struct {
 	docker          docker.Client
 	appsDir         string
 	reconciler      reconciler
+	masterSecret    string
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -36,6 +37,9 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 	s.routes()
 	return s
 }
+
+// SetMasterSecret sets the master secret for encrypting registry credentials.
+func (s *Server) SetMasterSecret(secret string) { s.masterSecret = secret }
 
 // SetBackupScheduler sets the backup scheduler (can be nil).
 func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
@@ -144,6 +148,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/apps/{slug}/backups/runs", s.authMiddleware(http.HandlerFunc(s.handleListBackupRuns)))
 	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackup)))
 	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
+
+	// Registry management
+	s.mux.Handle("GET /api/registries", s.authMiddleware(http.HandlerFunc(s.handleListRegistries)))
+	s.mux.Handle("POST /api/registries", s.authMiddleware(http.HandlerFunc(s.handleCreateRegistry)))
+	s.mux.Handle("PUT /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateRegistry)))
+	s.mux.Handle("DELETE /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteRegistry)))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
