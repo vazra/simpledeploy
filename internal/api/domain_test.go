@@ -90,3 +90,68 @@ func TestHandleUpdateDomain_NoExistingLabel(t *testing.T) {
 		t.Errorf("expected simpledeploy.domain label in compose, got:\n%s", string(updated))
 	}
 }
+
+func TestHandleUpdateDomain_PreservesFormatting(t *testing.T) {
+	srv, s := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	composeContent := `services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "9002:80"
+    labels:
+      simpledeploy.domain: "old.example.com"
+      simpledeploy.port: "80"
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: webapp
+
+volumes:
+  pgdata:
+`
+	if err := os.WriteFile(composePath, []byte(composeContent), 0644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	s.UpsertApp(&store.App{Name: "fmtapp", Slug: "fmtapp", ComposePath: composePath, Status: "running"}, nil)
+
+	body, _ := json.Marshal(map[string]string{"domain": "new.example.com"})
+	req := httptest.NewRequest(http.MethodPut, "/api/apps/fmtapp/domain", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	updated, err := os.ReadFile(composePath)
+	if err != nil {
+		t.Fatalf("read updated compose: %v", err)
+	}
+	result := string(updated)
+
+	// Domain should be updated with preserved quoting
+	if !strings.Contains(result, `"new.example.com"`) {
+		t.Errorf("expected quoted new.example.com, got:\n%s", result)
+	}
+	// Port quoting preserved
+	if !strings.Contains(result, `"9002:80"`) {
+		t.Errorf("port formatting changed:\n%s", result)
+	}
+	// Blank line between services preserved
+	if !strings.Contains(result, "\n\n  db:") {
+		t.Errorf("blank line between services lost:\n%s", result)
+	}
+	// Volumes section preserved
+	if !strings.Contains(result, "volumes:\n  pgdata:") {
+		t.Errorf("volumes section changed:\n%s", result)
+	}
+}

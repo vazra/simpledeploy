@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -68,44 +69,82 @@ func updateComposeDomain(composePath, domain string) error {
 		return fmt.Errorf("no services defined")
 	}
 
-	firstServiceNode := servicesNode.Content[1]
+	// Collect all domain value nodes across services
+	var domainNodes []*yaml.Node
+	for i := 1; i < len(servicesNode.Content); i += 2 {
+		svcNode := servicesNode.Content[i]
+		labelsNode := findMapValue(svcNode, "labels")
+		if labelsNode == nil {
+			continue
+		}
+		dv := findMapValue(labelsNode, "simpledeploy.domain")
+		if dv != nil {
+			domainNodes = append(domainNodes, dv)
+		}
+	}
 
+	// If existing labels found, do surgical replacement preserving formatting
+	if len(domainNodes) > 0 {
+		lines := splitLines(data)
+		for _, node := range domainNodes {
+			lineIdx := node.Line - 1 // yaml.Node.Line is 1-based
+			if lineIdx < 0 || lineIdx >= len(lines) {
+				continue
+			}
+			lines[lineIdx] = replaceDomainValue(lines[lineIdx], node.Value, domain)
+		}
+		return os.WriteFile(composePath, joinLines(lines), 0644)
+	}
+
+	// No existing label: add to first service via full marshal (unavoidable)
+	firstServiceNode := servicesNode.Content[1]
 	labelsNode := findMapValue(firstServiceNode, "labels")
 	if labelsNode == nil {
 		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "labels", Tag: "!!str"}
 		labelsNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		firstServiceNode.Content = append(firstServiceNode.Content, keyNode, labelsNode)
 	}
-
-	domainValueNode := findMapValue(labelsNode, "simpledeploy.domain")
-	if domainValueNode != nil {
-		domainValueNode.Value = domain
-	} else {
-		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "simpledeploy.domain", Tag: "!!str"}
-		valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: domain, Tag: "!!str"}
-		labelsNode.Content = append(labelsNode.Content, keyNode, valNode)
-	}
-
-	for i := 2; i < len(servicesNode.Content); i += 2 {
-		if i+1 >= len(servicesNode.Content) {
-			break
-		}
-		svcNode := servicesNode.Content[i+1]
-		svcLabels := findMapValue(svcNode, "labels")
-		if svcLabels == nil {
-			continue
-		}
-		dv := findMapValue(svcLabels, "simpledeploy.domain")
-		if dv != nil {
-			dv.Value = domain
-		}
-	}
+	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "simpledeploy.domain", Tag: "!!str"}
+	valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: domain, Tag: "!!str"}
+	labelsNode.Content = append(labelsNode.Content, keyNode, valNode)
 
 	out, err := yaml.Marshal(&doc)
 	if err != nil {
 		return fmt.Errorf("marshal compose: %w", err)
 	}
 	return os.WriteFile(composePath, out, 0644)
+}
+
+// replaceDomainValue replaces the old domain value on a YAML line, preserving
+// quoting style and surrounding formatting.
+func replaceDomainValue(line string, oldVal, newVal string) string {
+	// Try quoted variants first, then unquoted
+	for _, pattern := range []string{
+		fmt.Sprintf(`"%s"`, oldVal),
+		fmt.Sprintf(`'%s'`, oldVal),
+		oldVal,
+	} {
+		if idx := strings.Index(line, pattern); idx >= 0 {
+			replacement := newVal
+			// Preserve original quoting
+			if strings.HasPrefix(pattern, `"`) {
+				replacement = fmt.Sprintf(`"%s"`, newVal)
+			} else if strings.HasPrefix(pattern, `'`) {
+				replacement = fmt.Sprintf(`'%s'`, newVal)
+			}
+			return line[:idx] + replacement + line[idx+len(pattern):]
+		}
+	}
+	return line
+}
+
+func splitLines(data []byte) []string {
+	s := string(data)
+	return strings.Split(s, "\n")
+}
+
+func joinLines(lines []string) []byte {
+	return []byte(strings.Join(lines, "\n"))
 }
 
 func findMapValue(mapping *yaml.Node, key string) *yaml.Node {
