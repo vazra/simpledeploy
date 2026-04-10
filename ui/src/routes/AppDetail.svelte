@@ -39,6 +39,7 @@
   let showScaleModal = $state(false)
   let actionLoading = $state('')
   let scaleInputs = $state({})
+  let editDomain = $state('')
 
   // Backup form
   let bStrategy = $state('postgres')
@@ -55,6 +56,7 @@
     const res = await api.getApp(slug)
     if (res.error) { push('/'); return }
     app = res.data
+    editDomain = app?.Domain || ''
     loading = false
     loadRequests()
     loadServices()
@@ -168,6 +170,11 @@
     loadApp()
   }
 
+  async function saveDomain() {
+    const { error } = await api.updateDomain(slug, editDomain)
+    if (!error) await loadApp()
+  }
+
   $effect(() => {
     if (activeTab === 'metrics') loadMetrics()
     if (activeTab === 'backups') loadBackups()
@@ -243,12 +250,24 @@
             <span class="text-xs text-text-secondary uppercase tracking-wider">Status</span>
             <p class="text-text-primary mt-0.5 capitalize">{app.Status}</p>
           </div>
-          {#if app.Domain}
-            <div>
-              <span class="text-xs text-text-secondary uppercase tracking-wider">Domain</span>
-              <p class="text-text-primary mt-0.5">{app.Domain}</p>
+          <div>
+            <span class="text-xs text-text-secondary uppercase tracking-wider">Domain</span>
+            <div class="flex items-center gap-2 mt-1">
+              <input
+                bind:value={editDomain}
+                placeholder="example.com"
+                class="px-2 py-1 text-sm bg-surface-0 border border-border rounded font-mono focus:outline-none focus:border-accent w-64"
+              />
+              {#if editDomain !== (app?.Domain || '')}
+                <button
+                  onclick={saveDomain}
+                  class="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent/90 transition-colors"
+                >
+                  Save
+                </button>
+              {/if}
             </div>
-          {/if}
+          </div>
           {#if app.ComposeFile}
             <div>
               <span class="text-xs text-text-secondary uppercase tracking-wider">Compose File</span>

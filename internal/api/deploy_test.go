@@ -34,6 +34,7 @@ func (m *mockReconciler) ListVersions(_ context.Context, _ string) ([]store.Comp
 func (m *mockReconciler) ListDeployEvents(_ context.Context, _ string) ([]store.DeployEvent, error) {
 	return nil, nil
 }
+func (m *mockReconciler) Reconcile(_ context.Context) error { return nil }
 
 func newDeployTestServer(t *testing.T) (*Server, string) {
 	t.Helper()

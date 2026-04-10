@@ -62,6 +62,7 @@ func (m *mockReconcilerFull) ListDeployEvents(_ context.Context, slug string) ([
 	m.calls = append(m.calls, "ListDeployEvents:"+slug)
 	return []store.DeployEvent{}, nil
 }
+func (m *mockReconcilerFull) Reconcile(_ context.Context) error { return nil }
 
 func newActionTestServer(t *testing.T) (*Server, *mockReconcilerFull) {
 	t.Helper()

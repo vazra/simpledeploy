@@ -25,6 +25,7 @@ type reconciler interface {
 	RollbackOne(ctx context.Context, slug string, versionID int64) error
 	ListVersions(ctx context.Context, slug string) ([]store.ComposeVersion, error)
 	ListDeployEvents(ctx context.Context, slug string) ([]store.DeployEvent, error)
+	Reconcile(ctx context.Context) error
 }
 
 func (s *Server) SetAppsDir(dir string) { s.appsDir = dir }

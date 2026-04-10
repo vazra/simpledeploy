@@ -97,6 +97,7 @@ export const api = {
   getComposeVersions: (slug) => request('GET', `/apps/${slug}/versions`),
   rollbackApp: (slug, versionId) => requestWithToast('POST', `/apps/${slug}/rollback`, { version_id: versionId }, 'Rolled back'),
   getDeployEvents: (slug) => request('GET', `/apps/${slug}/events`),
+  updateDomain: (slug, domain) => requestWithToast('PUT', `/apps/${slug}/domain`, { domain }, 'Domain updated'),
 
   // Metrics
   systemMetrics: (from, to) => request('GET', `/metrics/system?from=${from}&to=${to}`),
