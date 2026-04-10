@@ -16,6 +16,7 @@ type Config struct {
 	MasterSecret   string          `yaml:"master_secret"`
 	Metrics        MetricsConfig   `yaml:"metrics"`
 	RateLimit      RateLimitConfig `yaml:"ratelimit"`
+	Registries     []string        `yaml:"registries"`
 }
 
 type TLSConfig struct {
