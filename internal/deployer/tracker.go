@@ -139,6 +139,9 @@ func (t *Tracker) IsDeploying(slug string) bool {
 }
 
 func (t *Tracker) TrackWithLog(slug string, cancel context.CancelFunc) *DeployLog {
+	if t == nil {
+		return nil
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.flights[slug] = cancel
@@ -148,6 +151,9 @@ func (t *Tracker) TrackWithLog(slug string, cancel context.CancelFunc) *DeployLo
 }
 
 func (t *Tracker) DoneWithLog(slug string, action string) {
+	if t == nil {
+		return
+	}
 	t.mu.Lock()
 	dl := t.logs[slug]
 	delete(t.flights, slug)

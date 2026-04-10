@@ -43,10 +43,17 @@ func New(runner CommandRunner) (*Deployer, error) {
 	return d, nil
 }
 
+// runCmd uses RunStreaming when a DeployLog is available, otherwise falls back to d.runner.Run.
+func (d *Deployer) runCmd(ctx context.Context, dl *DeployLog, name string, args ...string) (string, string, error) {
+	if dl != nil {
+		return RunStreaming(ctx, dl, name, args...)
+	}
+	return d.runner.Run(ctx, name, args...)
+}
+
 func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
-	d.Tracker.Track(app.Name, cancel)
-	defer d.Tracker.Done(app.Name)
+	dl := d.Tracker.TrackWithLog(app.Name, cancel)
 
 	project := "simpledeploy-" + app.Name
 	args := []string{
@@ -56,11 +63,15 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) DeployRes
 		"up", "-d",
 		"--remove-orphans",
 	}
-	stdout, stderr, err := d.runner.Run(ctx, "docker", args...)
+	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)
+	action := "deploy"
 	if err != nil {
+		action = "deploy_failed"
+		d.Tracker.DoneWithLog(app.Name, action)
 		return DeployResult{Output: output, Err: fmt.Errorf("compose up: %w", err)}
 	}
+	d.Tracker.DoneWithLog(app.Name, action)
 	return DeployResult{Output: output}
 }
 
@@ -81,8 +92,7 @@ func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
 
 func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
-	d.Tracker.Track(app.Name, cancel)
-	defer d.Tracker.Done(app.Name)
+	dl := d.Tracker.TrackWithLog(app.Name, cancel)
 
 	project := "simpledeploy-" + app.Name
 	args := []string{
@@ -93,11 +103,15 @@ func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployRe
 		"--force-recreate",
 		"--remove-orphans",
 	}
-	stdout, stderr, err := d.runner.Run(ctx, "docker", args...)
+	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)
+	action := "restart"
 	if err != nil {
+		action = "restart_failed"
+		d.Tracker.DoneWithLog(app.Name, action)
 		return DeployResult{Output: output, Err: fmt.Errorf("compose restart: %w", err)}
 	}
+	d.Tracker.DoneWithLog(app.Name, action)
 	return DeployResult{Output: output}
 }
 
@@ -123,8 +137,7 @@ func (d *Deployer) Start(ctx context.Context, projectName string) error {
 
 func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
-	d.Tracker.Track(app.Name, cancel)
-	defer d.Tracker.Done(app.Name)
+	dl := d.Tracker.TrackWithLog(app.Name, cancel)
 
 	project := "simpledeploy-" + app.Name
 
@@ -133,15 +146,17 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 	if len(auths) > 0 {
 		tmpDir, err := writeDockerConfig(auths)
 		if err != nil {
+			d.Tracker.DoneWithLog(app.Name, "pull_failed")
 			return DeployResult{Err: fmt.Errorf("write docker config: %w", err)}
 		}
 		defer os.RemoveAll(tmpDir)
 		pullArgs = []string{"--config", tmpDir, "compose", "-f", app.ComposePath, "-p", project, "pull"}
 	}
 
-	stdout, stderr, err := d.runner.Run(ctx, "docker", pullArgs...)
+	stdout, stderr, err := d.runCmd(ctx, dl, "docker", pullArgs...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)
 	if err != nil {
+		d.Tracker.DoneWithLog(app.Name, "pull_failed")
 		return DeployResult{Output: output, Err: fmt.Errorf("compose pull: %w", err)}
 	}
 
@@ -152,12 +167,14 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 		"up", "-d",
 		"--remove-orphans",
 	}
-	stdout, stderr, err = d.runner.Run(ctx, "docker", upArgs...)
+	stdout, stderr, err = d.runCmd(ctx, dl, "docker", upArgs...)
 	output += "\n" + strings.TrimSpace(stdout+"\n"+stderr)
 	output = strings.TrimSpace(output)
 	if err != nil {
+		d.Tracker.DoneWithLog(app.Name, "pull_failed")
 		return DeployResult{Output: output, Err: fmt.Errorf("compose up after pull: %w", err)}
 	}
+	d.Tracker.DoneWithLog(app.Name, "pull")
 	return DeployResult{Output: output}
 }
 
