@@ -8,6 +8,7 @@
   import Alerts from './routes/Alerts.svelte'
   import Users from './routes/Users.svelte'
   import Registries from './routes/Registries.svelte'
+  import Docker from './routes/Docker.svelte'
 
   const routes = {
     '/login': Login,
@@ -17,6 +18,7 @@
     '/alerts': Alerts,
     '/users': Users,
     '/registries': Registries,
+    '/docker': Docker,
   }
 </script>
 
