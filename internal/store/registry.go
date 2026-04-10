@@ -19,7 +19,9 @@ type Registry struct {
 
 func newID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -75,7 +77,7 @@ func (s *Store) GetRegistryByName(name string) (*Registry, error) {
 }
 
 func (s *Store) UpdateRegistry(id, name, url, usernameEnc, passwordEnc string) error {
-	_, err := s.db.Exec(`
+	res, err := s.db.Exec(`
 		UPDATE registries SET name = ?, url = ?, username_enc = ?, password_enc = ?, updated_at = datetime('now')
 		WHERE id = ?`,
 		name, url, usernameEnc, passwordEnc, id,
@@ -83,13 +85,21 @@ func (s *Store) UpdateRegistry(id, name, url, usernameEnc, passwordEnc string) e
 	if err != nil {
 		return fmt.Errorf("update registry: %w", err)
 	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("registry not found: %s", id)
+	}
 	return nil
 }
 
 func (s *Store) DeleteRegistry(id string) error {
-	_, err := s.db.Exec(`DELETE FROM registries WHERE id = ?`, id)
+	res, err := s.db.Exec(`DELETE FROM registries WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete registry: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("registry not found: %s", id)
 	}
 	return nil
 }

@@ -96,6 +96,10 @@ func (s *Server) handleUpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
+	if req.Name == "" || req.URL == "" || req.Username == "" || req.Password == "" {
+		http.Error(w, "name, url, username, password required", http.StatusBadRequest)
+		return
+	}
 	if s.masterSecret == "" {
 		http.Error(w, "master_secret not configured", http.StatusInternalServerError)
 		return
