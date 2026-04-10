@@ -42,7 +42,7 @@ func (s *Store) CreateUser(username, passwordHash, role string) (*User, error) {
 // GetUserByUsername returns the user with the given username.
 func (s *Store) GetUserByUsername(username string) (*User, error) {
 	var u User
-	err := s.ro.QueryRow(`
+	err := s.db.QueryRow(`
 		SELECT id, username, password_hash, role, created_at
 		FROM users WHERE username = ?
 	`, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
@@ -58,7 +58,7 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 // GetUserByID returns the user with the given ID.
 func (s *Store) GetUserByID(id int64) (*User, error) {
 	var u User
-	err := s.ro.QueryRow(`
+	err := s.db.QueryRow(`
 		SELECT id, username, password_hash, role, created_at
 		FROM users WHERE id = ?
 	`, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
@@ -73,7 +73,7 @@ func (s *Store) GetUserByID(id int64) (*User, error) {
 
 // ListUsers returns all users ordered by username, excluding password_hash.
 func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.ro.Query(`
+	rows, err := s.db.Query(`
 		SELECT id, username, role, created_at
 		FROM users ORDER BY username
 	`)
@@ -112,7 +112,7 @@ func (s *Store) DeleteUser(id int64) error {
 // UserCount returns the total number of users.
 func (s *Store) UserCount() (int, error) {
 	var count int
-	err := s.ro.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("user count: %w", err)
 	}
@@ -145,7 +145,7 @@ func (s *Store) GetAPIKeyByHash(hash string) (*APIKeyRecord, *User, error) {
 	var k APIKeyRecord
 	var u User
 	var expiresAt sql.NullTime
-	err := s.ro.QueryRow(`
+	err := s.db.QueryRow(`
 		SELECT
 			ak.id, ak.user_id, ak.key_hash, ak.name, ak.created_at, ak.expires_at,
 			u.id, u.username, u.password_hash, u.role, u.created_at
@@ -171,7 +171,7 @@ func (s *Store) GetAPIKeyByHash(hash string) (*APIKeyRecord, *User, error) {
 
 // ListAPIKeysByUser returns all API keys for the given user.
 func (s *Store) ListAPIKeysByUser(userID int64) ([]APIKeyRecord, error) {
-	rows, err := s.ro.Query(`
+	rows, err := s.db.Query(`
 		SELECT id, user_id, key_hash, name, created_at, expires_at
 		FROM api_keys WHERE user_id = ?
 	`, userID)
@@ -238,7 +238,7 @@ func (s *Store) RevokeAppAccess(userID, appID int64) error {
 // super_admins always return true.
 func (s *Store) HasAppAccess(userID int64, appSlug string) (bool, error) {
 	var role string
-	err := s.ro.QueryRow(`SELECT role FROM users WHERE id = ?`, userID).Scan(&role)
+	err := s.db.QueryRow(`SELECT role FROM users WHERE id = ?`, userID).Scan(&role)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -250,7 +250,7 @@ func (s *Store) HasAppAccess(userID int64, appSlug string) (bool, error) {
 	}
 
 	var count int
-	err = s.ro.QueryRow(`
+	err = s.db.QueryRow(`
 		SELECT COUNT(*)
 		FROM user_app_access uaa
 		JOIN apps a ON a.id = uaa.app_id
@@ -264,7 +264,7 @@ func (s *Store) HasAppAccess(userID int64, appSlug string) (bool, error) {
 
 // GetUserAppSlugs returns the list of app slugs accessible to the given user.
 func (s *Store) GetUserAppSlugs(userID int64) ([]string, error) {
-	rows, err := s.ro.Query(`
+	rows, err := s.db.Query(`
 		SELECT a.slug
 		FROM apps a
 		JOIN user_app_access uaa ON uaa.app_id = a.id

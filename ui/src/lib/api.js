@@ -164,16 +164,23 @@ export const api = {
   deleteRegistry: (id) => requestWithToast('DELETE', `/registries/${id}`, null, 'Registry removed'),
 
   // Docker
+  dockerInfo: () => request('GET', '/docker/info'),
   dockerDiskUsage: () => request('GET', '/docker/disk-usage'),
   dockerImages: () => request('GET', '/docker/images'),
   dockerRemoveImage: (id) => requestWithToast('DELETE', `/docker/images/${encodeURIComponent(id)}`, null, 'Image removed'),
   dockerNetworks: () => request('GET', '/docker/networks'),
   dockerVolumes: () => request('GET', '/docker/volumes'),
-  dockerRemoveNetwork: (id) => requestWithToast('DELETE', `/docker/networks/${id}`, null, 'Network removed'),
-  dockerRemoveVolume: (name) => requestWithToast('DELETE', `/docker/volumes/${name}`, null, 'Volume removed'),
-  dockerPruneContainers: () => requestWithToast('POST', '/docker/prune/containers', null, 'Containers pruned'),
-  dockerPruneImages: () => requestWithToast('POST', '/docker/prune/images', null, 'Images pruned'),
-  dockerPruneVolumes: () => requestWithToast('POST', '/docker/prune/volumes', null, 'Volumes pruned'),
-  dockerPruneBuildCache: () => requestWithToast('POST', '/docker/prune/build-cache', null, 'Build cache pruned'),
-  dockerPruneAll: () => requestWithToast('POST', '/docker/prune/all', null, 'System pruned'),
+  dockerRemoveNetwork: (id) => requestWithToast('DELETE', `/docker/networks/${encodeURIComponent(id)}`, null, 'Network removed'),
+  dockerRemoveVolume: (name) => requestWithToast('DELETE', `/docker/volumes/${encodeURIComponent(name)}`, null, 'Volume removed'),
+  dockerPruneContainers: () => request('POST', '/docker/prune/containers'),
+  dockerPruneImages: () => request('POST', '/docker/prune/images'),
+  dockerPruneVolumes: () => request('POST', '/docker/prune/volumes'),
+  dockerPruneBuildCache: () => request('POST', '/docker/prune/build-cache'),
+  dockerPruneAll: () => request('POST', '/docker/prune/all'),
+
+  // System
+  systemInfo: () => request('GET', '/system/info'),
+  systemPruneMetrics: (days) => request('POST', '/system/prune/metrics', { days }),
+  systemPruneRequestStats: (days) => request('POST', '/system/prune/request-stats', { days }),
+  systemVacuum: () => request('POST', '/system/vacuum'),
 }

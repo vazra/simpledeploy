@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
@@ -25,6 +26,11 @@ type Server struct {
 	appsDir         string
 	reconciler      reconciler
 	masterSecret    string
+	buildVersion    string
+	buildCommit     string
+	buildDate       string
+	dbPath          string
+	startedAt       time.Time
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -34,6 +40,7 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 		store:       st,
 		jwt:         jwtMgr,
 		rateLimiter: rl,
+		startedAt:   time.Now(),
 	}
 	s.routes()
 	return s
@@ -41,6 +48,16 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 
 // SetMasterSecret sets the master secret for encrypting registry credentials.
 func (s *Server) SetMasterSecret(secret string) { s.masterSecret = secret }
+
+// SetBuildInfo sets the build version, commit, and date.
+func (s *Server) SetBuildInfo(version, commit, date string) {
+	s.buildVersion = version
+	s.buildCommit = commit
+	s.buildDate = date
+}
+
+// SetDBPath sets the path to the SQLite database file.
+func (s *Server) SetDBPath(path string) { s.dbPath = path }
 
 // SetBackupScheduler sets the backup scheduler (can be nil).
 func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
@@ -159,6 +176,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
 
 	// Docker system management
+	s.mux.Handle("GET /api/docker/info", s.authMiddleware(http.HandlerFunc(s.handleDockerInfo)))
 	s.mux.Handle("GET /api/docker/disk-usage", s.authMiddleware(http.HandlerFunc(s.handleDockerDiskUsage)))
 	s.mux.Handle("POST /api/docker/prune/containers", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneContainers)))
 	s.mux.Handle("POST /api/docker/prune/images", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneImages)))
@@ -171,6 +189,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/docker/volumes", s.authMiddleware(http.HandlerFunc(s.handleDockerVolumes)))
 	s.mux.Handle("DELETE /api/docker/networks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDockerNetworkRemove)))
 	s.mux.Handle("DELETE /api/docker/volumes/{name}", s.authMiddleware(http.HandlerFunc(s.handleDockerVolumeRemove)))
+
+	// System management
+	s.mux.Handle("GET /api/system/info", s.authMiddleware(http.HandlerFunc(s.handleSystemInfo)))
+	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(http.HandlerFunc(s.handlePruneMetrics)))
+	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(http.HandlerFunc(s.handlePruneRequestStats)))
+	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(http.HandlerFunc(s.handleVacuumDB)))
 
 	// Registry management
 	s.mux.Handle("GET /api/registries", s.authMiddleware(http.HandlerFunc(s.handleListRegistries)))

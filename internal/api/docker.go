@@ -24,6 +24,35 @@ func (s *Server) dockerRaw() (*dockerclient.Client, bool) {
 	return cli, true
 }
 
+func (s *Server) handleDockerInfo(w http.ResponseWriter, r *http.Request) {
+	cli, ok := s.dockerRaw()
+	if !ok {
+		http.Error(w, "docker not available", http.StatusServiceUnavailable)
+		return
+	}
+	info, err := cli.Info(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"server_version":    info.ServerVersion,
+		"os":                info.OperatingSystem,
+		"arch":              info.Architecture,
+		"kernel":            info.KernelVersion,
+		"cpus":              info.NCPU,
+		"memory":            info.MemTotal,
+		"containers":        info.Containers,
+		"containers_running": info.ContainersRunning,
+		"containers_paused":  info.ContainersPaused,
+		"containers_stopped": info.ContainersStopped,
+		"images":            info.Images,
+		"storage_driver":    info.Driver,
+		"docker_root_dir":   info.DockerRootDir,
+	})
+}
+
 func (s *Server) handleDockerDiskUsage(w http.ResponseWriter, r *http.Request) {
 	cli, ok := s.dockerRaw()
 	if !ok {
@@ -60,7 +89,7 @@ func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	report, err := cli.ImagesPrune(r.Context(), filters.NewArgs())
+	report, err := cli.ImagesPrune(r.Context(), filters.NewArgs(filters.Arg("dangling", "false")))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -113,7 +142,7 @@ func (s *Server) handleDockerPruneAll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	images, err := cli.ImagesPrune(ctx, empty)
+	images, err := cli.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false")))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -148,7 +177,7 @@ func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	imgs, err := cli.ImageList(r.Context(), image.ListOptions{All: true})
+	imgs, err := cli.ImageList(r.Context(), image.ListOptions{})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

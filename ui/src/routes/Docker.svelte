@@ -5,12 +5,17 @@
   import Modal from '../components/Modal.svelte'
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
+  import { toasts } from '../lib/stores/toast.js'
 
   let activeTab = $state('cleanup')
   let loading = $state(false)
 
+  // Docker info state
+  let dockerInfo = $state(null)
+
   // Disk Cleanup state
   let diskUsage = $state(null)
+  let pruning = $state(false)
   let pruneModal = $state(null) // { title, message, action }
 
   // Images state
@@ -37,13 +42,21 @@
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
-  onMount(() => loadCleanup())
+  onMount(() => {
+    loadDockerInfo()
+    loadCleanup()
+  })
+
+  async function loadDockerInfo() {
+    const res = await api.dockerInfo()
+    if (res.data) dockerInfo = res.data
+  }
 
   function switchTab(tab) {
     activeTab = tab
-    if (tab === 'cleanup' && !diskUsage) loadCleanup()
-    if (tab === 'images' && images.length === 0) loadImages()
-    if (tab === 'netsvols' && networks.length === 0 && volumes.length === 0) loadNetsVols()
+    if (tab === 'cleanup') loadCleanup()
+    if (tab === 'images') loadImages()
+    if (tab === 'netsvols') loadNetsVols()
   }
 
   async function loadCleanup() {
@@ -70,7 +83,7 @@
 
   function sumSize(items, field = 'Size') {
     if (!items) return 0
-    return items.reduce((acc, i) => acc + (i[field] || i.SizeRw || 0), 0)
+    return items.reduce((acc, i) => acc + (i[field] || 0), 0)
   }
 
   function diskCards() {
@@ -87,11 +100,48 @@
     pruneModal = { title, message, action }
   }
 
-  async function doPruneImages() { await api.dockerPruneImages(); loadCleanup() }
-  async function doPruneContainers() { await api.dockerPruneContainers(); loadCleanup() }
-  async function doPruneVolumes() { await api.dockerPruneVolumes(); loadCleanup() }
-  async function doPruneBuildCache() { await api.dockerPruneBuildCache(); loadCleanup() }
-  async function doPruneAll() { await api.dockerPruneAll(); loadCleanup() }
+  function pruneToast(res, countField, label) {
+    if (res.error) { toasts.error(res.error); return }
+    const d = res.data || {}
+    const count = d[countField]?.length || 0
+    const space = formatBytes(d.SpaceReclaimed || 0)
+    toasts.success(`${label}: ${count} removed, ${space} reclaimed`)
+  }
+
+  async function runPrune(fn) {
+    pruning = true
+    pruneModal = null
+    try { await fn() } finally { pruning = false }
+  }
+
+  async function doPruneImages() { await runPrune(async () => {
+    const res = await api.dockerPruneImages()
+    pruneToast(res, 'ImagesDeleted', 'Images')
+    await loadCleanup()
+  })}
+  async function doPruneContainers() { await runPrune(async () => {
+    const res = await api.dockerPruneContainers()
+    pruneToast(res, 'ContainersDeleted', 'Containers')
+    await loadCleanup()
+  })}
+  async function doPruneVolumes() { await runPrune(async () => {
+    const res = await api.dockerPruneVolumes()
+    pruneToast(res, 'VolumesDeleted', 'Volumes')
+    await loadCleanup()
+  })}
+  async function doPruneBuildCache() { await runPrune(async () => {
+    const res = await api.dockerPruneBuildCache()
+    pruneToast(res, 'CachesDeleted', 'Build cache')
+    await loadCleanup()
+  })}
+  async function doPruneAll() { await runPrune(async () => {
+    const res = await api.dockerPruneAll()
+    if (res.error) { toasts.error(res.error); return }
+    const d = res.data || {}
+    const space = formatBytes(d.space_reclaimed || 0)
+    toasts.success(`System pruned: ${space} reclaimed`)
+    await loadCleanup()
+  })}
 
   function parseRepoTag(img) {
     const tag = img.RepoTags?.[0] || '<none>:<none>'
@@ -126,9 +176,12 @@
   }
 
   async function pruneUnusedVolumes() {
-    await api.dockerPruneVolumes()
     pruneVolumesConfirm = false
-    loadNetsVols()
+    await runPrune(async () => {
+      const res = await api.dockerPruneVolumes()
+      pruneToast(res, 'VolumesDeleted', 'Volumes')
+      await loadNetsVols()
+    })
   }
 
   const systemNetworks = ['bridge', 'host', 'none']
@@ -138,6 +191,42 @@
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-lg font-bold text-text-primary">Docker</h1>
   </div>
+
+  {#if dockerInfo}
+    <div class="bg-surface-2 border border-border rounded-lg p-4 mb-6">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div>
+          <div class="text-xs font-medium text-text-secondary">Version</div>
+          <div class="text-sm font-semibold text-text-primary">{dockerInfo.server_version}</div>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-text-secondary">OS / Arch</div>
+          <div class="text-sm font-semibold text-text-primary">{dockerInfo.os} ({dockerInfo.arch})</div>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-text-secondary">CPUs / Memory</div>
+          <div class="text-sm font-semibold text-text-primary">{dockerInfo.cpus} cores / {formatBytes(dockerInfo.memory)}</div>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-text-secondary">Containers</div>
+          <div class="text-sm font-semibold text-text-primary">
+            <span class="text-green-500">{dockerInfo.containers_running}</span> /
+            <span class="text-yellow-500">{dockerInfo.containers_paused}</span> /
+            <span class="text-text-secondary">{dockerInfo.containers_stopped}</span>
+          </div>
+          <div class="text-xs text-text-secondary">run / pause / stop</div>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-text-secondary">Images</div>
+          <div class="text-sm font-semibold text-text-primary">{dockerInfo.images}</div>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-text-secondary">Storage Driver</div>
+          <div class="text-sm font-semibold text-text-primary">{dockerInfo.storage_driver}</div>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <div class="flex gap-1 mb-6 border-b border-border">
     {#each [['cleanup', 'Disk Cleanup'], ['images', 'Images'], ['netsvols', 'Networks & Volumes']] as [key, label]}
@@ -167,7 +256,7 @@
 
   {:else if activeTab === 'images'}
     <div class="flex justify-end mb-4">
-      <Button size="sm" variant="secondary" onclick={() => confirmPrune('Remove Dangling', 'Remove all dangling images?', async () => { await api.dockerPruneImages(); loadImages() })}>Remove Dangling</Button>
+      <Button size="sm" variant="secondary" onclick={() => confirmPrune('Remove Dangling', 'Remove all dangling images?', () => runPrune(async () => { const res = await api.dockerPruneImages(); pruneToast(res, 'ImagesDeleted', 'Images'); await loadImages() }))}>Remove Dangling</Button>
     </div>
     <div class="bg-surface-2 border border-border rounded-lg p-4">
       {#if images.length === 0}
@@ -270,11 +359,24 @@
     </div>
   {/if}
 
+  {#if pruning}
+    <div class="fixed inset-0 z-50 flex items-center justify-center" role="status">
+      <div class="absolute inset-0 bg-black/60"></div>
+      <div class="relative bg-surface-2 border border-border rounded-lg p-6 flex flex-col items-center gap-3">
+        <svg class="animate-spin h-8 w-8 text-accent" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span class="text-sm text-text-primary">Pruning...</span>
+      </div>
+    </div>
+  {/if}
+
   {#if pruneModal}
     <Modal
       title={pruneModal.title}
       message={pruneModal.message}
-      onConfirm={() => { pruneModal.action(); pruneModal = null }}
+      onConfirm={() => pruneModal.action()}
       onCancel={() => pruneModal = null}
     />
   {/if}

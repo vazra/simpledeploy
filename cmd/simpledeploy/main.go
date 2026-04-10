@@ -424,6 +424,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetAppsDir(cfg.AppsDir)
 	srv.SetReconciler(rec)
 	srv.SetMasterSecret(cfg.MasterSecret)
+	srv.SetBuildInfo(version, commit, date)
+	srv.SetDBPath(dbPath)
 
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)

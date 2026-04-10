@@ -53,6 +53,7 @@
   const rangeMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 }
 
   let pollTimer = null
+  let eventsKey = $state(0)
 
   function startPolling() {
     stopPolling()
@@ -64,6 +65,7 @@
       if (!app.deploying) {
         stopPolling()
         loadServices()
+        eventsKey++
         if (app.Status === 'error') activeTab = 'events'
       }
     }, 3000)
@@ -367,7 +369,9 @@
       <LogViewer {slug} />
 
     {:else if activeTab === 'events'}
-      <EventsTab {slug} />
+      {#key eventsKey}
+        <EventsTab {slug} />
+      {/key}
 
     {:else if activeTab === 'metrics'}
       <div class="flex gap-1 mb-4">

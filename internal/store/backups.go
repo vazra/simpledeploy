@@ -45,12 +45,12 @@ func (s *Store) ListBackupConfigs(appID *int64) ([]BackupConfig, error) {
 	var rows *sql.Rows
 	var err error
 	if appID == nil {
-		rows, err = s.ro.Query(`
+		rows, err = s.db.Query(`
 			SELECT id, app_id, strategy, target, schedule_cron, target_config_json, retention_count, created_at
 			FROM backup_configs ORDER BY id
 		`)
 	} else {
-		rows, err = s.ro.Query(`
+		rows, err = s.db.Query(`
 			SELECT id, app_id, strategy, target, schedule_cron, target_config_json, retention_count, created_at
 			FROM backup_configs WHERE app_id = ? ORDER BY id
 		`, *appID)
@@ -73,7 +73,7 @@ func (s *Store) ListBackupConfigs(appID *int64) ([]BackupConfig, error) {
 
 func (s *Store) GetBackupConfig(id int64) (*BackupConfig, error) {
 	var c BackupConfig
-	err := s.ro.QueryRow(`
+	err := s.db.QueryRow(`
 		SELECT id, app_id, strategy, target, schedule_cron, target_config_json, retention_count, created_at
 		FROM backup_configs WHERE id = ?
 	`, id).Scan(&c.ID, &c.AppID, &c.Strategy, &c.Target, &c.ScheduleCron, &c.TargetConfigJSON, &c.RetentionCount, &c.CreatedAt)
@@ -154,7 +154,7 @@ func (s *Store) UpdateBackupRunFailed(id int64, errMsg string) error {
 }
 
 func (s *Store) ListBackupRuns(configID int64) ([]BackupRun, error) {
-	rows, err := s.ro.Query(`
+	rows, err := s.db.Query(`
 		SELECT id, backup_config_id, status, size_bytes, started_at, finished_at, error_msg, file_path
 		FROM backup_runs WHERE backup_config_id = ? ORDER BY started_at DESC
 	`, configID)
@@ -175,7 +175,7 @@ func (s *Store) ListBackupRuns(configID int64) ([]BackupRun, error) {
 }
 
 func (s *Store) GetBackupRun(id int64) (*BackupRun, error) {
-	r, err := scanBackupRun(s.ro.QueryRow(`
+	r, err := scanBackupRun(s.db.QueryRow(`
 		SELECT id, backup_config_id, status, size_bytes, started_at, finished_at, error_msg, file_path
 		FROM backup_runs WHERE id = ?
 	`, id))
@@ -189,7 +189,7 @@ func (s *Store) GetBackupRun(id int64) (*BackupRun, error) {
 }
 
 func (s *Store) ListOldBackupRuns(configID int64, keepCount int) ([]BackupRun, error) {
-	rows, err := s.ro.Query(`
+	rows, err := s.db.Query(`
 		SELECT id, backup_config_id, status, size_bytes, started_at, finished_at, error_msg, file_path
 		FROM backup_runs
 		WHERE backup_config_id = ? AND status = 'success'
