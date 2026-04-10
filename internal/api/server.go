@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -173,7 +174,14 @@ func (s *Server) Handler() http.Handler {
 	return s.mux
 }
 
-func (s *Server) ListenAndServe() error {
-	addr := fmt.Sprintf(":%d", s.port)
-	return http.ListenAndServe(addr, s.mux)
+func (s *Server) ListenAndServe(ctx context.Context) error {
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", s.port),
+		Handler: s.mux,
+	}
+	go func() {
+		<-ctx.Done()
+		srv.Shutdown(context.Background())
+	}()
+	return srv.ListenAndServe()
 }

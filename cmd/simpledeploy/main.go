@@ -426,7 +426,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetUIFS(distFS)
 
 	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
-	return srv.ListenAndServe()
+	return srv.ListenAndServe(ctx)
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
