@@ -7,6 +7,7 @@
   import Backups from './routes/Backups.svelte'
   import Alerts from './routes/Alerts.svelte'
   import Users from './routes/Users.svelte'
+  import Registries from './routes/Registries.svelte'
 
   const routes = {
     '/login': Login,
@@ -15,6 +16,7 @@
     '/backups': Backups,
     '/alerts': Alerts,
     '/users': Users,
+    '/registries': Registries,
   }
 </script>
 

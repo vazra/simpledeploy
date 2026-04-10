@@ -127,4 +127,10 @@ export const api = {
   listAPIKeys: () => request('GET', '/apikeys'),
   createAPIKey: (name) => requestWithToast('POST', '/apikeys', { name }, 'API key created'),
   deleteAPIKey: (id) => requestWithToast('DELETE', `/apikeys/${id}`, null, 'API key revoked'),
+
+  // Registries
+  listRegistries: () => request('GET', '/registries'),
+  createRegistry: (r) => requestWithToast('POST', '/registries', r, 'Registry added'),
+  updateRegistry: (id, r) => requestWithToast('PUT', `/registries/${id}`, r, 'Registry updated'),
+  deleteRegistry: (id) => requestWithToast('DELETE', `/registries/${id}`, null, 'Registry removed'),
 }
