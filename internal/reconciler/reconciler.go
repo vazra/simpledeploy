@@ -2,28 +2,50 @@ package reconciler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
+// AppDeployer is the interface the reconciler uses to deploy and remove apps.
+type AppDeployer interface {
+	Deploy(ctx context.Context, app *compose.AppConfig) error
+	Teardown(ctx context.Context, projectName string) error
+	Restart(ctx context.Context, app *compose.AppConfig) error
+	Stop(ctx context.Context, projectName string) error
+	Start(ctx context.Context, projectName string) error
+	Pull(ctx context.Context, app *compose.AppConfig, auths []deployer.RegistryAuth) error
+	Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error
+	Status(ctx context.Context, projectName string) ([]deployer.ServiceStatus, error)
+}
+
 // Reconciler syncs the apps directory with the running containers and store.
 type Reconciler struct {
-	store    *store.Store
-	deployer *deployer.Deployer
-	proxy    proxy.Proxy // can be nil
-	appsDir  string
+	store        *store.Store
+	deployer     AppDeployer
+	proxy        proxy.Proxy // can be nil
+	appsDir      string
+	config       *config.Config
+	masterSecret string
 }
 
 // New creates a Reconciler.
-func New(st *store.Store, d *deployer.Deployer, p proxy.Proxy, appsDir string) *Reconciler {
-	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir}
+func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *config.Config) *Reconciler {
+	secret := ""
+	if cfg != nil {
+		secret = cfg.MasterSecret
+	}
+	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret}
 }
 
 // Reconcile diffs the apps directory against the store and deploys/removes as needed.
@@ -38,16 +60,24 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("list apps: %w", err)
 	}
 
-	currentMap := make(map[string]struct{}, len(current))
+	currentMap := make(map[string]store.App, len(current))
 	for _, a := range current {
-		currentMap[a.Slug] = struct{}{}
+		currentMap[a.Slug] = a
 	}
 
-	// deploy new apps
+	// deploy new or changed apps
 	for slug, cfg := range desired {
-		if _, exists := currentMap[slug]; !exists {
+		existing, exists := currentMap[slug]
+		if !exists {
 			if err := r.deployApp(ctx, slug, cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "reconciler: deploy %s: %v\n", slug, err)
+			}
+			continue
+		}
+		hash, _ := hashFile(cfg.ComposePath)
+		if hash != "" && hash != existing.ComposeHash {
+			if err := r.deployApp(ctx, slug, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "reconciler: redeploy %s: %v\n", slug, err)
 			}
 		}
 	}
@@ -94,6 +124,151 @@ func (r *Reconciler) DeployOne(ctx context.Context, composePath, appName string)
 // RemoveOne removes a single app by slug.
 func (r *Reconciler) RemoveOne(ctx context.Context, appName string) error {
 	return r.removeApp(ctx, appName)
+}
+
+func (r *Reconciler) RestartOne(ctx context.Context, slug string) error {
+	cfg, err := r.loadAppConfig(slug)
+	if err != nil {
+		return err
+	}
+	if err := r.deployer.Restart(ctx, cfg); err != nil {
+		return fmt.Errorf("restart: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "running")
+}
+
+func (r *Reconciler) StopOne(ctx context.Context, slug string) error {
+	if err := r.deployer.Stop(ctx, slug); err != nil {
+		return fmt.Errorf("stop: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "stopped")
+}
+
+func (r *Reconciler) StartOne(ctx context.Context, slug string) error {
+	if err := r.deployer.Start(ctx, slug); err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "running")
+}
+
+func (r *Reconciler) resolveRegistries(app *compose.AppConfig) ([]deployer.RegistryAuth, error) {
+	if r.masterSecret == "" {
+		return nil, nil
+	}
+
+	var names []string
+	switch app.Registries {
+	case "none":
+		return nil, nil
+	case "":
+		if r.config != nil {
+			names = r.config.Registries
+		}
+	default:
+		for _, n := range strings.Split(app.Registries, ",") {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				names = append(names, n)
+			}
+		}
+	}
+
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	var auths []deployer.RegistryAuth
+	for _, name := range names {
+		reg, err := r.store.GetRegistryByName(name)
+		if err != nil {
+			return nil, fmt.Errorf("lookup registry %q: %w", name, err)
+		}
+		username, err := auth.Decrypt(reg.UsernameEnc, r.masterSecret)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt username for %q: %w", name, err)
+		}
+		password, err := auth.Decrypt(reg.PasswordEnc, r.masterSecret)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt password for %q: %w", name, err)
+		}
+		auths = append(auths, deployer.RegistryAuth{URL: reg.URL, Username: username, Password: password})
+	}
+	return auths, nil
+}
+
+func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
+	cfg, err := r.loadAppConfig(slug)
+	if err != nil {
+		return err
+	}
+	auths, err := r.resolveRegistries(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve registries: %w", err)
+	}
+	if err := r.deployer.Pull(ctx, cfg, auths); err != nil {
+		return fmt.Errorf("pull: %w", err)
+	}
+	return r.store.UpdateAppStatus(slug, "running")
+}
+
+func (r *Reconciler) ScaleOne(ctx context.Context, slug string, scales map[string]int) error {
+	cfg, err := r.loadAppConfig(slug)
+	if err != nil {
+		return err
+	}
+	if err := r.deployer.Scale(ctx, cfg, scales); err != nil {
+		return fmt.Errorf("scale: %w", err)
+	}
+	return nil
+}
+
+func (r *Reconciler) AppServices(ctx context.Context, slug string) ([]deployer.ServiceStatus, error) {
+	return r.deployer.Status(ctx, slug)
+}
+
+func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int64) error {
+	ver, err := r.store.GetComposeVersion(versionID)
+	if err != nil {
+		return fmt.Errorf("get version: %w", err)
+	}
+
+	composePath := filepath.Join(r.appsDir, slug, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte(ver.Content), 0644); err != nil {
+		return fmt.Errorf("write compose: %w", err)
+	}
+
+	cfg, err := compose.ParseFile(composePath, slug)
+	if err != nil {
+		return fmt.Errorf("parse compose: %w", err)
+	}
+
+	if err := r.deployApp(ctx, slug, cfg); err != nil {
+		return fmt.Errorf("redeploy: %w", err)
+	}
+
+	r.store.CreateDeployEvent(slug, "rollback", nil, fmt.Sprintf("rollback to version %d", ver.Version))
+	return nil
+}
+
+func (r *Reconciler) ListVersions(ctx context.Context, slug string) ([]store.ComposeVersion, error) {
+	app, err := r.store.GetAppBySlug(slug)
+	if err != nil {
+		return nil, err
+	}
+	return r.store.ListComposeVersions(app.ID)
+}
+
+func (r *Reconciler) ListDeployEvents(ctx context.Context, slug string) ([]store.DeployEvent, error) {
+	return r.store.ListDeployEvents(slug)
+}
+
+func (r *Reconciler) loadAppConfig(slug string) (*compose.AppConfig, error) {
+	composePath := filepath.Join(r.appsDir, slug, "docker-compose.yml")
+	cfg, err := compose.ParseFile(composePath, slug)
+	if err != nil {
+		return nil, fmt.Errorf("parse compose for %s: %w", slug, err)
+	}
+	return cfg, nil
 }
 
 // scanAppsDir reads subdirectories and parses each docker-compose.yml.
@@ -147,17 +322,37 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		}
 	}
 
+	hash, _ := hashFile(cfg.ComposePath)
 	app := &store.App{
 		Name:        slug,
 		Slug:        slug,
 		ComposePath: cfg.ComposePath,
 		Status:      "running",
 		Domain:      cfg.Domain,
+		ComposeHash: hash,
 	}
 	if err := r.store.UpsertApp(app, labels); err != nil {
 		return fmt.Errorf("upsert app: %w", err)
 	}
+
+	// Store compose version
+	content, _ := os.ReadFile(cfg.ComposePath)
+	if len(content) > 0 {
+		r.store.CreateComposeVersion(app.ID, string(content), hash)
+	}
+	// Log deploy event
+	r.store.CreateDeployEvent(slug, "deploy", nil, "")
+
 	return nil
+}
+
+func hashFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
 }
 
 // removeApp calls deployer.Teardown then deletes the app from the store.

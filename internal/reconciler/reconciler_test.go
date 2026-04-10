@@ -4,16 +4,89 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
-	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
-func newTestEnv(t *testing.T) (*Reconciler, *docker.MockClient, *store.Store, string) {
+type mockDeployer struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (m *mockDeployer) Deploy(_ context.Context, app *compose.AppConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Deploy:"+app.Name)
+	return nil
+}
+
+func (m *mockDeployer) Teardown(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Teardown:"+name)
+	return nil
+}
+
+func (m *mockDeployer) Restart(_ context.Context, app *compose.AppConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Restart:"+app.Name)
+	return nil
+}
+
+func (m *mockDeployer) Stop(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Stop:"+name)
+	return nil
+}
+
+func (m *mockDeployer) Start(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Start:"+name)
+	return nil
+}
+
+func (m *mockDeployer) Pull(_ context.Context, app *compose.AppConfig, _ []deployer.RegistryAuth) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Pull:"+app.Name)
+	return nil
+}
+
+func (m *mockDeployer) Scale(_ context.Context, app *compose.AppConfig, _ map[string]int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Scale:"+app.Name)
+	return nil
+}
+
+func (m *mockDeployer) Status(_ context.Context, name string) ([]deployer.ServiceStatus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Status:"+name)
+	return nil, nil
+}
+
+func (m *mockDeployer) hasCall(prefix string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range m.calls {
+		if c == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+func newTestEnv(t *testing.T) (*Reconciler, *mockDeployer, *store.Store, string) {
 	t.Helper()
 
 	// temp SQLite DB
@@ -24,15 +97,13 @@ func newTestEnv(t *testing.T) (*Reconciler, *docker.MockClient, *store.Store, st
 	}
 	t.Cleanup(func() { st.Close() })
 
-	// mock docker client and deployer
-	mock := docker.NewMockClient()
-	d := deployer.New(mock)
+	mock := &mockDeployer{}
 
 	// temp apps dir
 	appsDir := t.TempDir()
 
 	mockProxy := proxy.NewMockProxy()
-	r := New(st, d, mockProxy, appsDir)
+	r := New(st, mock, mockProxy, appsDir, nil)
 	return r, mock, st, appsDir
 }
 
@@ -67,11 +138,8 @@ func TestReconcileNewApp(t *testing.T) {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	if !mock.HasCall("NetworkCreate:simpledeploy-myapp") {
-		t.Error("expected NetworkCreate:simpledeploy-myapp")
-	}
-	if !mock.HasCall("ContainerCreate:simpledeploy-myapp-web") {
-		t.Error("expected ContainerCreate:simpledeploy-myapp-web")
+	if !mock.hasCall("Deploy:myapp") {
+		t.Error("expected Deploy:myapp")
 	}
 
 	app, err := st.GetAppBySlug("myapp")
@@ -107,8 +175,8 @@ func TestReconcileRemoveApp(t *testing.T) {
 		t.Fatalf("second Reconcile: %v", err)
 	}
 
-	if !mock.HasCall("NetworkRemove:simpledeploy-rmapp") {
-		t.Error("expected NetworkRemove:simpledeploy-rmapp")
+	if !mock.hasCall("Teardown:rmapp") {
+		t.Error("expected Teardown:rmapp")
 	}
 
 	if _, err := st.GetAppBySlug("rmapp"); err == nil {
@@ -174,6 +242,54 @@ func TestReconcileRemoveUpdatesProxy(t *testing.T) {
 	}
 }
 
+func TestReconcileRedeploysOnChange(t *testing.T) {
+	r, mock, _, appsDir := newTestEnv(t)
+	ctx := context.Background()
+
+	writeComposeFile(t, appsDir, "myapp")
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+	if !mock.hasCall("Deploy:myapp") {
+		t.Fatal("expected initial Deploy:myapp")
+	}
+
+	composePath := filepath.Join(appsDir, "myapp", "docker-compose.yml")
+	os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"\n"), 0644)
+
+	mock.mu.Lock()
+	mock.calls = nil
+	mock.mu.Unlock()
+
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if !mock.hasCall("Deploy:myapp") {
+		t.Error("expected redeploy after compose change")
+	}
+}
+
+func TestReconcileSkipsUnchanged(t *testing.T) {
+	r, mock, _, appsDir := newTestEnv(t)
+	ctx := context.Background()
+
+	writeComposeFile(t, appsDir, "myapp")
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+
+	mock.mu.Lock()
+	mock.calls = nil
+	mock.mu.Unlock()
+
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	if mock.hasCall("Deploy:myapp") {
+		t.Error("should NOT redeploy unchanged app")
+	}
+}
+
 func TestWatcherTriggersReconcile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping watcher test in short mode")
@@ -200,10 +316,7 @@ func TestWatcherTriggersReconcile(t *testing.T) {
 	cancel()
 	<-done
 
-	if !mock.HasCall("NetworkCreate:simpledeploy-watched") {
-		t.Error("expected NetworkCreate:simpledeploy-watched after watcher triggered reconcile")
-	}
-	if !mock.HasCall("ContainerCreate:simpledeploy-watched-web") {
-		t.Error("expected ContainerCreate:simpledeploy-watched-web after watcher triggered reconcile")
+	if !mock.hasCall("Deploy:watched") {
+		t.Error("expected Deploy:watched after watcher triggered reconcile")
 	}
 }

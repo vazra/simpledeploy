@@ -7,14 +7,18 @@
   let ws = $state(null)
   let following = $state(true)
   let container
+  let services = $state([])
+  let selectedService = $state(service)
+  let showTimestamps = $state(true)
 
   onMount(() => { connect() })
   onDestroy(() => { if (ws) ws.close() })
 
   function connect() {
+    if (ws) ws.close()
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     let url = `${proto}//${window.location.host}/api/apps/${slug}/logs?follow=true&tail=200`
-    if (service) url += `&service=${service}`
+    if (selectedService) url += `&service=${selectedService}`
 
     ws = new WebSocket(url)
     ws.onmessage = (event) => {
@@ -37,47 +41,52 @@
   }
 
   function clear() { lines = [] }
+
+  function downloadLogs() {
+    const text = lines.map((l) => `${l.ts || ''} [${l.stream}] ${l.line}`).join('\n')
+    const blob = new Blob([text], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${slug}-logs.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 </script>
 
-<div class="log-viewer">
-  <div class="log-toolbar">
-    <button onclick={toggleFollow} class:active={following}>
+<div class="flex flex-col h-[500px]">
+  <div class="flex items-center gap-2 px-3 py-2 bg-surface-1 border border-border rounded-t-lg">
+    <button
+      onclick={toggleFollow}
+      class="px-2 py-1 text-xs rounded border transition-colors
+        {following ? 'border-success text-success' : 'border-border text-text-secondary hover:text-text-primary'}"
+    >
       {following ? 'Following' : 'Paused'}
     </button>
-    <button onclick={clear}>Clear</button>
-    <span class="line-count">{lines.length} lines</span>
+    <button onclick={clear} class="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary transition-colors">
+      Clear
+    </button>
+    <button
+      onclick={() => showTimestamps = !showTimestamps}
+      class="px-2 py-1 text-xs rounded border transition-colors
+        {showTimestamps ? 'border-accent text-accent' : 'border-border text-text-secondary hover:text-text-primary'}"
+    >
+      Timestamps
+    </button>
+    <button onclick={downloadLogs} class="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary transition-colors">
+      Download
+    </button>
+    <span class="ml-auto text-xs text-text-muted">{lines.length} lines</span>
   </div>
-  <div class="log-container" bind:this={container}>
+
+  <div
+    bind:this={container}
+    class="flex-1 overflow-y-auto bg-surface-0 border border-t-0 border-border rounded-b-lg font-mono text-xs p-3 space-y-px"
+  >
     {#each lines as line}
-      <div class="log-line" class:stderr={line.stream === 'stderr'}>
-        {#if line.ts}<span class="ts">{line.ts}</span>{/if}
-        <span class="text">{line.line}</span>
+      <div class="whitespace-pre-wrap break-all {line.stream === 'stderr' ? 'text-danger' : 'text-text-primary'}">
+        {#if showTimestamps && line.ts}<span class="text-text-muted mr-2">{line.ts}</span>{/if}<span>{line.line}</span>
       </div>
     {/each}
   </div>
 </div>
-
-<style>
-  .log-viewer { display: flex; flex-direction: column; height: 500px; }
-  .log-toolbar {
-    display: flex; gap: 0.5rem; align-items: center;
-    padding: 0.5rem; background: #161b22; border: 1px solid #21262d;
-    border-radius: 4px 4px 0 0;
-  }
-  .log-toolbar button {
-    padding: 0.3rem 0.6rem; background: #21262d; border: 1px solid #30363d;
-    border-radius: 4px; color: #8b949e; cursor: pointer; font-size: 0.75rem;
-  }
-  .log-toolbar button.active { color: #3fb950; border-color: #3fb950; }
-  .line-count { margin-left: auto; color: #484f58; font-size: 0.75rem; }
-  .log-container {
-    flex: 1; overflow-y: auto; background: #0d1117;
-    border: 1px solid #21262d; border-top: none;
-    border-radius: 0 0 4px 4px; font-family: 'SF Mono', monospace; font-size: 0.8rem;
-    padding: 0.5rem;
-  }
-  .log-line { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
-  .log-line.stderr { color: #f85149; }
-  .ts { color: #484f58; margin-right: 0.5rem; }
-  .text { color: #c9d1d9; }
-</style>

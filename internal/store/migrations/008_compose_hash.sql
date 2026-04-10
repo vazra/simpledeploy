@@ -1,0 +1,1 @@
+ALTER TABLE apps ADD COLUMN compose_hash TEXT NOT NULL DEFAULT '';

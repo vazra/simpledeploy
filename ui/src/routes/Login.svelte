@@ -1,6 +1,7 @@
 <script>
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
+  import Button from '../components/Button.svelte'
 
   let username = $state('')
   let password = $state('')
@@ -14,67 +15,69 @@
     loading = true
     try {
       if (setupMode) {
-        await api.setup(username, password)
+        const res = await api.setup(username, password)
+        if (res.error) { error = res.error; loading = false; return }
       }
-      await api.login(username, password)
+      const res = await api.login(username, password)
+      if (res.error) { error = setupMode ? res.error : 'Invalid credentials'; loading = false; return }
       push('/')
     } catch (err) {
-      error = setupMode ? err.message : 'Invalid credentials'
+      error = err.message
     } finally {
       loading = false
     }
   }
 </script>
 
-<div class="login-container">
-  <div class="login-card">
-    <h1>SimpleDeploy</h1>
-    <p class="subtitle">{setupMode ? 'Create Admin Account' : 'Sign In'}</p>
+<div class="flex items-center justify-center min-h-screen bg-surface-0 px-4">
+  <div class="w-full max-w-sm">
+    <div class="bg-surface-2 border border-border rounded-xl p-8 shadow-lg">
+      <div class="flex flex-col items-center mb-8">
+        <svg class="w-10 h-10 text-accent mb-3" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        <h1 class="text-xl font-bold text-accent">SimpleDeploy</h1>
+        <p class="text-sm text-text-secondary mt-1">{setupMode ? 'Create Admin Account' : 'Sign in to continue'}</p>
+      </div>
 
-    {#if error}
-      <div class="error">{error}</div>
-    {/if}
+      {#if error}
+        <div class="bg-red-900/20 border border-danger rounded-md px-3 py-2 mb-4 text-sm text-danger light:bg-red-50">
+          {error}
+        </div>
+      {/if}
 
-    <form onsubmit={handleSubmit}>
-      <input type="text" bind:value={username} placeholder="Username" required />
-      <input type="password" bind:value={password} placeholder="Password" required />
-      <button type="submit" disabled={loading}>
-        {loading ? '...' : (setupMode ? 'Create Account' : 'Sign In')}
+      <form onsubmit={handleSubmit} class="flex flex-col gap-4">
+        <div>
+          <label for="username" class="block text-xs font-medium text-text-secondary mb-1.5">Username</label>
+          <input
+            id="username"
+            type="text"
+            bind:value={username}
+            required
+            class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent"
+          />
+        </div>
+        <div>
+          <label for="password" class="block text-xs font-medium text-text-secondary mb-1.5">Password</label>
+          <input
+            id="password"
+            type="password"
+            bind:value={password}
+            required
+            class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent"
+          />
+        </div>
+        <Button type="submit" {loading} variant="primary" size="md">
+          {setupMode ? 'Create Account' : 'Sign In'}
+        </Button>
+      </form>
+
+      <button
+        onclick={() => { setupMode = !setupMode; error = '' }}
+        class="block w-full mt-4 text-center text-xs text-accent hover:underline"
+      >
+        {setupMode ? 'Back to login' : 'First time? Create admin account'}
       </button>
-    </form>
-
-    <button class="link" onclick={() => setupMode = !setupMode}>
-      {setupMode ? 'Back to login' : 'First time? Create admin account'}
-    </button>
+    </div>
   </div>
 </div>
-
-<style>
-  .login-container {
-    display: flex; justify-content: center; align-items: center;
-    min-height: 100vh; background: #0f1117;
-  }
-  .login-card {
-    background: #1c1f26; border: 1px solid #2d3139; border-radius: 8px;
-    padding: 2rem; width: 100%; max-width: 380px;
-  }
-  h1 { text-align: center; color: #58a6ff; margin-bottom: 0.25rem; }
-  .subtitle { text-align: center; color: #8b949e; margin-bottom: 1.5rem; font-size: 0.9rem; }
-  .error { background: #3d1f1f; border: 1px solid #f85149; color: #f85149; padding: 0.5rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem; }
-  input {
-    width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 0.75rem;
-    background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
-    color: #e1e4e8; font-size: 0.9rem;
-  }
-  input:focus { outline: none; border-color: #58a6ff; }
-  button[type="submit"] {
-    width: 100%; padding: 0.6rem; background: #238636; border: none;
-    border-radius: 4px; color: #fff; font-size: 0.9rem; cursor: pointer;
-  }
-  button[type="submit"]:hover { background: #2ea043; }
-  button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
-  .link {
-    display: block; width: 100%; margin-top: 1rem; background: none;
-    border: none; color: #58a6ff; cursor: pointer; font-size: 0.8rem; text-align: center;
-  }
-</style>

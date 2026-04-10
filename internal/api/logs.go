@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/gorilla/websocket"
 )
 
@@ -36,8 +37,6 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		service = "web"
 	}
 
-	containerName := fmt.Sprintf("simpledeploy-%s-%s", slug, service)
-
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -56,6 +55,19 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Find container by compose labels
+	project := fmt.Sprintf("simpledeploy-%s", slug)
+	f := filters.NewArgs(
+		filters.Arg("label", fmt.Sprintf("com.docker.compose.project=%s", project)),
+		filters.Arg("label", fmt.Sprintf("com.docker.compose.service=%s", service)),
+	)
+	ctrs, err := s.docker.ContainerList(ctx, container.ListOptions{Filters: f})
+	if err != nil || len(ctrs) == 0 {
+		conn.WriteJSON(map[string]string{"error": "container not found"})
+		return
+	}
+	containerID := ctrs[0].ID
+
 	logOpts := container.LogsOptions{
 		ShowStdout: true, ShowStderr: true,
 		Follow: follow, Tail: tail, Timestamps: true,
@@ -64,7 +76,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		logOpts.Since = since
 	}
 
-	reader, err := s.docker.ContainerLogs(ctx, containerName, logOpts)
+	reader, err := s.docker.ContainerLogs(ctx, containerID, logOpts)
 	if err != nil {
 		conn.WriteJSON(map[string]string{"error": err.Error()})
 		return

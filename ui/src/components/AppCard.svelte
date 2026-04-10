@@ -1,74 +1,52 @@
 <script>
-  let { app } = $props()
+  import Badge from './Badge.svelte'
 
-  const statusColors = {
-    running: '#3fb950',
-    stopped: '#8b949e',
-    error: '#f85149'
+  let { app, metrics = null } = $props()
+
+  const statusVariant = {
+    running: 'success',
+    stopped: 'default',
+    error: 'danger'
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes) return '0'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return (bytes / Math.pow(k, i)).toFixed(0) + ' ' + sizes[i]
   }
 </script>
 
-<a href="#/apps/{app.Slug}" class="card">
-  <div class="header">
-    <span class="status-dot" style="background: {statusColors[app.Status] || '#8b949e'}"></span>
-    <h3>{app.Name}</h3>
+<a href="#/apps/{app.Slug}" class="block bg-surface-2 border border-border rounded-lg p-4 hover:border-accent hover:bg-surface-2/80 transition-all group">
+  <div class="flex items-start justify-between mb-2">
+    <div class="flex items-center gap-2 min-w-0">
+      <span class="w-2 h-2 rounded-full shrink-0 {app.Status === 'running' ? 'bg-success' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
+      <h3 class="text-sm font-semibold text-text-primary truncate group-hover:text-accent transition-colors">{app.Name}</h3>
+    </div>
+    <Badge variant={statusVariant[app.Status] || 'default'}>{app.Status}</Badge>
   </div>
-  <div class="meta">
-    <span class="status">{app.Status}</span>
-    {#if app.Domain}
-      <span class="domain">{app.Domain}</span>
-    {/if}
-  </div>
-</a>
 
-<style>
-  .card {
-    display: block;
-    background: #1c1f26;
-    border: 1px solid #2d3139;
-    border-radius: 8px;
-    padding: 1rem;
-    text-decoration: none;
-    color: #e1e4e8;
-    transition: border-color 0.15s, background 0.15s;
-  }
-  .card:hover {
-    border-color: #58a6ff;
-    background: #1f2430;
-  }
-  .header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-  }
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  h3 {
-    margin: 0;
-    font-size: 0.95rem;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .meta {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    font-size: 0.78rem;
-    color: #8b949e;
-  }
-  .status {
-    text-transform: capitalize;
-  }
-  .domain {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-</style>
+  {#if app.Domain}
+    <p class="text-xs text-accent truncate mb-3">{app.Domain}</p>
+  {/if}
+
+  {#if metrics}
+    <div class="flex gap-3 pt-2 border-t border-border-muted">
+      <div class="flex-1">
+        <div class="text-xs text-text-muted mb-0.5">CPU</div>
+        <div class="h-1.5 bg-surface-3 rounded-full overflow-hidden">
+          <div class="h-full bg-accent rounded-full transition-all" style="width: {Math.min(metrics.cpu || 0, 100)}%"></div>
+        </div>
+        <div class="text-xs text-text-secondary mt-0.5">{metrics.cpu?.toFixed(1) || 0}%</div>
+      </div>
+      <div class="flex-1">
+        <div class="text-xs text-text-muted mb-0.5">MEM</div>
+        <div class="h-1.5 bg-surface-3 rounded-full overflow-hidden">
+          <div class="h-full bg-success rounded-full transition-all" style="width: {Math.min(metrics.memPct || 0, 100)}%"></div>
+        </div>
+        <div class="text-xs text-text-secondary mt-0.5">{metrics.memPct?.toFixed(1) || 0}%</div>
+      </div>
+    </div>
+  {/if}
+</a>

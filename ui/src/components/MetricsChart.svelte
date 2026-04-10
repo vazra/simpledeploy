@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { Chart, registerables } from 'chart.js'
   import 'chartjs-adapter-date-fns'
+  import { effectiveTheme } from '../lib/stores/theme.js'
 
   Chart.register(...registerables)
 
@@ -9,13 +10,22 @@
   let canvas
   let chart
 
-  onMount(() => {
+  function getGridColor(theme) {
+    return theme === 'light' ? '#e5e7eb' : '#21262d'
+  }
+
+  function getTickColor(theme) {
+    return theme === 'light' ? '#656d76' : '#8b949e'
+  }
+
+  function createChart(theme) {
+    if (chart) chart.destroy()
     chart = new Chart(canvas, {
       type: 'line',
       data: {
         datasets: [{
           label,
-          data,
+          data: [...data],
           borderColor: color,
           backgroundColor: color + '20',
           fill: true,
@@ -31,51 +41,48 @@
           x: {
             type: 'time',
             time: { unit: 'minute' },
-            grid: { color: '#21262d' },
-            ticks: { color: '#8b949e', font: { size: 10 } }
+            grid: { color: getGridColor(theme) },
+            ticks: { color: getTickColor(theme), font: { size: 10 } }
           },
           y: {
             beginAtZero: true,
-            grid: { color: '#21262d' },
+            grid: { color: getGridColor(theme) },
             ticks: {
-              color: '#8b949e',
+              color: getTickColor(theme),
               font: { size: 10 },
               callback: (v) => v + unit
             }
           }
         },
-        plugins: {
-          legend: { display: false },
-        }
+        plugins: { legend: { display: false } }
       }
     })
+  }
+
+  let currentTheme = 'dark'
+  let mounted = false
+
+  onMount(() => {
+    mounted = true
+    const unsub = effectiveTheme.subscribe((t) => {
+      currentTheme = t
+    })
+    return () => {
+      unsub()
+      if (chart) { chart.destroy(); chart = null }
+    }
   })
 
-  onDestroy(() => { if (chart) chart.destroy() })
+  $effect(() => {
+    if (mounted && canvas && data) {
+      createChart(currentTheme)
+    }
+  })
 </script>
 
-<div class="chart-container">
-  <h4>{label}</h4>
-  <div class="chart-wrapper">
+<div class="bg-surface-2 border border-border rounded-lg p-4">
+  <h4 class="text-xs font-medium text-text-secondary mb-3">{label}</h4>
+  <div class="h-44 relative">
     <canvas bind:this={canvas}></canvas>
   </div>
 </div>
-
-<style>
-  .chart-container {
-    background: #1c1f26;
-    border: 1px solid #2d3139;
-    border-radius: 8px;
-    padding: 1rem;
-  }
-  h4 {
-    margin: 0 0 0.75rem;
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: #8b949e;
-  }
-  .chart-wrapper {
-    height: 180px;
-    position: relative;
-  }
-</style>

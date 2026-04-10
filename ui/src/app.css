@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface-0: #0f1117;
+  --color-surface-1: #161b22;
+  --color-surface-2: #1c1f26;
+  --color-surface-3: #21262d;
+  --color-border: #2d3139;
+  --color-border-muted: #21262d;
+  --color-text-primary: #e1e4e8;
+  --color-text-secondary: #8b949e;
+  --color-text-muted: #484f58;
+  --color-accent: #58a6ff;
+  --color-success: #3fb950;
+  --color-danger: #f85149;
+  --color-warning: #d29922;
+  --color-info: #58a6ff;
+  --color-input-bg: #0d1117;
+  --color-btn-primary: #238636;
+  --color-btn-primary-hover: #2ea043;
+  --color-btn-danger: #da3633;
+}
+
+@custom-variant light {
+  .light & {
+    @slot;
+  }
+}
+
+@theme light {
+  --color-surface-0: #ffffff;
+  --color-surface-1: #f6f8fa;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #d1d5db;
+  --color-border: #d0d7de;
+  --color-border-muted: #e5e7eb;
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #656d76;
+  --color-text-muted: #9ca3af;
+  --color-accent: #0969da;
+  --color-success: #1a7f37;
+  --color-danger: #cf222e;
+  --color-warning: #9a6700;
+  --color-info: #0969da;
+  --color-input-bg: #f6f8fa;
+  --color-btn-primary: #1f883d;
+  --color-btn-primary-hover: #1a7f37;
+  --color-btn-danger: #cf222e;
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
+}
+
+@keyframes slide-panel {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-slide-panel {
+  animation: slide-panel 0.2s ease-out;
+}

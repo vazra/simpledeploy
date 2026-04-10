@@ -1,12 +1,19 @@
 <script>
   import { onMount } from 'svelte'
   import Layout from '../components/Layout.svelte'
+  import Button from '../components/Button.svelte'
+  import Badge from '../components/Badge.svelte'
+  import SlidePanel from '../components/SlidePanel.svelte'
+  import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
 
   let users = $state([])
   let keys = $state([])
-  let error = $state('')
   let newKey = $state('')
+  let loading = $state(true)
+
+  let showUserPanel = $state(false)
+  let showKeyPanel = $state(false)
 
   // user form
   let uName = $state('')
@@ -16,40 +23,44 @@
   // key form
   let kName = $state('')
 
+  const roleVariants = {
+    super_admin: 'danger',
+    admin: 'warning',
+    viewer: 'info',
+  }
+
   onMount(loadAll)
 
   async function loadAll() {
-    try {
-      error = ''
-      ;[users, keys] = await Promise.all([
-        api.listUsers().catch(() => []),
-        api.listAPIKeys().catch(() => []),
-      ])
-    } catch (e) { error = e.message }
+    loading = true
+    const [uRes, kRes] = await Promise.all([
+      api.listUsers(),
+      api.listAPIKeys(),
+    ])
+    users = uRes.data || []
+    keys = kRes.data || []
+    loading = false
   }
 
   async function createUser() {
-    try { error = ''; await api.createUser({ username: uName, password: uPass, role: uRole }); uName = ''; uPass = ''; await loadAll() }
-    catch (e) { error = e.message }
+    const res = await api.createUser({ username: uName, password: uPass, role: uRole })
+    if (!res.error) { uName = ''; uPass = ''; showUserPanel = false; loadAll() }
   }
 
-  async function delUser(id) {
-    try { await api.deleteUser(id); await loadAll() } catch (e) { error = e.message }
-  }
+  async function delUser(id) { await api.deleteUser(id); loadAll() }
 
   async function createKey() {
-    try {
-      error = ''; newKey = ''
-      const res = await api.createAPIKey(kName)
-      newKey = res.key
+    newKey = ''
+    const res = await api.createAPIKey(kName)
+    if (!res.error) {
+      newKey = res.data?.key || ''
       kName = ''
-      await loadAll()
-    } catch (e) { error = e.message }
+      showKeyPanel = false
+      loadAll()
+    }
   }
 
-  async function revokeKey(id) {
-    try { await api.deleteAPIKey(id); await loadAll() } catch (e) { error = e.message }
-  }
+  async function revokeKey(id) { await api.deleteAPIKey(id); loadAll() }
 
   function copyKey() {
     navigator.clipboard.writeText(newKey)
@@ -57,82 +68,120 @@
 </script>
 
 <Layout>
-  <h2 class="page-title">Users & API Keys</h2>
-  {#if error}<div class="error">{error}</div>{/if}
-
-  <!-- Users -->
-  <div class="section">
-    <h3 class="section-title">Users</h3>
-    {#if users.length === 0}<p class="empty">No users.</p>
-    {:else}
-      <table class="table">
-        <thead><tr><th>ID</th><th>Username</th><th>Role</th><th></th></tr></thead>
-        <tbody>
-          {#each users as u}
-            <tr><td>{u.id}</td><td>{u.username}</td><td>{u.role}</td>
-              <td><button class="btn-danger-sm" onclick={() => delUser(u.id)}>Delete</button></td></tr>
-          {/each}
-        </tbody>
-      </table>
-    {/if}
-    <form class="inline-form" onsubmit={(e) => { e.preventDefault(); createUser() }}>
-      <input class="input" placeholder="Username" bind:value={uName} required />
-      <input class="input" type="password" placeholder="Password" bind:value={uPass} required />
-      <select class="input sm" bind:value={uRole}><option>super_admin</option><option>admin</option><option>viewer</option></select>
-      <button class="btn-primary" type="submit">Add User</button>
-    </form>
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-lg font-bold text-text-primary">Users & API Keys</h1>
   </div>
 
-  <!-- API Keys -->
-  <div class="section">
-    <h3 class="section-title">API Keys</h3>
+  {#if loading}
+    <div class="space-y-4">
+      <Skeleton type="card" count={2} />
+    </div>
+  {:else}
+    <!-- New Key Display -->
     {#if newKey}
-      <div class="key-display">
-        <span class="key-label">New key (copy now, shown once):</span>
-        <div class="key-row">
-          <code class="key-value">{newKey}</code>
-          <button class="btn-sm" onclick={copyKey}>Copy</button>
+      <div class="bg-green-900/20 border border-success rounded-lg px-4 py-3 mb-4 light:bg-green-50">
+        <p class="text-xs text-success mb-2">New key created (copy now, shown once):</p>
+        <div class="flex items-center gap-2">
+          <code class="flex-1 text-xs bg-surface-1 text-text-primary px-3 py-2 rounded break-all font-mono">{newKey}</code>
+          <Button size="sm" variant="secondary" onclick={copyKey}>Copy</Button>
         </div>
       </div>
     {/if}
-    {#if keys.length === 0}<p class="empty">No API keys.</p>
-    {:else}
-      <table class="table">
-        <thead><tr><th>Name</th><th>Created</th><th></th></tr></thead>
-        <tbody>
-          {#each keys as k}
-            <tr><td>{k.name}</td><td>{new Date(k.created_at).toLocaleString()}</td>
-              <td><button class="btn-danger-sm" onclick={() => revokeKey(k.id)}>Revoke</button></td></tr>
-          {/each}
-        </tbody>
-      </table>
-    {/if}
-    <form class="inline-form" onsubmit={(e) => { e.preventDefault(); createKey() }}>
-      <input class="input" placeholder="Key name" bind:value={kName} required />
-      <button class="btn-primary" type="submit">Create Key</button>
-    </form>
-  </div>
-</Layout>
 
-<style>
-  .page-title { font-size: 1.1rem; font-weight: 600; color: #e1e4e8; margin: 0 0 1rem; }
-  .section { background: #1c1f26; border: 1px solid #2d3139; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
-  .section-title { font-size: 0.9rem; font-weight: 600; color: #e1e4e8; margin: 0 0 0.75rem; }
-  .error { color: #f85149; font-size: 0.85rem; margin-bottom: 0.75rem; }
-  .empty { color: #8b949e; font-size: 0.85rem; margin: 0 0 0.75rem; }
-  .table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 0.75rem; }
-  .table th { text-align: left; color: #8b949e; font-weight: 500; padding: 0.4rem 0.5rem; }
-  .table td { padding: 0.4rem 0.5rem; color: #e1e4e8; }
-  .table tbody tr:nth-child(even) { background: #161b22; }
-  .inline-form { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
-  .input { padding: 0.4rem 0.5rem; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #e1e4e8; font-size: 0.8rem; }
-  .input.sm { width: 120px; }
-  .btn-primary { padding: 0.4rem 0.8rem; background: #238636; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 0.8rem; white-space: nowrap; }
-  .btn-primary:hover { background: #2ea043; }
-  .btn-danger-sm { padding: 0.25rem 0.5rem; background: #da3633; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 0.75rem; }
-  .btn-sm { padding: 0.25rem 0.5rem; background: #30363d; border: none; border-radius: 4px; color: #e1e4e8; cursor: pointer; font-size: 0.75rem; }
-  .key-display { background: #0d1117; border: 1px solid #3fb950; border-radius: 4px; padding: 0.75rem; margin-bottom: 0.75rem; }
-  .key-label { font-size: 0.75rem; color: #3fb950; display: block; margin-bottom: 0.35rem; }
-  .key-row { display: flex; align-items: center; gap: 0.5rem; }
-  .key-value { flex: 1; font-size: 0.8rem; color: #e1e4e8; word-break: break-all; background: #161b22; padding: 0.35rem 0.5rem; border-radius: 3px; }
-</style>
+    <!-- Users -->
+    <div class="bg-surface-2 border border-border rounded-lg p-4 mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-text-primary">Users</h3>
+        <Button size="sm" variant="secondary" onclick={() => showUserPanel = true}>Add User</Button>
+      </div>
+      {#if users.length === 0}
+        <p class="text-sm text-text-secondary">No users.</p>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-border">
+              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">ID</th>
+              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Username</th>
+              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Role</th>
+              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Created</th>
+              <th class="py-2 px-3"></th>
+            </tr></thead>
+            <tbody class="divide-y divide-border-muted">
+              {#each users as u}
+                <tr class="hover:bg-surface-1">
+                  <td class="py-2 px-3">{u.id}</td>
+                  <td class="py-2 px-3 font-medium">{u.username}</td>
+                  <td class="py-2 px-3"><Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge></td>
+                  <td class="py-2 px-3 text-text-secondary">{u.created_at ? new Date(u.created_at).toLocaleDateString() : ''}</td>
+                  <td class="py-2 px-3"><Button variant="danger" size="sm" onclick={() => delUser(u.id)}>Delete</Button></td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
+
+    <!-- API Keys -->
+    <div class="bg-surface-2 border border-border rounded-lg p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-text-primary">API Keys</h3>
+        <Button size="sm" variant="secondary" onclick={() => showKeyPanel = true}>Create Key</Button>
+      </div>
+      {#if keys.length === 0}
+        <p class="text-sm text-text-secondary">No API keys.</p>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-border">
+              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Name</th>
+              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Created</th>
+              <th class="py-2 px-3"></th>
+            </tr></thead>
+            <tbody class="divide-y divide-border-muted">
+              {#each keys as k}
+                <tr class="hover:bg-surface-1">
+                  <td class="py-2 px-3 font-medium">{k.name}</td>
+                  <td class="py-2 px-3 text-text-secondary">{new Date(k.created_at).toLocaleString()}</td>
+                  <td class="py-2 px-3"><Button variant="danger" size="sm" onclick={() => revokeKey(k.id)}>Revoke</Button></td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Add User Slide Panel -->
+  <SlidePanel title="Add User" open={showUserPanel} onclose={() => showUserPanel = false}>
+    <form onsubmit={(e) => { e.preventDefault(); createUser() }} class="flex flex-col gap-4">
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Username</label>
+        <input bind:value={uName} required class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary focus:ring-2 focus:ring-accent/50" />
+      </div>
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Password</label>
+        <input type="password" bind:value={uPass} required class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary focus:ring-2 focus:ring-accent/50" />
+      </div>
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Role</label>
+        <select bind:value={uRole} class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary">
+          <option>viewer</option><option>admin</option><option>super_admin</option>
+        </select>
+      </div>
+      <Button type="submit">Create User</Button>
+    </form>
+  </SlidePanel>
+
+  <!-- Create Key Slide Panel -->
+  <SlidePanel title="Create API Key" open={showKeyPanel} onclose={() => showKeyPanel = false}>
+    <form onsubmit={(e) => { e.preventDefault(); createKey() }} class="flex flex-col gap-4">
+      <div>
+        <label class="block text-xs text-text-secondary mb-1">Key Name</label>
+        <input bind:value={kName} required class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary focus:ring-2 focus:ring-accent/50" />
+      </div>
+      <Button type="submit">Create Key</Button>
+    </form>
+  </SlidePanel>
+</Layout>

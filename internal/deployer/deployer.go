@@ -2,161 +2,223 @@ package deployer
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/go-connections/nat"
 	"github.com/vazra/simpledeploy/internal/compose"
-	"github.com/vazra/simpledeploy/internal/docker"
 )
 
-const projectLabel = "simpledeploy.project"
-
-type Deployer struct {
-	docker docker.Client
+type RegistryAuth struct {
+	URL      string
+	Username string
+	Password string
 }
 
-func New(docker docker.Client) *Deployer {
-	return &Deployer{docker: docker}
+type ServiceStatus struct {
+	Service string `json:"service"`
+	State   string `json:"state"`
+	Health  string `json:"health"`
+}
+
+type Deployer struct {
+	runner CommandRunner
+}
+
+func New(runner CommandRunner) (*Deployer, error) {
+	d := &Deployer{runner: runner}
+	_, stderr, err := d.runner.Run(context.Background(), "docker", "compose", "version")
+	if err != nil {
+		return nil, fmt.Errorf("docker compose not available: %s: %w", stderr, err)
+	}
+	return d, nil
 }
 
 func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) error {
-	netName := fmt.Sprintf("simpledeploy-%s", app.Name)
-	_, err := d.docker.NetworkCreate(ctx, netName, network.CreateOptions{
-		Labels: map[string]string{
-			projectLabel: app.Name,
-		},
-	})
+	project := "simpledeploy-" + app.Name
+	args := []string{
+		"compose",
+		"-f", app.ComposePath,
+		"-p", project,
+		"up", "-d",
+		"--remove-orphans",
+	}
+	_, stderr, err := d.runner.Run(ctx, "docker", args...)
 	if err != nil {
-		return fmt.Errorf("create network: %w", err)
+		return fmt.Errorf("compose up: %s: %w", stderr, err)
 	}
-
-	for _, svc := range app.Services {
-		if err := d.deployService(ctx, app.Name, netName, svc); err != nil {
-			return fmt.Errorf("deploy service %s: %w", svc.Name, err)
-		}
-	}
-	return nil
-}
-
-func (d *Deployer) deployService(ctx context.Context, appName, netName string, svc compose.ServiceConfig) error {
-	rc, err := d.docker.ImagePull(ctx, svc.Image, image.PullOptions{})
-	if err != nil {
-		return fmt.Errorf("pull image %s: %w", svc.Image, err)
-	}
-	_, _ = io.Copy(io.Discard, rc)
-	rc.Close()
-
-	env := make([]string, 0, len(svc.Environment))
-	for k, v := range svc.Environment {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	labels := map[string]string{
-		projectLabel:            appName,
-		"simpledeploy.service": svc.Name,
-	}
-	for k, v := range svc.Labels {
-		labels[k] = v
-	}
-
-	exposedPorts := nat.PortSet{}
-	portBindings := nat.PortMap{}
-	for _, p := range svc.Ports {
-		proto := p.Protocol
-		if proto == "" {
-			proto = "tcp"
-		}
-		ctrPort, err := nat.NewPort(proto, p.Container)
-		if err != nil {
-			return fmt.Errorf("parse container port %s: %w", p.Container, err)
-		}
-		exposedPorts[ctrPort] = struct{}{}
-		portBindings[ctrPort] = []nat.PortBinding{
-			{HostPort: p.Host},
-		}
-	}
-
-	containerConfig := &container.Config{
-		Image:        svc.Image,
-		Env:          env,
-		Labels:       labels,
-		ExposedPorts: exposedPorts,
-	}
-
-	volBinds := make([]string, 0, len(svc.Volumes))
-	for _, v := range svc.Volumes {
-		volBinds = append(volBinds, fmt.Sprintf("%s:%s", v.Source, v.Target))
-	}
-
-	hostConfig := &container.HostConfig{
-		PortBindings: portBindings,
-		RestartPolicy: container.RestartPolicy{
-			Name: restartPolicyName(svc.Restart),
-		},
-		Binds: volBinds,
-	}
-
-	netConfig := &network.NetworkingConfig{
-		EndpointsConfig: map[string]*network.EndpointSettings{
-			netName: {},
-		},
-	}
-
-	ctrName := fmt.Sprintf("simpledeploy-%s-%s", appName, svc.Name)
-	resp, err := d.docker.ContainerCreate(ctx, containerConfig, hostConfig, netConfig, ctrName)
-	if err != nil {
-		return fmt.Errorf("create container %s: %w", ctrName, err)
-	}
-
-	if err := d.docker.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("start container %s: %w", ctrName, err)
-	}
-
 	return nil
 }
 
 func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
-	ctrs, err := d.docker.ContainerList(ctx, container.ListOptions{
-		All: true,
-		Filters: filters.NewArgs(
-			filters.Arg("label", fmt.Sprintf("%s=%s", projectLabel, projectName)),
-		),
-	})
+	project := "simpledeploy-" + projectName
+	args := []string{
+		"compose",
+		"-p", project,
+		"down",
+		"--remove-orphans",
+	}
+	_, stderr, err := d.runner.Run(ctx, "docker", args...)
 	if err != nil {
-		return fmt.Errorf("list containers: %w", err)
+		return fmt.Errorf("compose down: %s: %w", stderr, err)
 	}
-
-	for _, ctr := range ctrs {
-		if err := d.docker.ContainerStop(ctx, ctr.ID, container.StopOptions{}); err != nil {
-			return fmt.Errorf("stop container %s: %w", ctr.ID, err)
-		}
-		if err := d.docker.ContainerRemove(ctx, ctr.ID, container.RemoveOptions{}); err != nil {
-			return fmt.Errorf("remove container %s: %w", ctr.ID, err)
-		}
-	}
-
-	netName := fmt.Sprintf("simpledeploy-%s", projectName)
-	if err := d.docker.NetworkRemove(ctx, netName); err != nil {
-		return fmt.Errorf("remove network %s: %w", netName, err)
-	}
-
 	return nil
 }
 
-func restartPolicyName(restart string) container.RestartPolicyMode {
-	switch restart {
-	case "always":
-		return container.RestartPolicyAlways
-	case "unless-stopped":
-		return container.RestartPolicyUnlessStopped
-	case "on-failure":
-		return container.RestartPolicyOnFailure
-	default:
-		return container.RestartPolicyDisabled
+func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) error {
+	project := "simpledeploy-" + app.Name
+	args := []string{
+		"compose",
+		"-f", app.ComposePath,
+		"-p", project,
+		"up", "-d",
+		"--force-recreate",
+		"--remove-orphans",
 	}
+	_, stderr, err := d.runner.Run(ctx, "docker", args...)
+	if err != nil {
+		return fmt.Errorf("compose restart: %s: %w", stderr, err)
+	}
+	return nil
+}
+
+func (d *Deployer) Stop(ctx context.Context, projectName string) error {
+	project := "simpledeploy-" + projectName
+	args := []string{"compose", "-p", project, "stop"}
+	_, stderr, err := d.runner.Run(ctx, "docker", args...)
+	if err != nil {
+		return fmt.Errorf("compose stop: %s: %w", stderr, err)
+	}
+	return nil
+}
+
+func (d *Deployer) Start(ctx context.Context, projectName string) error {
+	project := "simpledeploy-" + projectName
+	args := []string{"compose", "-p", project, "start"}
+	_, stderr, err := d.runner.Run(ctx, "docker", args...)
+	if err != nil {
+		return fmt.Errorf("compose start: %s: %w", stderr, err)
+	}
+	return nil
+}
+
+func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) error {
+	project := "simpledeploy-" + app.Name
+
+	pullArgs := []string{"compose", "-f", app.ComposePath, "-p", project, "pull"}
+
+	if len(auths) > 0 {
+		tmpDir, err := writeDockerConfig(auths)
+		if err != nil {
+			return fmt.Errorf("write docker config: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+		pullArgs = []string{"--config", tmpDir, "compose", "-f", app.ComposePath, "-p", project, "pull"}
+	}
+
+	_, stderr, err := d.runner.Run(ctx, "docker", pullArgs...)
+	if err != nil {
+		return fmt.Errorf("compose pull: %s: %w", stderr, err)
+	}
+	upArgs := []string{
+		"compose",
+		"-f", app.ComposePath,
+		"-p", project,
+		"up", "-d",
+		"--remove-orphans",
+	}
+	_, stderr, err = d.runner.Run(ctx, "docker", upArgs...)
+	if err != nil {
+		return fmt.Errorf("compose up after pull: %s: %w", stderr, err)
+	}
+	return nil
+}
+
+func writeDockerConfig(auths []RegistryAuth) (string, error) {
+	type authEntry struct {
+		Auth string `json:"auth"`
+	}
+	configData := struct {
+		Auths map[string]authEntry `json:"auths"`
+	}{
+		Auths: make(map[string]authEntry, len(auths)),
+	}
+	for _, a := range auths {
+		encoded := base64.StdEncoding.EncodeToString([]byte(a.Username + ":" + a.Password))
+		configData.Auths[a.URL] = authEntry{Auth: encoded}
+	}
+	data, err := json.Marshal(configData)
+	if err != nil {
+		return "", err
+	}
+	tmpDir, err := os.MkdirTemp("", "simpledeploy-docker-*")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0600); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", err
+	}
+	return tmpDir, nil
+}
+
+func (d *Deployer) Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error {
+	project := "simpledeploy-" + app.Name
+	args := []string{
+		"compose",
+		"-f", app.ComposePath,
+		"-p", project,
+		"up", "-d",
+		"--no-recreate",
+		"--remove-orphans",
+	}
+	for svc, n := range scales {
+		args = append(args, "--scale", fmt.Sprintf("%s=%d", svc, n))
+	}
+	_, stderr, err := d.runner.Run(ctx, "docker", args...)
+	if err != nil {
+		return fmt.Errorf("compose scale: %s: %w", stderr, err)
+	}
+	return nil
+}
+
+func (d *Deployer) Status(ctx context.Context, projectName string) ([]ServiceStatus, error) {
+	project := "simpledeploy-" + projectName
+	stdout, stderr, err := d.runner.Run(ctx, "docker", "compose", "-p", project, "ps", "--format", "json")
+	if err != nil {
+		return nil, fmt.Errorf("compose ps: %s: %w", stderr, err)
+	}
+	if stdout == "" {
+		return nil, nil
+	}
+	var raw []struct {
+		Service string `json:"Service"`
+		State   string `json:"State"`
+		Health  string `json:"Health"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		raw = nil
+		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+			if line == "" {
+				continue
+			}
+			var item struct {
+				Service string `json:"Service"`
+				State   string `json:"State"`
+				Health  string `json:"Health"`
+			}
+			if err := json.Unmarshal([]byte(line), &item); err != nil {
+				continue
+			}
+			raw = append(raw, item)
+		}
+	}
+	result := make([]ServiceStatus, len(raw))
+	for i, r := range raw {
+		result[i] = ServiceStatus{Service: r.Service, State: r.State, Health: r.Health}
+	}
+	return result, nil
 }
