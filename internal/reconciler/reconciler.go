@@ -22,7 +22,7 @@ type AppDeployer interface {
 	Restart(ctx context.Context, app *compose.AppConfig) error
 	Stop(ctx context.Context, projectName string) error
 	Start(ctx context.Context, projectName string) error
-	Pull(ctx context.Context, app *compose.AppConfig) error
+	Pull(ctx context.Context, app *compose.AppConfig, auths []deployer.RegistryAuth) error
 	Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error
 	Status(ctx context.Context, projectName string) ([]deployer.ServiceStatus, error)
 }
@@ -148,7 +148,7 @@ func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
 	if err != nil {
 		return err
 	}
-	if err := r.deployer.Pull(ctx, cfg); err != nil {
+	if err := r.deployer.Pull(ctx, cfg, nil); err != nil {
 		return fmt.Errorf("pull: %w", err)
 	}
 	return r.store.UpdateAppStatus(slug, "running")

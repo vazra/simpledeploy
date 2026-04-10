@@ -2,12 +2,21 @@ package deployer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
+
+type RegistryAuth struct {
+	URL      string
+	Username string
+	Password string
+}
 
 type ServiceStatus struct {
 	Service string `json:"service"`
@@ -96,9 +105,20 @@ func (d *Deployer) Start(ctx context.Context, projectName string) error {
 	return nil
 }
 
-func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig) error {
+func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) error {
 	project := "simpledeploy-" + app.Name
+
 	pullArgs := []string{"compose", "-f", app.ComposePath, "-p", project, "pull"}
+
+	if len(auths) > 0 {
+		tmpDir, err := writeDockerConfig(auths)
+		if err != nil {
+			return fmt.Errorf("write docker config: %w", err)
+		}
+		defer os.RemoveAll(tmpDir)
+		pullArgs = []string{"--config", tmpDir, "compose", "-f", app.ComposePath, "-p", project, "pull"}
+	}
+
 	_, stderr, err := d.runner.Run(ctx, "docker", pullArgs...)
 	if err != nil {
 		return fmt.Errorf("compose pull: %s: %w", stderr, err)
@@ -115,6 +135,34 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig) error {
 		return fmt.Errorf("compose up after pull: %s: %w", stderr, err)
 	}
 	return nil
+}
+
+func writeDockerConfig(auths []RegistryAuth) (string, error) {
+	type authEntry struct {
+		Auth string `json:"auth"`
+	}
+	configData := struct {
+		Auths map[string]authEntry `json:"auths"`
+	}{
+		Auths: make(map[string]authEntry, len(auths)),
+	}
+	for _, a := range auths {
+		encoded := base64.StdEncoding.EncodeToString([]byte(a.Username + ":" + a.Password))
+		configData.Auths[a.URL] = authEntry{Auth: encoded}
+	}
+	data, err := json.Marshal(configData)
+	if err != nil {
+		return "", err
+	}
+	tmpDir, err := os.MkdirTemp("", "simpledeploy-docker-*")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), data, 0600); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", err
+	}
+	return tmpDir, nil
 }
 
 func (d *Deployer) Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error {

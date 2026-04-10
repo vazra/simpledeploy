@@ -122,7 +122,7 @@ func TestPullCallsPullThenUp(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
 	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
-	if err := d.Pull(context.Background(), app); err != nil {
+	if err := d.Pull(context.Background(), app, nil); err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
 	if !mock.HasCall("docker", "compose", "pull") {
@@ -130,6 +130,51 @@ func TestPullCallsPullThenUp(t *testing.T) {
 	}
 	if !mock.HasCall("docker", "compose", "up", "-d") {
 		t.Errorf("expected compose up after pull, got: %+v", mock.Calls)
+	}
+}
+
+func TestPullWithAuth(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/tmp/docker-compose.yml"}
+
+	auths := []RegistryAuth{
+		{URL: "ghcr.io", Username: "user", Password: "pass"},
+	}
+	err := d.Pull(context.Background(), app, auths)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	found := false
+	for _, c := range mock.Calls {
+		for _, arg := range c.Args {
+			if arg == "--config" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected --config flag in docker pull call")
+	}
+}
+
+func TestPullWithoutAuth(t *testing.T) {
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock}
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/tmp/docker-compose.yml"}
+
+	err := d.Pull(context.Background(), app, nil)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+
+	for _, c := range mock.Calls {
+		for _, arg := range c.Args {
+			if arg == "--config" {
+				t.Error("unexpected --config flag when no auths")
+			}
+		}
 	}
 }
 
