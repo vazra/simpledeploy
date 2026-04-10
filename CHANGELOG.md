@@ -1,5 +1,69 @@
 # Changelog
 
+## [1.3.0](https://github.com/vazra/simpledeploy/compare/v1.2.0...v1.3.0) (2026-04-10)
+
+
+### Features
+
+* add container health visibility via docker compose ps ([2040ee7](https://github.com/vazra/simpledeploy/commit/2040ee7be136cc807a383b33bce3c9f743d6bbcf))
+* add local dev setup with sample apps ([0a68fe5](https://github.com/vazra/simpledeploy/commit/0a68fe537ee3165a0fe6f04c6a8ae83111faabd4))
+* add private container registry auth ([b97903a](https://github.com/vazra/simpledeploy/commit/b97903a2a0b0c1f903c107bd2cd33e22d34b9d4a))
+* **api:** add compose validation endpoint ([934c174](https://github.com/vazra/simpledeploy/commit/934c174714046ffd1e46f23ae64ecae4af8b1ba4))
+* **api:** add registry CRUD endpoints ([ac98ae0](https://github.com/vazra/simpledeploy/commit/ac98ae09d2df3600f76094347d2ccf667e23b4f0))
+* **api:** add rollback, versions, and deploy events endpoints ([265d256](https://github.com/vazra/simpledeploy/commit/265d2563593dcb8b00549e5ca5e5428ae06f8151))
+* **auth:** add AES-256-GCM encrypt/decrypt helpers ([0c6e892](https://github.com/vazra/simpledeploy/commit/0c6e89253a8820b2774be016412c01bdf10e123d))
+* **cli:** add registry add/list/remove commands ([7bfaf1d](https://github.com/vazra/simpledeploy/commit/7bfaf1dd62356648040f828415dab920bcb19e2e))
+* **config:** add registries field to config and compose labels ([6838a38](https://github.com/vazra/simpledeploy/commit/6838a38a0132803ded8a3efbe34d4b2cfca4e998))
+* **deployer:** add CommandRunner interface with ExecRunner and MockRunner ([3e7b495](https://github.com/vazra/simpledeploy/commit/3e7b495df5b5531584ada9b79dab61e69a3e83f7))
+* **deployer:** add restart, stop, start, pull, scale methods ([e14ebe4](https://github.com/vazra/simpledeploy/commit/e14ebe444972abf32aa4fe28588362c5c47e87b8))
+* **deployer:** rewrite to use docker compose CLI ([df29fad](https://github.com/vazra/simpledeploy/commit/df29fad628f915329b7d52f89b59fd37c7c7df5b))
+* **deployer:** support registry auth via temp docker config ([3f56d46](https://github.com/vazra/simpledeploy/commit/3f56d46ec43a6e3ee73607a930b634deecd21e78))
+* **metrics:** sync app status from Docker state on each collector tick ([d73773b](https://github.com/vazra/simpledeploy/commit/d73773b639564796b291eff48bd02dcfad4c471f))
+* **reconciler:** add restart, stop, start, pull, scale wrappers ([f00b30a](https://github.com/vazra/simpledeploy/commit/f00b30a264e3e36fd3bf472bc7e00669dd1d15d7))
+* **reconciler:** detect compose file changes via hash and redeploy ([eab36a9](https://github.com/vazra/simpledeploy/commit/eab36a925039c1f89f2f2860a605c2794bf33003))
+* **reconciler:** resolve registry auth for pulls ([3394325](https://github.com/vazra/simpledeploy/commit/33943251aa2c7bec7a1c2ab6edf5a544159cd8c3))
+* **reconciler:** store compose versions, log deploy events, add rollback ([99a23d2](https://github.com/vazra/simpledeploy/commit/99a23d279d99bf752b876931dad9558328e8ed14))
+* **store:** add compose_hash column for change detection ([cef9d2c](https://github.com/vazra/simpledeploy/commit/cef9d2cece482a4f9e1e3cc9158351ae71bc7163))
+* **store:** add compose_versions and deploy_events tables ([de7a075](https://github.com/vazra/simpledeploy/commit/de7a075a83eaf54ec2c78661d86af44ea08cf51f))
+* **store:** add registries table and CRUD methods ([c1ce3ac](https://github.com/vazra/simpledeploy/commit/c1ce3ac2882da4dfa491f837087cb3c0d01749b8))
+* **ui:** add collapsible sidebar and layout rewrite ([21e1efd](https://github.com/vazra/simpledeploy/commit/21e1efd3b9f3a173c92def6efe0b3f13582d8b0c))
+* **ui:** add compose editor reusable components ([c09f33d](https://github.com/vazra/simpledeploy/commit/c09f33d7582aad869237ace8a46845c57f07a3d8))
+* **ui:** add config tab with dual-mode compose editor ([956e4a7](https://github.com/vazra/simpledeploy/commit/956e4a7f6b6ceb1bd5fb1957cf8fb61626f4560b))
+* **ui:** add deploy app from dashboard ([c7c0c5b](https://github.com/vazra/simpledeploy/commit/c7c0c5b67c4c57c1d088a36e46fa9743ac3f0254))
+* **ui:** add deploy history, rollback, and events in config tab ([8f8484d](https://github.com/vazra/simpledeploy/commit/8f8484d8e082ea5077cd42400b451cd524009583))
+* **ui:** add registry management page ([45091a4](https://github.com/vazra/simpledeploy/commit/45091a413e5db908018f0cdd329826c23db1d93e))
+* **ui:** add restart, stop, start, pull, scale buttons ([1dca27e](https://github.com/vazra/simpledeploy/commit/1dca27e718dc463a393b68809e5f9996d6d307bd))
+* **ui:** add reusable component library ([2a8def7](https://github.com/vazra/simpledeploy/commit/2a8def7e81a45c5b920887b025451d97e6d0354a))
+* **ui:** add tailwind css v4 with dark/light theme tokens ([4c494c7](https://github.com/vazra/simpledeploy/commit/4c494c737581590bd0e8712204134aa88c1ae6fc))
+* **ui:** add theme store and toggle component ([d6c5f40](https://github.com/vazra/simpledeploy/commit/d6c5f40617df3870aff97357cf49eebb79706384))
+* **ui:** add toast notification system ([70d3820](https://github.com/vazra/simpledeploy/commit/70d38206cec9a05c777ef6da8e534355db54f315))
+* **ui:** add visual compose editor component ([9609469](https://github.com/vazra/simpledeploy/commit/9609469ac012a76a29935c05ad1a7c5b96c39dad))
+* **ui:** redesign alerts page with slide panels ([37e45ef](https://github.com/vazra/simpledeploy/commit/37e45eff6db1288e5a09e935ee134ca17e357737))
+* **ui:** redesign app detail page with enhanced tabs ([ddf947b](https://github.com/vazra/simpledeploy/commit/ddf947bbafbb98adddb8cd25b8f82425cfccc532))
+* **ui:** redesign backups page with slide panel ([491b924](https://github.com/vazra/simpledeploy/commit/491b92480f9b00428b8dc5a6fcedf578d519c5b4))
+* **ui:** redesign dashboard with full info panels ([7de296f](https://github.com/vazra/simpledeploy/commit/7de296f61815372e2c52fd53dcb0456c43589fb7))
+* **ui:** redesign login page with tailwind ([c79ff6e](https://github.com/vazra/simpledeploy/commit/c79ff6e23c0d1ae825931e1fc497b90b8906a540))
+* **ui:** redesign users page with slide panels ([483e6fd](https://github.com/vazra/simpledeploy/commit/483e6fd37ac5fe1cef2cd07180afc485f427e6d0))
+* **ui:** rewrite LogViewer with tailwind and download support ([e450170](https://github.com/vazra/simpledeploy/commit/e45017078ed26317d9f282bd9a19bf17ebe2ead9))
+* **ui:** rewrite MetricsChart and AppCard with tailwind ([bfaae1b](https://github.com/vazra/simpledeploy/commit/bfaae1b63d79790f33a4b6b627530efd4b13d68a))
+* **ui:** show service health status in app overview ([4fa332d](https://github.com/vazra/simpledeploy/commit/4fa332d7792e45216b0a1c54792c92e691c68050))
+* **ui:** update api client with error handling and toast integration ([71c8215](https://github.com/vazra/simpledeploy/commit/71c82154c76058c1a245aaf076a3244f72a81957))
+
+
+### Bug Fixes
+
+* **deployer:** handle redeploy without full teardown ([bd10672](https://github.com/vazra/simpledeploy/commit/bd10672cc529f3952a004b8e9cc86c56c886ff84))
+* **deployer:** remove --force-recreate from default deploy ([15f6805](https://github.com/vazra/simpledeploy/commit/15f6805f3da52998256a0c8789104ca00da60e6f))
+* **metrics:** strip port from domain in request stats lookup ([9a7f60a](https://github.com/vazra/simpledeploy/commit/9a7f60a7d16f79b42f895e7149e61b4e142288c1))
+* **store,api:** validate update fields, check affected rows, handle rand error ([a7b3262](https://github.com/vazra/simpledeploy/commit/a7b3262dd61381399ad1bb89e863346144cc8962))
+* **store:** update migration version test for migration 010 ([041c16e](https://github.com/vazra/simpledeploy/commit/041c16ee8d1c78fe5d88519ca8772f4b26076502))
+* **ui:** address code review findings ([7bd9efe](https://github.com/vazra/simpledeploy/commit/7bd9efe58e595cfc8932906678506b493c926848))
+* **ui:** fix chart not rendering on metrics tab ([4e2e6bc](https://github.com/vazra/simpledeploy/commit/4e2e6bc757ad3ddc11af9c723ed99e9135ec7816))
+* **ui:** fix Chart.js incompatibility with Svelte 5 $state proxies ([8c07d2f](https://github.com/vazra/simpledeploy/commit/8c07d2fd21002d8631053da7a15c5ea8edb971d9))
+* **ui:** fix empty charts by recreating on data change ([4d76760](https://github.com/vazra/simpledeploy/commit/4d767601b6d1ac6bc4b68b22ff1e9c3a70149ec1))
+* **ui:** fix label names, double toast, btoa unicode, validation state ([a213520](https://github.com/vazra/simpledeploy/commit/a213520d8f321aca6018faeeaf64aba0d29465e0))
+* **ui:** resolve a11y warnings in Modal and SlidePanel ([8fcd33c](https://github.com/vazra/simpledeploy/commit/8fcd33cfa0eda724df69b5a386fb7a8c91ceb75e))
+
 ## [1.2.0](https://github.com/vazra/simpledeploy/compare/v1.1.0...v1.2.0) (2026-04-08)
 
 
