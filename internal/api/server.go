@@ -119,6 +119,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/apps/{slug}/pull", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePull))))
 	s.mux.Handle("POST /api/apps/{slug}/scale", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleScale))))
 	s.mux.Handle("GET /api/apps/{slug}/services", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetServices))))
+	s.mux.Handle("GET /api/apps/{slug}/env", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetEnv))))
+	s.mux.Handle("PUT /api/apps/{slug}/env", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePutEnv))))
 
 	// Deploy history
 	s.mux.Handle("GET /api/apps/{slug}/versions", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListVersions))))
