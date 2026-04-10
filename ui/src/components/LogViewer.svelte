@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
+  import { api } from '../lib/api.js'
 
   let { slug, service = '' } = $props()
 
@@ -11,11 +12,21 @@
   let selectedService = $state(service)
   let showTimestamps = $state(true)
 
-  onMount(() => { connect() })
+  onMount(async () => {
+    const { data } = await api.getAppServices(slug)
+    if (data) {
+      services = data.map(s => s.service)
+      if (!selectedService && services.length > 0) {
+        selectedService = services[0]
+      }
+    }
+    connect()
+  })
   onDestroy(() => { if (ws) ws.close() })
 
   function connect() {
     if (ws) ws.close()
+    lines = []
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     let url = `${proto}//${window.location.host}/api/apps/${slug}/logs?follow=true&tail=200`
     if (selectedService) url += `&service=${selectedService}`
@@ -33,6 +44,11 @@
     ws.onclose = () => { ws = null }
   }
 
+  function switchService(svc) {
+    selectedService = svc
+    connect()
+  }
+
   function toggleFollow() {
     following = !following
     if (following && container) {
@@ -48,14 +64,28 @@
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${slug}-logs.txt`
+    a.download = `${slug}-${selectedService || 'all'}-logs.txt`
     a.click()
     URL.revokeObjectURL(url)
   }
 </script>
 
 <div class="flex flex-col h-[500px]">
-  <div class="flex items-center gap-2 px-3 py-2 bg-surface-1 border border-border rounded-t-lg">
+  <div class="flex items-center gap-2 px-3 py-2 bg-surface-1 border border-border rounded-t-lg flex-wrap">
+    {#if services.length > 1}
+      <div class="flex items-center gap-1">
+        {#each services as svc}
+          <button
+            onclick={() => switchService(svc)}
+            class="px-2 py-1 text-xs rounded border transition-colors
+              {selectedService === svc ? 'border-accent text-accent bg-accent/10' : 'border-border text-text-secondary hover:text-text-primary'}"
+          >
+            {svc}
+          </button>
+        {/each}
+      </div>
+      <div class="w-px h-4 bg-border"></div>
+    {/if}
     <button
       onclick={toggleFollow}
       class="px-2 py-1 text-xs rounded border transition-colors
