@@ -51,8 +51,11 @@ Requires Go 1.22+ and Node.js 18+.
 - **Scheduled backups** for Postgres (pg_dump) and volumes (tar+gzip) to S3 or local
 - **Alerts** with webhooks (Slack, Telegram, Discord, custom)
 - **Log streaming** via WebSocket
+- **Private registry support** for pulling from Docker Hub, GHCR, ECR, ACR, and self-hosted registries
 - **Multi-user RBAC** with per-app access scoping
 - **Remote client CLI** with context management (like kubectl)
+- **Deploy safety** with compose versioning, rollback, and audit trail
+- **App lifecycle controls** (restart, stop, start, pull, scale) via CLI, API, and UI
 - **Web dashboard** (embedded Svelte SPA)
 - **Single binary**, SQLite storage, minimal dependencies
 
@@ -125,7 +128,7 @@ simpledeploy apikey create --name "ci-deploy" --user-id 1
 simpledeploy (single process)
 +-- Caddy (embedded reverse proxy, TLS, rate limiting, request metrics)
 +-- API server (REST + WebSocket, management UI)
-+-- Reconciler (watches config dir, deploys via Docker API)
++-- Reconciler (watches config dir, deploys via Docker Compose CLI)
 +-- Metrics collector (Docker stats + gopsutil, every 10s)
 +-- Metrics rollup (tiered aggregation + pruning)
 +-- Backup scheduler (cron-based, Postgres/volume, S3/local)

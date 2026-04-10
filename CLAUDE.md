@@ -19,13 +19,13 @@ make clean      # Remove build artifacts
 cmd/simpledeploy/     CLI entrypoint (cobra commands, wiring)
 internal/
   api/                REST API + WebSocket handlers
-  auth/               Password hashing, JWT, API keys, rate limiting
+  auth/               Password hashing, JWT, API keys, rate limiting, credential encryption
   alerts/             Alert evaluator, webhook dispatch
   backup/             Strategies (postgres/volume), targets (s3/local), scheduler
   client/             HTTP client for remote API, context config
   compose/            Compose file parsing, label extraction
   config/             YAML config parsing
-  deployer/           Translates compose specs to Docker API calls
+  deployer/           Docker compose CLI wrapper (pull, deploy, scale, etc.)
   docker/             Docker client wrapper + mock
   metrics/            Collector, writer, rollup
   proxy/              Caddy embedding, route management, Caddy handler modules
@@ -42,10 +42,12 @@ ui/                   Svelte SPA (Vite build)
 - **Caddy JSON config.** No Caddyfile. Config built programmatically in `proxy.buildConfig()`, loaded via `caddy.Load()`.
 - **Custom Caddy modules.** `simpledeploy_metrics` and `simpledeploy_ratelimit` registered via `init()` in proxy package.
 - **Compose labels.** All app config via `simpledeploy.*` labels in docker-compose.yml.
+- **CommandRunner interface.** Deployer shells out to `docker compose` CLI via `CommandRunner` with `MockRunner` for tests.
+- **AES-256-GCM encryption.** Registry credentials encrypted with `master_secret` via `auth.Encrypt`/`auth.Decrypt`.
 
 ## Database
 
-SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 7 migrations:
+SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 10 migrations:
 
 1. apps table
 2. app_labels
@@ -54,6 +56,9 @@ SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations
 5. request_stats
 6. webhooks, alert_rules, alert_history
 7. backup_configs, backup_runs
+8. compose_hash (change detection)
+9. compose_versions, deploy_events (deploy safety)
+10. registries (private registry auth)
 
 ## Testing
 
@@ -67,6 +72,7 @@ go test ./internal/store/ -run TestUpsert  # specific test
 - Store tests use temp DB files
 - API tests use httptest + real store
 - Mock Docker client in `internal/docker/mock.go`
+- Mock command runner in `internal/deployer/runner.go`
 
 ## Adding a New Feature
 

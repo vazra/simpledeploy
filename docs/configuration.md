@@ -52,6 +52,11 @@ ratelimit:
   window: 60s
   burst: 50
   by: ip              # ip | header:X-API-Key | path
+
+# Default registries applied to all apps (names reference stored registries)
+registries:
+  - ghcr-org
+  - my-ecr
 ```
 
 ### Field Reference
@@ -71,6 +76,7 @@ ratelimit:
 | `ratelimit.window` | string | `60s` | Rate limit time window |
 | `ratelimit.burst` | int | `50` | Burst allowance |
 | `ratelimit.by` | string | `ip` | Rate limit key |
+| `registries` | list | `[]` | Default registry names for all apps |
 
 ### TLS Modes
 

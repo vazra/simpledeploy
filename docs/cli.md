@@ -195,6 +195,40 @@ simpledeploy apikey revoke --id 3
 
 API keys authenticate CLI and API requests via `Authorization: Bearer sd_...` header.
 
+## Registry Management
+
+### `simpledeploy registry`
+
+Manage private container registry credentials.
+
+```bash
+# Add a registry
+simpledeploy registry add --name ghcr-org --url ghcr.io --username myuser --password mytoken
+
+# List registries
+simpledeploy registry list
+
+# Remove a registry
+simpledeploy registry remove ghcr-org
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `add` | Add registry credentials (encrypted with master_secret) |
+| `list` | List configured registries with decrypted usernames |
+| `remove` | Remove a registry by name |
+
+#### `registry add` flags
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--name` | Yes | Registry identifier (referenced in config/labels) |
+| `--url` | Yes | Registry URL (e.g., `ghcr.io`, `123456.dkr.ecr.us-east-1.amazonaws.com`) |
+| `--username` | Yes | Registry username |
+| `--password` | Yes | Registry password or token |
+
+Credentials are encrypted with AES-256-GCM using the `master_secret` from config.
+
 ## Utility Commands
 
 ### `simpledeploy version`
