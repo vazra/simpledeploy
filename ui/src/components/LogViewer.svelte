@@ -34,6 +34,10 @@
     ws = new WebSocket(url)
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data)
+      if (msg.error) {
+        lines = [{ stream: 'stderr', line: msg.error, ts: '' }]
+        return
+      }
       lines = [...lines.slice(-999), msg]
       if (following && container) {
         requestAnimationFrame(() => {

@@ -12,8 +12,12 @@ async function requestText(method, path, body = null) {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(body)
   }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30000)
+  opts.signal = controller.signal
   try {
     const res = await fetch(BASE + path, opts)
+    clearTimeout(timeout)
     if (res.status === 401) {
       if (!window.location.hash.includes('login')) {
         window.location.hash = '#/login'
@@ -27,7 +31,9 @@ async function requestText(method, path, body = null) {
     const data = await res.text()
     return { data, error: null }
   } catch (err) {
-    return { data: null, error: err.message }
+    clearTimeout(timeout)
+    const msg = err.name === 'AbortError' ? 'Request timed out' : err.message
+    return { data: null, error: msg }
   }
 }
 
@@ -41,8 +47,12 @@ async function request(method, path, body = null) {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(body)
   }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30000)
+  opts.signal = controller.signal
   try {
     const res = await fetch(BASE + path, opts)
+    clearTimeout(timeout)
     if (res.status === 401) {
       if (!window.location.hash.includes('login')) {
         window.location.hash = '#/login'
@@ -58,7 +68,9 @@ async function request(method, path, body = null) {
     const data = ct && ct.includes('application/json') ? await res.json() : null
     return { data, error: null }
   } catch (err) {
-    return { data: null, error: err.message }
+    clearTimeout(timeout)
+    const msg = err.name === 'AbortError' ? 'Request timed out' : err.message
+    return { data: null, error: msg }
   }
 }
 
@@ -72,12 +84,25 @@ async function requestWithToast(method, path, body, successMsg) {
   return result
 }
 
+async function healthCheck() {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 5000)
+  try {
+    const res = await fetch(BASE + '/health', { signal: controller.signal })
+    clearTimeout(timeout)
+    return { data: res.ok, error: res.ok ? null : `HTTP ${res.status}` }
+  } catch (err) {
+    clearTimeout(timeout)
+    return { data: null, error: err.name === 'AbortError' ? 'Request timed out' : err.message }
+  }
+}
+
 export const api = {
   // Auth (no toast on success for login)
   login: (username, password) => request('POST', '/auth/login', { username, password }),
   logout: () => request('POST', '/auth/logout'),
   setup: (username, password) => request('POST', '/setup', { username, password }),
-  health: () => request('GET', '/health'),
+  health: healthCheck,
 
   // Apps
   listApps: () => request('GET', '/apps'),

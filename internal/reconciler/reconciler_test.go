@@ -19,11 +19,11 @@ type mockDeployer struct {
 	calls []string
 }
 
-func (m *mockDeployer) Deploy(_ context.Context, app *compose.AppConfig) error {
+func (m *mockDeployer) Deploy(_ context.Context, app *compose.AppConfig) deployer.DeployResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Deploy:"+app.Name)
-	return nil
+	return deployer.DeployResult{}
 }
 
 func (m *mockDeployer) Teardown(_ context.Context, name string) error {
@@ -33,11 +33,11 @@ func (m *mockDeployer) Teardown(_ context.Context, name string) error {
 	return nil
 }
 
-func (m *mockDeployer) Restart(_ context.Context, app *compose.AppConfig) error {
+func (m *mockDeployer) Restart(_ context.Context, app *compose.AppConfig) deployer.DeployResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Restart:"+app.Name)
-	return nil
+	return deployer.DeployResult{}
 }
 
 func (m *mockDeployer) Stop(_ context.Context, name string) error {
@@ -54,11 +54,11 @@ func (m *mockDeployer) Start(_ context.Context, name string) error {
 	return nil
 }
 
-func (m *mockDeployer) Pull(_ context.Context, app *compose.AppConfig, _ []deployer.RegistryAuth) error {
+func (m *mockDeployer) Pull(_ context.Context, app *compose.AppConfig, _ []deployer.RegistryAuth) deployer.DeployResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Pull:"+app.Name)
-	return nil
+	return deployer.DeployResult{}
 }
 
 func (m *mockDeployer) Scale(_ context.Context, app *compose.AppConfig, _ map[string]int) error {

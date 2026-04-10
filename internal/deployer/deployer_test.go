@@ -18,8 +18,8 @@ func TestDeployCallsComposeUp(t *testing.T) {
 		ComposePath: "/apps/myapp/docker-compose.yml",
 	}
 
-	if err := d.Deploy(context.Background(), app); err != nil {
-		t.Fatalf("Deploy: %v", err)
+	if result := d.Deploy(context.Background(), app); result.Err != nil {
+		t.Fatalf("Deploy: %v", result.Err)
 	}
 
 	if !mock.HasCall("docker", "compose", "up", "-d", "--remove-orphans") {
@@ -55,12 +55,12 @@ func TestDeployPropagatesError(t *testing.T) {
 		ComposePath: "/apps/myapp/docker-compose.yml",
 	}
 
-	err := d.Deploy(context.Background(), app)
-	if err == nil {
+	result := d.Deploy(context.Background(), app)
+	if result.Err == nil {
 		t.Fatal("expected error from Deploy")
 	}
-	if !strings.Contains(err.Error(), "compose failed") {
-		t.Errorf("expected 'compose failed' in error, got: %v", err)
+	if !strings.Contains(result.Err.Error(), "compose failed") {
+		t.Errorf("expected 'compose failed' in error, got: %v", result.Err)
 	}
 }
 
@@ -88,8 +88,8 @@ func TestRestartCallsForceRecreate(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
 	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
-	if err := d.Restart(context.Background(), app); err != nil {
-		t.Fatalf("Restart: %v", err)
+	if result := d.Restart(context.Background(), app); result.Err != nil {
+		t.Fatalf("Restart: %v", result.Err)
 	}
 	if !mock.HasCall("docker", "compose", "up", "--force-recreate") {
 		t.Errorf("expected --force-recreate, got: %+v", mock.Calls)
@@ -122,8 +122,8 @@ func TestPullCallsPullThenUp(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
 	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
-	if err := d.Pull(context.Background(), app, nil); err != nil {
-		t.Fatalf("Pull: %v", err)
+	if result := d.Pull(context.Background(), app, nil); result.Err != nil {
+		t.Fatalf("Pull: %v", result.Err)
 	}
 	if !mock.HasCall("docker", "compose", "pull") {
 		t.Errorf("expected compose pull, got: %+v", mock.Calls)
@@ -141,9 +141,9 @@ func TestPullWithAuth(t *testing.T) {
 	auths := []RegistryAuth{
 		{URL: "ghcr.io", Username: "user", Password: "pass"},
 	}
-	err := d.Pull(context.Background(), app, auths)
-	if err != nil {
-		t.Fatalf("Pull: %v", err)
+	result := d.Pull(context.Background(), app, auths)
+	if result.Err != nil {
+		t.Fatalf("Pull: %v", result.Err)
 	}
 
 	found := false
@@ -164,9 +164,9 @@ func TestPullWithoutAuth(t *testing.T) {
 	d := &Deployer{runner: mock}
 	app := &compose.AppConfig{Name: "myapp", ComposePath: "/tmp/docker-compose.yml"}
 
-	err := d.Pull(context.Background(), app, nil)
-	if err != nil {
-		t.Fatalf("Pull: %v", err)
+	result := d.Pull(context.Background(), app, nil)
+	if result.Err != nil {
+		t.Fatalf("Pull: %v", result.Err)
 	}
 
 	for _, c := range mock.Calls {

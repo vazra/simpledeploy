@@ -61,7 +61,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		filters.Arg("label", fmt.Sprintf("com.docker.compose.project=%s", project)),
 		filters.Arg("label", fmt.Sprintf("com.docker.compose.service=%s", service)),
 	)
-	ctrs, err := s.docker.ContainerList(ctx, container.ListOptions{Filters: f})
+	ctrs, err := s.docker.ContainerList(ctx, container.ListOptions{Filters: f, All: true})
 	if err != nil || len(ctrs) == 0 {
 		conn.WriteJSON(map[string]string{"error": "container not found"})
 		return

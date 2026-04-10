@@ -62,7 +62,7 @@ func (s *Store) CreateComposeVersion(appID int64, content, hash string) error {
 
 // ListComposeVersions returns versions for an app ordered newest first.
 func (s *Store) ListComposeVersions(appID int64) ([]ComposeVersion, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT id, app_id, version, content, hash, created_at
 		FROM compose_versions
 		WHERE app_id = ?
@@ -87,7 +87,7 @@ func (s *Store) ListComposeVersions(appID int64) ([]ComposeVersion, error) {
 // GetComposeVersion returns a single version by its primary key.
 func (s *Store) GetComposeVersion(id int64) (*ComposeVersion, error) {
 	var v ComposeVersion
-	err := s.db.QueryRow(`
+	err := s.ro.QueryRow(`
 		SELECT id, app_id, version, content, hash, created_at
 		FROM compose_versions WHERE id = ?
 	`, id).Scan(&v.ID, &v.AppID, &v.Version, &v.Content, &v.Hash, &v.CreatedAt)
@@ -114,7 +114,7 @@ func (s *Store) CreateDeployEvent(appSlug, action string, userID *int64, detail 
 
 // ListDeployEvents returns the 50 most recent events for an app.
 func (s *Store) ListDeployEvents(appSlug string) ([]DeployEvent, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT id, app_slug, action, user_id, detail, created_at
 		FROM deploy_events
 		WHERE app_slug = ?

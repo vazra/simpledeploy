@@ -19,12 +19,12 @@ import (
 
 // AppDeployer is the interface the reconciler uses to deploy and remove apps.
 type AppDeployer interface {
-	Deploy(ctx context.Context, app *compose.AppConfig) error
+	Deploy(ctx context.Context, app *compose.AppConfig) deployer.DeployResult
 	Teardown(ctx context.Context, projectName string) error
-	Restart(ctx context.Context, app *compose.AppConfig) error
+	Restart(ctx context.Context, app *compose.AppConfig) deployer.DeployResult
 	Stop(ctx context.Context, projectName string) error
 	Start(ctx context.Context, projectName string) error
-	Pull(ctx context.Context, app *compose.AppConfig, auths []deployer.RegistryAuth) error
+	Pull(ctx context.Context, app *compose.AppConfig, auths []deployer.RegistryAuth) deployer.DeployResult
 	Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error
 	Status(ctx context.Context, projectName string) ([]deployer.ServiceStatus, error)
 	Cancel(ctx context.Context, app *compose.AppConfig) error
@@ -132,10 +132,19 @@ func (r *Reconciler) RestartOne(ctx context.Context, slug string) error {
 	if err != nil {
 		return err
 	}
-	if err := r.deployer.Restart(ctx, cfg); err != nil {
-		return fmt.Errorf("restart: %w", err)
+	result := r.deployer.Restart(ctx, cfg)
+	action := "restart"
+	status := "running"
+	if result.Err != nil {
+		action = "restart_failed"
+		status = "error"
 	}
-	return r.store.UpdateAppStatus(slug, "running")
+	r.store.CreateDeployEvent(slug, action, nil, result.Output)
+	r.store.UpdateAppStatus(slug, status)
+	if result.Err != nil {
+		return fmt.Errorf("restart failed, check deploy events for details")
+	}
+	return nil
 }
 
 func (r *Reconciler) StopOne(ctx context.Context, slug string) error {
@@ -206,10 +215,19 @@ func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
 	if err != nil {
 		return fmt.Errorf("resolve registries: %w", err)
 	}
-	if err := r.deployer.Pull(ctx, cfg, auths); err != nil {
-		return fmt.Errorf("pull: %w", err)
+	result := r.deployer.Pull(ctx, cfg, auths)
+	action := "pull"
+	status := "running"
+	if result.Err != nil {
+		action = "pull_failed"
+		status = "error"
 	}
-	return r.store.UpdateAppStatus(slug, "running")
+	r.store.CreateDeployEvent(slug, action, nil, result.Output)
+	r.store.UpdateAppStatus(slug, status)
+	if result.Err != nil {
+		return fmt.Errorf("pull failed, check deploy events for details")
+	}
+	return nil
 }
 
 func (r *Reconciler) ScaleOne(ctx context.Context, slug string, scales map[string]int) error {
@@ -322,11 +340,8 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 
 // deployApp calls deployer.Deploy then upserts the app in the store with labels.
 func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.AppConfig) error {
-	if err := r.deployer.Deploy(ctx, cfg); err != nil {
-		return fmt.Errorf("deploy: %w", err)
-	}
+	result := r.deployer.Deploy(ctx, cfg)
 
-	// collect simpledeploy.* labels from all services
 	labels := make(map[string]string)
 	for _, svc := range cfg.Services {
 		for k, v := range svc.Labels {
@@ -339,11 +354,18 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	}
 
 	hash, _ := hashFile(cfg.ComposePath)
+	status := "running"
+	action := "deploy"
+	if result.Err != nil {
+		status = "error"
+		action = "deploy_failed"
+	}
+
 	app := &store.App{
 		Name:        slug,
 		Slug:        slug,
 		ComposePath: cfg.ComposePath,
-		Status:      "running",
+		Status:      status,
 		Domain:      cfg.Domain,
 		ComposeHash: hash,
 	}
@@ -351,14 +373,15 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		return fmt.Errorf("upsert app: %w", err)
 	}
 
-	// Store compose version
 	content, _ := os.ReadFile(cfg.ComposePath)
 	if len(content) > 0 {
 		r.store.CreateComposeVersion(app.ID, string(content), hash)
 	}
-	// Log deploy event
-	r.store.CreateDeployEvent(slug, "deploy", nil, "")
+	r.store.CreateDeployEvent(slug, action, nil, result.Output)
 
+	if result.Err != nil {
+		return fmt.Errorf("deploy: %w", result.Err)
+	}
 	return nil
 }
 

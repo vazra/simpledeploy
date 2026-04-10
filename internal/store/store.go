@@ -15,44 +15,65 @@ import (
 var migrationsFS embed.FS
 
 type Store struct {
-	db *sql.DB
+	db *sql.DB // write pool (single conn)
+	ro *sql.DB // read pool (multiple conns)
 }
 
 func Open(path string) (*Store, error) {
+	// Write pool: single connection for serialized writes
 	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
-
 	db.SetMaxOpenConns(1)
 
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	// Read pool: multiple connections for concurrent reads (WAL mode allows this)
+	ro, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&mode=ro")
+	if err != nil {
 		db.Close()
-		return nil, fmt.Errorf("set WAL mode: %w", err)
+		return nil, fmt.Errorf("open read db: %w", err)
 	}
-	if _, err := db.Exec("PRAGMA cache_size=2000"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("set cache size: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	ro.SetMaxOpenConns(4)
+
+	for _, conn := range []*sql.DB{db, ro} {
+		if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			db.Close()
+			ro.Close()
+			return nil, fmt.Errorf("set WAL mode: %w", err)
+		}
+		if _, err := conn.Exec("PRAGMA cache_size=2000"); err != nil {
+			db.Close()
+			ro.Close()
+			return nil, fmt.Errorf("set cache size: %w", err)
+		}
+		if _, err := conn.Exec("PRAGMA foreign_keys=ON"); err != nil {
+			db.Close()
+			ro.Close()
+			return nil, fmt.Errorf("enable foreign keys: %w", err)
+		}
 	}
 
-	s := &Store{db: db}
+	s := &Store{db: db, ro: ro}
 	if err := s.migrate(); err != nil {
 		db.Close()
+		ro.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return s, nil
 }
 
 func (s *Store) Close() error {
+	s.ro.Close()
 	return s.db.Close()
 }
 
 func (s *Store) DB() *sql.DB {
 	return s.db
+}
+
+// ReadDB returns the read-only connection pool for concurrent reads.
+func (s *Store) ReadDB() *sql.DB {
+	return s.ro
 }
 
 func (s *Store) migrate() error {

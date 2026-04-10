@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/Layout.svelte'
   import AppCard from '../components/AppCard.svelte'
   import MetricsChart from '../components/MetricsChart.svelte'
@@ -9,11 +9,13 @@
   import Button from '../components/Button.svelte'
   import SlidePanel from '../components/SlidePanel.svelte'
   import { api } from '../lib/api.js'
+  import { connection } from '../lib/stores/connection.svelte.js'
 
   let apps = $state([])
   let cpuHistory = $state([])
   let memHistory = $state([])
   let loading = $state(true)
+  let loadError = $state(false)
   let latestMetrics = $state(null)
   let alertHistory = $state([])
   let backupRunsByApp = $state({})
@@ -55,10 +57,13 @@
     reader.readAsText(file)
   }
 
+  const unsubReconnect = connection.onReconnect(() => loadDashboard())
   onMount(loadDashboard)
+  onDestroy(unsubReconnect)
 
   async function loadDashboard() {
     loading = true
+    loadError = false
     const now = new Date().toISOString()
     const from = new Date(Date.now() - rangeMs[timeRange]).toISOString()
 
@@ -67,6 +72,12 @@
       api.systemMetrics(from, now),
       api.alertHistory(),
     ])
+
+    if (appsRes.error) {
+      loading = false
+      loadError = true
+      return
+    }
 
     apps = appsRes.data || []
     alertHistory = histRes.data || []
@@ -91,7 +102,11 @@
       }))
     }
 
-    // Load per-app metrics and request stats
+    loading = false
+    loadPerAppData(now)
+  }
+
+  async function loadPerAppData(now) {
     const hourAgo = new Date(Date.now() - 3600000).toISOString()
     await Promise.all(
       apps.map(async (app) => {
@@ -103,24 +118,19 @@
         ])
         if (mRes.data && mRes.data.length > 0) {
           const latest = mRes.data[mRes.data.length - 1]
-          appMetricsMap[slug] = {
+          appMetricsMap = { ...appMetricsMap, [slug]: {
             cpu: latest.cpu_pct,
             memPct: latest.mem_limit ? (latest.mem_bytes / latest.mem_limit) * 100 : 0,
-          }
+          }}
         }
         if (rRes.data) {
-          appRequestsMap[slug] = rRes.data
+          appRequestsMap = { ...appRequestsMap, [slug]: rRes.data }
         }
         if (bRes.data && bRes.data.length > 0) {
-          backupRunsByApp[slug] = bRes.data
+          backupRunsByApp = { ...backupRunsByApp, [slug]: bRes.data }
         }
       })
     )
-    appMetricsMap = { ...appMetricsMap }
-    appRequestsMap = { ...appRequestsMap }
-    backupRunsByApp = { ...backupRunsByApp }
-
-    loading = false
   }
 
   function formatBytes(bytes) {
@@ -178,7 +188,17 @@
 </script>
 
 <Layout>
-  {#if loading}
+  {#if loadError}
+    <div class="flex flex-col items-center justify-center py-20 text-center">
+      <div class="w-12 h-12 rounded-full bg-red-900/30 flex items-center justify-center mb-4">
+        <svg class="w-6 h-6 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+        </svg>
+      </div>
+      <p class="text-text-secondary text-sm mb-3">Unable to connect to backend</p>
+      <Button size="sm" variant="secondary" onclick={loadDashboard}>Retry</Button>
+    </div>
+  {:else if loading}
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
       {#each Array(4) as _}<Skeleton type="card" />{/each}
     </div>

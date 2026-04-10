@@ -1,9 +1,10 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/Layout.svelte'
   import MetricsChart from '../components/MetricsChart.svelte'
   import LogViewer from '../components/LogViewer.svelte'
   import ConfigTab from '../components/ConfigTab.svelte'
+  import EventsTab from '../components/EventsTab.svelte'
   import EnvEditor from '../components/EnvEditor.svelte'
   import StatCard from '../components/StatCard.svelte'
   import Badge from '../components/Badge.svelte'
@@ -13,6 +14,7 @@
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
   import { toasts } from '../lib/stores/toast.js'
+  import { connection } from '../lib/stores/connection.svelte.js'
 
   let { params } = $props()
   let slug = $derived(params.slug)
@@ -47,19 +49,23 @@
   let bCron = $state('0 2 * * *')
   let bRetention = $state(7)
 
-  const tabs = ['overview', 'logs', 'metrics', 'backups', 'config', 'environment']
+  const tabs = ['overview', 'logs', 'events', 'metrics', 'backups', 'config', 'environment']
   const rangeMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 }
 
+  const unsubReconnect = connection.onReconnect(() => loadApp())
   onMount(loadApp)
+  onDestroy(unsubReconnect)
 
   async function loadApp() {
-    const res = await api.getApp(slug)
-    if (res.error) { push('/'); return }
-    app = res.data
+    const [appRes] = await Promise.all([
+      api.getApp(slug),
+      loadRequests(),
+      loadServices(),
+    ])
+    if (appRes.error) { push('/'); return }
+    app = appRes.data
     editDomain = app?.Domain || ''
     loading = false
-    loadRequests()
-    loadServices()
   }
 
   async function loadMetrics() {
@@ -77,6 +83,7 @@
 
   async function loadServices() {
     const res = await api.getAppServices(slug)
+    if (res.error) return
     services = res.data || []
   }
 
@@ -84,6 +91,7 @@
     const now = new Date().toISOString()
     const from = new Date(Date.now() - 3600000).toISOString()
     const res = await api.appRequests(slug, from, now)
+    if (res.error) return
     requestStats = res.data
   }
 
@@ -131,9 +139,10 @@
 
   async function handleRestart() {
     actionLoading = 'restart'
-    await api.restartApp(slug)
+    const res = await api.restartApp(slug)
     actionLoading = ''
     showRestartModal = false
+    if (res.error) activeTab = 'events'
     loadApp()
   }
 
@@ -153,8 +162,9 @@
 
   async function handlePull() {
     actionLoading = 'pull'
-    await api.pullApp(slug)
+    const res = await api.pullApp(slug)
     actionLoading = ''
+    if (res.error) activeTab = 'events'
     loadApp()
   }
 
@@ -326,6 +336,9 @@
 
     {:else if activeTab === 'logs'}
       <LogViewer {slug} />
+
+    {:else if activeTab === 'events'}
+      <EventsTab {slug} />
 
     {:else if activeTab === 'metrics'}
       <div class="flex gap-1 mb-4">

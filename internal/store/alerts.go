@@ -50,7 +50,7 @@ func (s *Store) CreateWebhook(w *Webhook) error {
 func (s *Store) GetWebhook(id int64) (*Webhook, error) {
 	var w Webhook
 	var tmpl, hdrs sql.NullString
-	err := s.db.QueryRow(`
+	err := s.ro.QueryRow(`
 		SELECT id, name, type, url, template_override, headers_json, created_at
 		FROM webhooks WHERE id = ?
 	`, id).Scan(&w.ID, &w.Name, &w.Type, &w.URL, &tmpl, &hdrs, &w.CreatedAt)
@@ -70,7 +70,7 @@ func (s *Store) GetWebhook(id int64) (*Webhook, error) {
 }
 
 func (s *Store) ListWebhooks() ([]Webhook, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT id, name, type, url, template_override, headers_json, created_at
 		FROM webhooks ORDER BY id
 	`)
@@ -157,12 +157,12 @@ func (s *Store) ListAlertRules(appID *int64) ([]AlertRule, error) {
 	var rows *sql.Rows
 	var err error
 	if appID == nil {
-		rows, err = s.db.Query(`
+		rows, err = s.ro.Query(`
 			SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at
 			FROM alert_rules ORDER BY id
 		`)
 	} else {
-		rows, err = s.db.Query(`
+		rows, err = s.ro.Query(`
 			SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at
 			FROM alert_rules WHERE app_id = ? ORDER BY id
 		`, *appID)
@@ -184,7 +184,7 @@ func (s *Store) ListAlertRules(appID *int64) ([]AlertRule, error) {
 }
 
 func (s *Store) ListActiveAlertRules() ([]AlertRule, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at
 		FROM alert_rules WHERE enabled = 1 ORDER BY id
 	`)
@@ -280,7 +280,7 @@ func (s *Store) ResolveAlert(historyID int64) error {
 
 func (s *Store) GetActiveAlert(ruleID int64) (*AlertHistory, error) {
 	var h AlertHistory
-	err := s.db.QueryRow(`
+	err := s.ro.QueryRow(`
 		SELECT id, rule_id, fired_at, resolved_at, value
 		FROM alert_history
 		WHERE rule_id = ? AND resolved_at IS NULL
@@ -299,12 +299,12 @@ func (s *Store) ListAlertHistory(ruleID *int64, limit int) ([]AlertHistory, erro
 	var rows *sql.Rows
 	var err error
 	if ruleID == nil {
-		rows, err = s.db.Query(`
+		rows, err = s.ro.Query(`
 			SELECT id, rule_id, fired_at, resolved_at, value
 			FROM alert_history ORDER BY fired_at DESC LIMIT ?
 		`, limit)
 	} else {
-		rows, err = s.db.Query(`
+		rows, err = s.ro.Query(`
 			SELECT id, rule_id, fired_at, resolved_at, value
 			FROM alert_history WHERE rule_id = ? ORDER BY fired_at DESC LIMIT ?
 		`, *ruleID, limit)

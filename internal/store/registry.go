@@ -39,7 +39,7 @@ func (s *Store) CreateRegistry(name, url, usernameEnc, passwordEnc string) (*Reg
 }
 
 func (s *Store) ListRegistries() ([]Registry, error) {
-	rows, err := s.db.Query(`SELECT id, name, url, username_enc, password_enc, created_at, updated_at FROM registries ORDER BY name`)
+	rows, err := s.ro.Query(`SELECT id, name, url, username_enc, password_enc, created_at, updated_at FROM registries ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("query registries: %w", err)
 	}
@@ -58,7 +58,7 @@ func (s *Store) ListRegistries() ([]Registry, error) {
 
 func (s *Store) GetRegistry(id string) (*Registry, error) {
 	var r Registry
-	err := s.db.QueryRow(`SELECT id, name, url, username_enc, password_enc, created_at, updated_at FROM registries WHERE id = ?`, id).
+	err := s.ro.QueryRow(`SELECT id, name, url, username_enc, password_enc, created_at, updated_at FROM registries WHERE id = ?`, id).
 		Scan(&r.ID, &r.Name, &r.URL, &r.UsernameEnc, &r.PasswordEnc, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get registry: %w", err)
@@ -68,7 +68,7 @@ func (s *Store) GetRegistry(id string) (*Registry, error) {
 
 func (s *Store) GetRegistryByName(name string) (*Registry, error) {
 	var r Registry
-	err := s.db.QueryRow(`SELECT id, name, url, username_enc, password_enc, created_at, updated_at FROM registries WHERE name = ?`, name).
+	err := s.ro.QueryRow(`SELECT id, name, url, username_enc, password_enc, created_at, updated_at FROM registries WHERE name = ?`, name).
 		Scan(&r.ID, &r.Name, &r.URL, &r.UsernameEnc, &r.PasswordEnc, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get registry by name: %w", err)

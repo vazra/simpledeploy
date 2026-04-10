@@ -59,7 +59,7 @@ func (s *Store) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]m
 	var err error
 
 	if appID == nil {
-		rows, err = s.db.Query(`
+		rows, err = s.ro.Query(`
 			SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp
 			FROM metrics
 			WHERE app_id IS NULL AND tier = ? AND timestamp >= ? AND timestamp <= ?
@@ -69,7 +69,7 @@ func (s *Store) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]m
 			to.UTC().Format("2006-01-02 15:04:05"),
 		)
 	} else {
-		rows, err = s.db.Query(`
+		rows, err = s.ro.Query(`
 			SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp
 			FROM metrics
 			WHERE app_id = ? AND tier = ? AND timestamp >= ? AND timestamp <= ?

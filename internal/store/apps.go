@@ -64,7 +64,7 @@ func (s *Store) UpsertApp(app *App, labels map[string]string) error {
 func (s *Store) GetAppByID(id int64) (*App, error) {
 	var a App
 	var domain sql.NullString
-	err := s.db.QueryRow(`
+	err := s.ro.QueryRow(`
 		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
 		FROM apps WHERE id = ?
 	`, id).Scan(
@@ -87,7 +87,7 @@ func (s *Store) GetAppByID(id int64) (*App, error) {
 func (s *Store) GetAppBySlug(slug string) (*App, error) {
 	var a App
 	var domain sql.NullString
-	err := s.db.QueryRow(`
+	err := s.ro.QueryRow(`
 		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
 		FROM apps WHERE slug = ?
 	`, slug).Scan(
@@ -108,7 +108,7 @@ func (s *Store) GetAppBySlug(slug string) (*App, error) {
 
 // ListApps returns all apps ordered by name.
 func (s *Store) ListApps() ([]App, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
 		FROM apps ORDER BY name
 	`)
@@ -172,7 +172,7 @@ func (s *Store) UpdateAppStatus(slug, status string) error {
 
 // GetAppLabels returns all labels for the app with the given slug.
 func (s *Store) GetAppLabels(slug string) (map[string]string, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT al.key, al.value
 		FROM app_labels al
 		JOIN apps a ON a.id = al.app_id

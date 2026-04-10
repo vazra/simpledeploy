@@ -54,7 +54,7 @@ func (s *Store) InsertRequestStats(stats []metrics.RequestStat) error {
 
 // QueryRequestStats returns request stats for the given app, tier, and time range.
 func (s *Store) QueryRequestStats(appID int64, tier string, from, to time.Time) ([]metrics.RequestStat, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.ro.Query(`
 		SELECT app_id, timestamp, status_code, latency_ms, method, path_pattern
 		FROM request_stats
 		WHERE app_id = ? AND tier = ? AND timestamp >= ? AND timestamp <= ?

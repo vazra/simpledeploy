@@ -9,7 +9,6 @@
   import Button from './Button.svelte'
   import Skeleton from './Skeleton.svelte'
   import Modal from './Modal.svelte'
-  import Badge from './Badge.svelte'
 
   let { slug } = $props()
 
@@ -24,10 +23,8 @@
   let hasValidationErrors = $state(false)
 
   let versions = $state([])
-  let events = $state([])
   let rollbackTarget = $state(null)
   let rollingBack = $state(false)
-
   function normalizeYaml(str) {
     try { return yaml.dump(yaml.load(str), { lineWidth: -1 }) } catch { return str }
   }
@@ -111,12 +108,8 @@
   }
 
   async function loadHistory() {
-    const [vRes, eRes] = await Promise.all([
-      api.getComposeVersions(slug),
-      api.getDeployEvents(slug),
-    ])
+    const vRes = await api.getComposeVersions(slug)
     versions = vRes.data || []
-    events = eRes.data || []
   }
 
   async function handleRollback() {
@@ -196,20 +189,6 @@
     </div>
   {/if}
 
-  {#if events.length > 0}
-    <div class="bg-surface-2 border border-border rounded-lg p-4 mt-4">
-      <h3 class="text-sm font-semibold text-text-primary mb-3">Deploy Events</h3>
-      <div class="space-y-2">
-        {#each events as evt}
-          <div class="flex items-center gap-3 text-sm px-2 py-1.5 bg-surface-1 rounded">
-            <Badge variant={evt.action === 'deploy' ? 'success' : evt.action === 'rollback' ? 'warning' : 'info'}>{evt.action}</Badge>
-            <span class="text-text-secondary flex-1">{evt.detail || '-'}</span>
-            <span class="text-xs text-text-muted">{evt.created_at ? new Date(evt.created_at).toLocaleString() : ''}</span>
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
 {/if}
 
 {#if showDiff}

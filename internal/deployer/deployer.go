@@ -18,6 +18,11 @@ type RegistryAuth struct {
 	Password string
 }
 
+type DeployResult struct {
+	Output string
+	Err    error
+}
+
 type ServiceStatus struct {
 	Service string `json:"service"`
 	State   string `json:"state"`
@@ -38,7 +43,7 @@ func New(runner CommandRunner) (*Deployer, error) {
 	return d, nil
 }
 
-func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) error {
+func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
 	d.Tracker.Track(app.Name, cancel)
 	defer d.Tracker.Done(app.Name)
@@ -51,11 +56,12 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) error {
 		"up", "-d",
 		"--remove-orphans",
 	}
-	_, stderr, err := d.runner.Run(ctx, "docker", args...)
+	stdout, stderr, err := d.runner.Run(ctx, "docker", args...)
+	output := strings.TrimSpace(stdout + "\n" + stderr)
 	if err != nil {
-		return fmt.Errorf("compose up: %s: %w", stderr, err)
+		return DeployResult{Output: output, Err: fmt.Errorf("compose up: %w", err)}
 	}
-	return nil
+	return DeployResult{Output: output}
 }
 
 func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
@@ -73,7 +79,7 @@ func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
 	return nil
 }
 
-func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) error {
+func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
 	d.Tracker.Track(app.Name, cancel)
 	defer d.Tracker.Done(app.Name)
@@ -87,11 +93,12 @@ func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) error {
 		"--force-recreate",
 		"--remove-orphans",
 	}
-	_, stderr, err := d.runner.Run(ctx, "docker", args...)
+	stdout, stderr, err := d.runner.Run(ctx, "docker", args...)
+	output := strings.TrimSpace(stdout + "\n" + stderr)
 	if err != nil {
-		return fmt.Errorf("compose restart: %s: %w", stderr, err)
+		return DeployResult{Output: output, Err: fmt.Errorf("compose restart: %w", err)}
 	}
-	return nil
+	return DeployResult{Output: output}
 }
 
 func (d *Deployer) Stop(ctx context.Context, projectName string) error {
@@ -114,7 +121,7 @@ func (d *Deployer) Start(ctx context.Context, projectName string) error {
 	return nil
 }
 
-func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) error {
+func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
 	d.Tracker.Track(app.Name, cancel)
 	defer d.Tracker.Done(app.Name)
@@ -126,16 +133,18 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 	if len(auths) > 0 {
 		tmpDir, err := writeDockerConfig(auths)
 		if err != nil {
-			return fmt.Errorf("write docker config: %w", err)
+			return DeployResult{Err: fmt.Errorf("write docker config: %w", err)}
 		}
 		defer os.RemoveAll(tmpDir)
 		pullArgs = []string{"--config", tmpDir, "compose", "-f", app.ComposePath, "-p", project, "pull"}
 	}
 
-	_, stderr, err := d.runner.Run(ctx, "docker", pullArgs...)
+	stdout, stderr, err := d.runner.Run(ctx, "docker", pullArgs...)
+	output := strings.TrimSpace(stdout + "\n" + stderr)
 	if err != nil {
-		return fmt.Errorf("compose pull: %s: %w", stderr, err)
+		return DeployResult{Output: output, Err: fmt.Errorf("compose pull: %w", err)}
 	}
+
 	upArgs := []string{
 		"compose",
 		"-f", app.ComposePath,
@@ -143,11 +152,13 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 		"up", "-d",
 		"--remove-orphans",
 	}
-	_, stderr, err = d.runner.Run(ctx, "docker", upArgs...)
+	stdout, stderr, err = d.runner.Run(ctx, "docker", upArgs...)
+	output += "\n" + strings.TrimSpace(stdout+"\n"+stderr)
+	output = strings.TrimSpace(output)
 	if err != nil {
-		return fmt.Errorf("compose up after pull: %s: %w", stderr, err)
+		return DeployResult{Output: output, Err: fmt.Errorf("compose up after pull: %w", err)}
 	}
-	return nil
+	return DeployResult{Output: output}
 }
 
 func writeDockerConfig(auths []RegistryAuth) (string, error) {

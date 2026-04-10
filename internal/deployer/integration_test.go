@@ -41,8 +41,8 @@ func TestIntegrationDeployAndTeardown(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	if err := d.Deploy(ctx, app); err != nil {
-		t.Fatalf("Deploy: %v", err)
+	if result := d.Deploy(ctx, app); result.Err != nil {
+		t.Fatalf("deploy: %v", result.Err)
 	}
 	// Ensure cleanup on failure
 	defer d.Teardown(context.Background(), "integration-test")

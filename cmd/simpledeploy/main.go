@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"net/http"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,9 +50,10 @@ var rootCmd = &cobra.Command{
 }
 
 var serveCmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Start the simpledeploy server",
-	RunE:  runServe,
+	Use:          "serve",
+	Short:        "Start the simpledeploy server",
+	SilenceUsage: true,
+	RunE:         runServe,
 }
 
 var initCmd = &cobra.Command{
@@ -426,7 +429,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetUIFS(distFS)
 
 	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
-	return srv.ListenAndServe(ctx)
+	err = srv.ListenAndServe(ctx)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
