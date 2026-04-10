@@ -162,6 +162,24 @@ var pullCmd = &cobra.Command{Use: "pull", Short: "Pull remote app config to loca
 var diffCmd = &cobra.Command{Use: "diff", Short: "Diff local vs remote config", RunE: runDiff}
 var syncCmd = &cobra.Command{Use: "sync", Short: "Sync local dir to remote", RunE: runSync}
 
+var registryCmd = &cobra.Command{Use: "registry", Short: "Manage container registries"}
+var registryAddCmd = &cobra.Command{
+	Use:   "add",
+	Short: "Add a registry",
+	RunE:  runRegistryAdd,
+}
+var registryListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List registries",
+	RunE:  runRegistryList,
+}
+var registryRemoveCmd = &cobra.Command{
+	Use:   "remove <name>",
+	Short: "Remove a registry",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRegistryRemove,
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
@@ -239,7 +257,18 @@ func init() {
 	contextCmd.AddCommand(contextAddCmd, contextUseCmd, contextListCmd)
 	rootCmd.AddCommand(contextCmd, pullCmd, diffCmd, syncCmd)
 
-	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd, versionCmd)
+	registryAddCmd.Flags().String("name", "", "registry name")
+	registryAddCmd.Flags().String("url", "", "registry URL (e.g. ghcr.io)")
+	registryAddCmd.Flags().String("username", "", "username")
+	registryAddCmd.Flags().String("password", "", "password")
+	registryAddCmd.MarkFlagRequired("name")
+	registryAddCmd.MarkFlagRequired("url")
+	registryAddCmd.MarkFlagRequired("username")
+	registryAddCmd.MarkFlagRequired("password")
+
+	registryCmd.AddCommand(registryAddCmd, registryListCmd, registryRemoveCmd)
+
+	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd, versionCmd, registryCmd)
 }
 
 func main() {
@@ -1150,4 +1179,94 @@ func (a *statusSyncAdapter) ListApps() ([]metrics.StatusApp, error) {
 
 func (a *statusSyncAdapter) UpdateAppStatus(slug, status string) error {
 	return a.store.UpdateAppStatus(slug, status)
+}
+
+func runRegistryAdd(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg.MasterSecret == "" {
+		return fmt.Errorf("master_secret must be set in config")
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	name, _ := cmd.Flags().GetString("name")
+	url, _ := cmd.Flags().GetString("url")
+	username, _ := cmd.Flags().GetString("username")
+	password, _ := cmd.Flags().GetString("password")
+
+	usernameEnc, err := auth.Encrypt(username, cfg.MasterSecret)
+	if err != nil {
+		return fmt.Errorf("encrypt username: %w", err)
+	}
+	passwordEnc, err := auth.Encrypt(password, cfg.MasterSecret)
+	if err != nil {
+		return fmt.Errorf("encrypt password: %w", err)
+	}
+
+	reg, err := db.CreateRegistry(name, url, usernameEnc, passwordEnc)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("added registry %q (%s) id=%s\n", reg.Name, reg.URL, reg.ID)
+	return nil
+}
+
+func runRegistryList(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	regs, err := db.ListRegistries()
+	if err != nil {
+		return err
+	}
+	if len(regs) == 0 {
+		fmt.Println("no registries configured")
+		return nil
+	}
+	for _, r := range regs {
+		username := "(encrypted)"
+		if cfg.MasterSecret != "" {
+			if u, err := auth.Decrypt(r.UsernameEnc, cfg.MasterSecret); err == nil {
+				username = u
+			}
+		}
+		fmt.Printf("%-20s %-40s user=%-15s id=%s\n", r.Name, r.URL, username, r.ID)
+	}
+	return nil
+}
+
+func runRegistryRemove(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	name := args[0]
+	reg, err := db.GetRegistryByName(name)
+	if err != nil {
+		return fmt.Errorf("registry %q not found: %w", name, err)
+	}
+	if err := db.DeleteRegistry(reg.ID); err != nil {
+		return err
+	}
+	fmt.Printf("removed registry %q\n", name)
+	return nil
 }
