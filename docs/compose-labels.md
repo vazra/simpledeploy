@@ -95,6 +95,28 @@ Path patterns replace dynamic segments in URL paths for metrics grouping. Exampl
 
 If not set, SimpleDeploy auto-normalizes by replacing all-digit path segments with `{id}`.
 
+## Registry Labels
+
+| Label | Default | Description |
+|-------|---------|-------------|
+| `simpledeploy.registries` | global config | Comma-separated registry names for this app |
+
+Override which registries are used when pulling images for this app:
+
+```yaml
+labels:
+  simpledeploy.registries: "ghcr-org,my-ecr"
+```
+
+Special value `none` disables all registries (including global defaults):
+
+```yaml
+labels:
+  simpledeploy.registries: "none"
+```
+
+If not set, the global `registries` list from the server config applies. Registry names reference credentials stored via `simpledeploy registry add` or the API.
+
 ## Multi-Service Apps
 
 Labels can be placed on any service in the compose file. SimpleDeploy merges labels across all services (first occurrence wins for duplicate keys).
