@@ -15,7 +15,7 @@
   onMount(async () => {
     const { data } = await api.getAppServices(slug)
     if (data) {
-      services = data.map(s => s.service)
+      services = data.map(s => s.service).sort()
       if (!selectedService && services.length > 0) {
         selectedService = services[0]
       }
