@@ -14,6 +14,7 @@ type Client interface {
 	ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error)
 	ContainerStats(ctx context.Context, containerID string) (container.StatsResponseReader, error)
 	ContainerLogs(ctx context.Context, containerID string, opts container.LogsOptions) (io.ReadCloser, error)
+	Raw() *dockerclient.Client
 }
 
 type DockerClient struct {

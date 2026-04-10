@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/docker/docker/api/types/container"
+	dockerclient "github.com/docker/docker/client"
 )
 
 // MockClient is a thread-safe in-memory Docker client for testing.
@@ -85,6 +86,10 @@ func (m *MockClient) ContainerStats(_ context.Context, _ string) (container.Stat
 		Body:   io.NopCloser(strings.NewReader(mockStatsJSON)),
 		OSType: "linux",
 	}, nil
+}
+
+func (m *MockClient) Raw() *dockerclient.Client {
+	return nil
 }
 
 func (m *MockClient) ContainerLogs(_ context.Context, id string, _ container.LogsOptions) (io.ReadCloser, error) {

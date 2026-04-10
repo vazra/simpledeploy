@@ -158,6 +158,20 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackup)))
 	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
 
+	// Docker system management
+	s.mux.Handle("GET /api/docker/disk-usage", s.authMiddleware(http.HandlerFunc(s.handleDockerDiskUsage)))
+	s.mux.Handle("POST /api/docker/prune/containers", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneContainers)))
+	s.mux.Handle("POST /api/docker/prune/images", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneImages)))
+	s.mux.Handle("POST /api/docker/prune/volumes", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneVolumes)))
+	s.mux.Handle("POST /api/docker/prune/build-cache", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneBuildCache)))
+	s.mux.Handle("POST /api/docker/prune/all", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneAll)))
+	s.mux.Handle("GET /api/docker/images", s.authMiddleware(http.HandlerFunc(s.handleDockerImages)))
+	s.mux.Handle("DELETE /api/docker/images/{id}", s.authMiddleware(http.HandlerFunc(s.handleDockerImageRemove)))
+	s.mux.Handle("GET /api/docker/networks", s.authMiddleware(http.HandlerFunc(s.handleDockerNetworks)))
+	s.mux.Handle("GET /api/docker/volumes", s.authMiddleware(http.HandlerFunc(s.handleDockerVolumes)))
+	s.mux.Handle("DELETE /api/docker/networks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDockerNetworkRemove)))
+	s.mux.Handle("DELETE /api/docker/volumes/{name}", s.authMiddleware(http.HandlerFunc(s.handleDockerVolumeRemove)))
+
 	// Registry management
 	s.mux.Handle("GET /api/registries", s.authMiddleware(http.HandlerFunc(s.handleListRegistries)))
 	s.mux.Handle("POST /api/registries", s.authMiddleware(http.HandlerFunc(s.handleCreateRegistry)))
