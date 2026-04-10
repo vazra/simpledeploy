@@ -72,55 +72,62 @@
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  const btnBase = 'px-2.5 py-1 text-xs font-medium rounded-md transition-colors'
+  const btnInactive = 'text-text-secondary hover:text-text-primary hover:bg-surface-3/50'
 </script>
 
-<div class="flex flex-col h-[500px]">
-  <div class="flex items-center gap-2 px-3 py-2 bg-surface-1 border border-border rounded-t-lg flex-wrap">
+<div class="flex flex-col h-[600px] rounded-xl overflow-hidden border border-border/50 shadow-sm">
+  <div class="flex items-center gap-1.5 px-4 py-2.5 bg-surface-2 border-b border-border/50 flex-wrap">
     {#if services.length > 1}
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-1 bg-surface-3/40 rounded-lg p-0.5">
         {#each services as svc}
           <button
             onclick={() => switchService(svc)}
-            class="px-2 py-1 text-xs rounded border transition-colors
-              {selectedService === svc ? 'border-accent text-accent bg-accent/10' : 'border-border text-text-secondary hover:text-text-primary'}"
+            class="px-2.5 py-1 text-xs font-medium rounded-md transition-colors
+              {selectedService === svc ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
           >
             {svc}
           </button>
         {/each}
       </div>
-      <div class="w-px h-4 bg-border"></div>
+      <div class="w-px h-4 bg-border/50 mx-1"></div>
     {/if}
-    <button
-      onclick={toggleFollow}
-      class="px-2 py-1 text-xs rounded border transition-colors
-        {following ? 'border-success text-success' : 'border-border text-text-secondary hover:text-text-primary'}"
-    >
-      {following ? 'Following' : 'Paused'}
+    <div class="flex items-center gap-1 bg-surface-3/40 rounded-lg p-0.5">
+      <button onclick={toggleFollow}
+        class="{btnBase} {following ? 'bg-surface-2 text-success shadow-sm' : btnInactive}">
+        <span class="inline-flex items-center gap-1">
+          {#if following}<span class="w-1.5 h-1.5 rounded-full bg-success"></span>{/if}
+          {following ? 'Following' : 'Paused'}
+        </span>
+      </button>
+      <button onclick={clear} class="{btnBase} {btnInactive}">Clear</button>
+      <button onclick={() => showTimestamps = !showTimestamps}
+        class="{btnBase} {showTimestamps ? 'bg-surface-2 text-accent shadow-sm' : btnInactive}">
+        Timestamps
+      </button>
+    </div>
+    <button onclick={downloadLogs} class="{btnBase} {btnInactive} ml-1">
+      <span class="inline-flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+        Download
+      </span>
     </button>
-    <button onclick={clear} class="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary transition-colors">
-      Clear
-    </button>
-    <button
-      onclick={() => showTimestamps = !showTimestamps}
-      class="px-2 py-1 text-xs rounded border transition-colors
-        {showTimestamps ? 'border-accent text-accent' : 'border-border text-text-secondary hover:text-text-primary'}"
-    >
-      Timestamps
-    </button>
-    <button onclick={downloadLogs} class="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary transition-colors">
-      Download
-    </button>
-    <span class="ml-auto text-xs text-text-muted">{lines.length} lines</span>
+    <span class="ml-auto text-xs text-text-muted tabular-nums">{lines.length} lines</span>
   </div>
 
   <div
     bind:this={container}
-    class="flex-1 overflow-y-auto bg-surface-0 border border-t-0 border-border rounded-b-lg font-mono text-xs p-3 space-y-px"
+    class="flex-1 overflow-y-auto bg-[#0c0c0c] light:bg-[#1a1a2e] font-mono text-[13px] leading-5 p-4 selection:bg-accent/30"
   >
-    {#each lines as line}
-      <div class="whitespace-pre-wrap break-all {line.stream === 'stderr' ? 'text-danger' : 'text-text-primary'}">
-        {#if showTimestamps && line.ts}<span class="text-text-muted mr-2">{line.ts}</span>{/if}<span>{line.line}</span>
-      </div>
-    {/each}
+    {#if lines.length === 0}
+      <div class="flex items-center justify-center h-full text-[#555] text-sm">Waiting for logs...</div>
+    {:else}
+      {#each lines as line}
+        <div class="whitespace-pre-wrap break-all py-px hover:bg-white/[0.03] {line.stream === 'stderr' ? 'text-red-400' : 'text-[#d4d4d4] light:text-[#c8c8d8]'}">
+          {#if showTimestamps && line.ts}<span class="text-[#555] mr-3 select-none">{line.ts}</span>{/if}<span>{line.line}</span>
+        </div>
+      {/each}
+    {/if}
   </div>
 </div>

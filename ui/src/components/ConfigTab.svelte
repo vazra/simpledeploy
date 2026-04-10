@@ -135,15 +135,15 @@
     <Skeleton type="card" count={3} />
   </div>
 {:else}
-  <div class="flex gap-1 bg-surface-1 rounded-lg p-1 w-fit mb-4">
+  <div class="flex gap-0.5 bg-surface-3/40 rounded-lg p-0.5 w-fit mb-4">
     <button
-      class="px-3 py-1.5 text-xs rounded-md transition-colors
-        {mode === 'visual' ? 'bg-surface-3 text-text-primary' : 'text-text-secondary hover:text-text-primary'}"
+      class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors
+        {mode === 'visual' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
       onclick={() => switchMode('visual')}
     >Visual</button>
     <button
-      class="px-3 py-1.5 text-xs rounded-md transition-colors
-        {mode === 'yaml' ? 'bg-surface-3 text-text-primary' : 'text-text-secondary hover:text-text-primary'}"
+      class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors
+        {mode === 'yaml' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
       onclick={() => switchMode('yaml')}
     >YAML</button>
   </div>
@@ -157,28 +157,28 @@
     }} />
   {/if}
 
-  <div class="sticky bottom-0 bg-surface-0 border-t border-border py-3 mt-4 flex justify-end">
+  <div class="sticky bottom-0 bg-surface-0/80 backdrop-blur-sm border-t border-border/50 py-3 mt-4 flex justify-end">
     <Button onclick={handleSave} loading={saving} disabled={mode === 'visual' && hasValidationErrors}>Save &amp; Deploy</Button>
   </div>
 
   {#if versions.length > 0}
-    <div class="bg-surface-2 border border-border rounded-lg p-4 mt-4">
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mt-4">
       <h3 class="text-sm font-semibold text-text-primary mb-3">Deploy History</h3>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead><tr class="border-b border-border">
-            <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Version</th>
-            <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Hash</th>
-            <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Deployed</th>
-            <th class="py-2 px-3"></th>
+          <thead><tr class="border-b border-border/50">
+            <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Version</th>
+            <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Hash</th>
+            <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Deployed</th>
+            <th class="py-3 px-4"></th>
           </tr></thead>
-          <tbody class="divide-y divide-border-muted">
+          <tbody class="divide-y divide-border/30">
             {#each versions as v}
-              <tr class="hover:bg-surface-1">
-                <td class="py-2 px-3">v{v.version}</td>
-                <td class="py-2 px-3 font-mono text-xs">{v.hash?.slice(0, 12)}</td>
-                <td class="py-2 px-3">{v.created_at ? new Date(v.created_at).toLocaleString() : '-'}</td>
-                <td class="py-2 px-3">
+              <tr class="hover:bg-surface-hover">
+                <td class="py-3 px-4">v{v.version}</td>
+                <td class="py-3 px-4 font-mono text-xs">{v.hash?.slice(0, 12)}</td>
+                <td class="py-3 px-4">{v.created_at ? new Date(v.created_at).toLocaleString() : '-'}</td>
+                <td class="py-3 px-4">
                   <Button variant="secondary" size="sm" onclick={() => rollbackTarget = v.id}>Rollback</Button>
                 </td>
               </tr>

@@ -27,6 +27,7 @@
 
   let filterStatus = $state('all')
   let sortBy = $state('name')
+  let searchQuery = $state('')
 
   // Deploy form
   let showDeployPanel = $state(false)
@@ -169,6 +170,10 @@
 
   let filteredApps = $derived.by(() => {
     let result = apps
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase()
+      result = result.filter((a) => (a.Name || '').toLowerCase().includes(q) || (a.Slug || '').toLowerCase().includes(q))
+    }
     if (filterStatus !== 'all') {
       result = result.filter((a) => a.Status === filterStatus)
     }
@@ -190,7 +195,7 @@
 <Layout>
   {#if loadError}
     <div class="flex flex-col items-center justify-center py-20 text-center">
-      <div class="w-12 h-12 rounded-full bg-red-900/30 flex items-center justify-center mb-4">
+      <div class="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
         <svg class="w-6 h-6 text-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
         </svg>
@@ -205,10 +210,11 @@
     <div class="grid grid-cols-3 gap-3 mb-4">
       {#each Array(3) as _}<Skeleton type="card" />{/each}
     </div>
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-2 gap-4">
       {#each Array(2) as _}<Skeleton type="chart" />{/each}
     </div>
   {:else}
+    <div class="animate-fade-in-up">
     <!-- System Health -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
       <StatCard
@@ -227,7 +233,7 @@
     </div>
 
     <!-- App Summary -->
-    <div class="grid grid-cols-3 gap-3 mb-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
       <StatCard label="Total Apps" value={apps.length} />
       <StatCard label="Running" value={runningCount} color="text-success" />
       <button onclick={() => filterStatus = filterStatus === 'stopped' ? 'all' : 'stopped'} class="text-left">
@@ -236,16 +242,16 @@
     </div>
 
     <!-- Main Content: Apps + Sidebar panels -->
-    <div class="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-6">
       <!-- Apps Grid (3/5) -->
-      <div class="xl:col-span-3">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-base font-semibold text-text-primary">Applications</h2>
+      <div class="lg:col-span-3">
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <h2 class="text-lg font-semibold text-text-primary tracking-tight flex-1 min-w-0">Applications</h2>
           <div class="flex items-center gap-2">
             <Button size="sm" onclick={() => showDeployPanel = true}>Deploy App</Button>
             <select
               bind:value={filterStatus}
-              class="text-xs bg-surface-2 border border-border rounded-md px-2 py-1 text-text-secondary"
+              class="text-xs bg-surface-2 border border-border/50 rounded-lg px-3 py-1.5 text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent/30"
             >
               <option value="all">All</option>
               <option value="running">Running</option>
@@ -254,7 +260,7 @@
             </select>
             <select
               bind:value={sortBy}
-              class="text-xs bg-surface-2 border border-border rounded-md px-2 py-1 text-text-secondary"
+              class="text-xs bg-surface-2 border border-border/50 rounded-lg px-3 py-1.5 text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent/30"
             >
               <option value="name">Name</option>
               <option value="status">Status</option>
@@ -263,12 +269,30 @@
           </div>
         </div>
 
+        <div class="relative mb-4">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+          </svg>
+          <input
+            bind:value={searchQuery}
+            placeholder="Search apps..."
+            class="w-full pl-10 pr-4 py-2 bg-surface-2 border border-border/50 rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/30"
+          />
+        </div>
+
         {#if apps.length === 0}
-          <div class="bg-surface-2 border border-border rounded-lg p-8 text-center">
-            <p class="text-text-secondary text-sm">No apps deployed yet.</p>
+          <div class="bg-surface-2 rounded-xl p-12 shadow-sm border border-border/50 text-center">
+            <div class="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center mx-auto mb-4">
+              <svg class="w-6 h-6 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </div>
+            <p class="text-text-primary font-medium mb-1">No apps deployed yet</p>
+            <p class="text-sm text-text-muted mb-4">Deploy your first app to get started</p>
+            <Button size="sm" onclick={() => showDeployPanel = true}>Deploy App</Button>
           </div>
         {:else}
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             {#each filteredApps as app}
               <AppCard {app} metrics={appMetricsMap[app.Slug]} />
             {/each}
@@ -277,9 +301,9 @@
       </div>
 
       <!-- Side Panels (2/5) -->
-      <div class="xl:col-span-2 flex flex-col gap-4">
+      <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-4 lg:gap-5">
         <!-- Active Alerts -->
-        <div class="bg-surface-2 border border-border rounded-lg p-4">
+        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-semibold text-text-primary">Active Alerts</h3>
             <a href="#/alerts" class="text-xs text-accent hover:underline">View all</a>
@@ -300,7 +324,7 @@
         </div>
 
         <!-- Recent Backups -->
-        <div class="bg-surface-2 border border-border rounded-lg p-4">
+        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-semibold text-text-primary">Recent Backups</h3>
             <a href="#/backups" class="text-xs text-accent hover:underline">View all</a>
@@ -322,7 +346,7 @@
         </div>
 
         <!-- Alert History (recent) -->
-        <div class="bg-surface-2 border border-border rounded-lg p-4">
+        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-semibold text-text-primary">Alert History</h3>
           </div>
@@ -345,13 +369,13 @@
 
     <!-- Charts -->
     <div class="mb-3 flex items-center justify-between">
-      <h2 class="text-base font-semibold text-text-primary">System Trends</h2>
+      <h2 class="text-lg font-semibold text-text-primary tracking-tight">System Trends</h2>
       <div class="flex gap-1">
         {#each Object.keys(rangeMs) as range}
           <button
             onclick={() => { timeRange = range; loadDashboard() }}
             class="px-2 py-1 text-xs rounded-md border transition-colors
-              {timeRange === range ? 'border-accent text-accent' : 'border-border text-text-secondary hover:text-text-primary'}"
+              {timeRange === range ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
           >
             {range}
           </button>
@@ -359,42 +383,43 @@
       </div>
     </div>
     {#if cpuHistory.length > 0}
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <MetricsChart data={cpuHistory} label="CPU Usage" color="#58a6ff" unit="%" />
-        <MetricsChart data={memHistory} label="Memory Usage" color="#3fb950" unit="%" />
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MetricsChart data={cpuHistory} label="CPU Usage" color="#3b82f6" unit="%" />
+        <MetricsChart data={memHistory} label="Memory Usage" color="#22c55e" unit="%" />
       </div>
     {:else}
-      <div class="bg-surface-2 border border-border rounded-lg p-8 text-center">
+      <div class="bg-surface-2 rounded-xl p-12 shadow-sm border border-border/50 text-center">
         <p class="text-text-secondary text-sm">No metrics data available.</p>
       </div>
     {/if}
+    </div>
   {/if}
 
   <SlidePanel title="Deploy App" open={showDeployPanel} onclose={() => showDeployPanel = false}>
     <form onsubmit={(e) => { e.preventDefault(); handleDeploy() }} class="flex flex-col gap-4">
       <div>
-        <label class="block text-xs font-medium text-text-secondary mb-1.5">App Name</label>
+        <label class="block text-xs font-medium text-text-muted mb-2">App Name</label>
         <input
           bind:value={deployName}
           required
           placeholder="my-app"
-          class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50"
+          class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
         />
         <p class="text-xs text-text-muted mt-1">Lowercase letters, numbers, hyphens</p>
       </div>
 
       <div>
-        <label class="block text-xs font-medium text-text-secondary mb-1.5">Compose File</label>
+        <label class="block text-xs font-medium text-text-muted mb-2">Compose File</label>
         <div class="flex gap-1 mb-2">
           <button
             type="button"
             onclick={() => deployInputMode = 'paste'}
-            class="px-2 py-1 text-xs rounded border transition-colors {deployInputMode === 'paste' ? 'border-accent text-accent' : 'border-border text-text-secondary'}"
+            class="px-2 py-1 text-xs rounded border transition-colors {deployInputMode === 'paste' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
           >Paste</button>
           <button
             type="button"
             onclick={() => deployInputMode = 'upload'}
-            class="px-2 py-1 text-xs rounded border transition-colors {deployInputMode === 'upload' ? 'border-accent text-accent' : 'border-border text-text-secondary'}"
+            class="px-2 py-1 text-xs rounded border transition-colors {deployInputMode === 'upload' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
           >Upload</button>
         </div>
 
@@ -404,7 +429,7 @@
             required
             rows="12"
             placeholder="version: '3'&#10;services:&#10;  web:&#10;    image: nginx:latest&#10;    ports:&#10;      - '80:80'"
-            class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/50 resize-y"
+            class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 resize-y"
           ></textarea>
         {:else}
           <input

@@ -68,8 +68,8 @@
 </script>
 
 <Layout>
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-lg font-bold text-text-primary">Users & API Keys</h1>
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h1 class="text-xl font-semibold tracking-tight text-text-primary">Users & API Keys</h1>
   </div>
 
   {#if loading}
@@ -79,8 +79,8 @@
   {:else}
     <!-- New Key Display -->
     {#if newKey}
-      <div class="bg-green-900/20 border border-success rounded-lg px-4 py-3 mb-4 light:bg-green-50">
-        <p class="text-xs text-success mb-2">New key created (copy now, shown once):</p>
+      <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-5 py-4 mb-6 light:bg-emerald-50">
+        <p class="text-xs text-emerald-400 light:text-emerald-700 mb-2">New key created (copy now, shown once):</p>
         <div class="flex items-center gap-2">
           <code class="flex-1 text-xs bg-surface-1 text-text-primary px-3 py-2 rounded break-all font-mono">{newKey}</code>
           <Button size="sm" variant="secondary" onclick={copyKey}>Copy</Button>
@@ -89,31 +89,31 @@
     {/if}
 
     <!-- Users -->
-    <div class="bg-surface-2 border border-border rounded-lg p-4 mb-4">
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-sm font-semibold text-text-primary">Users</h3>
         <Button size="sm" variant="secondary" onclick={() => showUserPanel = true}>Add User</Button>
       </div>
       {#if users.length === 0}
-        <p class="text-sm text-text-secondary">No users.</p>
+        <p class="text-sm text-text-muted">No users.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead><tr class="border-b border-border">
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">ID</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Username</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Role</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Created</th>
-              <th class="py-2 px-3"></th>
+            <thead><tr class="border-b border-border/50">
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">ID</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Username</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Role</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Created</th>
+              <th class="py-3 px-4"></th>
             </tr></thead>
-            <tbody class="divide-y divide-border-muted">
+            <tbody class="divide-y divide-border/30">
               {#each users as u}
-                <tr class="hover:bg-surface-1">
-                  <td class="py-2 px-3">{u.id}</td>
-                  <td class="py-2 px-3 font-medium">{u.username}</td>
-                  <td class="py-2 px-3"><Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge></td>
-                  <td class="py-2 px-3 text-text-secondary">{u.created_at ? new Date(u.created_at).toLocaleDateString() : ''}</td>
-                  <td class="py-2 px-3"><Button variant="danger" size="sm" onclick={() => delUser(u.id)}>Delete</Button></td>
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-3 px-4">{u.id}</td>
+                  <td class="py-3 px-4 font-medium">{u.username}</td>
+                  <td class="py-3 px-4"><Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge></td>
+                  <td class="py-3 px-4 text-text-secondary">{u.created_at ? new Date(u.created_at).toLocaleDateString() : ''}</td>
+                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => delUser(u.id)}>Delete</Button></td>
                 </tr>
               {/each}
             </tbody>
@@ -123,27 +123,27 @@
     </div>
 
     <!-- API Keys -->
-    <div class="bg-surface-2 border border-border rounded-lg p-4">
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
       <div class="flex items-center justify-between mb-3">
         <h3 class="text-sm font-semibold text-text-primary">API Keys</h3>
         <Button size="sm" variant="secondary" onclick={() => showKeyPanel = true}>Create Key</Button>
       </div>
       {#if keys.length === 0}
-        <p class="text-sm text-text-secondary">No API keys.</p>
+        <p class="text-sm text-text-muted">No API keys.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead><tr class="border-b border-border">
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Name</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Created</th>
-              <th class="py-2 px-3"></th>
+            <thead><tr class="border-b border-border/50">
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Name</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Created</th>
+              <th class="py-3 px-4"></th>
             </tr></thead>
-            <tbody class="divide-y divide-border-muted">
+            <tbody class="divide-y divide-border/30">
               {#each keys as k}
-                <tr class="hover:bg-surface-1">
-                  <td class="py-2 px-3 font-medium">{k.name}</td>
-                  <td class="py-2 px-3 text-text-secondary">{new Date(k.created_at).toLocaleString()}</td>
-                  <td class="py-2 px-3"><Button variant="danger" size="sm" onclick={() => revokeKey(k.id)}>Revoke</Button></td>
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-3 px-4 font-medium">{k.name}</td>
+                  <td class="py-3 px-4 text-text-secondary">{new Date(k.created_at).toLocaleString()}</td>
+                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => revokeKey(k.id)}>Revoke</Button></td>
                 </tr>
               {/each}
             </tbody>
@@ -157,16 +157,16 @@
   <SlidePanel title="Add User" open={showUserPanel} onclose={() => showUserPanel = false}>
     <form onsubmit={(e) => { e.preventDefault(); createUser() }} class="flex flex-col gap-4">
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Username</label>
-        <input bind:value={uName} required class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary focus:ring-2 focus:ring-accent/50" />
+        <label class="block text-xs text-text-muted mb-2">Username</label>
+        <input bind:value={uName} required class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
       </div>
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Password</label>
-        <input type="password" bind:value={uPass} required class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary focus:ring-2 focus:ring-accent/50" />
+        <label class="block text-xs text-text-muted mb-2">Password</label>
+        <input type="password" bind:value={uPass} required class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
       </div>
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Role</label>
-        <select bind:value={uRole} class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary">
+        <label class="block text-xs text-text-muted mb-2">Role</label>
+        <select bind:value={uRole} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
           <option>viewer</option><option>admin</option><option>super_admin</option>
         </select>
       </div>
@@ -178,8 +178,8 @@
   <SlidePanel title="Create API Key" open={showKeyPanel} onclose={() => showKeyPanel = false}>
     <form onsubmit={(e) => { e.preventDefault(); createKey() }} class="flex flex-col gap-4">
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Key Name</label>
-        <input bind:value={kName} required class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary focus:ring-2 focus:ring-accent/50" />
+        <label class="block text-xs text-text-muted mb-2">Key Name</label>
+        <input bind:value={kName} required class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
       </div>
       <Button type="submit">Create Key</Button>
     </form>

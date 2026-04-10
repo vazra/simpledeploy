@@ -2,17 +2,17 @@
   import { toasts } from '../lib/stores/toast.js'
 
   const typeStyles = {
-    success: 'bg-green-900/80 border-success text-success',
-    error: 'bg-red-900/80 border-danger text-danger',
-    warning: 'bg-yellow-900/80 border-warning text-warning',
-    info: 'bg-blue-900/80 border-accent text-accent',
+    success: 'bg-surface-2/90 border-emerald-500/30 text-emerald-400',
+    error: 'bg-surface-2/90 border-red-500/30 text-red-400',
+    warning: 'bg-surface-2/90 border-amber-500/30 text-amber-400',
+    info: 'bg-surface-2/90 border-blue-500/30 text-blue-400',
   }
 
   const lightTypeStyles = {
-    success: 'light:bg-green-50 light:border-success light:text-green-800',
-    error: 'light:bg-red-50 light:border-danger light:text-red-800',
-    warning: 'light:bg-yellow-50 light:border-warning light:text-yellow-800',
-    info: 'light:bg-blue-50 light:border-accent light:text-blue-800',
+    success: 'light:bg-white/90 light:border-emerald-200 light:text-emerald-700',
+    error: 'light:bg-white/90 light:border-red-200 light:text-red-700',
+    warning: 'light:bg-white/90 light:border-amber-200 light:text-amber-700',
+    info: 'light:bg-white/90 light:border-blue-200 light:text-blue-700',
   }
 
   const icons = {
@@ -26,7 +26,7 @@
 <div class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
   {#each $toasts as toast (toast.id)}
     <div
-      class="flex items-start gap-2 px-4 py-3 rounded-lg border text-sm shadow-lg backdrop-blur-sm animate-slide-in {typeStyles[toast.type]} {lightTypeStyles[toast.type]}"
+      class="flex items-start gap-2 px-4 py-3 rounded-xl border text-sm shadow-lg backdrop-blur-md animate-slide-in {typeStyles[toast.type]} {lightTypeStyles[toast.type]}"
       role="alert"
     >
       <svg class="w-5 h-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">

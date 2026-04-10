@@ -188,13 +188,13 @@
 </script>
 
 <Layout>
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-lg font-bold text-text-primary">Docker</h1>
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h1 class="text-xl font-semibold tracking-tight text-text-primary">Docker</h1>
   </div>
 
   {#if dockerInfo}
-    <div class="bg-surface-2 border border-border rounded-lg p-4 mb-6">
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-8">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <div>
           <div class="text-xs font-medium text-text-secondary">Version</div>
           <div class="text-sm font-semibold text-text-primary">{dockerInfo.server_version}</div>
@@ -228,11 +228,11 @@
     </div>
   {/if}
 
-  <div class="flex gap-1 mb-6 border-b border-border">
+  <div class="flex overflow-x-auto gap-1 mb-6 border-b border-border/50">
     {#each [['cleanup', 'Disk Cleanup'], ['images', 'Images'], ['netsvols', 'Networks & Volumes']] as [key, label]}
       <button
         onclick={() => switchTab(key)}
-        class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {activeTab === key ? 'border-accent text-accent' : 'border-transparent text-text-secondary hover:text-text-primary'}"
+        class="px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors {activeTab === key ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text-primary'}"
       >{label}</button>
     {/each}
   </div>
@@ -244,9 +244,9 @@
   {:else if activeTab === 'cleanup'}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       {#each diskCards() as card}
-        <div class="bg-surface-2 border border-border rounded-lg p-4">
+        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
           <div class="text-xs font-medium text-text-secondary mb-1">{card.label}</div>
-          <div class="text-xl font-bold text-text-primary">{formatBytes(card.size)}</div>
+          <div class="text-2xl font-semibold text-text-primary">{formatBytes(card.size)}</div>
           <div class="text-xs text-text-secondary mb-3">{card.count} items</div>
           <Button size="sm" variant="secondary" onclick={card.action}>Prune</Button>
         </div>
@@ -258,30 +258,30 @@
     <div class="flex justify-end mb-4">
       <Button size="sm" variant="secondary" onclick={() => confirmPrune('Remove Dangling', 'Remove all dangling images?', () => runPrune(async () => { const res = await api.dockerPruneImages(); pruneToast(res, 'ImagesDeleted', 'Images'); await loadImages() }))}>Remove Dangling</Button>
     </div>
-    <div class="bg-surface-2 border border-border rounded-lg p-4">
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
       {#if images.length === 0}
-        <p class="text-sm text-text-secondary">No images found.</p>
+        <p class="text-sm text-text-muted">No images found.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead><tr class="border-b border-border">
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Repository</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Tag</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Image ID</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Size</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Created</th>
-              <th class="py-2 px-3"></th>
+            <thead><tr class="border-b border-border/50">
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Repository</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Tag</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Image ID</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Size</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Created</th>
+              <th class="py-3 px-4"></th>
             </tr></thead>
-            <tbody class="divide-y divide-border-muted">
+            <tbody class="divide-y divide-border/30">
               {#each images as img}
                 {@const parsed = parseRepoTag(img)}
-                <tr class="hover:bg-surface-1">
-                  <td class="py-2 px-3 font-medium">{parsed.repo}</td>
-                  <td class="py-2 px-3 text-text-secondary">{parsed.tag}</td>
-                  <td class="py-2 px-3 text-text-secondary font-mono text-xs">{shortId(img.Id)}</td>
-                  <td class="py-2 px-3 text-text-secondary">{formatBytes(img.Size)}</td>
-                  <td class="py-2 px-3 text-text-secondary">{formatDate(img.Created)}</td>
-                  <td class="py-2 px-3"><Button variant="danger" size="sm" onclick={() => imageToDelete = img.Id}>Delete</Button></td>
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-3 px-4 font-medium">{parsed.repo}</td>
+                  <td class="py-3 px-4 text-text-secondary">{parsed.tag}</td>
+                  <td class="py-3 px-4 text-text-secondary font-mono text-xs">{shortId(img.Id)}</td>
+                  <td class="py-3 px-4 text-text-secondary">{formatBytes(img.Size)}</td>
+                  <td class="py-3 px-4 text-text-secondary">{formatDate(img.Created)}</td>
+                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => imageToDelete = img.Id}>Delete</Button></td>
                 </tr>
               {/each}
             </tbody>
@@ -291,28 +291,28 @@
     </div>
 
   {:else if activeTab === 'netsvols'}
-    <h2 class="text-sm font-semibold text-text-primary mb-3">Networks</h2>
-    <div class="bg-surface-2 border border-border rounded-lg p-4 mb-6">
+    <h2 class="text-base font-medium text-text-primary mb-4">Networks</h2>
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
       {#if networks.length === 0}
-        <p class="text-sm text-text-secondary">No networks found.</p>
+        <p class="text-sm text-text-muted">No networks found.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead><tr class="border-b border-border">
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Name</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Driver</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Scope</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Created</th>
-              <th class="py-2 px-3"></th>
+            <thead><tr class="border-b border-border/50">
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Name</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Driver</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Scope</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Created</th>
+              <th class="py-3 px-4"></th>
             </tr></thead>
-            <tbody class="divide-y divide-border-muted">
+            <tbody class="divide-y divide-border/30">
               {#each networks as net}
-                <tr class="hover:bg-surface-1">
-                  <td class="py-2 px-3 font-medium">{net.Name}</td>
-                  <td class="py-2 px-3 text-text-secondary">{net.Driver}</td>
-                  <td class="py-2 px-3 text-text-secondary">{net.Scope}</td>
-                  <td class="py-2 px-3 text-text-secondary">{formatDate(net.Created)}</td>
-                  <td class="py-2 px-3">
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-3 px-4 font-medium">{net.Name}</td>
+                  <td class="py-3 px-4 text-text-secondary">{net.Driver}</td>
+                  <td class="py-3 px-4 text-text-secondary">{net.Scope}</td>
+                  <td class="py-3 px-4 text-text-secondary">{formatDate(net.Created)}</td>
+                  <td class="py-3 px-4">
                     {#if systemNetworks.includes(net.Name)}
                       <Button variant="danger" size="sm" disabled>Delete</Button>
                     {:else}
@@ -328,28 +328,28 @@
     </div>
 
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-sm font-semibold text-text-primary">Volumes</h2>
+      <h2 class="text-base font-medium text-text-primary">Volumes</h2>
       <Button size="sm" variant="secondary" onclick={() => pruneVolumesConfirm = true}>Prune Unused</Button>
     </div>
-    <div class="bg-surface-2 border border-border rounded-lg p-4">
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
       {#if volumes.length === 0}
-        <p class="text-sm text-text-secondary">No volumes found.</p>
+        <p class="text-sm text-text-muted">No volumes found.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead><tr class="border-b border-border">
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Name</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Driver</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Mountpoint</th>
-              <th class="py-2 px-3"></th>
+            <thead><tr class="border-b border-border/50">
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Name</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Driver</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Mountpoint</th>
+              <th class="py-3 px-4"></th>
             </tr></thead>
-            <tbody class="divide-y divide-border-muted">
+            <tbody class="divide-y divide-border/30">
               {#each volumes as vol}
-                <tr class="hover:bg-surface-1">
-                  <td class="py-2 px-3 font-medium font-mono text-xs">{vol.Name}</td>
-                  <td class="py-2 px-3 text-text-secondary">{vol.Driver}</td>
-                  <td class="py-2 px-3 text-text-secondary text-xs truncate max-w-xs">{vol.Mountpoint}</td>
-                  <td class="py-2 px-3"><Button variant="danger" size="sm" onclick={() => volumeToDelete = vol.Name}>Delete</Button></td>
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-3 px-4 font-medium font-mono text-xs">{vol.Name}</td>
+                  <td class="py-3 px-4 text-text-secondary">{vol.Driver}</td>
+                  <td class="py-3 px-4 text-text-secondary text-xs truncate max-w-xs">{vol.Mountpoint}</td>
+                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => volumeToDelete = vol.Name}>Delete</Button></td>
                 </tr>
               {/each}
             </tbody>
@@ -361,7 +361,7 @@
 
   {#if pruning}
     <div class="fixed inset-0 z-50 flex items-center justify-center" role="status">
-      <div class="absolute inset-0 bg-black/60"></div>
+      <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
       <div class="relative bg-surface-2 border border-border rounded-lg p-6 flex flex-col items-center gap-3">
         <svg class="animate-spin h-8 w-8 text-accent" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

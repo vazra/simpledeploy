@@ -1,24 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  --color-surface-0: #0f1117;
-  --color-surface-1: #161b22;
-  --color-surface-2: #1c1f26;
-  --color-surface-3: #21262d;
-  --color-border: #2d3139;
-  --color-border-muted: #21262d;
-  --color-text-primary: #e1e4e8;
-  --color-text-secondary: #8b949e;
-  --color-text-muted: #484f58;
-  --color-accent: #58a6ff;
-  --color-success: #3fb950;
-  --color-danger: #f85149;
-  --color-warning: #d29922;
-  --color-info: #58a6ff;
-  --color-input-bg: #0d1117;
-  --color-btn-primary: #238636;
-  --color-btn-primary-hover: #2ea043;
-  --color-btn-danger: #da3633;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --color-surface-0: #09090b;
+  --color-surface-1: #111111;
+  --color-surface-2: #171717;
+  --color-surface-3: #262626;
+  --color-surface-hover: #1e1e1e;
+  --color-border: #262626;
+  --color-border-muted: #1a1a1a;
+  --color-text-primary: #ededed;
+  --color-text-secondary: #a1a1a1;
+  --color-text-muted: #666666;
+  --color-accent: #3b82f6;
+  --color-accent-muted: #3b82f620;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+  --color-warning: #eab308;
+  --color-info: #3b82f6;
+  --color-input-bg: #09090b;
+  --color-btn-primary: #ededed;
+  --color-btn-primary-hover: #ffffff;
+  --color-btn-danger: #dc2626;
 }
 
 @custom-variant light {
@@ -27,25 +30,28 @@
   }
 }
 
-@theme light {
-  --color-surface-0: #ffffff;
-  --color-surface-1: #f6f8fa;
+/* Light theme: override CSS custom properties when .light class is on root */
+.light {
+  --color-surface-0: #f4f4f5;
+  --color-surface-1: #f9f9fa;
   --color-surface-2: #ffffff;
-  --color-surface-3: #d1d5db;
-  --color-border: #d0d7de;
-  --color-border-muted: #e5e7eb;
-  --color-text-primary: #1f2937;
-  --color-text-secondary: #656d76;
-  --color-text-muted: #9ca3af;
-  --color-accent: #0969da;
-  --color-success: #1a7f37;
-  --color-danger: #cf222e;
-  --color-warning: #9a6700;
-  --color-info: #0969da;
-  --color-input-bg: #f6f8fa;
-  --color-btn-primary: #1f883d;
-  --color-btn-primary-hover: #1a7f37;
-  --color-btn-danger: #cf222e;
+  --color-surface-3: #e8e8ea;
+  --color-surface-hover: #f0f0f1;
+  --color-border: #e0e0e2;
+  --color-border-muted: #ebebed;
+  --color-text-primary: #0a0a0a;
+  --color-text-secondary: #737373;
+  --color-text-muted: #a3a3a3;
+  --color-accent: #2563eb;
+  --color-accent-muted: #2563eb15;
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+  --color-warning: #ca8a04;
+  --color-info: #2563eb;
+  --color-input-bg: #fafafa;
+  --color-btn-primary: #171717;
+  --color-btn-primary-hover: #000000;
+  --color-btn-danger: #dc2626;
 }
 
 @keyframes slide-in {
@@ -54,7 +60,7 @@
 }
 
 .animate-slide-in {
-  animation: slide-in 0.2s ease-out;
+  animation: slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes slide-panel {
@@ -63,5 +69,43 @@
 }
 
 .animate-slide-panel {
-  animation: slide-panel 0.2s ease-out;
+  animation: slide-panel 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, var(--color-surface-3) 0%, var(--color-surface-hover) 50%, var(--color-surface-3) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
 }

@@ -5,6 +5,7 @@
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
 
+  let { forceExpanded = false } = $props()
   let currentPath = $state(window.location.hash.slice(1) || '/')
 
   const nav = [
@@ -41,41 +42,44 @@
   }
 </script>
 
-<aside class="flex flex-col h-screen bg-surface-1 border-r border-border transition-all duration-200 {$sidebarExpanded ? 'w-52' : 'w-14'}">
-  <div class="flex items-center h-14 px-3 border-b border-border">
+<aside class="flex flex-col h-screen sticky top-0 shrink-0 bg-surface-1 border-r border-border/30 transition-all duration-200 {forceExpanded || $sidebarExpanded ? 'w-56' : 'w-16'}">
+  <div class="flex items-center h-16 px-4 border-b border-border/30">
     <div class="flex items-center gap-2 overflow-hidden">
       <svg class="w-7 h-7 shrink-0 text-accent" viewBox="0 0 24 24" fill="currentColor">
         <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
       </svg>
-      {#if $sidebarExpanded}
-        <span class="text-sm font-semibold text-accent whitespace-nowrap">SimpleDeploy</span>
+      {#if forceExpanded || $sidebarExpanded}
+        <span class="text-sm font-semibold text-text-primary whitespace-nowrap">SimpleDeploy</span>
       {/if}
     </div>
   </div>
 
-  <nav class="flex-1 flex flex-col gap-0.5 py-2 px-2">
+  <nav class="flex-1 flex flex-col gap-1 py-3 px-3">
     {#each nav as item}
       <a
         href="#{item.path}"
-        class="flex items-center gap-2.5 px-2 py-2 rounded-md text-sm transition-colors
-          {isActive(item.path) ? 'bg-surface-3 text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/50'}"
-        title={$sidebarExpanded ? '' : item.label}
+        class="flex items-center gap-2.5 px-3 py-2.5 rounded-lg relative text-sm transition-colors
+          {isActive(item.path) ? 'bg-surface-3/50 text-text-primary font-medium' : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/30'}"
+        title={forceExpanded || $sidebarExpanded ? '' : item.label}
       >
+        {#if isActive(item.path)}
+          <span class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-accent rounded-full"></span>
+        {/if}
         <span class="shrink-0">{@html item.icon}</span>
-        {#if $sidebarExpanded}
+        {#if forceExpanded || $sidebarExpanded}
           <span class="whitespace-nowrap">{item.label}</span>
         {/if}
       </a>
     {/each}
   </nav>
 
-  <div class="flex flex-col gap-1 p-2 border-t border-border">
+  <div class="flex flex-col gap-1 p-3 border-t border-border/30">
     <div class="flex items-center {$sidebarExpanded ? 'justify-between' : 'justify-center'}">
       <ThemeToggle />
-      {#if $sidebarExpanded}
+      {#if forceExpanded || $sidebarExpanded}
         <button
           onclick={logout}
-          class="text-xs text-text-secondary hover:text-danger transition-colors"
+          class="text-xs text-text-muted hover:text-danger transition-colors"
         >
           Logout
         </button>
@@ -83,7 +87,7 @@
     </div>
     <button
       onclick={toggle}
-      class="flex items-center justify-center w-full py-1.5 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface-3/50 transition-colors"
+      class="flex items-center justify-center w-full py-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3/50 transition-colors"
       title={$sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
       aria-label="Toggle sidebar"
     >

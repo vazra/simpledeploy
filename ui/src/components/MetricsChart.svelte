@@ -11,11 +11,11 @@
   let chart
 
   function getGridColor(theme) {
-    return theme === 'light' ? '#e5e7eb' : '#21262d'
+    return theme === 'light' ? '#f0f0f0' : '#1a1a1a'
   }
 
   function getTickColor(theme) {
-    return theme === 'light' ? '#656d76' : '#8b949e'
+    return theme === 'light' ? '#737373' : '#666666'
   }
 
   function createChart(theme) {
@@ -80,8 +80,8 @@
   })
 </script>
 
-<div class="bg-surface-2 border border-border rounded-lg p-4">
-  <h4 class="text-xs font-medium text-text-secondary mb-3">{label}</h4>
+<div class="bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50">
+  <h4 class="text-xs font-medium text-text-secondary mb-4">{label}</h4>
   <div class="h-44 relative">
     <canvas bind:this={canvas}></canvas>
   </div>

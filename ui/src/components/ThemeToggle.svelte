@@ -13,7 +13,7 @@
 
 <button
   onclick={cycle}
-  class="relative flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors"
+  class="relative flex items-center justify-center w-8 h-8 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors"
   title="Theme: {$themePreference}"
   aria-label="Toggle theme"
 >
@@ -27,6 +27,6 @@
     </svg>
   {/if}
   {#if $themePreference === 'system'}
-    <span class="absolute -top-1 -right-1 w-2 h-2 bg-accent rounded-full"></span>
+    <span class="absolute -top-1 -right-1 w-1.5 h-1.5 bg-accent rounded-full ring-2 ring-surface-1"></span>
   {/if}
 </button>

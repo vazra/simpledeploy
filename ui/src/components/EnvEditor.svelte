@@ -39,7 +39,7 @@
   }
 </script>
 
-<div class="bg-surface-2 border border-border rounded-lg p-4">
+<div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
   <div class="flex items-center justify-between mb-3">
     <div>
       <h3 class="text-sm font-semibold text-text-primary">Environment Variables</h3>
@@ -48,7 +48,7 @@
     <div class="flex gap-2">
       <button
         onclick={() => showValues = !showValues}
-        class="px-2 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary transition-colors"
+        class="px-2 py-1 text-xs rounded-lg border border-border/50 text-text-secondary hover:text-text-primary transition-colors"
       >
         {showValues ? 'Hide values' : 'Show values'}
       </button>
@@ -56,21 +56,21 @@
   </div>
 
   {#if loading}
-    <p class="text-xs text-text-secondary">Loading...</p>
+    <p class="text-xs text-text-muted">Loading...</p>
   {:else}
     {#if vars.length > 0}
       <div class="overflow-x-auto mb-3">
         <table class="w-full text-sm">
           <thead>
-            <tr class="border-b border-border">
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-2 w-1/3">Key</th>
-              <th class="text-left text-xs font-medium text-text-secondary py-2 px-2">Value</th>
-              <th class="py-2 px-2 w-8"></th>
+            <tr class="border-b border-border/50">
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4 w-1/3">Key</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Value</th>
+              <th class="py-3 px-4 w-8"></th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-border-muted">
+          <tbody class="divide-y divide-border/30">
             {#each vars as v, i}
-              <tr class="hover:bg-surface-1">
+              <tr class="hover:bg-surface-hover">
                 <td class="py-1.5 px-2">
                   <input
                     type="text"
@@ -102,7 +102,7 @@
         </table>
       </div>
     {:else}
-      <p class="text-xs text-text-secondary mb-3">No environment variables. Add one below.</p>
+      <p class="text-xs text-text-muted mb-3">No environment variables. Add one below.</p>
     {/if}
 
     <div class="flex gap-2 mt-2">

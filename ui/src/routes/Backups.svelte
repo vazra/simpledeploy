@@ -69,20 +69,20 @@
 </script>
 
 <Layout>
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-lg font-bold text-text-primary">Backups</h1>
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h1 class="text-xl font-semibold tracking-tight text-text-primary">Backups</h1>
   </div>
 
   {#if loading}
     <Skeleton type="card" count={2} />
   {:else}
     <!-- App Selector -->
-    <div class="bg-surface-2 border border-border rounded-lg p-4 mb-4">
-      <label class="block text-xs text-text-secondary mb-1.5">Select App</label>
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
+      <label class="block text-xs text-text-muted mb-2">Select App</label>
       <select
         value={selectedApp}
         onchange={onAppChange}
-        class="w-full max-w-xs px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary"
+        class="w-full max-w-xs px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary"
       >
         <option value="">-- choose app --</option>
         {#each apps as app}<option value={app.Slug || app.slug}>{app.Name || app.Slug || app.slug}</option>{/each}
@@ -91,31 +91,31 @@
 
     {#if selectedApp}
       <!-- Backup Configs -->
-      <div class="bg-surface-2 border border-border rounded-lg p-4 mb-4">
+      <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-sm font-semibold text-text-primary">Backup Configs</h3>
           <Button size="sm" variant="secondary" onclick={() => showConfigPanel = true}>New Config</Button>
         </div>
         {#if configs.length === 0}
-          <p class="text-sm text-text-secondary">No backup configs.</p>
+          <p class="text-sm text-text-muted">No backup configs.</p>
         {:else}
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead><tr class="border-b border-border">
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Strategy</th>
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Target</th>
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Cron</th>
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Retention</th>
-                <th class="py-2 px-3"></th>
+              <thead><tr class="border-b border-border/50">
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Strategy</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Target</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Cron</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Retention</th>
+                <th class="py-3 px-4"></th>
               </tr></thead>
-              <tbody class="divide-y divide-border-muted">
+              <tbody class="divide-y divide-border/30">
                 {#each configs as c}
-                  <tr class="hover:bg-surface-1">
-                    <td class="py-2 px-3">{c.strategy}</td>
-                    <td class="py-2 px-3">{c.target}</td>
-                    <td class="py-2 px-3 font-mono text-xs">{c.cron_expr}</td>
-                    <td class="py-2 px-3">{c.retention_days}d</td>
-                    <td class="py-2 px-3"><Button variant="danger" size="sm" onclick={() => deleteConfig(c.id)}>Delete</Button></td>
+                  <tr class="hover:bg-surface-hover">
+                    <td class="py-3 px-4">{c.strategy}</td>
+                    <td class="py-3 px-4">{c.target}</td>
+                    <td class="py-3 px-4 font-mono text-xs">{c.cron_expr}</td>
+                    <td class="py-3 px-4">{c.retention_days}d</td>
+                    <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => deleteConfig(c.id)}>Delete</Button></td>
                   </tr>
                 {/each}
               </tbody>
@@ -125,31 +125,31 @@
       </div>
 
       <!-- Backup Runs -->
-      <div class="bg-surface-2 border border-border rounded-lg p-4">
+      <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-sm font-semibold text-text-primary">Backup Runs</h3>
           <Button size="sm" onclick={backupNow}>Backup Now</Button>
         </div>
         {#if runs.length === 0}
-          <p class="text-sm text-text-secondary">No backup runs.</p>
+          <p class="text-sm text-text-muted">No backup runs.</p>
         {:else}
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead><tr class="border-b border-border">
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">ID</th>
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Status</th>
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Started</th>
-                <th class="text-left text-xs font-medium text-text-secondary py-2 px-3">Finished</th>
-                <th class="py-2 px-3"></th>
+              <thead><tr class="border-b border-border/50">
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">ID</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Status</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Started</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Finished</th>
+                <th class="py-3 px-4"></th>
               </tr></thead>
-              <tbody class="divide-y divide-border-muted">
+              <tbody class="divide-y divide-border/30">
                 {#each runs as r}
-                  <tr class="hover:bg-surface-1">
-                    <td class="py-2 px-3">{r.id}</td>
-                    <td class="py-2 px-3"><Badge variant={r.status === 'completed' ? 'success' : 'danger'}>{r.status}</Badge></td>
-                    <td class="py-2 px-3">{r.started_at ? new Date(r.started_at).toLocaleString() : '-'}</td>
-                    <td class="py-2 px-3">{r.finished_at ? new Date(r.finished_at).toLocaleString() : '-'}</td>
-                    <td class="py-2 px-3"><Button variant="secondary" size="sm" onclick={() => restoreTarget = r.id}>Restore</Button></td>
+                  <tr class="hover:bg-surface-hover">
+                    <td class="py-3 px-4">{r.id}</td>
+                    <td class="py-3 px-4"><Badge variant={r.status === 'completed' ? 'success' : 'danger'}>{r.status}</Badge></td>
+                    <td class="py-3 px-4">{r.started_at ? new Date(r.started_at).toLocaleString() : '-'}</td>
+                    <td class="py-3 px-4">{r.finished_at ? new Date(r.finished_at).toLocaleString() : '-'}</td>
+                    <td class="py-3 px-4"><Button variant="secondary" size="sm" onclick={() => restoreTarget = r.id}>Restore</Button></td>
                   </tr>
                 {/each}
               </tbody>
@@ -168,24 +168,24 @@
   <SlidePanel title="New Backup Config" open={showConfigPanel} onclose={() => showConfigPanel = false}>
     <form onsubmit={(e) => { e.preventDefault(); createConfig() }} class="flex flex-col gap-4">
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Strategy</label>
-        <select bind:value={strategy} class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary">
+        <label class="block text-xs text-text-muted mb-2">Strategy</label>
+        <select bind:value={strategy} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
           <option>postgres</option><option>volume</option>
         </select>
       </div>
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Target</label>
-        <select bind:value={target} class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary">
+        <label class="block text-xs text-text-muted mb-2">Target</label>
+        <select bind:value={target} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
           <option>s3</option><option>local</option>
         </select>
       </div>
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Cron Schedule</label>
-        <input bind:value={cron} class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary" />
+        <label class="block text-xs text-text-muted mb-2">Cron Schedule</label>
+        <input bind:value={cron} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary" />
       </div>
       <div>
-        <label class="block text-xs text-text-secondary mb-1">Retention (days)</label>
-        <input type="number" bind:value={retention} class="w-full px-3 py-2 bg-input-bg border border-border rounded-md text-sm text-text-primary" />
+        <label class="block text-xs text-text-muted mb-2">Retention (days)</label>
+        <input type="number" bind:value={retention} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary" />
       </div>
       <Button type="submit">Create Config</Button>
     </form>
