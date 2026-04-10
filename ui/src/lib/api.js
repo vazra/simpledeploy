@@ -178,9 +178,16 @@ export const api = {
   dockerPruneBuildCache: () => request('POST', '/docker/prune/build-cache'),
   dockerPruneAll: () => request('POST', '/docker/prune/all'),
 
+  // WebSocket
+  deployLogsWs: (slug) => {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return new WebSocket(`${proto}//${window.location.host}/api/apps/${slug}/deploy-logs`)
+  },
+
   // System
   systemInfo: () => request('GET', '/system/info'),
-  systemPruneMetrics: (days) => request('POST', '/system/prune/metrics', { days }),
-  systemPruneRequestStats: (days) => request('POST', '/system/prune/request-stats', { days }),
+  systemStorageBreakdown: () => request('GET', '/system/storage-breakdown'),
+  systemPruneMetrics: (days, tier) => request('POST', '/system/prune/metrics', { days, tier }),
+  systemPruneRequestStats: (days, tier) => request('POST', '/system/prune/request-stats', { days, tier }),
   systemVacuum: () => request('POST', '/system/vacuum'),
 }
