@@ -29,6 +29,7 @@ type reconciler interface {
 	Reconcile(ctx context.Context) error
 	CancelOne(ctx context.Context, slug string) error
 	IsDeploying(slug string) bool
+	SubscribeDeployLog(slug string) (<-chan deployer.OutputLine, func(), bool)
 }
 
 func (s *Server) SetAppsDir(dir string) { s.appsDir = dir }

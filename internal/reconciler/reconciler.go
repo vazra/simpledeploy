@@ -50,6 +50,14 @@ func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *con
 	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret}
 }
 
+// SubscribeDeployLog returns a channel of deploy output lines for the given app slug.
+func (r *Reconciler) SubscribeDeployLog(slug string) (<-chan deployer.OutputLine, func(), bool) {
+	if d, ok := r.deployer.(*deployer.Deployer); ok {
+		return d.Tracker.Subscribe(slug)
+	}
+	return nil, nil, false
+}
+
 // Reconcile diffs the apps directory against the store and deploys/removes as needed.
 func (r *Reconciler) Reconcile(ctx context.Context) error {
 	desired, err := r.scanAppsDir()

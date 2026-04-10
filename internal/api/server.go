@@ -121,6 +121,8 @@ func (s *Server) routes() {
 		s.appAccessMiddleware(http.HandlerFunc(s.handleAppRequests))))
 
 	// Logs (WebSocket)
+	s.mux.Handle("GET /api/apps/{slug}/deploy-logs", s.authMiddleware(
+		s.appAccessMiddleware(http.HandlerFunc(s.handleDeployLogs))))
 	s.mux.Handle("GET /api/apps/{slug}/logs", s.authMiddleware(
 		s.appAccessMiddleware(http.HandlerFunc(s.handleLogs))))
 
@@ -192,6 +194,7 @@ func (s *Server) routes() {
 
 	// System management
 	s.mux.Handle("GET /api/system/info", s.authMiddleware(http.HandlerFunc(s.handleSystemInfo)))
+	s.mux.Handle("GET /api/system/storage-breakdown", s.authMiddleware(http.HandlerFunc(s.handleStorageBreakdown)))
 	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(http.HandlerFunc(s.handlePruneMetrics)))
 	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(http.HandlerFunc(s.handlePruneRequestStats)))
 	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(http.HandlerFunc(s.handleVacuumDB)))

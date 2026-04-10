@@ -68,6 +68,9 @@ func (m *mockReconcilerFull) CancelOne(_ context.Context, slug string) error {
 	return nil
 }
 func (m *mockReconcilerFull) IsDeploying(_ string) bool { return false }
+func (m *mockReconcilerFull) SubscribeDeployLog(_ string) (<-chan deployer.OutputLine, func(), bool) {
+	return nil, nil, false
+}
 
 func newActionTestServer(t *testing.T) (*Server, *mockReconcilerFull) {
 	t.Helper()
