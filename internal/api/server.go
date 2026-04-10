@@ -91,6 +91,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
 	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
 
 	// Protected routes

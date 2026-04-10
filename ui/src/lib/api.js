@@ -101,6 +101,7 @@ export const api = {
   // Auth (no toast on success for login)
   login: (username, password) => request('POST', '/auth/login', { username, password }),
   logout: () => request('POST', '/auth/logout'),
+  setupStatus: () => request('GET', '/setup/status'),
   setup: (username, password) => request('POST', '/setup', { username, password }),
   health: healthCheck,
 
@@ -111,10 +112,10 @@ export const api = {
   deploy: (name, compose) => requestWithToast('POST', '/apps/deploy', { name, compose }, 'App deployed'),
   getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
-  restartApp: (slug) => requestWithToast('POST', `/apps/${slug}/restart`, null, 'Restart started'),
+  restartApp: (slug) => request('POST', `/apps/${slug}/restart`),
   stopApp: (slug) => requestWithToast('POST', `/apps/${slug}/stop`, null, 'App stopped'),
   startApp: (slug) => requestWithToast('POST', `/apps/${slug}/start`, null, 'App started'),
-  pullApp: (slug) => requestWithToast('POST', `/apps/${slug}/pull`, null, 'Pull started'),
+  pullApp: (slug) => request('POST', `/apps/${slug}/pull`),
   cancelDeploy: (slug) => requestWithToast('POST', `/apps/${slug}/cancel`, null, 'Deploy cancelled'),
   scaleApp: (slug, scales) => requestWithToast('POST', `/apps/${slug}/scale`, { scales }, 'App scaled'),
   getAppServices: (slug) => request('GET', `/apps/${slug}/services`),
