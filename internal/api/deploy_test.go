@@ -64,8 +64,8 @@ func TestDeployEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", w.Code, w.Body.String())
 	}
 
 	var resp map[string]string
@@ -73,8 +73,8 @@ func TestDeployEndpoint(t *testing.T) {
 	if resp["name"] != "myapp" {
 		t.Errorf("name = %q, want myapp", resp["name"])
 	}
-	if resp["status"] != "deployed" {
-		t.Errorf("status = %q, want deployed", resp["status"])
+	if resp["status"] != "started" {
+		t.Errorf("status = %q, want started", resp["status"])
 	}
 
 	written, err := os.ReadFile(filepath.Join(appsDir, "myapp", "docker-compose.yml"))
@@ -100,8 +100,8 @@ func TestDeployEndpointWithReconciler(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201", w.Code)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", w.Code)
 	}
 }
 

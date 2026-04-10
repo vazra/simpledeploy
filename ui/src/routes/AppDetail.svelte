@@ -52,9 +52,33 @@
   const tabs = ['overview', 'logs', 'events', 'metrics', 'backups', 'config', 'environment']
   const rangeMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 }
 
+  let pollTimer = null
+
+  function startPolling() {
+    stopPolling()
+    pollTimer = setInterval(async () => {
+      const res = await api.getApp(slug)
+      if (res.error) return
+      app = res.data
+      editDomain = app?.Domain || ''
+      if (!app.deploying) {
+        stopPolling()
+        loadServices()
+        if (app.Status === 'error') activeTab = 'events'
+      }
+    }, 3000)
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  }
+
   const unsubReconnect = connection.onReconnect(() => loadApp())
   onMount(loadApp)
-  onDestroy(unsubReconnect)
+  onDestroy(() => { unsubReconnect(); stopPolling() })
 
   async function loadApp() {
     const [appRes] = await Promise.all([
@@ -66,6 +90,7 @@
     app = appRes.data
     editDomain = app?.Domain || ''
     loading = false
+    if (app?.deploying) startPolling()
   }
 
   async function loadMetrics() {
@@ -142,8 +167,10 @@
     const res = await api.restartApp(slug)
     actionLoading = ''
     showRestartModal = false
-    if (res.error) activeTab = 'events'
-    loadApp()
+    if (!res.error) {
+      app = { ...app, deploying: true }
+      startPolling()
+    }
   }
 
   async function handleStop() {
@@ -164,8 +191,10 @@
     actionLoading = 'pull'
     const res = await api.pullApp(slug)
     actionLoading = ''
-    if (res.error) activeTab = 'events'
-    loadApp()
+    if (!res.error) {
+      app = { ...app, deploying: true }
+      startPolling()
+    }
   }
 
   async function cancelDeploy() {

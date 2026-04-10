@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -66,22 +67,34 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		currentMap[a.Slug] = a
 	}
 
-	// deploy new or changed apps
+	// deploy new or changed apps (max 3 concurrent)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 3)
 	for slug, cfg := range desired {
 		existing, exists := currentMap[slug]
-		if !exists {
-			if err := r.deployApp(ctx, slug, cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "reconciler: deploy %s: %v\n", slug, err)
-			}
+		needsDeploy := !exists
+		if exists {
+			hash, _ := hashFile(cfg.ComposePath)
+			needsDeploy = hash != "" && hash != existing.ComposeHash
+		}
+		if !needsDeploy {
 			continue
 		}
-		hash, _ := hashFile(cfg.ComposePath)
-		if hash != "" && hash != existing.ComposeHash {
-			if err := r.deployApp(ctx, slug, cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "reconciler: redeploy %s: %v\n", slug, err)
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(slug string, cfg *compose.AppConfig, exists bool) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			action := "deploy"
+			if exists {
+				action = "redeploy"
 			}
-		}
+			if err := r.deployApp(ctx, slug, cfg); err != nil {
+				fmt.Fprintf(os.Stderr, "reconciler: %s %s: %v\n", action, slug, err)
+			}
+		}(slug, cfg, exists)
 	}
+	wg.Wait()
 
 	// remove apps no longer on disk
 	for _, a := range current {

@@ -79,17 +79,14 @@ func newActionTestServer(t *testing.T) (*Server, *mockReconcilerFull) {
 }
 
 func TestRestartEndpoint(t *testing.T) {
-	srv, mock := newActionTestServer(t)
+	srv, _ := newActionTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/myapp/restart", nil)
 	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	if len(mock.calls) == 0 || mock.calls[0] != "RestartOne:myapp" {
-		t.Errorf("expected RestartOne:myapp, got: %v", mock.calls)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -124,17 +121,14 @@ func TestStartEndpoint(t *testing.T) {
 }
 
 func TestPullEndpoint(t *testing.T) {
-	srv, mock := newActionTestServer(t)
+	srv, _ := newActionTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/myapp/pull", nil)
 	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
-	}
-	if len(mock.calls) == 0 || mock.calls[0] != "PullOne:myapp" {
-		t.Errorf("expected PullOne:myapp, got: %v", mock.calls)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", w.Code, w.Body.String())
 	}
 }
 

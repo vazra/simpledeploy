@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -14,12 +17,14 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reconciler not configured", http.StatusInternalServerError)
 		return
 	}
-	if err := s.reconciler.RestartOne(r.Context(), slug); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	go func() {
+		if err := s.reconciler.RestartOne(context.Background(), slug); err != nil {
+			fmt.Fprintf(os.Stderr, "restart %s: %v\n", slug, err)
+		}
+	}()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
@@ -56,12 +61,14 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reconciler not configured", http.StatusInternalServerError)
 		return
 	}
-	if err := s.reconciler.PullOne(r.Context(), slug); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	go func() {
+		if err := s.reconciler.PullOne(context.Background(), slug); err != nil {
+			fmt.Fprintf(os.Stderr, "pull %s: %v\n", slug, err)
+		}
+	}()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
 }
 
 func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {

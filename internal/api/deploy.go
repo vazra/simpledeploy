@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,17 +68,18 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.reconciler != nil {
-		if err := s.reconciler.DeployOne(r.Context(), composePath, body.Name); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		go func() {
+			if err := s.reconciler.DeployOne(context.Background(), composePath, body.Name); err != nil {
+				fmt.Fprintf(os.Stderr, "deploy %s: %v\n", body.Name, err)
+			}
+		}()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{
 		"name":   body.Name,
-		"status": "deployed",
+		"status": "started",
 	})
 }
 
