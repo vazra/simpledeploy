@@ -298,7 +298,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("init deployer: %w", err)
 	}
-	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir)
+	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg)
 
 	// metrics pipeline
 	metricsCh := make(chan metrics.MetricPoint, 500)
@@ -440,7 +440,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("init deployer: %w", err)
 	}
-	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
+	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg)
 	ctx := cmd.Context()
 
 	file, _ := cmd.Flags().GetString("file")
@@ -512,7 +512,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("init deployer: %w", err)
 	}
-	rec := reconciler.New(db, dep, nil, cfg.AppsDir)
+	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg)
 
 	if err := rec.RemoveOne(cmd.Context(), name); err != nil {
 		return fmt.Errorf("remove %s: %w", name, err)

@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -29,15 +31,21 @@ type AppDeployer interface {
 
 // Reconciler syncs the apps directory with the running containers and store.
 type Reconciler struct {
-	store    *store.Store
-	deployer AppDeployer
-	proxy    proxy.Proxy // can be nil
-	appsDir  string
+	store        *store.Store
+	deployer     AppDeployer
+	proxy        proxy.Proxy // can be nil
+	appsDir      string
+	config       *config.Config
+	masterSecret string
 }
 
 // New creates a Reconciler.
-func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string) *Reconciler {
-	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir}
+func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *config.Config) *Reconciler {
+	secret := ""
+	if cfg != nil {
+		secret = cfg.MasterSecret
+	}
+	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret}
 }
 
 // Reconcile diffs the apps directory against the store and deploys/removes as needed.
@@ -143,12 +151,61 @@ func (r *Reconciler) StartOne(ctx context.Context, slug string) error {
 	return r.store.UpdateAppStatus(slug, "running")
 }
 
+func (r *Reconciler) resolveRegistries(app *compose.AppConfig) ([]deployer.RegistryAuth, error) {
+	if r.masterSecret == "" {
+		return nil, nil
+	}
+
+	var names []string
+	switch app.Registries {
+	case "none":
+		return nil, nil
+	case "":
+		if r.config != nil {
+			names = r.config.Registries
+		}
+	default:
+		for _, n := range strings.Split(app.Registries, ",") {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				names = append(names, n)
+			}
+		}
+	}
+
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	var auths []deployer.RegistryAuth
+	for _, name := range names {
+		reg, err := r.store.GetRegistryByName(name)
+		if err != nil {
+			return nil, fmt.Errorf("lookup registry %q: %w", name, err)
+		}
+		username, err := auth.Decrypt(reg.UsernameEnc, r.masterSecret)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt username for %q: %w", name, err)
+		}
+		password, err := auth.Decrypt(reg.PasswordEnc, r.masterSecret)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt password for %q: %w", name, err)
+		}
+		auths = append(auths, deployer.RegistryAuth{URL: reg.URL, Username: username, Password: password})
+	}
+	return auths, nil
+}
+
 func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
 	cfg, err := r.loadAppConfig(slug)
 	if err != nil {
 		return err
 	}
-	if err := r.deployer.Pull(ctx, cfg, nil); err != nil {
+	auths, err := r.resolveRegistries(cfg)
+	if err != nil {
+		return fmt.Errorf("resolve registries: %w", err)
+	}
+	if err := r.deployer.Pull(ctx, cfg, auths); err != nil {
 		return fmt.Errorf("pull: %w", err)
 	}
 	return r.store.UpdateAppStatus(slug, "running")

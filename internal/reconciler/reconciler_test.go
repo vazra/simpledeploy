@@ -54,7 +54,7 @@ func (m *mockDeployer) Start(_ context.Context, name string) error {
 	return nil
 }
 
-func (m *mockDeployer) Pull(_ context.Context, app *compose.AppConfig) error {
+func (m *mockDeployer) Pull(_ context.Context, app *compose.AppConfig, _ []deployer.RegistryAuth) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Pull:"+app.Name)
@@ -103,7 +103,7 @@ func newTestEnv(t *testing.T) (*Reconciler, *mockDeployer, *store.Store, string)
 	appsDir := t.TempDir()
 
 	mockProxy := proxy.NewMockProxy()
-	r := New(st, mock, mockProxy, appsDir)
+	r := New(st, mock, mockProxy, appsDir, nil)
 	return r, mock, st, appsDir
 }
 
