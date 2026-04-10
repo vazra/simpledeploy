@@ -27,6 +27,14 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	type appResponse struct {
+		store.App
+		Deploying bool `json:"deploying"`
+	}
+	resp := appResponse{
+		App:       *app,
+		Deploying: s.reconciler != nil && s.reconciler.IsDeploying(slug),
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(app)
+	json.NewEncoder(w).Encode(resp)
 }

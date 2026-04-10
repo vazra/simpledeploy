@@ -125,6 +125,9 @@ func (s *Server) routes() {
 	// Domain
 	s.mux.Handle("PUT /api/apps/{slug}/domain", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateDomain))))
 
+	// Cancel deploy
+	s.mux.Handle("POST /api/apps/{slug}/cancel", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleCancel))))
+
 	// Deploy history
 	s.mux.Handle("GET /api/apps/{slug}/versions", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListVersions))))
 	s.mux.Handle("POST /api/apps/{slug}/rollback", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRollback))))

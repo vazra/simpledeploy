@@ -25,11 +25,12 @@ type ServiceStatus struct {
 }
 
 type Deployer struct {
-	runner CommandRunner
+	runner  CommandRunner
+	Tracker *Tracker
 }
 
 func New(runner CommandRunner) (*Deployer, error) {
-	d := &Deployer{runner: runner}
+	d := &Deployer{runner: runner, Tracker: NewTracker()}
 	_, stderr, err := d.runner.Run(context.Background(), "docker", "compose", "version")
 	if err != nil {
 		return nil, fmt.Errorf("docker compose not available: %s: %w", stderr, err)
@@ -38,6 +39,10 @@ func New(runner CommandRunner) (*Deployer, error) {
 }
 
 func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) error {
+	ctx, cancel := context.WithCancel(ctx)
+	d.Tracker.Track(app.Name, cancel)
+	defer d.Tracker.Done(app.Name)
+
 	project := "simpledeploy-" + app.Name
 	args := []string{
 		"compose",
@@ -69,6 +74,10 @@ func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
 }
 
 func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) error {
+	ctx, cancel := context.WithCancel(ctx)
+	d.Tracker.Track(app.Name, cancel)
+	defer d.Tracker.Done(app.Name)
+
 	project := "simpledeploy-" + app.Name
 	args := []string{
 		"compose",
@@ -106,6 +115,10 @@ func (d *Deployer) Start(ctx context.Context, projectName string) error {
 }
 
 func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) error {
+	ctx, cancel := context.WithCancel(ctx)
+	d.Tracker.Track(app.Name, cancel)
+	defer d.Tracker.Done(app.Name)
+
 	project := "simpledeploy-" + app.Name
 
 	pullArgs := []string{"compose", "-f", app.ComposePath, "-p", project, "pull"}
@@ -181,6 +194,25 @@ func (d *Deployer) Scale(ctx context.Context, app *compose.AppConfig, scales map
 	_, stderr, err := d.runner.Run(ctx, "docker", args...)
 	if err != nil {
 		return fmt.Errorf("compose scale: %s: %w", stderr, err)
+	}
+	return nil
+}
+
+func (d *Deployer) Cancel(ctx context.Context, app *compose.AppConfig) error {
+	if err := d.Tracker.Cancel(app.Name); err != nil {
+		return err
+	}
+	project := "simpledeploy-" + app.Name
+	args := []string{
+		"compose",
+		"-f", app.ComposePath,
+		"-p", project,
+		"up", "-d",
+		"--remove-orphans",
+	}
+	_, stderr, err := d.runner.Run(ctx, "docker", args...)
+	if err != nil {
+		return fmt.Errorf("reconcile after cancel: %s: %w", stderr, err)
 	}
 	return nil
 }

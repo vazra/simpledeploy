@@ -158,6 +158,11 @@
     loadApp()
   }
 
+  async function cancelDeploy() {
+    await api.cancelDeploy(slug)
+    await loadApp()
+  }
+
   async function handleScale() {
     actionLoading = 'scale'
     const scales = {}
@@ -206,6 +211,14 @@
           {/if}
           <Button variant="secondary" size="sm" onclick={handlePull} loading={actionLoading === 'pull'}>Pull &amp; Update</Button>
           <Button variant="secondary" size="sm" onclick={() => { scaleInputs = {}; showScaleModal = true }}>Scale</Button>
+          {#if app?.deploying}
+            <button
+              onclick={cancelDeploy}
+              class="px-3 py-1.5 text-xs rounded bg-danger text-white hover:bg-danger/90 transition-colors"
+            >
+              Cancel Deploy
+            </button>
+          {/if}
           <Button variant="danger" size="sm" onclick={() => showDeleteModal = true}>Delete</Button>
         </div>
       </div>

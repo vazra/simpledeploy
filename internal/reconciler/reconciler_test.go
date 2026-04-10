@@ -75,6 +75,13 @@ func (m *mockDeployer) Status(_ context.Context, name string) ([]deployer.Servic
 	return nil, nil
 }
 
+func (m *mockDeployer) Cancel(_ context.Context, app *compose.AppConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "Cancel:"+app.Name)
+	return nil
+}
+
 func (m *mockDeployer) hasCall(prefix string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

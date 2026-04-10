@@ -27,6 +27,7 @@ type AppDeployer interface {
 	Pull(ctx context.Context, app *compose.AppConfig, auths []deployer.RegistryAuth) error
 	Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error
 	Status(ctx context.Context, projectName string) ([]deployer.ServiceStatus, error)
+	Cancel(ctx context.Context, app *compose.AppConfig) error
 }
 
 // Reconciler syncs the apps directory with the running containers and store.
@@ -224,6 +225,21 @@ func (r *Reconciler) ScaleOne(ctx context.Context, slug string, scales map[strin
 
 func (r *Reconciler) AppServices(ctx context.Context, slug string) ([]deployer.ServiceStatus, error) {
 	return r.deployer.Status(ctx, slug)
+}
+
+func (r *Reconciler) CancelOne(ctx context.Context, slug string) error {
+	cfg, err := r.loadAppConfig(slug)
+	if err != nil {
+		return err
+	}
+	return r.deployer.Cancel(ctx, cfg)
+}
+
+func (r *Reconciler) IsDeploying(slug string) bool {
+	if d, ok := r.deployer.(*deployer.Deployer); ok {
+		return d.Tracker.IsDeploying(slug)
+	}
+	return false
 }
 
 func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int64) error {

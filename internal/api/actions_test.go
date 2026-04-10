@@ -63,6 +63,11 @@ func (m *mockReconcilerFull) ListDeployEvents(_ context.Context, slug string) ([
 	return []store.DeployEvent{}, nil
 }
 func (m *mockReconcilerFull) Reconcile(_ context.Context) error { return nil }
+func (m *mockReconcilerFull) CancelOne(_ context.Context, slug string) error {
+	m.calls = append(m.calls, "CancelOne:"+slug)
+	return nil
+}
+func (m *mockReconcilerFull) IsDeploying(_ string) bool { return false }
 
 func newActionTestServer(t *testing.T) (*Server, *mockReconcilerFull) {
 	t.Helper()

@@ -90,6 +90,7 @@ export const api = {
   stopApp: (slug) => requestWithToast('POST', `/apps/${slug}/stop`, null, 'App stopped'),
   startApp: (slug) => requestWithToast('POST', `/apps/${slug}/start`, null, 'App started'),
   pullApp: (slug) => requestWithToast('POST', `/apps/${slug}/pull`, null, 'Images pulled & redeployed'),
+  cancelDeploy: (slug) => requestWithToast('POST', `/apps/${slug}/cancel`, null, 'Deploy cancelled'),
   scaleApp: (slug, scales) => requestWithToast('POST', `/apps/${slug}/scale`, { scales }, 'App scaled'),
   getAppServices: (slug) => request('GET', `/apps/${slug}/services`),
   getEnv: (slug) => request('GET', `/apps/${slug}/env`),
