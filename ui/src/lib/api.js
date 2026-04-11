@@ -159,6 +159,11 @@ export const api = {
   createAPIKey: (name) => requestWithToast('POST', '/apikeys', { name }, 'API key created'),
   deleteAPIKey: (id) => requestWithToast('DELETE', `/apikeys/${id}`, null, 'API key revoked'),
 
+  // Profile
+  getProfile: () => request('GET', '/me'),
+  updateProfile: (data) => requestWithToast('PUT', '/me', data, 'Profile updated'),
+  changePassword: (data) => requestWithToast('PUT', '/me/password', data, 'Password changed'),
+
   // Registries
   listRegistries: () => request('GET', '/registries'),
   createRegistry: (r) => requestWithToast('POST', '/registries', r, 'Registry added'),
