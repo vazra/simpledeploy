@@ -328,6 +328,20 @@
             <div class="text-sm font-semibold text-text-primary">{info.simpledeploy?.go_version || '-'}</div>
           </div>
         </div>
+        {#if info.simpledeploy?.process}
+          <div class="border-t border-border/50 mt-4 pt-4">
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div>
+                <div class="text-xs font-medium text-text-secondary">Memory Usage</div>
+                <div class="text-sm font-semibold text-text-primary">{formatBytes(info.simpledeploy.process.mem_alloc)} <span class="text-xs font-normal text-text-secondary">of {formatBytes(info.simpledeploy.process.mem_sys)} reserved</span></div>
+              </div>
+              <div>
+                <div class="text-xs font-medium text-text-secondary">Active Tasks</div>
+                <div class="text-sm font-semibold text-text-primary">{info.simpledeploy.process.num_goroutine}</div>
+              </div>
+            </div>
+          </div>
+        {/if}
       </div>
 
       <!-- System Resources -->

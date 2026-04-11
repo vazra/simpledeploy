@@ -26,12 +26,22 @@ type systemInfoResponse struct {
 }
 
 type simpleDeployInfo struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
-	BuildDate string `json:"build_date"`
-	Uptime    string `json:"uptime"`
-	UptimeSec int64  `json:"uptime_sec"`
-	GoVersion string `json:"go_version"`
+	Version    string      `json:"version"`
+	Commit     string      `json:"commit"`
+	BuildDate  string      `json:"build_date"`
+	Uptime     string      `json:"uptime"`
+	UptimeSec  int64       `json:"uptime_sec"`
+	GoVersion  string      `json:"go_version"`
+	Process    processInfo `json:"process"`
+}
+
+type processInfo struct {
+	MemAlloc      uint64 `json:"mem_alloc"`
+	MemSys        uint64 `json:"mem_sys"`
+	MemHeapInuse  uint64 `json:"mem_heap_inuse"`
+	MemStackInuse uint64 `json:"mem_stack_inuse"`
+	NumGoroutine  int    `json:"num_goroutine"`
+	NumGC         uint32 `json:"num_gc"`
 }
 
 type systemResources struct {
@@ -89,6 +99,9 @@ func formatUptime(d time.Duration) string {
 func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(s.startedAt)
 
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
 	sd := simpleDeployInfo{
 		Version:   s.buildVersion,
 		Commit:    s.buildCommit,
@@ -96,6 +109,14 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		Uptime:    formatUptime(uptime),
 		UptimeSec: int64(uptime.Seconds()),
 		GoVersion: runtime.Version(),
+		Process: processInfo{
+			MemAlloc:      mem.Alloc,
+			MemSys:        mem.Sys,
+			MemHeapInuse:  mem.HeapInuse,
+			MemStackInuse: mem.StackInuse,
+			NumGoroutine:  runtime.NumGoroutine(),
+			NumGC:         mem.NumGC,
+		},
 	}
 
 	var res systemResources
