@@ -1,6 +1,6 @@
 # Compose Labels Reference
 
-SimpleDeploy reads `simpledeploy.*` labels from your Docker Compose services to configure routing, backups, alerts, and rate limiting.
+SimpleDeploy reads `simpledeploy.*` labels from your Docker Compose services to configure routing, access control, backups, alerts, and rate limiting.
 
 ## Example
 
@@ -25,6 +25,7 @@ services:
       simpledeploy.ratelimit.window: "60s"
       simpledeploy.ratelimit.by: "ip"
       simpledeploy.ratelimit.burst: "20"
+      simpledeploy.access.allow: "10.0.0.0/8,203.0.113.5"
     restart: unless-stopped
 ```
 
@@ -39,6 +40,18 @@ services:
 If `simpledeploy.domain` is not set, the app runs but has no proxy route (accessible only via host-mapped ports).
 
 If `simpledeploy.port` is not set, SimpleDeploy uses the first port mapping it finds in the compose file.
+
+## Access Control Labels
+
+| Label | Default | Description |
+|-------|---------|-------------|
+| `simpledeploy.access.allow` | - (all traffic allowed) | Comma-separated IPs and/or CIDRs |
+
+When set, only requests from matching IPs reach the app. Non-matching requests receive `404 Not Found`. Supports both individual IPs (`203.0.113.5`) and CIDR ranges (`10.0.0.0/8`).
+
+When absent or empty, all traffic is allowed (no restriction).
+
+Managed via the UI or `PUT /api/apps/{slug}/access`.
 
 ## Backup Labels
 
