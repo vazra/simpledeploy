@@ -24,8 +24,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.TLS.Mode != "auto" {
 		t.Errorf("TLS.Mode = %q, want auto", cfg.TLS.Mode)
 	}
-	if len(cfg.Metrics.Tiers) != 4 {
-		t.Errorf("Metrics.Tiers len = %d, want 4", len(cfg.Metrics.Tiers))
+	if len(cfg.Metrics.Tiers) != 5 {
+		t.Errorf("Metrics.Tiers len = %d, want 5", len(cfg.Metrics.Tiers))
 	}
 	if cfg.RateLimit.Requests != 200 {
 		t.Errorf("RateLimit.Requests = %d, want 200", cfg.RateLimit.Requests)
