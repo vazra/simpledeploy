@@ -17,6 +17,7 @@ type Config struct {
 	Metrics        MetricsConfig   `yaml:"metrics"`
 	RateLimit      RateLimitConfig `yaml:"ratelimit"`
 	Registries     []string        `yaml:"registries"`
+	TrustedProxies []string        `yaml:"trusted_proxies"`
 }
 
 type TLSConfig struct {

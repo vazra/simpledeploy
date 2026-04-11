@@ -3,18 +3,16 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 )
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	ip := auth.RealIP(r, s.trustedProxies)
+
 	// Rate limit by client IP
 	if s.rateLimiter != nil {
-		ip := r.RemoteAddr
-		if i := strings.LastIndex(ip, ":"); i != -1 {
-			ip = ip[:i]
-		}
 		if !s.rateLimiter.Allow(ip) {
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
@@ -30,6 +28,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lockout check
+	if s.lockout != nil {
+		if s.lockout.IsLocked("user:"+req.Username) || s.lockout.IsLocked("ip:"+ip) {
+			http.Error(w, "account temporarily locked", http.StatusTooManyRequests)
+			return
+		}
+	}
+
 	// Always run bcrypt to prevent user enumeration via timing
 	user, err := s.store.GetUserByUsername(req.Username)
 	// Use a dummy hash so bcrypt runs even if user not found
@@ -38,6 +44,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		hash = user.PasswordHash
 	}
 	if !auth.CheckPassword(hash, req.Password) || err != nil {
+		if s.lockout != nil {
+			s.lockout.RecordFailure("user:" + req.Username)
+			s.lockout.RecordFailure("ip:" + ip)
+		}
+		if s.audit != nil {
+			s.audit.Log(audit.Event{Type: "login_failed", Username: req.Username, IP: ip})
+		}
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -51,6 +64,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "failed to generate token", http.StatusInternalServerError)
 		return
+	}
+
+	if s.lockout != nil {
+		s.lockout.RecordSuccess("user:" + req.Username)
+		s.lockout.RecordSuccess("ip:" + ip)
+	}
+
+	if s.audit != nil {
+		s.audit.Log(audit.Event{Type: "login", Username: user.Username, IP: ip, Success: true})
 	}
 
 	http.SetCookie(w, &http.Cookie{

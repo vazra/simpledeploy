@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/docker"
@@ -36,6 +37,9 @@ type Server struct {
 	docker          docker.Client
 	appsDir         string
 	reconciler      reconciler
+	lockout         *auth.LoginLockout
+	audit           *audit.Logger
+	trustedProxies  []string
 	masterSecret    string
 	buildVersion    string
 	buildCommit     string
@@ -74,6 +78,15 @@ func (s *Server) SetDBPath(path string) { s.dbPath = path }
 func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
 	s.backupScheduler = sched
 }
+
+// SetLockout sets the login lockout tracker.
+func (s *Server) SetLockout(l *auth.LoginLockout) { s.lockout = l }
+
+// SetAudit sets the audit logger.
+func (s *Server) SetAudit(a *audit.Logger) { s.audit = a }
+
+// SetTrustedProxies sets the trusted proxy IPs for X-Forwarded-For parsing.
+func (s *Server) SetTrustedProxies(proxies []string) { s.trustedProxies = proxies }
 
 // SetDocker sets the docker client.
 func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
@@ -213,6 +226,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(http.HandlerFunc(s.handlePruneMetrics)))
 	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(http.HandlerFunc(s.handlePruneRequestStats)))
 	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(http.HandlerFunc(s.handleVacuumDB)))
+	s.mux.Handle("GET /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleAuditLog)))
 
 	// Registry management
 	s.mux.Handle("GET /api/registries", s.authMiddleware(http.HandlerFunc(s.handleListRegistries)))

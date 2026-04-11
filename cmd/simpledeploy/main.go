@@ -24,6 +24,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
 	"github.com/vazra/simpledeploy/internal/alerts"
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/api"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
@@ -314,6 +315,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	jwtMgr := auth.NewJWTManager(jwtSecret, 24*time.Hour)
 	rl := auth.NewRateLimiter(10, time.Minute)
+	lockout := auth.NewLoginLockout(10)
 
 	dc, err := docker.NewClient()
 	if err != nil {
@@ -444,9 +446,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetDocker(dc)
 	srv.SetAppsDir(cfg.AppsDir)
 	srv.SetReconciler(rec)
+	srv.SetLockout(lockout)
+	srv.SetTrustedProxies(cfg.TrustedProxies)
 	srv.SetMasterSecret(cfg.MasterSecret)
 	srv.SetBuildInfo(version, commit, date)
 	srv.SetDBPath(dbPath)
+	srv.SetAudit(audit.New(os.Stderr, 500))
 
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)
@@ -703,7 +708,7 @@ func runAPIKeyCreate(cmd *cobra.Command, args []string) error {
 	name, _ := cmd.Flags().GetString("name")
 	userID, _ := cmd.Flags().GetInt64("user-id")
 
-	plaintext, hash, err := auth.GenerateAPIKey()
+	plaintext, hash, err := auth.GenerateAPIKey(cfg.MasterSecret)
 	if err != nil {
 		return err
 	}
