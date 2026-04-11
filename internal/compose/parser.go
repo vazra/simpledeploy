@@ -24,6 +24,7 @@ type AppConfig struct {
 	AlertMemory     string
 	PathPatterns    string
 	Registries      string
+	AccessAllow     string
 	RateLimit       RateLimitLabels
 	Services        []ServiceConfig
 	Project         *types.Project
@@ -69,6 +70,7 @@ type LabelConfig struct {
 	AlertMemory     string
 	PathPatterns    string
 	Registries      string
+	AccessAllow     string
 	RateLimit       RateLimitLabels
 }
 
@@ -128,6 +130,7 @@ func ParseFile(path, appName string) (*AppConfig, error) {
 		AlertMemory:     lc.AlertMemory,
 		PathPatterns:    lc.PathPatterns,
 		Registries:      lc.Registries,
+		AccessAllow:     lc.AccessAllow,
 		RateLimit:       lc.RateLimit,
 		Project:         project,
 	}
@@ -153,6 +156,7 @@ func ExtractLabels(labels map[string]string) LabelConfig {
 		AlertMemory:     labels["simpledeploy.alert.memory"],
 		PathPatterns:    labels["simpledeploy.paths"],
 		Registries:      labels["simpledeploy.registries"],
+		AccessAllow:     labels["simpledeploy.access.allow"],
 		RateLimit: RateLimitLabels{
 			Requests: labels["simpledeploy.ratelimit.requests"],
 			Window:   labels["simpledeploy.ratelimit.window"],

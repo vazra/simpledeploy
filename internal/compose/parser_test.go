@@ -110,6 +110,7 @@ func TestExtractLabels(t *testing.T) {
 		"simpledeploy.ratelimit.window":   "1m",
 		"simpledeploy.ratelimit.by":       "ip",
 		"simpledeploy.ratelimit.burst":    "20",
+		"simpledeploy.access.allow":       "10.0.0.0/8,192.168.1.5",
 	}
 
 	lc := ExtractLabels(labels)
@@ -155,5 +156,8 @@ func TestExtractLabels(t *testing.T) {
 	}
 	if lc.RateLimit.Burst != "20" {
 		t.Errorf("RateLimit.Burst = %q, want %q", lc.RateLimit.Burst, "20")
+	}
+	if lc.AccessAllow != "10.0.0.0/8,192.168.1.5" {
+		t.Errorf("AccessAllow = %q, want %q", lc.AccessAllow, "10.0.0.0/8,192.168.1.5")
 	}
 }
