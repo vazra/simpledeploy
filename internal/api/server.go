@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +15,16 @@ import (
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+// httpError logs the real error and returns a generic message to the client.
+func httpError(w http.ResponseWriter, err error, code int) {
+	log.Printf("[api] %s", err)
+	msg := http.StatusText(code)
+	if code == http.StatusNotFound {
+		msg = "not found"
+	}
+	http.Error(w, msg, code)
+}
 
 type Server struct {
 	mux             *http.ServeMux
@@ -213,13 +224,27 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return securityHeaders(s.mux)
+}
+
+// securityHeaders adds standard security headers to all responses.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
-		Handler: s.mux,
+		Handler: s.Handler(),
 	}
 	go func() {
 		<-ctx.Done()
