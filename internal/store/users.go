@@ -196,9 +196,19 @@ func (s *Store) ListAPIKeysByUser(userID int64) ([]APIKeyRecord, error) {
 	return keys, rows.Err()
 }
 
-// DeleteAPIKey deletes the API key with the given ID.
-func (s *Store) DeleteAPIKey(id int64) error {
-	res, err := s.db.Exec(`DELETE FROM api_keys WHERE id = ?`, id)
+// DeleteAPIKey deletes the API key with the given ID, scoped to the owning user.
+// super_admin can delete any key by passing userID=0.
+func (s *Store) DeleteAPIKey(id, userID int64) error {
+	var query string
+	var args []any
+	if userID == 0 {
+		query = `DELETE FROM api_keys WHERE id = ?`
+		args = []any{id}
+	} else {
+		query = `DELETE FROM api_keys WHERE id = ? AND user_id = ?`
+		args = []any{id, userID}
+	}
+	res, err := s.db.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("delete api key: %w", err)
 	}

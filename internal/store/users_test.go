@@ -185,7 +185,7 @@ func TestDeleteAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}
-	if err := s.DeleteAPIKey(k.ID); err != nil {
+	if err := s.DeleteAPIKey(k.ID, u.ID); err != nil {
 		t.Fatalf("DeleteAPIKey: %v", err)
 	}
 	if _, _, err := s.GetAPIKeyByHash("hashDEL"); err == nil {

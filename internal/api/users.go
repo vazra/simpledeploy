@@ -42,7 +42,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	users, err := s.store.ListUsers()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	resp := make([]userResponse, len(users))
@@ -68,12 +68,12 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	hash, err := auth.HashPassword(body.Password)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	u, err := s.store.CreateUser(body.Username, hash, body.Role)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -91,7 +91,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteUser(id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -120,7 +120,7 @@ func (s *Server) handleGrantAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.GrantAppAccess(userID, app.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -143,7 +143,7 @@ func (s *Server) handleRevokeAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.RevokeAppAccess(userID, app.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -158,7 +158,7 @@ func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	keys, err := s.store.ListAPIKeysByUser(user.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	type keyResponse struct {
@@ -188,12 +188,12 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 	plaintext, hash, err := auth.GenerateAPIKey()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	k, err := s.store.CreateAPIKey(user.ID, hash, body.Name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -216,8 +216,13 @@ func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if err := s.store.DeleteAPIKey(id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// super_admin can delete any key; others only their own
+	ownerID := user.ID
+	if user.Role == "super_admin" {
+		ownerID = 0
+	}
+	if err := s.store.DeleteAPIKey(id, ownerID); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
