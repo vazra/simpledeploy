@@ -30,18 +30,28 @@ type StatusApp struct {
 	Status string
 }
 
+// containerCounters holds cumulative Docker counters for rate computation.
+type containerCounters struct {
+	netRx     uint64
+	netTx     uint64
+	diskRead  uint64
+	diskWrite uint64
+	ts        time.Time
+}
+
 // Collector gathers system and container metrics.
 type Collector struct {
 	docker       docker.Client
 	appLookup    AppLookup
 	statusSyncer StatusSyncer
 	out          chan<- MetricPoint
+	prevCounters map[string]*containerCounters // key: container ID
 }
 
 // NewCollector creates a new Collector.
 // appLookup may be nil; if so, AppID will always be nil.
 func NewCollector(dc docker.Client, appLookup AppLookup, out chan<- MetricPoint) *Collector {
-	return &Collector{docker: dc, appLookup: appLookup, out: out}
+	return &Collector{docker: dc, appLookup: appLookup, out: out, prevCounters: make(map[string]*containerCounters)}
 }
 
 func (c *Collector) SetStatusSyncer(ss StatusSyncer) {
@@ -122,14 +132,22 @@ func (c *Collector) CollectContainers(ctx context.Context) ([]MetricPoint, error
 		return nil, fmt.Errorf("ContainerList: %w", err)
 	}
 
+	seen := make(map[string]bool, len(containers))
 	var points []MetricPoint
 	for _, ctr := range containers {
+		seen[ctr.ID] = true
 		pt, err := c.collectContainer(ctx, ctr)
 		if err != nil {
 			log.Printf("metrics: skip container %s: %v", ctr.ID[:12], err)
 			continue
 		}
 		points = append(points, pt)
+	}
+	// Clean stale entries from prevCounters
+	for id := range c.prevCounters {
+		if !seen[id] {
+			delete(c.prevCounters, id)
+		}
 	}
 	return points, nil
 }
@@ -162,22 +180,52 @@ func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Su
 	memBytes := int64(stats.MemoryStats.Usage)
 	memLimit := int64(stats.MemoryStats.Limit)
 
-	// Network (cumulative byte counters, cast to float64 for now)
-	var netRx, netTx float64
+	// Network: sum cumulative byte counters across interfaces
+	var curNetRx, curNetTx uint64
 	for _, ns := range stats.Networks {
-		netRx += float64(ns.RxBytes)
-		netTx += float64(ns.TxBytes)
+		curNetRx += ns.RxBytes
+		curNetTx += ns.TxBytes
 	}
 
-	// Block IO
-	var diskRead, diskWrite float64
+	// Block IO: sum cumulative byte counters
+	var curDiskRead, curDiskWrite uint64
 	for _, entry := range stats.BlkioStats.IoServiceBytesRecursive {
 		switch entry.Op {
 		case "Read":
-			diskRead += float64(entry.Value)
+			curDiskRead += entry.Value
 		case "Write":
-			diskWrite += float64(entry.Value)
+			curDiskWrite += entry.Value
 		}
+	}
+
+	// Compute rates from deltas
+	now := time.Now()
+	var netRxRate, netTxRate, diskReadRate, diskWriteRate float64
+	if prev, ok := c.prevCounters[ctr.ID]; ok {
+		elapsed := now.Sub(prev.ts).Seconds()
+		if elapsed > 0 {
+			// Handle counter resets (current < previous): output 0
+			if curNetRx >= prev.netRx {
+				netRxRate = float64(curNetRx-prev.netRx) / elapsed
+			}
+			if curNetTx >= prev.netTx {
+				netTxRate = float64(curNetTx-prev.netTx) / elapsed
+			}
+			if curDiskRead >= prev.diskRead {
+				diskReadRate = float64(curDiskRead-prev.diskRead) / elapsed
+			}
+			if curDiskWrite >= prev.diskWrite {
+				diskWriteRate = float64(curDiskWrite-prev.diskWrite) / elapsed
+			}
+		}
+	}
+	// Store current counters for next cycle
+	c.prevCounters[ctr.ID] = &containerCounters{
+		netRx:     curNetRx,
+		netTx:     curNetTx,
+		diskRead:  curDiskRead,
+		diskWrite: curDiskWrite,
+		ts:        now,
 	}
 
 	// Map container to app via compose project label
@@ -195,12 +243,12 @@ func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Su
 		CPUPct:      cpuPct,
 		MemBytes:    memBytes,
 		MemLimit:    memLimit,
-		NetRx:       netRx,
-		NetTx:       netTx,
-		DiskRead:    diskRead,
-		DiskWrite:   diskWrite,
+		NetRx:       netRxRate,
+		NetTx:       netTxRate,
+		DiskRead:    diskReadRate,
+		DiskWrite:   diskWriteRate,
 		Tier:        TierRaw,
-		Ts:          time.Now().Unix(),
+		Ts:          now.Unix(),
 	}, nil
 }
 

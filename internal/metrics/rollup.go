@@ -11,24 +11,24 @@ type MetricAggregator interface {
 	PruneMetrics(tier string, before time.Time) (int64, error)
 }
 
-// ReqStatsAggregator is implemented by store.Store.
-type ReqStatsAggregator interface {
-	AggregateRequestStats(sourceTier, destTier string, olderThan time.Time) error
-	PruneRequestStats(tier string, before time.Time) (int64, error)
+// ReqMetricsAggregator is implemented by store.Store.
+type ReqMetricsAggregator interface {
+	AggregateRequestMetrics(sourceTier, destTier string, olderThan time.Time) error
+	PruneRequestMetrics(tier string, before time.Time) (int64, error)
 }
 
-// ReqStatsRollupManager handles rollup and pruning for request_stats.
-type ReqStatsRollupManager struct {
-	store ReqStatsAggregator
+// ReqMetricsRollupManager handles rollup and pruning for request metrics.
+type ReqMetricsRollupManager struct {
+	store ReqMetricsAggregator
 	tiers []TierConfig
 }
 
-func NewReqStatsRollupManager(st ReqStatsAggregator, tiers []TierConfig) *ReqStatsRollupManager {
-	return &ReqStatsRollupManager{store: st, tiers: tiers}
+func NewReqMetricsRollupManager(st ReqMetricsAggregator, tiers []TierConfig) *ReqMetricsRollupManager {
+	return &ReqMetricsRollupManager{store: st, tiers: tiers}
 }
 
 // Run calls RunOnce every 60 seconds until ctx is cancelled.
-func (rm *ReqStatsRollupManager) Run(ctx context.Context) {
+func (rm *ReqMetricsRollupManager) Run(ctx context.Context) {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -41,22 +41,25 @@ func (rm *ReqStatsRollupManager) Run(ctx context.Context) {
 	}
 }
 
-// RunOnce performs one round of aggregation and pruning for request stats.
-func (rm *ReqStatsRollupManager) RunOnce() error {
+// RunOnce performs one round of aggregation and pruning for request metrics.
+func (rm *ReqMetricsRollupManager) RunOnce() error {
 	now := time.Now().UTC()
 
-	if err := rm.store.AggregateRequestStats(TierRaw, Tier1m, now.Add(-2*time.Minute)); err != nil {
+	if err := rm.store.AggregateRequestMetrics(TierRaw, Tier1m, now.Add(-1*time.Minute)); err != nil {
 		return err
 	}
-	if err := rm.store.AggregateRequestStats(Tier1m, Tier5m, now.Add(-10*time.Minute)); err != nil {
+	if err := rm.store.AggregateRequestMetrics(Tier1m, Tier5m, now.Add(-5*time.Minute)); err != nil {
 		return err
 	}
-	if err := rm.store.AggregateRequestStats(Tier5m, Tier1h, now.Add(-2*time.Hour)); err != nil {
+	if err := rm.store.AggregateRequestMetrics(Tier5m, Tier1h, now.Add(-1*time.Hour)); err != nil {
+		return err
+	}
+	if err := rm.store.AggregateRequestMetrics(Tier1h, Tier1d, now.Add(-24*time.Hour)); err != nil {
 		return err
 	}
 
 	for _, tc := range rm.tiers {
-		if _, err := rm.store.PruneRequestStats(tc.Name, now.Add(-tc.Retention)); err != nil {
+		if _, err := rm.store.PruneRequestMetrics(tc.Name, now.Add(-tc.Retention)); err != nil {
 			return err
 		}
 	}
@@ -96,22 +99,24 @@ func (rm *RollupManager) Run(ctx context.Context) {
 func (rm *RollupManager) RunOnce() error {
 	now := time.Now().UTC()
 
-	// raw -> 1m: aggregate data older than 2 minutes
-	if err := rm.store.AggregateMetrics(TierRaw, Tier1m, now.Add(-2*time.Minute)); err != nil {
+	// raw -> 1m
+	if err := rm.store.AggregateMetrics(TierRaw, Tier1m, now.Add(-1*time.Minute)); err != nil {
+		return err
+	}
+	// 1m -> 5m
+	if err := rm.store.AggregateMetrics(Tier1m, Tier5m, now.Add(-5*time.Minute)); err != nil {
+		return err
+	}
+	// 5m -> 1h
+	if err := rm.store.AggregateMetrics(Tier5m, Tier1h, now.Add(-1*time.Hour)); err != nil {
+		return err
+	}
+	// 1h -> 1d
+	if err := rm.store.AggregateMetrics(Tier1h, Tier1d, now.Add(-24*time.Hour)); err != nil {
 		return err
 	}
 
-	// 1m -> 5m: aggregate data older than 10 minutes
-	if err := rm.store.AggregateMetrics(Tier1m, Tier5m, now.Add(-10*time.Minute)); err != nil {
-		return err
-	}
-
-	// 5m -> 1h: aggregate data older than 2 hours
-	if err := rm.store.AggregateMetrics(Tier5m, Tier1h, now.Add(-2*time.Hour)); err != nil {
-		return err
-	}
-
-	// Prune each tier based on its retention config
+	// Prune each tier based on retention config
 	for _, tc := range rm.tiers {
 		if _, err := rm.store.PruneMetrics(tc.Name, now.Add(-tc.Retention)); err != nil {
 			return err
