@@ -300,6 +300,16 @@ func main() {
 	}
 }
 
+func scanAndTee(r *os.File, orig *os.File, buf *logbuf.Buffer) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Fprintln(orig, line)
+		buf.Write([]byte(line))
+	}
+}
+
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
@@ -316,7 +326,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	dbPath := filepath.Join(cfg.DataDir, "simpledeploy.db")
 	logBuf := logbuf.New(1000)
-	log.SetOutput(io.MultiWriter(os.Stderr, logBuf))
+
+	// Redirect stdout/stderr through pipes so ALL output (including Caddy/zap)
+	// gets captured into the log buffer while still printing to the terminal.
+	origStdout := os.Stdout
+	origStderr := os.Stderr
+	stdoutR, stdoutW, _ := os.Pipe()
+	stderrR, stderrW, _ := os.Pipe()
+	os.Stdout = stdoutW
+	os.Stderr = stderrW
+	log.SetOutput(stderrW)
+	go scanAndTee(stdoutR, origStdout, logBuf)
+	go scanAndTee(stderrR, origStderr, logBuf)
+
 	log.Printf("simpledeploy starting (data_dir=%s)", cfg.DataDir)
 
 	db, err := store.Open(dbPath)
