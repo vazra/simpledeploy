@@ -48,19 +48,30 @@ func (s *Store) InsertRequestMetrics(points []metrics.RequestMetricPoint) error 
 // QueryRequestMetrics returns request metric points for the given app and range.
 // Returns the points, interval in seconds, and any error.
 func (s *Store) QueryRequestMetrics(appID int64, rangeStr string) ([]metrics.RequestMetricPoint, int, error) {
-	tier, intervalSec := SelectTier(rangeStr)
+	tiers, intervalSec := SelectTiers(rangeStr)
 
 	now := time.Now().Unix()
 	dur := rangeToDuration(rangeStr)
 	from := now - int64(dur.Seconds())
 	to := now
 
-	rows, err := s.db.Query(`
+	args := []interface{}{appID}
+	tierPlaceholders := ""
+	for i, t := range tiers {
+		if i > 0 {
+			tierPlaceholders += ", "
+		}
+		tierPlaceholders += "?"
+		args = append(args, t)
+	}
+	args = append(args, from, to)
+
+	rows, err := s.db.Query(fmt.Sprintf(`
 		SELECT app_id, ts, tier, count, error_count, avg_latency, max_latency
 		FROM request_metrics
-		WHERE app_id = ? AND tier = ? AND ts >= ? AND ts <= ?
+		WHERE app_id = ? AND tier IN (%s) AND ts >= ? AND ts <= ?
 		ORDER BY ts
-	`, appID, tier, from, to)
+	`, tierPlaceholders), args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query request metrics: %w", err)
 	}

@@ -52,23 +52,24 @@ func (s *Store) InsertMetrics(points []metrics.MetricPoint) error {
 	return tx.Commit()
 }
 
-// SelectTier picks the appropriate tier and interval for a range string.
-func SelectTier(rangeStr string) (string, int) {
+// SelectTiers returns the tiers to query (primary + feeder tiers with unrolled
+// data) and the display interval for a range string.
+func SelectTiers(rangeStr string) ([]string, int) {
 	switch rangeStr {
 	case "1h":
-		return metrics.TierRaw, 10
+		return []string{metrics.TierRaw}, 10
 	case "6h":
-		return metrics.Tier1m, 60
+		return []string{metrics.Tier1m, metrics.TierRaw}, 60
 	case "24h":
-		return metrics.Tier5m, 300
+		return []string{metrics.Tier5m, metrics.Tier1m, metrics.TierRaw}, 300
 	case "1w":
-		return metrics.Tier1h, 3600
+		return []string{metrics.Tier1h, metrics.Tier5m, metrics.Tier1m, metrics.TierRaw}, 3600
 	case "1m":
-		return metrics.Tier1h, 3600
+		return []string{metrics.Tier1h, metrics.Tier5m, metrics.Tier1m, metrics.TierRaw}, 3600
 	case "1yr":
-		return metrics.Tier1d, 86400
+		return []string{metrics.Tier1d, metrics.Tier1h, metrics.Tier5m, metrics.Tier1m, metrics.TierRaw}, 86400
 	default:
-		return metrics.TierRaw, 10
+		return []string{metrics.TierRaw}, 10
 	}
 }
 
@@ -95,7 +96,7 @@ func rangeToDuration(rangeStr string) time.Duration {
 // QueryMetrics returns metric points for the given app and range string.
 // Returns the points, the interval in seconds, and any error.
 func (s *Store) QueryMetrics(appID *int64, rangeStr string) ([]metrics.MetricPoint, int, error) {
-	tier, intervalSec := SelectTier(rangeStr)
+	tiers, intervalSec := SelectTiers(rangeStr)
 
 	now := time.Now().Unix()
 	dur := rangeToDuration(rangeStr)
@@ -103,21 +104,30 @@ func (s *Store) QueryMetrics(appID *int64, rangeStr string) ([]metrics.MetricPoi
 	to := now
 
 	var appFilter string
-	args := make([]interface{}, 0, 5)
+	args := make([]interface{}, 0, 5+len(tiers))
 	if appID == nil {
 		appFilter = "app_id IS NULL"
 	} else {
 		appFilter = "app_id = ?"
 		args = append(args, *appID)
 	}
-	args = append(args, tier, from, to)
+	// Build tier IN clause
+	tierPlaceholders := ""
+	for i, t := range tiers {
+		if i > 0 {
+			tierPlaceholders += ", "
+		}
+		tierPlaceholders += "?"
+		args = append(args, t)
+	}
+	args = append(args, from, to)
 
 	query := fmt.Sprintf(`
 		SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, ts, tier
 		FROM metrics
-		WHERE %s AND tier = ? AND ts >= ? AND ts <= ?
+		WHERE %s AND tier IN (%s) AND ts >= ? AND ts <= ?
 		ORDER BY container_id, ts
-	`, appFilter)
+	`, appFilter, tierPlaceholders)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
