@@ -26,7 +26,7 @@ func makeEvent() AlertEvent {
 
 func renderTemplate(t *testing.T, tmplStr string, event AlertEvent) string {
 	t.Helper()
-	d := NewWebhookDispatcher()
+	d := NewWebhookDispatcherAllowPrivate()
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -56,7 +56,7 @@ func renderTemplate(t *testing.T, tmplStr string, event AlertEvent) string {
 
 func TestRenderSlackTemplate(t *testing.T) {
 	event := makeEvent()
-	d := NewWebhookDispatcher()
+	d := NewWebhookDispatcherAllowPrivate()
 
 	var captured string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +87,7 @@ func TestRenderSlackTemplate(t *testing.T) {
 
 func TestRenderCustomTemplate(t *testing.T) {
 	event := makeEvent()
-	d := NewWebhookDispatcher()
+	d := NewWebhookDispatcherAllowPrivate()
 
 	var captured string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +134,7 @@ func TestRenderWithOverride(t *testing.T) {
 
 func TestWebhookSend(t *testing.T) {
 	event := makeEvent()
-	d := NewWebhookDispatcher()
+	d := NewWebhookDispatcherAllowPrivate()
 
 	var gotMethod, gotContentType, gotBody, gotCustomHeader string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +172,7 @@ func TestWebhookSend(t *testing.T) {
 
 func TestWebhookSendError(t *testing.T) {
 	event := makeEvent()
-	d := NewWebhookDispatcher()
+	d := NewWebhookDispatcherAllowPrivate()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

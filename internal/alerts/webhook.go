@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"text/template"
 	"time"
 
@@ -19,11 +22,53 @@ var builtinTemplates = map[string]string{
 }
 
 type WebhookDispatcher struct {
-	client *http.Client
+	client       *http.Client
+	allowPrivate bool // skip SSRF validation (for tests)
 }
 
 func NewWebhookDispatcher() *WebhookDispatcher {
 	return &WebhookDispatcher{client: &http.Client{Timeout: 10 * time.Second}}
+}
+
+// NewWebhookDispatcherAllowPrivate creates a dispatcher that skips SSRF checks (for testing).
+func NewWebhookDispatcherAllowPrivate() *WebhookDispatcher {
+	return &WebhookDispatcher{
+		client:       &http.Client{Timeout: 10 * time.Second},
+		allowPrivate: true,
+	}
+}
+
+// validateWebhookURL rejects URLs that target private/reserved IPs or non-HTTP schemes.
+func validateWebhookURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url scheme %q not allowed, must be http or https", u.Scheme)
+	}
+	host := u.Hostname()
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("dns lookup failed for %q: %w", host, err)
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("webhook url resolves to private/reserved IP %s", ip)
+		}
+		// Block cloud metadata IPs (169.254.169.254)
+		if ip.Equal(net.ParseIP("169.254.169.254")) {
+			return fmt.Errorf("webhook url resolves to cloud metadata IP")
+		}
+	}
+	return nil
+}
+
+// blockedWebhookHeaders are headers that cannot be overridden via webhook config.
+var blockedWebhookHeaders = map[string]bool{
+	"host":           true,
+	"content-length": true,
+	"transfer-encoding": true,
 }
 
 func (d *WebhookDispatcher) Send(webhook store.Webhook, event AlertEvent) error {
@@ -46,6 +91,12 @@ func (d *WebhookDispatcher) Send(webhook store.Webhook, event AlertEvent) error 
 		return fmt.Errorf("execute template: %w", err)
 	}
 
+	if !d.allowPrivate {
+		if err := validateWebhookURL(webhook.URL); err != nil {
+			return fmt.Errorf("webhook url rejected: %w", err)
+		}
+	}
+
 	req, err := http.NewRequest(http.MethodPost, webhook.URL, &buf)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -58,6 +109,9 @@ func (d *WebhookDispatcher) Send(webhook store.Webhook, event AlertEvent) error 
 			return fmt.Errorf("parse headers: %w", err)
 		}
 		for k, v := range headers {
+			if blockedWebhookHeaders[strings.ToLower(k)] {
+				continue
+			}
 			req.Header.Set(k, v)
 		}
 	}

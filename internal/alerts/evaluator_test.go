@@ -174,7 +174,7 @@ func TestEvaluateOnce_FiresAlert(t *testing.T) {
 	}
 	al := &mockAppLookup{apps: make(map[int64]*store.App)}
 
-	e := NewEvaluator(ms, al, mq, NewWebhookDispatcher())
+	e := NewEvaluator(ms, al, mq, NewWebhookDispatcherAllowPrivate())
 	if err := e.EvaluateOnce(context.Background()); err != nil {
 		t.Fatalf("EvaluateOnce: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestEvaluateOnce_NoFire(t *testing.T) {
 	}
 	al := &mockAppLookup{apps: make(map[int64]*store.App)}
 
-	e := NewEvaluator(ms, al, mq, NewWebhookDispatcher())
+	e := NewEvaluator(ms, al, mq, NewWebhookDispatcherAllowPrivate())
 	if err := e.EvaluateOnce(context.Background()); err != nil {
 		t.Fatalf("EvaluateOnce: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestEvaluateOnce_ResolvesAlert(t *testing.T) {
 	}
 	al := &mockAppLookup{apps: make(map[int64]*store.App)}
 
-	e := NewEvaluator(ms, al, mq, NewWebhookDispatcher())
+	e := NewEvaluator(ms, al, mq, NewWebhookDispatcherAllowPrivate())
 	if err := e.EvaluateOnce(context.Background()); err != nil {
 		t.Fatalf("EvaluateOnce: %v", err)
 	}
