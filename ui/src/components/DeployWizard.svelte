@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte'
   import Button from './Button.svelte'
   import YamlEditor from './YamlEditor.svelte'
   import AccordionSection from './AccordionSection.svelte'
@@ -118,6 +119,93 @@
       }
     }
     return yaml
+  }
+
+  // Step 3 state
+  let deployStatus = $state('deploying') // 'deploying' | 'success' | 'failed'
+  let deployLines = $state([])
+  let currentAction = $state('')
+  let deployWs = $state(null)
+  let logContainer = $state(null)
+
+  async function startDeploy() {
+    step = 3
+    deployStatus = 'deploying'
+    deployLines = []
+    currentAction = 'Starting deploy...'
+
+    const finalCompose = injectLabels(composeText)
+    const encoded = btoa(finalCompose)
+    const res = await api.deploy(appName.trim(), encoded)
+
+    if (res.error) {
+      deployStatus = 'failed'
+      deployLines = [{ line: res.error, stream: 'stderr' }]
+      return
+    }
+
+    // Connect to deploy log WebSocket
+    deployWs = api.deployLogsWs(appName.trim())
+    deployWs.onmessage = (event) => {
+      const msg = JSON.parse(event.data)
+      if (msg.done) {
+        deployStatus = msg.action === 'deploy' ? 'success' : 'failed'
+        currentAction = msg.action === 'deploy' ? 'Deploy complete' : `Failed: ${msg.action}`
+        deployWs?.close()
+        deployWs = null
+        return
+      }
+      if (msg.line) {
+        deployLines = [...deployLines, msg]
+        if (logContainer) {
+          requestAnimationFrame(() => { logContainer.scrollTop = logContainer.scrollHeight })
+        }
+      }
+      if (msg.action) currentAction = msg.action
+    }
+    deployWs.onerror = () => {
+      deployStatus = 'failed'
+      currentAction = 'WebSocket connection failed'
+    }
+    deployWs.onclose = () => {
+      if (deployStatus === 'deploying') {
+        deployStatus = 'failed'
+        currentAction = 'Connection lost'
+      }
+    }
+  }
+
+  onDestroy(() => {
+    if (deployWs) deployWs.close()
+    if (validateTimer) clearTimeout(validateTimer)
+  })
+
+  function resetWizard() {
+    step = 1
+    appName = ''
+    composeText = ''
+    composeValid = false
+    composeErrors = []
+    nameError = ''
+    deployStatus = 'deploying'
+    deployLines = []
+    currentAction = ''
+    parsedServices = []
+    registries = []
+    selectedRegistry = ''
+    routingDomain = ''
+    routingPort = ''
+    routingTls = false
+  }
+
+  let confirmClose = $state(false)
+
+  function handleClose() {
+    if (step === 3 && deployStatus === 'deploying') {
+      confirmClose = true
+      return
+    }
+    onclose()
   }
 
   function parseServicesFromYaml(text) {
@@ -345,21 +433,85 @@
         </AccordionSection>
       </div>
     {:else}
-      <p class="text-text-muted text-sm">Step 3 placeholder</p>
+      <div class="flex flex-col gap-4 h-full">
+        <!-- Status badge -->
+        <div class="flex items-center gap-2">
+          {#if deployStatus === 'deploying'}
+            <span class="flex items-center gap-1.5 text-sm font-medium text-warning">
+              <span class="w-2 h-2 rounded-full bg-warning animate-pulse"></span>
+              Deploying...
+            </span>
+          {:else if deployStatus === 'success'}
+            <span class="flex items-center gap-1.5 text-sm font-medium text-success">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+              Deployed
+            </span>
+          {:else}
+            <span class="flex items-center gap-1.5 text-sm font-medium text-danger">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              Failed
+            </span>
+          {/if}
+          {#if currentAction}
+            <span class="text-xs text-text-muted">{currentAction}</span>
+          {/if}
+        </div>
+
+        <!-- Log viewer -->
+        <div
+          bind:this={logContainer}
+          class="flex-1 min-h-[300px] max-h-[400px] overflow-y-auto bg-[#0c0c0c] light:bg-[#1a1a2e] rounded-lg font-mono text-[13px] leading-5 p-4"
+        >
+          {#if deployLines.length === 0}
+            <div class="flex items-center justify-center h-full text-[#555] text-sm">Waiting for output...</div>
+          {:else}
+            {#each deployLines as line}
+              <div class="whitespace-pre-wrap break-all py-px {line.stream === 'stderr' ? 'text-red-400' : 'text-[#d4d4d4] light:text-[#c8c8d8]'}">
+                {line.line}
+              </div>
+            {/each}
+          {/if}
+        </div>
+
+        <!-- Completion actions -->
+        {#if deployStatus === 'success'}
+          <div class="flex gap-2">
+            <Button size="sm" onclick={() => { onComplete(); window.location.hash = `#/apps/${appName.trim()}` }}>View App</Button>
+            <Button size="sm" variant="secondary" onclick={resetWizard}>Deploy Another</Button>
+          </div>
+        {:else if deployStatus === 'failed'}
+          <div class="flex gap-2">
+            <Button size="sm" variant="secondary" onclick={() => { step = 1 }}>Back to Edit</Button>
+          </div>
+        {/if}
+      </div>
     {/if}
   </div>
 
   <!-- Footer -->
   <div class="flex justify-between pt-4 border-t border-border/50 mt-4">
-    {#if step > 1 && step < 3}
-      <Button variant="secondary" size="sm" onclick={() => step--}>Back</Button>
-    {:else}
+    {#if step === 2}
+      <Button variant="secondary" size="sm" onclick={() => step = 1}>Back</Button>
+      <Button size="sm" onclick={startDeploy}>Deploy</Button>
+    {:else if step === 1}
       <div></div>
-    {/if}
-    {#if step === 1}
       <Button size="sm" disabled={!appName.trim() || !!nameError || !composeValid} onclick={enterStep2}>Next</Button>
-    {:else if step < 3}
-      <Button size="sm" onclick={() => step++}>Next</Button>
+    {:else}
+      <!-- Step 3: no footer nav, actions are inline above -->
     {/if}
   </div>
+
+  <!-- Close confirmation during deploy -->
+  {#if confirmClose}
+    <div class="fixed inset-0 z-50 flex items-center justify-center">
+      <button class="absolute inset-0 bg-black/40" onclick={() => confirmClose = false} aria-label="Cancel"></button>
+      <div class="relative bg-surface-2 border border-border/50 rounded-xl p-6 max-w-sm shadow-2xl">
+        <p class="text-sm text-text-primary mb-4">Deploy in progress. Close anyway?</p>
+        <div class="flex gap-2 justify-end">
+          <Button size="sm" variant="secondary" onclick={() => confirmClose = false}>Cancel</Button>
+          <Button size="sm" variant="danger" onclick={() => { deployWs?.close(); onclose() }}>Close</Button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
