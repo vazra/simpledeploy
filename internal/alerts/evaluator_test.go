@@ -76,8 +76,8 @@ type mockMetricQuerier struct {
 	points []metrics.MetricPoint
 }
 
-func (m *mockMetricQuerier) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]metrics.MetricPoint, error) {
-	return m.points, nil
+func (m *mockMetricQuerier) QueryMetrics(appID *int64, rangeStr string) ([]metrics.MetricPoint, int, error) {
+	return m.points, 10, nil
 }
 
 type mockAppLookup struct {
@@ -165,11 +165,12 @@ func TestEvaluateOnce_FiresAlert(t *testing.T) {
 	}
 	ms.webhooks[10] = &store.Webhook{ID: 10, Type: "slack", URL: srv.URL}
 
+	now := time.Now().Unix()
 	mq := &mockMetricQuerier{
 		points: []metrics.MetricPoint{
-			{CPUPct: 90},
-			{CPUPct: 95},
-			{CPUPct: 85},
+			{CPUPct: 90, Ts: now - 10},
+			{CPUPct: 95, Ts: now - 20},
+			{CPUPct: 85, Ts: now - 30},
 		},
 	}
 	al := &mockAppLookup{apps: make(map[int64]*store.App)}
@@ -204,10 +205,11 @@ func TestEvaluateOnce_NoFire(t *testing.T) {
 	}
 	ms.webhooks[10] = &store.Webhook{ID: 10, Type: "slack", URL: srv.URL}
 
+	now := time.Now().Unix()
 	mq := &mockMetricQuerier{
 		points: []metrics.MetricPoint{
-			{CPUPct: 50},
-			{CPUPct: 60},
+			{CPUPct: 50, Ts: now - 10},
+			{CPUPct: 60, Ts: now - 20},
 		},
 	}
 	al := &mockAppLookup{apps: make(map[int64]*store.App)}
@@ -245,10 +247,11 @@ func TestEvaluateOnce_ResolvesAlert(t *testing.T) {
 	ms.activeAlerts[1] = existing
 
 	// metrics now below threshold
+	now := time.Now().Unix()
 	mq := &mockMetricQuerier{
 		points: []metrics.MetricPoint{
-			{CPUPct: 50},
-			{CPUPct: 60},
+			{CPUPct: 50, Ts: now - 10},
+			{CPUPct: 60, Ts: now - 20},
 		},
 	}
 	al := &mockAppLookup{apps: make(map[int64]*store.App)}

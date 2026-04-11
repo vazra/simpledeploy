@@ -3,78 +3,80 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
-	"time"
 
-	"github.com/vazra/simpledeploy/internal/store"
+	"github.com/vazra/simpledeploy/internal/metrics"
 )
 
-type metricResponse struct {
-	Timestamp time.Time `json:"timestamp"`
-	CPUPct    float64   `json:"cpu_pct"`
-	MemBytes  int64     `json:"mem_bytes"`
-	MemLimit  int64     `json:"mem_limit"`
-	NetRx     int64     `json:"net_rx"`
-	NetTx     int64     `json:"net_tx"`
-	DiskRead  int64     `json:"disk_read"`
-	DiskWrite int64     `json:"disk_write"`
+type metricsEnvelope struct {
+	Interval   int                         `json:"interval"`
+	Containers map[string]containerMetrics `json:"containers"`
 }
 
-func parseTimeRange(r *http.Request) (time.Time, time.Time) {
-	now := time.Now().UTC()
-	defaultFrom := now.Add(-time.Hour)
+type containerMetrics struct {
+	Points []compactPoint `json:"points"`
+}
 
-	parseTime := func(s string) (time.Time, bool) {
-		if s == "" {
-			return time.Time{}, false
-		}
-		// try RFC3339
-		if t, err := time.Parse(time.RFC3339, s); err == nil {
-			return t.UTC(), true
-		}
-		// try unix timestamp
-		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return time.Unix(n, 0).UTC(), true
-		}
-		return time.Time{}, false
-	}
+type compactPoint struct {
+	T  int64    `json:"t"`
+	C  *float64 `json:"c,omitempty"`
+	M  *int64   `json:"m,omitempty"`
+	ML *int64   `json:"ml,omitempty"`
+	NR *float64 `json:"nr,omitempty"`
+	NT *float64 `json:"nt,omitempty"`
+	DR *float64 `json:"dr,omitempty"`
+	DW *float64 `json:"dw,omitempty"`
+}
 
-	from, ok := parseTime(r.URL.Query().Get("from"))
-	if !ok {
-		from = defaultFrom
+func parseRange(r *http.Request) string {
+	rng := r.URL.Query().Get("range")
+	switch rng {
+	case "1h", "6h", "24h", "1w", "1m", "1yr":
+		return rng
+	default:
+		return "1h"
 	}
-	to, ok := parseTime(r.URL.Query().Get("to"))
-	if !ok {
-		to = now
+}
+
+func metricToCompact(p metrics.MetricPoint) compactPoint {
+	return compactPoint{
+		T:  p.Ts,
+		C:  &p.CPUPct,
+		M:  &p.MemBytes,
+		ML: &p.MemLimit,
+		NR: &p.NetRx,
+		NT: &p.NetTx,
+		DR: &p.DiskRead,
+		DW: &p.DiskWrite,
 	}
-	return from, to
+}
+
+func insertGaps(points []compactPoint, intervalSec int) []compactPoint {
+	if len(points) < 2 {
+		return points
+	}
+	threshold := int64(float64(intervalSec) * 1.5)
+	result := []compactPoint{points[0]}
+	for i := 1; i < len(points); i++ {
+		gap := points[i].T - points[i-1].T
+		if gap > threshold {
+			result = append(result, compactPoint{T: points[i-1].T + int64(intervalSec)})
+		}
+		result = append(result, points[i])
+	}
+	return result
 }
 
 func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
-	from, to := parseTimeRange(r)
-	tier := store.SelectTier(to.Sub(from))
-	points, err := s.store.QueryMetrics(nil, tier, from, to)
+	rangeStr := parseRange(r)
+	points, intervalSec, err := s.store.QueryMetrics(nil, rangeStr)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
-	resp := make([]metricResponse, 0, len(points))
-	for _, p := range points {
-		resp = append(resp, metricResponse{
-			Timestamp: p.Timestamp,
-			CPUPct:    p.CPUPct,
-			MemBytes:  p.MemBytes,
-			MemLimit:  p.MemLimit,
-			NetRx:     p.NetRx,
-			NetTx:     p.NetTx,
-			DiskRead:  p.DiskRead,
-			DiskWrite: p.DiskWrite,
-		})
-	}
-
+	env := buildMetricsEnvelope(points, intervalSec)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(env)
 }
 
 func (s *Server) handleAppMetrics(w http.ResponseWriter, r *http.Request) {
@@ -85,28 +87,32 @@ func (s *Server) handleAppMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	from, to := parseTimeRange(r)
-	tier := store.SelectTier(to.Sub(from))
-	points, err := s.store.QueryMetrics(&app.ID, tier, from, to)
+	rangeStr := parseRange(r)
+	points, intervalSec, err := s.store.QueryMetrics(&app.ID, rangeStr)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
-	resp := make([]metricResponse, 0, len(points))
+	env := buildMetricsEnvelope(points, intervalSec)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(env)
+}
+
+func buildMetricsEnvelope(points []metrics.MetricPoint, intervalSec int) metricsEnvelope {
+	grouped := make(map[string][]compactPoint)
 	for _, p := range points {
-		resp = append(resp, metricResponse{
-			Timestamp: p.Timestamp,
-			CPUPct:    p.CPUPct,
-			MemBytes:  p.MemBytes,
-			MemLimit:  p.MemLimit,
-			NetRx:     p.NetRx,
-			NetTx:     p.NetTx,
-			DiskRead:  p.DiskRead,
-			DiskWrite: p.DiskWrite,
-		})
+		cp := metricToCompact(p)
+		grouped[p.ContainerID] = append(grouped[p.ContainerID], cp)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	containers := make(map[string]containerMetrics, len(grouped))
+	for cid, pts := range grouped {
+		containers[cid] = containerMetrics{Points: insertGaps(pts, intervalSec)}
+	}
+
+	return metricsEnvelope{
+		Interval:   intervalSec,
+		Containers: containers,
+	}
 }

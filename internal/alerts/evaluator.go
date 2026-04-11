@@ -11,7 +11,7 @@ import (
 )
 
 type MetricQuerier interface {
-	QueryMetrics(appID *int64, tier string, from, to time.Time) ([]metrics.MetricPoint, error)
+	QueryMetrics(appID *int64, rangeStr string) ([]metrics.MetricPoint, int, error)
 }
 
 type AlertStoreReader interface {
@@ -65,12 +65,20 @@ func (e *Evaluator) EvaluateOnce(ctx context.Context) error {
 
 	now := time.Now()
 	for _, rule := range rules {
-		from := now.Add(-time.Duration(rule.DurationSec) * time.Second)
-		pts, err := e.metrics.QueryMetrics(rule.AppID, metrics.TierRaw, from, now)
+		pts, _, err := e.metrics.QueryMetrics(rule.AppID, "1h")
 		if err != nil {
 			log.Printf("evaluator: query metrics rule %d: %v", rule.ID, err)
 			continue
 		}
+		// filter to only points within the rule's duration window
+		cutoff := now.Add(-time.Duration(rule.DurationSec) * time.Second).Unix()
+		filtered := pts[:0]
+		for _, p := range pts {
+			if p.Ts >= cutoff {
+				filtered = append(filtered, p)
+			}
+		}
+		pts = filtered
 		if len(pts) == 0 {
 			continue
 		}

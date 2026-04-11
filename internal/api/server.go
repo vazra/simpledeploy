@@ -239,7 +239,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/system/info", s.authMiddleware(http.HandlerFunc(s.handleSystemInfo)))
 	s.mux.Handle("GET /api/system/storage-breakdown", s.authMiddleware(http.HandlerFunc(s.handleStorageBreakdown)))
 	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(http.HandlerFunc(s.handlePruneMetrics)))
-	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(http.HandlerFunc(s.handlePruneRequestStats)))
+	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(http.HandlerFunc(s.handlePruneRequestMetrics)))
 	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(http.HandlerFunc(s.handleVacuumDB)))
 	s.mux.Handle("GET /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleAuditLog)))
 	s.mux.Handle("DELETE /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleClearAuditLog)))

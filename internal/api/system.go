@@ -174,7 +174,7 @@ func (s *Server) handleStorageBreakdown(w http.ResponseWriter, r *http.Request) 
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	rs, err := s.store.GetRequestStatsTierStats()
+	rs, err := s.store.GetRequestMetricsTierStats()
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
@@ -189,7 +189,7 @@ func parsePruneRequest(r *http.Request) pruneRequest {
 	if req.Days <= 0 {
 		req.Days = 30
 	}
-	validTiers := map[string]bool{"raw": true, "1m": true, "5m": true, "1h": true}
+	validTiers := map[string]bool{"raw": true, "1m": true, "5m": true, "1h": true, "1d": true}
 	if !validTiers[req.Tier] {
 		req.Tier = "raw"
 	}
@@ -208,16 +208,16 @@ func (s *Server) handlePruneMetrics(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d metrics[%s] rows older than %d days", n, req.Tier, req.Days)})
 }
 
-func (s *Server) handlePruneRequestStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePruneRequestMetrics(w http.ResponseWriter, r *http.Request) {
 	req := parsePruneRequest(r)
 	cutoff := time.Now().AddDate(0, 0, -req.Days)
-	n, err := s.store.PruneRequestStats(req.Tier, cutoff)
+	n, err := s.store.PruneRequestMetrics(req.Tier, cutoff)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d request_stats[%s] rows older than %d days", n, req.Tier, req.Days)})
+	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d request_metrics[%s] rows older than %d days", n, req.Tier, req.Days)})
 }
 
 func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +407,7 @@ func stripMetrics(dbPath string) error {
 		return err
 	}
 	defer db.Close()
-	for _, table := range []string{"metrics", "request_stats"} {
+	for _, table := range []string{"metrics", "request_metrics"} {
 		if _, err := db.Exec("DELETE FROM " + table); err != nil {
 			return fmt.Errorf("delete %s: %w", table, err)
 		}

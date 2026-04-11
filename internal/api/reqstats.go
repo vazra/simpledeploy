@@ -2,26 +2,48 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"time"
 
-	"github.com/vazra/simpledeploy/internal/store"
+	"github.com/vazra/simpledeploy/internal/metrics"
 )
 
-type requestStatsResponse struct {
-	TotalRequests int                `json:"total_requests"`
-	AvgLatencyMs  float64            `json:"avg_latency_ms"`
-	StatusCodes   map[string]int     `json:"status_codes"`
-	Points        []requestStatPoint `json:"points"`
+type requestMetricsEnvelope struct {
+	Interval int               `json:"interval"`
+	Points   []compactReqPoint `json:"points"`
 }
 
-type requestStatPoint struct {
-	Timestamp   time.Time `json:"timestamp"`
-	StatusCode  int       `json:"status_code"`
-	LatencyMs   float64   `json:"latency_ms"`
-	Method      string    `json:"method"`
-	PathPattern string    `json:"path_pattern"`
+type compactReqPoint struct {
+	T  int64    `json:"t"`
+	N  *int64   `json:"n,omitempty"`
+	E  *int64   `json:"e,omitempty"`
+	AL *float64 `json:"al,omitempty"`
+	ML *float64 `json:"ml,omitempty"`
+}
+
+func reqMetricToCompact(p metrics.RequestMetricPoint) compactReqPoint {
+	return compactReqPoint{
+		T:  p.Ts,
+		N:  &p.Count,
+		E:  &p.ErrorCount,
+		AL: &p.AvgLatency,
+		ML: &p.MaxLatency,
+	}
+}
+
+func insertReqGaps(points []compactReqPoint, intervalSec int) []compactReqPoint {
+	if len(points) < 2 {
+		return points
+	}
+	threshold := int64(float64(intervalSec) * 1.5)
+	result := []compactReqPoint{points[0]}
+	for i := 1; i < len(points); i++ {
+		gap := points[i].T - points[i-1].T
+		if gap > threshold {
+			result = append(result, compactReqPoint{T: points[i-1].T + int64(intervalSec)})
+		}
+		result = append(result, points[i])
+	}
+	return result
 }
 
 func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
@@ -32,58 +54,23 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	from, to := parseTimeRange(r)
-	tier := store.SelectTier(to.Sub(from))
-	stats, err := s.store.QueryRequestStats(app.ID, tier, from, to)
+	rangeStr := parseRange(r)
+	points, intervalSec, err := s.store.QueryRequestMetrics(app.ID, rangeStr)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
-	resp := buildRequestStatsResponse(stats)
+	compact := make([]compactReqPoint, 0, len(points))
+	for _, p := range points {
+		compact = append(compact, reqMetricToCompact(p))
+	}
+
+	env := requestMetricsEnvelope{
+		Interval: intervalSec,
+		Points:   insertReqGaps(compact, intervalSec),
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func buildRequestStatsResponse(stats []store.RequestStat) requestStatsResponse {
-	resp := requestStatsResponse{
-		StatusCodes: make(map[string]int),
-		Points:      make([]requestStatPoint, 0, len(stats)),
-	}
-
-	var totalLatency float64
-	for _, st := range stats {
-		resp.TotalRequests++
-		totalLatency += st.LatencyMs
-
-		bucket := statusCodeBucket(st.StatusCode)
-		resp.StatusCodes[bucket]++
-
-		resp.Points = append(resp.Points, requestStatPoint{
-			Timestamp:   st.Timestamp,
-			StatusCode:  st.StatusCode,
-			LatencyMs:   st.LatencyMs,
-			Method:      st.Method,
-			PathPattern: st.PathPattern,
-		})
-	}
-
-	if resp.TotalRequests > 0 {
-		resp.AvgLatencyMs = totalLatency / float64(resp.TotalRequests)
-	}
-
-	return resp
-}
-
-func statusCodeBucket(code int) string {
-	switch {
-	case code >= 500:
-		return "5xx"
-	case code >= 400:
-		return "4xx"
-	case code >= 200:
-		return "2xx"
-	default:
-		return fmt.Sprintf("%dxx", code/100)
-	}
+	json.NewEncoder(w).Encode(env)
 }
