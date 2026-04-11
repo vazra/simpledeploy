@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+
+	"golang.org/x/crypto/pbkdf2"
 )
 
 // Encrypt encrypts plaintext with AES-256-GCM using a SHA-256 hash of key.
@@ -55,6 +57,6 @@ func Decrypt(encoded, key string) (string, error) {
 }
 
 func deriveKey(key string) []byte {
-	h := sha256.Sum256([]byte(key))
-	return h[:]
+	salt := []byte("simpledeploy-v1") // fixed salt; key uniqueness comes from the master secret
+	return pbkdf2.Key([]byte(key), salt, 100_000, 32, sha256.New)
 }
