@@ -273,6 +273,87 @@ func TestListAPIKeys(t *testing.T) {
 	}
 }
 
+func TestGetMe(t *testing.T) {
+	srv, _, cookie := setupUserTestServer(t)
+
+	req := authedRequest(t, http.MethodGet, "/api/me", nil, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/me status = %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["username"] != "admin" {
+		t.Errorf("username = %v, want admin", resp["username"])
+	}
+	if resp["role"] != "super_admin" {
+		t.Errorf("role = %v, want super_admin", resp["role"])
+	}
+}
+
+func TestUpdateMe(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+
+	req := authedRequest(t, http.MethodPut, "/api/me", map[string]string{
+		"display_name": "Admin User",
+		"email":        "admin@example.com",
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT /api/me status = %d, want 200", w.Code)
+	}
+
+	user, err := st.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	if user.DisplayName != "Admin User" {
+		t.Errorf("display_name = %q, want %q", user.DisplayName, "Admin User")
+	}
+	if user.Email != "admin@example.com" {
+		t.Errorf("email = %q, want %q", user.Email, "admin@example.com")
+	}
+}
+
+func TestChangePassword(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+
+	req := authedRequest(t, http.MethodPut, "/api/me/password", map[string]string{
+		"current_password": "password123",
+		"new_password":     "newpass456",
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT /api/me/password status = %d, want 200", w.Code)
+	}
+
+	user, _ := st.GetUserByUsername("admin")
+	if !auth.CheckPassword(user.PasswordHash, "newpass456") {
+		t.Error("new password should be valid")
+	}
+}
+
+func TestChangePasswordWrongCurrent(t *testing.T) {
+	srv, _, cookie := setupUserTestServer(t)
+
+	req := authedRequest(t, http.MethodPut, "/api/me/password", map[string]string{
+		"current_password": "wrongpassword",
+		"new_password":     "newpass456",
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
 func TestRevokeAPIKey(t *testing.T) {
 	srv, _, cookie := setupUserTestServer(t)
 
