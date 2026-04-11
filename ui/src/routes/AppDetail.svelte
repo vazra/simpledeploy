@@ -24,6 +24,8 @@
   let metricsRange = $state('1h')
   let cpuData = $state([])
   let memData = $state([])
+  let memSummary = $state('')
+  let memRaw = $state([])
   let netRxData = $state([])
   let netTxData = $state([])
   let diskReadData = $state([])
@@ -50,8 +52,10 @@
   let bCron = $state('0 2 * * *')
   let bRetention = $state(7)
 
+  let metricsInterval = $state(10)
+
   const tabs = ['overview', 'logs', 'events', 'metrics', 'backups', 'config', 'environment']
-  const rangeMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 }
+  const ranges = ['1h', '6h', '24h', '1w', '1m', '1yr']
 
   let pollTimer = null
   function startPolling() {
@@ -95,37 +99,40 @@
     if (app?.deploying) startPolling()
   }
 
-  // gapThreshold: if two points are further apart than this, break the line.
-  // Based on the coarsest tier expected for each range.
-  // Between normal spacing and smallest gap: 5m-tier=5min, 1h-tier=1hr
-  // A missing point doubles the spacing, so threshold sits at 1.5x normal
-  const gapThreshold = { '1h': 450000, '6h': 450000, '24h': 5400000, '7d': 5400000 }
-
-  function withGaps(range, points) {
-    if (points.length < 2) return points
-    const threshold = gapThreshold[range] || 600000
-    const result = [points[0]]
-    for (let i = 1; i < points.length; i++) {
-      const gap = points[i].x - points[i - 1].x
-      if (gap > threshold) {
-        result.push({ x: new Date(points[i - 1].x.getTime() + 1), y: null })
-      }
-      result.push(points[i])
-    }
-    return result
+  function formatBytes(bytes) {
+    if (!bytes) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i]
   }
 
   async function loadMetrics() {
-    const now = new Date().toISOString()
-    const from = new Date(Date.now() - rangeMs[metricsRange]).toISOString()
-    const res = await api.appMetrics(slug, from, now)
-    const data = res.data || []
-    cpuData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct })))
-    memData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.mem_limit ? (m.mem_bytes / m.mem_limit) * 100 : 0 })))
-    netRxData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.net_rx || 0 })))
-    netTxData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.net_tx || 0 })))
-    diskReadData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_read || 0 })))
-    diskWriteData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_write || 0 })))
+    const res = await api.appMetrics(slug, metricsRange)
+    const data = res.data
+    if (!data?.containers) return
+
+    const allPoints = []
+    for (const ctr of Object.values(data.containers)) {
+      allPoints.push(...(ctr.points || []))
+    }
+    allPoints.sort((a, b) => a.t - b.t)
+
+    const interval = data.interval || 10
+    metricsInterval = interval
+
+    cpuData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.c ?? null }))
+    memData = allPoints.map(p => ({
+      x: new Date(p.t * 1000),
+      y: p.ml ? ((p.m || 0) / p.ml) * 100 : null,
+    }))
+    memRaw = allPoints.map(p => ({ bytes: p.m || 0, limit: p.ml || 0 }))
+    const latest = allPoints.filter(p => p.c != null).pop()
+    memSummary = latest?.ml ? `${formatBytes(latest.m)} / ${formatBytes(latest.ml)}` : ''
+    netRxData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.nr ?? null }))
+    netTxData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.nt ?? null }))
+    diskReadData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.dr ?? null }))
+    diskWriteData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.dw ?? null }))
   }
 
   async function loadServices() {
@@ -135,9 +142,7 @@
   }
 
   async function loadRequests() {
-    const now = new Date().toISOString()
-    const from = new Date(Date.now() - 3600000).toISOString()
-    const res = await api.appRequests(slug, from, now)
+    const res = await api.appRequests(slug, metricsRange)
     if (res.error) return
     requestStats = res.data
   }
@@ -427,7 +432,7 @@
 
     {:else if activeTab === 'metrics'}
       <div class="flex gap-1 mb-4">
-        {#each Object.keys(rangeMs) as range}
+        {#each ranges as range}
           <button
             onclick={() => { metricsRange = range; loadMetrics() }}
             class="px-2 py-1 text-xs rounded-md border transition-colors
@@ -438,12 +443,16 @@
         {/each}
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <MetricsChart data={cpuData} label="CPU Usage" color="#3b82f6" unit="%" />
-        <MetricsChart data={memData} label="Memory Usage" color="#22c55e" unit="%" />
-        <MetricsChart data={netRxData} label="Network RX" color="#eab308" unit=" B/s" />
-        <MetricsChart data={netTxData} label="Network TX" color="#a78bfa" unit=" B/s" />
-        <MetricsChart data={diskReadData} label="Disk Read" color="#fb923c" unit=" B/s" />
-        <MetricsChart data={diskWriteData} label="Disk Write" color="#ef4444" unit=" B/s" />
+        <MetricsChart data={cpuData} label="CPU Usage" color="#3b82f6" unit="%" interval={metricsInterval} />
+        <MetricsChart data={memData} label="Memory Usage" color="#22c55e" unit="%" subtitle={memSummary} interval={metricsInterval}
+          tooltipFormat={(i, pct) => {
+            const r = memRaw[i]
+            return r ? `${pct.toFixed(1)}% (${formatBytes(r.bytes)} / ${formatBytes(r.limit)})` : `${pct.toFixed(1)}%`
+          }} />
+        <MetricsChart data={netRxData} label="Network RX" color="#eab308" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart data={netTxData} label="Network TX" color="#a78bfa" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart data={diskReadData} label="Disk Read" color="#fb923c" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart data={diskWriteData} label="Disk Write" color="#ef4444" unit=" B/s" interval={metricsInterval} />
       </div>
 
     {:else if activeTab === 'backups'}

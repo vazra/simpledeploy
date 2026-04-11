@@ -128,9 +128,9 @@ export const api = {
   updateAccess: (slug, allow) => requestWithToast('PUT', `/apps/${slug}/access`, { allow }, 'IP allowlist updated'),
 
   // Metrics
-  systemMetrics: (from, to) => request('GET', `/metrics/system?from=${from}&to=${to}`),
-  appMetrics: (slug, from, to) => request('GET', `/apps/${slug}/metrics?from=${from}&to=${to}`),
-  appRequests: (slug, from, to) => request('GET', `/apps/${slug}/requests?from=${from}&to=${to}`),
+  systemMetrics: (range) => request('GET', `/metrics/system?range=${range || '1h'}`),
+  appMetrics: (slug, range) => request('GET', `/apps/${slug}/metrics?range=${range || '1h'}`),
+  appRequests: (slug, range) => request('GET', `/apps/${slug}/requests?range=${range || '1h'}`),
 
   // Backups
   listBackupConfigs: (slug) => request('GET', `/apps/${slug}/backups/configs`),

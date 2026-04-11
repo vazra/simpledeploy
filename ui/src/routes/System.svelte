@@ -41,8 +41,8 @@
   let downloadCompact = $state(false)
   let savingBackupConfig = $state(false)
 
-  const tiers = ['raw', '1m', '5m', '1h']
-  const tierLabels = { raw: 'Raw', '1m': '1 min', '5m': '5 min', '1h': '1 hour' }
+  const tiers = ['raw', '1m', '5m', '1h', '1d']
+  const tierLabels = { raw: 'Raw', '1m': '1 min', '5m': '5 min', '1h': '1 hour', '1d': '1 day' }
 
   function formatBytes(bytes) {
     if (!bytes || bytes === 0) return '0 B'
@@ -268,7 +268,7 @@
     apps: 'Apps',
     users: 'Users',
     metrics: 'Metrics',
-    request_stats: 'Request Stats',
+    request_stats: 'Request Metrics',
     alert_rules: 'Alert Rules',
     backup_runs: 'Backup Runs',
   }
@@ -452,10 +452,10 @@
               </div>
             </div>
 
-            <!-- Request Stats tiers -->
+            <!-- Request Metrics tiers -->
             <div>
               <div class="text-xs font-medium text-text-secondary mb-3">
-                Request Stats
+                Request Metrics
                 <span class="ml-1 text-text-primary font-semibold">{totalRows(breakdown.request_stats).toLocaleString()} rows</span>
               </div>
               <div class="space-y-2">

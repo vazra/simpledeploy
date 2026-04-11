@@ -14,6 +14,7 @@
   let apps = $state([])
   let cpuHistory = $state([])
   let memHistory = $state([])
+  let memRawHistory = $state([])
   let loading = $state(true)
   let loadError = $state(false)
   let latestMetrics = $state(null)
@@ -22,8 +23,9 @@
   let appMetricsMap = $state({})
   let appRequestsMap = $state({})
   let timeRange = $state('1h')
+  let metricsInterval = $state(10)
 
-  const rangeMs = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '7d': 604800000 }
+  const ranges = ['1h', '6h', '24h', '1w', '1m', '1yr']
 
   let filterStatus = $state('all')
   let sortBy = $state('name')
@@ -62,31 +64,13 @@
   onMount(loadDashboard)
   onDestroy(unsubReconnect)
 
-  const gapThreshold = { '1h': 450000, '6h': 450000, '24h': 5400000, '7d': 5400000 }
-
-  function withGaps(range, points) {
-    if (points.length < 2) return points
-    const threshold = gapThreshold[range] || 600000
-    const result = [points[0]]
-    for (let i = 1; i < points.length; i++) {
-      const gap = points[i].x - points[i - 1].x
-      if (gap > threshold) {
-        result.push({ x: new Date(points[i - 1].x.getTime() + 1), y: null })
-      }
-      result.push(points[i])
-    }
-    return result
-  }
-
   async function loadDashboard() {
     loading = true
     loadError = false
-    const now = new Date().toISOString()
-    const from = new Date(Date.now() - rangeMs[timeRange]).toISOString()
 
     const [appsRes, metricsRes, histRes] = await Promise.all([
       api.listApps(),
-      api.systemMetrics(from, now),
+      api.systemMetrics(timeRange),
       api.alertHistory(),
     ])
 
@@ -99,46 +83,61 @@
     apps = appsRes.data || []
     alertHistory = histRes.data || []
 
-    const metricsData = metricsRes.data || []
-    if (metricsData.length > 0) {
-      const latest = metricsData[metricsData.length - 1]
-      latestMetrics = {
-        cpu: latest.cpu_pct?.toFixed(1) || '0',
-        memUsed: formatBytes(latest.mem_bytes || 0),
-        memTotal: formatBytes(latest.mem_limit || 0),
-        memPct: latest.mem_limit ? ((latest.mem_bytes / latest.mem_limit) * 100).toFixed(1) : '0',
-        netRx: formatBytes(latest.net_rx || 0),
-        netTx: formatBytes(latest.net_tx || 0),
-        diskRead: formatBytes(latest.disk_read || 0),
-        diskWrite: formatBytes(latest.disk_write || 0),
+    const metricsData = metricsRes.data
+    if (metricsData?.containers) {
+      const sysPoints = metricsData.containers['']?.points || []
+      const interval = metricsData.interval || 10
+
+      if (sysPoints.length > 0) {
+        const latest = sysPoints[sysPoints.length - 1]
+        latestMetrics = {
+          cpu: (latest.c ?? 0).toFixed(1),
+          memUsed: formatBytes(latest.m || 0),
+          memTotal: formatBytes(latest.ml || 0),
+          memPct: latest.ml ? ((latest.m / latest.ml) * 100).toFixed(1) : '0',
+          netRx: formatBytes(latest.nr || 0),
+          netTx: formatBytes(latest.nt || 0),
+          diskRead: formatBytes(latest.dr || 0),
+          diskWrite: formatBytes(latest.dw || 0),
+        }
+        cpuHistory = sysPoints.map(p => ({ x: new Date(p.t * 1000), y: p.c ?? null }))
+        memHistory = sysPoints.map(p => ({
+          x: new Date(p.t * 1000),
+          y: p.ml ? ((p.m || 0) / p.ml) * 100 : null,
+        }))
+        memRawHistory = sysPoints.map(p => ({ bytes: p.m || 0, limit: p.ml || 0 }))
+        metricsInterval = interval
       }
-      cpuHistory = withGaps(timeRange, metricsData.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct })))
-      memHistory = withGaps(timeRange, metricsData.map((m) => ({
-        x: new Date(m.timestamp),
-        y: m.mem_limit ? (m.mem_bytes / m.mem_limit) * 100 : 0,
-      })))
     }
 
     loading = false
-    loadPerAppData(now)
+    loadPerAppData()
   }
 
-  async function loadPerAppData(now) {
-    const hourAgo = new Date(Date.now() - 3600000).toISOString()
+  async function loadPerAppData() {
     await Promise.all(
       apps.map(async (app) => {
         const slug = app.Slug || app.slug
         const [mRes, rRes, bRes] = await Promise.all([
-          api.appMetrics(slug, hourAgo, now),
-          api.appRequests(slug, hourAgo, now),
+          api.appMetrics(slug, '1h'),
+          api.appRequests(slug, '1h'),
           api.listBackupRuns(slug),
         ])
-        if (mRes.data && mRes.data.length > 0) {
-          const latest = mRes.data[mRes.data.length - 1]
-          appMetricsMap = { ...appMetricsMap, [slug]: {
-            cpu: latest.cpu_pct,
-            memPct: latest.mem_limit ? (latest.mem_bytes / latest.mem_limit) * 100 : 0,
-          }}
+        if (mRes.data?.containers) {
+          const allPoints = []
+          for (const ctr of Object.values(mRes.data.containers)) {
+            allPoints.push(...(ctr.points || []))
+          }
+          allPoints.sort((a, b) => a.t - b.t)
+          const latest = allPoints.filter(p => p.c != null).pop()
+          if (latest) {
+            appMetricsMap = { ...appMetricsMap, [slug]: {
+              cpu: latest.c,
+              memPct: latest.ml ? (latest.m / latest.ml) * 100 : 0,
+              memBytes: latest.m || 0,
+              memLimit: latest.ml || 0,
+            }}
+          }
         }
         if (rRes.data) {
           appRequestsMap = { ...appRequestsMap, [slug]: rRes.data }
@@ -387,7 +386,7 @@
     <div class="mb-3 flex items-center justify-between">
       <h2 class="text-lg font-semibold text-text-primary tracking-tight">System Trends</h2>
       <div class="flex gap-1">
-        {#each Object.keys(rangeMs) as range}
+        {#each ranges as range}
           <button
             onclick={() => { timeRange = range; loadDashboard() }}
             class="px-2 py-1 text-xs rounded-md border transition-colors
@@ -400,8 +399,12 @@
     </div>
     {#if cpuHistory.length > 0}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <MetricsChart data={cpuHistory} label="CPU Usage" color="#3b82f6" unit="%" />
-        <MetricsChart data={memHistory} label="Memory Usage" color="#22c55e" unit="%" />
+        <MetricsChart data={cpuHistory} label="CPU Usage" color="#3b82f6" unit="%" interval={metricsInterval} />
+        <MetricsChart data={memHistory} label="Memory Usage" color="#22c55e" unit="%" subtitle="{latestMetrics?.memUsed || '0'} / {latestMetrics?.memTotal || '0'}" interval={metricsInterval}
+          tooltipFormat={(i, pct) => {
+            const r = memRawHistory[i]
+            return r ? `${pct.toFixed(1)}% (${formatBytes(r.bytes)} / ${formatBytes(r.limit)})` : `${pct.toFixed(1)}%`
+          }} />
       </div>
     {:else}
       <div class="bg-surface-2 rounded-xl p-12 shadow-sm border border-border/50 text-center">
