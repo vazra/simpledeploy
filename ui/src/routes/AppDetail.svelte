@@ -134,21 +134,30 @@
 
     if (single) return perContainer
 
-    // Combined "Total" line: sum values at each timestamp across containers
+    // Combined "Total" line: sum y and extra values at each timestamp
     const byTs = new Map()
     for (const id of ids) {
       for (const p of (containers[id]?.points || [])) {
         const raw = extract(p)
         const v = typeof raw === 'object' ? raw?.y : raw
+        const e = typeof raw === 'object' ? raw?.extra : undefined
         if (v == null) continue
         const existing = byTs.get(p.t)
-        if (existing != null) byTs.set(p.t, existing + v)
-        else byTs.set(p.t, v)
+        if (existing) {
+          existing.y += v
+          if (e != null && existing.extra != null) existing.extra += e
+        } else {
+          byTs.set(p.t, { y: v, extra: e != null ? e : undefined })
+        }
       }
     }
     const totalData = [...byTs.entries()]
       .sort((a, b) => a[0] - b[0])
-      .map(([t, v]) => ({ x: new Date(t * 1000), y: v }))
+      .map(([t, v]) => {
+        const pt = { x: new Date(t * 1000), y: v.y }
+        if (v.extra != null) pt.extra = v.extra
+        return pt
+      })
 
     return [
       { label: 'Total', color: baseColor, data: totalData },
