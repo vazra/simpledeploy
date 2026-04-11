@@ -32,7 +32,7 @@ func (s *Server) handleDockerInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := cli.Info(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -61,7 +61,7 @@ func (s *Server) handleDockerDiskUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	du, err := cli.DiskUsage(r.Context(), types.DiskUsageOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -76,7 +76,7 @@ func (s *Server) handleDockerPruneContainers(w http.ResponseWriter, r *http.Requ
 	}
 	report, err := cli.ContainersPrune(r.Context(), filters.NewArgs())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -91,7 +91,7 @@ func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request)
 	}
 	report, err := cli.ImagesPrune(r.Context(), filters.NewArgs(filters.Arg("dangling", "false")))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -106,7 +106,7 @@ func (s *Server) handleDockerPruneVolumes(w http.ResponseWriter, r *http.Request
 	}
 	report, err := cli.VolumesPrune(r.Context(), filters.NewArgs())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -121,7 +121,7 @@ func (s *Server) handleDockerPruneBuildCache(w http.ResponseWriter, r *http.Requ
 	}
 	report, err := cli.BuildCachePrune(r.Context(), types.BuildCachePruneOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -139,22 +139,22 @@ func (s *Server) handleDockerPruneAll(w http.ResponseWriter, r *http.Request) {
 
 	containers, err := cli.ContainersPrune(ctx, empty)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	images, err := cli.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false")))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	volumes, err := cli.VolumesPrune(ctx, empty)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	buildCache, err := cli.BuildCachePrune(ctx, types.BuildCachePruneOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -179,7 +179,7 @@ func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
 	}
 	imgs, err := cli.ImageList(r.Context(), image.ListOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -199,7 +199,7 @@ func (s *Server) handleDockerImageRemove(w http.ResponseWriter, r *http.Request)
 	}
 	dels, err := cli.ImageRemove(r.Context(), id, image.RemoveOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -214,7 +214,7 @@ func (s *Server) handleDockerNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 	nets, err := cli.NetworkList(r.Context(), network.ListOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -229,7 +229,7 @@ func (s *Server) handleDockerVolumes(w http.ResponseWriter, r *http.Request) {
 	}
 	vols, err := cli.VolumeList(r.Context(), volume.ListOptions{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -244,7 +244,7 @@ func (s *Server) handleDockerNetworkRemove(w http.ResponseWriter, r *http.Reques
 	}
 	id := r.PathValue("id")
 	if err := cli.NetworkRemove(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -259,7 +259,7 @@ func (s *Server) handleDockerVolumeRemove(w http.ResponseWriter, r *http.Request
 	}
 	name := r.PathValue("name")
 	if err := cli.VolumeRemove(r.Context(), name, false); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -33,7 +33,7 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := updateComposeDomain(app.ComposePath, req.Domain); err != nil {
-		http.Error(w, fmt.Sprintf("update compose: %v", err), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 

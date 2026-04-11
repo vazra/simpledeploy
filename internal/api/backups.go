@@ -18,7 +18,7 @@ func (s *Server) handleListBackupConfigs(w http.ResponseWriter, r *http.Request)
 	appID := app.ID
 	cfgs, err := s.store.ListBackupConfigs(&appID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if cfgs == nil {
@@ -44,7 +44,7 @@ func (s *Server) handleCreateBackupConfig(w http.ResponseWriter, r *http.Request
 	cfg.AppID = app.ID
 
 	if err := s.store.CreateBackupConfig(&cfg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -61,7 +61,7 @@ func (s *Server) handleDeleteBackupConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := s.store.DeleteBackupConfig(id); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httpError(w, err, http.StatusNotFound)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -79,7 +79,7 @@ func (s *Server) handleListBackupRuns(w http.ResponseWriter, r *http.Request) {
 	appID := app.ID
 	cfgs, err := s.store.ListBackupConfigs(&appID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -88,7 +88,7 @@ func (s *Server) handleListBackupRuns(w http.ResponseWriter, r *http.Request) {
 	for _, cfg := range cfgs {
 		runs, err := s.store.ListBackupRuns(cfg.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 		allRuns = append(allRuns, runs...)
@@ -117,7 +117,7 @@ func (s *Server) handleTriggerBackup(w http.ResponseWriter, r *http.Request) {
 	appID := app.ID
 	cfgs, err := s.store.ListBackupConfigs(&appID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if len(cfgs) == 0 {

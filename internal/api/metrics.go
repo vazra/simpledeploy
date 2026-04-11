@@ -55,7 +55,7 @@ func (s *Server) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
 	tier := store.SelectTier(to.Sub(from))
 	points, err := s.store.QueryMetrics(nil, tier, from, to)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -89,7 +89,7 @@ func (s *Server) handleAppMetrics(w http.ResponseWriter, r *http.Request) {
 	tier := store.SelectTier(to.Sub(from))
 	points, err := s.store.QueryMetrics(&app.ID, tier, from, to)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 

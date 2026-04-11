@@ -54,10 +54,18 @@ type appSummary struct {
 	Error   int `json:"error"`
 }
 
-type pruneRequest struct{ Days int `json:"days"` }
+type pruneRequest struct {
+	Days int    `json:"days"`
+	Tier string `json:"tier"` // raw, 1m, 5m, 1h — empty defaults to "raw"
+}
 type pruneResponse struct {
 	Deleted int64  `json:"deleted"`
 	Message string `json:"message"`
+}
+
+type storageBreakdownResponse struct {
+	Metrics      []store.TierStat `json:"metrics"`
+	RequestStats []store.TierStat `json:"request_stats"`
 }
 
 func formatUptime(d time.Duration) string {
@@ -134,39 +142,61 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handlePruneMetrics(w http.ResponseWriter, r *http.Request) {
-	var req pruneRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Days <= 0 {
-		req.Days = 30
-	}
-	cutoff := time.Now().AddDate(0, 0, -req.Days)
-	n, err := s.store.PruneMetrics("raw", cutoff)
+func (s *Server) handleStorageBreakdown(w http.ResponseWriter, r *http.Request) {
+	metrics, err := s.store.GetMetricsTierStats()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	rs, err := s.store.GetRequestStatsTierStats()
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d raw metric rows older than %d days", n, req.Days)})
+	json.NewEncoder(w).Encode(storageBreakdownResponse{Metrics: metrics, RequestStats: rs})
+}
+
+func parsePruneRequest(r *http.Request) pruneRequest {
+	var req pruneRequest
+	json.NewDecoder(r.Body).Decode(&req)
+	if req.Days <= 0 {
+		req.Days = 30
+	}
+	validTiers := map[string]bool{"raw": true, "1m": true, "5m": true, "1h": true}
+	if !validTiers[req.Tier] {
+		req.Tier = "raw"
+	}
+	return req
+}
+
+func (s *Server) handlePruneMetrics(w http.ResponseWriter, r *http.Request) {
+	req := parsePruneRequest(r)
+	cutoff := time.Now().AddDate(0, 0, -req.Days)
+	n, err := s.store.PruneMetrics(req.Tier, cutoff)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d metrics[%s] rows older than %d days", n, req.Tier, req.Days)})
 }
 
 func (s *Server) handlePruneRequestStats(w http.ResponseWriter, r *http.Request) {
-	var req pruneRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Days <= 0 {
-		req.Days = 30
-	}
+	req := parsePruneRequest(r)
 	cutoff := time.Now().AddDate(0, 0, -req.Days)
-	n, err := s.store.PruneRequestStats("raw", cutoff)
+	n, err := s.store.PruneRequestStats(req.Tier, cutoff)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d raw request stat rows older than %d days", n, req.Days)})
+	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d request_stats[%s] rows older than %d days", n, req.Tier, req.Days)})
 }
 
 func (s *Server) handleVacuumDB(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.VacuumDB(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	fi, _ := os.Stat(s.dbPath)

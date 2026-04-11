@@ -13,7 +13,7 @@ import (
 func (s *Server) handleListWebhooks(w http.ResponseWriter, r *http.Request) {
 	whs, err := s.store.ListWebhooks()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if whs == nil {
@@ -47,7 +47,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		HeadersJSON:      req.HeadersJSON,
 	}
 	if err := s.store.CreateWebhook(wh); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -62,7 +62,7 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteWebhook(id); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httpError(w, err, http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -83,7 +83,7 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 	}
 	rules, err := s.store.ListAlertRules(appID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if rules == nil {
@@ -126,7 +126,7 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		Enabled:     req.Enabled,
 	}
 	if err := s.store.CreateAlertRule(rule); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -164,7 +164,7 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 		Enabled:     req.Enabled,
 	}
 	if err := s.store.UpdateAlertRule(rule); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httpError(w, err, http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -178,7 +178,7 @@ func (s *Server) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.DeleteAlertRule(id); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		httpError(w, err, http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -206,7 +206,7 @@ func (s *Server) handleListAlertHistory(w http.ResponseWriter, r *http.Request) 
 	}
 	hist, err := s.store.ListAlertHistory(ruleID, limit)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if hist == nil {

@@ -26,7 +26,7 @@ type registryResponse struct {
 func (s *Server) handleListRegistries(w http.ResponseWriter, r *http.Request) {
 	regs, err := s.store.ListRegistries()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	resp := make([]registryResponse, len(regs))
@@ -74,7 +74,7 @@ func (s *Server) handleCreateRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	reg, err := s.store.CreateRegistry(req.Name, req.URL, usernameEnc, passwordEnc)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -115,7 +115,7 @@ func (s *Server) handleUpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.UpdateRegistry(id, req.Name, req.URL, usernameEnc, passwordEnc); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -125,7 +125,7 @@ func (s *Server) handleUpdateRegistry(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteRegistry(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.store.DeleteRegistry(id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

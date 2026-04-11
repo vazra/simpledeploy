@@ -36,7 +36,7 @@ func (s *Server) handleAppRequests(w http.ResponseWriter, r *http.Request) {
 	tier := store.SelectTier(to.Sub(from))
 	stats, err := s.store.QueryRequestStats(app.ID, tier, from, to)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 

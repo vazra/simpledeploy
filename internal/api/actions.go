@@ -34,7 +34,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.reconciler.StopOne(r.Context(), slug); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -48,7 +48,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.reconciler.StartOne(r.Context(), slug); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -89,7 +89,7 @@ func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.reconciler.ScaleOne(r.Context(), slug, body.Scales); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -104,7 +104,7 @@ func (s *Server) handleGetServices(w http.ResponseWriter, r *http.Request) {
 	}
 	services, err := s.reconciler.AppServices(r.Context(), slug)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if services == nil {
@@ -132,7 +132,7 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.reconciler.RollbackOne(r.Context(), slug, body.VersionID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -147,7 +147,7 @@ func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request) {
 	}
 	versions, err := s.reconciler.ListVersions(r.Context(), slug)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if versions == nil {
@@ -165,7 +165,7 @@ func (s *Server) handleListDeployEvents(w http.ResponseWriter, r *http.Request) 
 	}
 	events, err := s.reconciler.ListDeployEvents(r.Context(), slug)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if events == nil {

@@ -10,7 +10,7 @@ import (
 func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 	apps, err := s.store.ListApps()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if apps == nil {
