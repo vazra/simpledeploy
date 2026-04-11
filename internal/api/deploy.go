@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -99,6 +100,15 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(os.Stderr, "deploy %s: %v\n", body.Name, err)
 			}
 		}()
+	}
+
+	if s.audit != nil {
+		caller := GetAuthUser(r)
+		name := ""
+		if caller != nil {
+			name = caller.Username
+		}
+		s.audit.Log(audit.Event{Type: "deploy", Username: name, Detail: body.Name, Success: true})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

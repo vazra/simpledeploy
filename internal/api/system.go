@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -192,6 +194,27 @@ func (s *Server) handlePruneRequestStats(w http.ResponseWriter, r *http.Request)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d request_stats[%s] rows older than %d days", n, req.Tier, req.Days)})
+}
+
+func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	var entries []audit.Event
+	if s.audit != nil {
+		entries = s.audit.Recent(limit)
+	}
+	if entries == nil {
+		entries = []audit.Event{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
 }
 
 func (s *Server) handleVacuumDB(w http.ResponseWriter, r *http.Request) {
