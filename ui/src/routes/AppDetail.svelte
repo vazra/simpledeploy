@@ -95,13 +95,17 @@
     if (app?.deploying) startPolling()
   }
 
-  function withGaps(points) {
+  // gapThreshold: if two points are further apart than this, break the line.
+  // Based on the coarsest tier expected for each range.
+  const gapThreshold = { '1h': 120000, '6h': 600000, '24h': 600000, '7d': 7200000 }
+
+  function withGaps(range, points) {
     if (points.length < 2) return points
+    const threshold = gapThreshold[range] || 600000
     const result = [points[0]]
     for (let i = 1; i < points.length; i++) {
       const gap = points[i].x - points[i - 1].x
-      const prev = i >= 2 ? points[i - 1].x - points[i - 2].x : gap
-      if (gap > Math.max(prev * 3, 120000)) {
+      if (gap > threshold) {
         result.push({ x: new Date(points[i - 1].x.getTime() + 1), y: null })
       }
       result.push(points[i])
@@ -114,12 +118,12 @@
     const from = new Date(Date.now() - rangeMs[metricsRange]).toISOString()
     const res = await api.appMetrics(slug, from, now)
     const data = res.data || []
-    cpuData = withGaps(data.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct })))
-    memData = withGaps(data.map((m) => ({ x: new Date(m.timestamp), y: m.mem_limit ? (m.mem_bytes / m.mem_limit) * 100 : 0 })))
-    netRxData = withGaps(data.map((m) => ({ x: new Date(m.timestamp), y: m.net_rx || 0 })))
-    netTxData = withGaps(data.map((m) => ({ x: new Date(m.timestamp), y: m.net_tx || 0 })))
-    diskReadData = withGaps(data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_read || 0 })))
-    diskWriteData = withGaps(data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_write || 0 })))
+    cpuData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct })))
+    memData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.mem_limit ? (m.mem_bytes / m.mem_limit) * 100 : 0 })))
+    netRxData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.net_rx || 0 })))
+    netTxData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.net_tx || 0 })))
+    diskReadData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_read || 0 })))
+    diskWriteData = withGaps(metricsRange, data.map((m) => ({ x: new Date(m.timestamp), y: m.disk_write || 0 })))
   }
 
   async function loadServices() {

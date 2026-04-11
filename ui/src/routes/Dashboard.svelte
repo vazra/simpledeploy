@@ -62,13 +62,15 @@
   onMount(loadDashboard)
   onDestroy(unsubReconnect)
 
-  function withGaps(points) {
+  const gapThreshold = { '1h': 120000, '6h': 600000, '24h': 600000, '7d': 7200000 }
+
+  function withGaps(range, points) {
     if (points.length < 2) return points
+    const threshold = gapThreshold[range] || 600000
     const result = [points[0]]
     for (let i = 1; i < points.length; i++) {
       const gap = points[i].x - points[i - 1].x
-      const prev = i >= 2 ? points[i - 1].x - points[i - 2].x : gap
-      if (gap > Math.max(prev * 3, 120000)) {
+      if (gap > threshold) {
         result.push({ x: new Date(points[i - 1].x.getTime() + 1), y: null })
       }
       result.push(points[i])
@@ -110,8 +112,8 @@
         diskRead: formatBytes(latest.disk_read || 0),
         diskWrite: formatBytes(latest.disk_write || 0),
       }
-      cpuHistory = withGaps(metricsData.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct })))
-      memHistory = withGaps(metricsData.map((m) => ({
+      cpuHistory = withGaps(timeRange, metricsData.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct })))
+      memHistory = withGaps(timeRange, metricsData.map((m) => ({
         x: new Date(m.timestamp),
         y: m.mem_limit ? (m.mem_bytes / m.mem_limit) * 100 : 0,
       })))
