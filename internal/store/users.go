@@ -11,6 +11,8 @@ type User struct {
 	Username     string
 	PasswordHash string
 	Role         string
+	DisplayName  string
+	Email        string
 	CreatedAt    time.Time
 }
 
@@ -29,9 +31,9 @@ func (s *Store) CreateUser(username, passwordHash, role string) (*User, error) {
 	err := s.db.QueryRow(`
 		INSERT INTO users (username, password_hash, role)
 		VALUES (?, ?, ?)
-		RETURNING id, username, password_hash, role, created_at
+		RETURNING id, username, password_hash, role, display_name, email, created_at
 	`, username, passwordHash, role).Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt,
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -43,9 +45,9 @@ func (s *Store) CreateUser(username, passwordHash, role string) (*User, error) {
 func (s *Store) GetUserByUsername(username string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, created_at
+		SELECT id, username, password_hash, role, display_name, email, created_at
 		FROM users WHERE username = ?
-	`, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	`, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user %q not found", username)
 	}
@@ -59,9 +61,9 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 func (s *Store) GetUserByID(id int64) (*User, error) {
 	var u User
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, created_at
+		SELECT id, username, password_hash, role, display_name, email, created_at
 		FROM users WHERE id = ?
-	`, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt)
+	`, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user %d not found", id)
 	}
@@ -74,7 +76,7 @@ func (s *Store) GetUserByID(id int64) (*User, error) {
 // ListUsers returns all users ordered by username, excluding password_hash.
 func (s *Store) ListUsers() ([]User, error) {
 	rows, err := s.db.Query(`
-		SELECT id, username, role, created_at
+		SELECT id, username, role, display_name, email, created_at
 		FROM users ORDER BY username
 	`)
 	if err != nil {
@@ -85,7 +87,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		users = append(users, u)
@@ -148,13 +150,13 @@ func (s *Store) GetAPIKeyByHash(hash string) (*APIKeyRecord, *User, error) {
 	err := s.db.QueryRow(`
 		SELECT
 			ak.id, ak.user_id, ak.key_hash, ak.name, ak.created_at, ak.expires_at,
-			u.id, u.username, u.password_hash, u.role, u.created_at
+			u.id, u.username, u.password_hash, u.role, u.display_name, u.email, u.created_at
 		FROM api_keys ak
 		JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 	`, hash).Scan(
 		&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAt,
-		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.CreatedAt,
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil, fmt.Errorf("api key not found")
@@ -270,6 +272,32 @@ func (s *Store) HasAppAccess(userID int64, appSlug string) (bool, error) {
 		return false, fmt.Errorf("check app access: %w", err)
 	}
 	return count > 0, nil
+}
+
+// UpdateProfile updates the user's display name and email.
+func (s *Store) UpdateProfile(id int64, displayName, email string) error {
+	res, err := s.db.Exec(`UPDATE users SET display_name = ?, email = ? WHERE id = ?`, displayName, email, id)
+	if err != nil {
+		return fmt.Errorf("update profile: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user %d not found", id)
+	}
+	return nil
+}
+
+// UpdatePassword updates the user's password hash.
+func (s *Store) UpdatePassword(id int64, newHash string) error {
+	res, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, newHash, id)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user %d not found", id)
+	}
+	return nil
 }
 
 // GetUserAppSlugs returns the list of app slugs accessible to the given user.
