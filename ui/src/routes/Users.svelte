@@ -40,6 +40,16 @@
     viewer: 'info',
   }
 
+  const roleCircleColors = {
+    super_admin: 'bg-red-500/10 text-red-400 light:bg-red-50 light:text-red-700',
+    admin: 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700',
+    viewer: 'bg-blue-500/10 text-blue-400 light:bg-blue-50 light:text-blue-700',
+  }
+
+  function getInitials(name) {
+    return name.slice(0, 2).toUpperCase()
+  }
+
   onMount(loadAll)
 
   async function loadAll() {
@@ -100,35 +110,43 @@
     {/if}
 
     <!-- Users -->
-    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-semibold text-text-primary">Users</h3>
+    <div class="bg-surface-2 rounded-xl p-6 shadow-sm border border-border/50 mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2.5">
+          <h3 class="text-sm font-semibold text-text-primary">Users</h3>
+          {#if users.length > 0}
+            <Badge>{users.length}</Badge>
+          {/if}
+        </div>
         <Button size="sm" variant="secondary" onclick={() => showUserPanel = true}>Add User</Button>
       </div>
       {#if users.length === 0}
-        <p class="text-sm text-text-muted">No users.</p>
+        <div class="flex flex-col items-center justify-center py-10 text-center">
+          <svg class="w-12 h-12 text-text-muted/40 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z" />
+          </svg>
+          <p class="text-sm text-text-muted mb-3">No users yet</p>
+          <Button size="sm" variant="secondary" onclick={() => showUserPanel = true}>Add User</Button>
+        </div>
       {:else}
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead><tr class="border-b border-border/50">
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">ID</th>
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Username</th>
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Role</th>
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Created</th>
-              <th class="py-3 px-4"></th>
-            </tr></thead>
-            <tbody class="divide-y divide-border/30">
-              {#each users as u}
-                <tr class="hover:bg-surface-hover">
-                  <td class="py-3 px-4">{u.id}</td>
-                  <td class="py-3 px-4 font-medium">{u.username}</td>
-                  <td class="py-3 px-4"><Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge></td>
-                  <td class="py-3 px-4 text-text-secondary">{u.created_at ? new Date(u.created_at).toLocaleDateString() : ''}</td>
-                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', u.username, () => delUser(u.id))}>Delete</Button></td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {#each users as u}
+            <div class="bg-surface-1 border border-border/50 rounded-xl p-4">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 {roleCircleColors[u.role] || 'bg-surface-3/60 text-text-secondary'}">
+                  {getInitials(u.username)}
+                </div>
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="font-medium text-sm text-text-primary truncate">{u.username}</span>
+                  <Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge>
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-text-muted">Created {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}</span>
+                <Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', u.username, () => delUser(u.id))}>Delete</Button>
+              </div>
+            </div>
+          {/each}
         </div>
       {/if}
     </div>
