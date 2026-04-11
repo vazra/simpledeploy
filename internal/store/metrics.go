@@ -129,15 +129,19 @@ func (s *Store) QueryMetrics(appID *int64, rangeStr string) ([]metrics.MetricPoi
 	for rows.Next() {
 		var p metrics.MetricPoint
 		var dbAppID sql.NullInt64
+		// avg() in SQLite returns float64, so scan mem_bytes/mem_limit as float then cast
+		var memBytes, memLimit float64
 		if err := rows.Scan(
 			&dbAppID, &p.ContainerID,
-			&p.CPUPct, &p.MemBytes, &p.MemLimit,
+			&p.CPUPct, &memBytes, &memLimit,
 			&p.NetRx, &p.NetTx,
 			&p.DiskRead, &p.DiskWrite,
 			&p.Ts, &p.Tier,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan metric: %w", err)
 		}
+		p.MemBytes = int64(memBytes)
+		p.MemLimit = int64(memLimit)
 		if dbAppID.Valid {
 			id := dbAppID.Int64
 			p.AppID = &id
