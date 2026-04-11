@@ -192,4 +192,6 @@ export const api = {
   systemPruneMetrics: (days, tier) => request('POST', '/system/prune/metrics', { days, tier }),
   systemPruneRequestStats: (days, tier) => request('POST', '/system/prune/request-stats', { days, tier }),
   systemVacuum: () => request('POST', '/system/vacuum'),
+  systemAuditLog: (limit = 200) => request('GET', `/system/audit-log?limit=${limit}`),
+  systemClearAuditLog: () => request('DELETE', '/system/audit-log'),
 }

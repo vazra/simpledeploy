@@ -217,6 +217,19 @@ func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(entries)
 }
 
+func (s *Server) handleClearAuditLog(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	if s.audit != nil {
+		s.audit.Clear()
+		caller := GetAuthUser(r)
+		s.audit.Log(audit.Event{Type: "audit_cleared", Username: caller.Username, Success: true})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 func (s *Server) handleVacuumDB(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.VacuumDB(); err != nil {
 		httpError(w, err, http.StatusInternalServerError)

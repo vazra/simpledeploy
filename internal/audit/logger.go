@@ -83,3 +83,12 @@ func (l *Logger) Recent(limit int) []Event {
 	}
 	return result
 }
+
+// Clear resets the ring buffer, discarding all in-memory entries.
+func (l *Logger) Clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = make([]Event, l.maxSize)
+	l.pos = 0
+	l.full = false
+}

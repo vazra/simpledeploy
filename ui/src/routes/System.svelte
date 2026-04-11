@@ -20,6 +20,10 @@
   let pruningReqStats = $state(false)
   let vacuuming = $state(false)
 
+  let auditLogs = $state([])
+  let auditLoading = $state(false)
+  let clearing = $state(false)
+
   const tiers = ['raw', '1m', '5m', '1h']
   const tierLabels = { raw: 'Raw', '1m': '1 min', '5m': '5 min', '1h': '1 hour' }
 
@@ -51,10 +55,6 @@
       breakdown = res.data
     }
     breakdownLoading = false
-  }
-
-  function switchTab(tab) {
-    activeTab = tab
   }
 
   async function pruneMetrics() {
@@ -93,6 +93,47 @@
     vacuuming = false
   }
 
+  async function loadAuditLogs() {
+    auditLoading = true
+    const res = await api.systemAuditLog(200)
+    if (res.data) auditLogs = res.data
+    auditLoading = false
+  }
+
+  async function clearAuditLogs() {
+    clearing = true
+    const res = await api.systemClearAuditLog()
+    if (res.error) {
+      toasts.error(res.error)
+    } else {
+      toasts.success('Audit log cleared')
+      auditLogs = []
+    }
+    clearing = false
+  }
+
+  function switchTab(tab) {
+    activeTab = tab
+    if (tab === 'audit' && auditLogs.length === 0) loadAuditLogs()
+  }
+
+  const eventTypeColors = {
+    login: 'text-emerald-400',
+    login_failed: 'text-red-400',
+    user_created: 'text-blue-400',
+    user_deleted: 'text-orange-400',
+    apikey_created: 'text-blue-400',
+    apikey_deleted: 'text-orange-400',
+    deploy: 'text-violet-400',
+    audit_cleared: 'text-text-secondary',
+  }
+
+  function formatTime(ts) {
+    if (!ts) return '-'
+    const d = new Date(ts)
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
   const rowCountLabels = {
     apps: 'Apps',
     users: 'Users',
@@ -118,7 +159,7 @@
   </div>
 
   <div class="flex overflow-x-auto gap-1 mb-6 border-b border-border/50">
-    {#each [['overview', 'Overview'], ['maintenance', 'Maintenance']] as [key, label]}
+    {#each [['overview', 'Overview'], ['maintenance', 'Maintenance'], ['audit', 'Audit Log']] as [key, label]}
       <button
         onclick={() => switchTab(key)}
         class="px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors {activeTab === key ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text-primary'}"
@@ -412,6 +453,77 @@
           {vacuuming ? 'Running...' : 'Run VACUUM'}
         </Button>
       </div>
+    </div>
+  {:else if activeTab === 'audit'}
+    <div class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-medium text-text-primary">Audit Log</h2>
+          <p class="text-xs text-text-secondary mt-1">Security events: logins, user changes, deploys, API key operations.</p>
+        </div>
+        <div class="flex gap-2">
+          <Button size="sm" variant="secondary" onclick={loadAuditLogs} disabled={auditLoading}>
+            {auditLoading ? 'Loading...' : 'Refresh'}
+          </Button>
+          <Button size="sm" variant="danger" onclick={clearAuditLogs} disabled={clearing || auditLogs.length === 0}>
+            {clearing ? 'Clearing...' : 'Clear'}
+          </Button>
+        </div>
+      </div>
+
+      {#if auditLoading && auditLogs.length === 0}
+        <Skeleton type="card" count={3} />
+      {:else if auditLogs.length === 0}
+        <div class="bg-surface-2 rounded-xl p-8 shadow-sm border border-border/50 text-center">
+          <p class="text-sm text-text-secondary">No audit events recorded yet.</p>
+        </div>
+      {:else}
+        <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden">
+          <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead class="sticky top-0 bg-surface-2 z-10">
+                <tr class="border-b border-border/50">
+                  <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Time</th>
+                  <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Event</th>
+                  <th class="text-left text-xs font-medium text-text-muted py-3 px-4">User</th>
+                  <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Detail</th>
+                  <th class="text-left text-xs font-medium text-text-muted py-3 px-4">IP</th>
+                  <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Status</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border/30">
+                {#each [...auditLogs].reverse() as event}
+                  <tr class="hover:bg-surface-hover transition-colors">
+                    <td class="py-2.5 px-4 text-xs text-text-secondary font-mono whitespace-nowrap">{formatTime(event.timestamp)}</td>
+                    <td class="py-2.5 px-4">
+                      <span class="text-xs font-medium {eventTypeColors[event.type] || 'text-text-primary'}">{event.type}</span>
+                    </td>
+                    <td class="py-2.5 px-4 text-xs text-text-primary">{event.username || '-'}</td>
+                    <td class="py-2.5 px-4 text-xs text-text-secondary font-mono">{event.detail || '-'}</td>
+                    <td class="py-2.5 px-4 text-xs text-text-secondary font-mono">{event.ip || '-'}</td>
+                    <td class="py-2.5 px-4">
+                      {#if event.success}
+                        <span class="inline-flex items-center gap-1 text-xs text-emerald-400">
+                          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                          ok
+                        </span>
+                      {:else}
+                        <span class="inline-flex items-center gap-1 text-xs text-red-400">
+                          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                          fail
+                        </span>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          <div class="border-t border-border/50 px-4 py-2">
+            <span class="text-xs text-text-secondary">{auditLogs.length} events (most recent 200, newest first)</span>
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 </Layout>
