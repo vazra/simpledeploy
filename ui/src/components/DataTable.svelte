@@ -20,7 +20,7 @@
             {#each columns as col}
               <td class="py-3 px-4 text-text-primary">
                 {#if col.render}
-                  {@html col.render(row)}
+                  {col.render(row)}
                 {:else}
                   {row[col.key] ?? ''}
                 {/if}
