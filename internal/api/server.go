@@ -157,6 +157,9 @@ func (s *Server) routes() {
 	// Domain
 	s.mux.Handle("PUT /api/apps/{slug}/domain", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateDomain))))
 
+	// IP access
+	s.mux.Handle("PUT /api/apps/{slug}/access", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateAccess))))
+
 	// Cancel deploy
 	s.mux.Handle("POST /api/apps/{slug}/cancel", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleCancel))))
 
