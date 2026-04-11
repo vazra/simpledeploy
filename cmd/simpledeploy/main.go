@@ -355,7 +355,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("generate secret: %w", err)
 		}
 		jwtSecret = generated
-		log.Printf("WARNING: master_secret not configured. Generated random secret for this session. Set master_secret in config for persistent sessions.")
+		fmt.Fprintf(os.Stderr, "WARNING: master_secret not configured. Generated random secret for this session. Set master_secret in config for persistent sessions.\n")
 	}
 	jwtMgr := auth.NewJWTManager(jwtSecret, 24*time.Hour)
 	rl := auth.NewRateLimiter(10, time.Minute)
@@ -436,7 +436,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	go func() {
 		if err := rec.Watch(ctx); err != nil {
-			log.Printf("reconciler watch: %v", err)
+			fmt.Fprintf(os.Stderr, "reconciler watch: %v\n", err)
 		}
 	}()
 
@@ -466,7 +466,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	count, _ := db.UserCount()
 	if count == 0 {
-		log.Printf("No users found. Create one at: POST http://localhost:%d/api/setup", cfg.ManagementPort)
+		fmt.Printf("No users found. Create one at: POST http://localhost:%d/api/setup\n", cfg.ManagementPort)
 	}
 
 	backupSched := backup.NewScheduler(db)
@@ -481,7 +481,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return backup.NewS3Target(s3cfg)
 	})
 	if err := backupSched.Start(); err != nil {
-		log.Printf("backup scheduler: %v", err)
+		fmt.Fprintf(os.Stderr, "backup scheduler: %v\n", err)
 	}
 	defer backupSched.Stop()
 
@@ -502,7 +502,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)
 
-	log.Printf("simpledeploy listening on :%d", cfg.ManagementPort)
+	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
 	err = srv.ListenAndServe(ctx)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
