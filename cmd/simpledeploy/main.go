@@ -325,7 +325,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	dbPath := filepath.Join(cfg.DataDir, "simpledeploy.db")
-	logBuf := logbuf.New(1000)
+	logBuf := logbuf.New(cfg.LogBufferSize)
 
 	// Redirect stdout/stderr through pipes so ALL output (including Caddy/zap)
 	// gets captured into the log buffer while still printing to the terminal.

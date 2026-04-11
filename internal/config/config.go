@@ -18,6 +18,7 @@ type Config struct {
 	RateLimit      RateLimitConfig `yaml:"ratelimit"`
 	Registries     []string        `yaml:"registries"`
 	TrustedProxies []string        `yaml:"trusted_proxies"`
+	LogBufferSize  int             `yaml:"log_buffer_size"`
 }
 
 type TLSConfig struct {
@@ -65,6 +66,7 @@ func DefaultConfig() *Config {
 			Burst:    50,
 			By:       "ip",
 		},
+		LogBufferSize: 500,
 	}
 }
 
