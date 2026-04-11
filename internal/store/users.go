@@ -280,7 +280,10 @@ func (s *Store) UpdateProfile(id int64, displayName, email string) error {
 	if err != nil {
 		return fmt.Errorf("update profile: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("user %d not found", id)
 	}
@@ -293,7 +296,10 @@ func (s *Store) UpdatePassword(id int64, newHash string) error {
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("user %d not found", id)
 	}
