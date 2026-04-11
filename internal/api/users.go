@@ -29,13 +29,15 @@ func requireRole(w http.ResponseWriter, r *http.Request, roles ...string) *AuthU
 
 // userResponse omits password_hash from JSON output.
 type userResponse struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	ID          int64  `json:"id"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
 }
 
 func toUserResponse(u *store.User) userResponse {
-	return userResponse{ID: u.ID, Username: u.Username, Role: u.Role}
+	return userResponse{ID: u.ID, Username: u.Username, Role: u.Role, DisplayName: u.DisplayName, Email: u.Email}
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
@@ -49,10 +51,90 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := make([]userResponse, len(users))
 	for i, u := range users {
-		resp[i] = userResponse{ID: u.ID, Username: u.Username, Role: u.Role}
+		resp[i] = toUserResponse(&u)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
+	authUser := GetAuthUser(r)
+	if authUser == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	user, err := s.store.GetUserByID(authUser.ID)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toUserResponse(user))
+}
+
+func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
+	authUser := GetAuthUser(r)
+	if authUser == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		DisplayName string `json:"display_name"`
+		Email       string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.UpdateProfile(authUser.ID, body.DisplayName, body.Email); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	authUser := GetAuthUser(r)
+	if authUser == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.NewPassword == "" {
+		http.Error(w, "new password required", http.StatusBadRequest)
+		return
+	}
+	user, err := s.store.GetUserByID(authUser.ID)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if !auth.CheckPassword(user.PasswordHash, body.CurrentPassword) {
+		http.Error(w, "current password is incorrect", http.StatusBadRequest)
+		return
+	}
+	hash, err := auth.HashPassword(body.NewPassword)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.UpdatePassword(authUser.ID, hash); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if s.audit != nil {
+		s.audit.Log(audit.Event{Type: "password_changed", Username: authUser.Username, Success: true})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {

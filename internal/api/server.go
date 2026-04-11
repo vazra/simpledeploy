@@ -141,6 +141,11 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/users/{id}/access", s.authMiddleware(http.HandlerFunc(s.handleGrantAccess)))
 	s.mux.Handle("DELETE /api/users/{id}/access/{slug}", s.authMiddleware(http.HandlerFunc(s.handleRevokeAccess)))
 
+	// Profile (auth)
+	s.mux.Handle("GET /api/me", s.authMiddleware(http.HandlerFunc(s.handleGetMe)))
+	s.mux.Handle("PUT /api/me", s.authMiddleware(http.HandlerFunc(s.handleUpdateMe)))
+	s.mux.Handle("PUT /api/me/password", s.authMiddleware(http.HandlerFunc(s.handleChangePassword)))
+
 	// API key management (auth)
 	s.mux.Handle("GET /api/apikeys", s.authMiddleware(http.HandlerFunc(s.handleListAPIKeys)))
 	s.mux.Handle("POST /api/apikeys", s.authMiddleware(http.HandlerFunc(s.handleCreateAPIKey)))
