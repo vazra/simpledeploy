@@ -1,5 +1,7 @@
 <script>
   import Button from './Button.svelte'
+  import YamlEditor from './YamlEditor.svelte'
+  import { api } from '../lib/api.js'
 
   let { onclose = () => {}, onComplete = () => {} } = $props()
 
@@ -22,6 +24,49 @@
   function handleNameInput(e) {
     appName = e.currentTarget.value
     nameError = appName.trim() ? validateName(appName) : ''
+  }
+
+  // Compose state
+  let composeText = $state('')
+  let composeInputMode = $state('paste')
+  let validating = $state(false)
+  let composeValid = $state(false)
+  let composeErrors = $state([])
+  let validateTimer = $state(null)
+
+  function handleComposeChange(val) {
+    composeText = val
+    composeValid = false
+    composeErrors = []
+    if (validateTimer) clearTimeout(validateTimer)
+    if (val.trim()) {
+      validateTimer = setTimeout(() => validateCompose(val), 800)
+    }
+  }
+
+  async function validateCompose(text) {
+    validating = true
+    const encoded = btoa(text)
+    const res = await api.validateCompose(encoded)
+    validating = false
+    if (res.data?.valid) {
+      composeValid = true
+      composeErrors = []
+    } else {
+      composeValid = false
+      composeErrors = res.data?.errors || ['Invalid compose file']
+    }
+  }
+
+  function handleFileUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      composeText = reader.result
+      handleComposeChange(composeText)
+    }
+    reader.readAsText(file)
   }
 </script>
 
@@ -71,8 +116,52 @@
           {/if}
         </div>
 
-        <!-- Compose editor placeholder for next task -->
-        <p class="text-text-muted text-sm">Compose editor coming next</p>
+        <div>
+          <label class="block text-xs font-medium text-text-muted mb-2">Compose File</label>
+          <div class="flex gap-1 mb-2">
+            <button
+              type="button"
+              onclick={() => composeInputMode = 'paste'}
+              class="px-2 py-1 text-xs rounded border transition-colors {composeInputMode === 'paste' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+            >Paste</button>
+            <button
+              type="button"
+              onclick={() => composeInputMode = 'upload'}
+              class="px-2 py-1 text-xs rounded border transition-colors {composeInputMode === 'upload' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+            >Upload</button>
+          </div>
+
+          {#if composeInputMode === 'paste'}
+            {#if validating}
+              <div class="flex items-center gap-2 text-xs text-text-muted mb-2">
+                <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                Validating...
+              </div>
+            {:else if composeValid}
+              <div class="flex items-center gap-1.5 text-xs text-success mb-2">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                Valid compose file
+              </div>
+            {:else if composeErrors.length > 0}
+              <div class="text-xs text-danger mb-2 flex flex-col gap-1">
+                {#each composeErrors as err}
+                  <p>{err}</p>
+                {/each}
+              </div>
+            {/if}
+            <YamlEditor value={composeText} onchange={handleComposeChange} />
+          {:else}
+            <input
+              type="file"
+              accept=".yml,.yaml"
+              onchange={handleFileUpload}
+              class="w-full text-sm text-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-border file:text-sm file:bg-surface-3 file:text-text-primary hover:file:bg-surface-3/80"
+            />
+            {#if composeText}
+              <p class="text-xs text-success mt-1">File loaded ({composeText.length} chars)</p>
+            {/if}
+          {/if}
+        </div>
       </div>
     {:else if step === 2}
       <p class="text-text-muted text-sm">Step 2 placeholder</p>
@@ -89,7 +178,7 @@
       <div></div>
     {/if}
     {#if step === 1}
-      <Button size="sm" disabled={!appName.trim() || !!nameError} onclick={() => step++}>Next</Button>
+      <Button size="sm" disabled={!appName.trim() || !!nameError || !composeValid} onclick={() => step++}>Next</Button>
     {:else if step < 3}
       <Button size="sm" onclick={() => step++}>Next</Button>
     {/if}
