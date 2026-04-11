@@ -186,7 +186,6 @@
     diskWriteDatasets = buildContainerDatasets(c, p => p.dw ?? null, '#ef4444')
 
     // mem summary: sum bytes across containers at latest timestamp
-    const ids = Object.keys(c).filter(id => id !== '')
     const latestTs = Math.max(...ids.flatMap(id => (c[id]?.points || []).map(p => p.t)))
     let totalMem = 0, totalLimit = 0
     for (const id of ids) {
