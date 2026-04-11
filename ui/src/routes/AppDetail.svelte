@@ -185,11 +185,16 @@
     diskReadDatasets = buildContainerDatasets(c, p => p.dr ?? null, '#fb923c')
     diskWriteDatasets = buildContainerDatasets(c, p => p.dw ?? null, '#ef4444')
 
-    // mem summary from latest point across all containers
-    const allPts = Object.values(c).flatMap(ct => ct.points || [])
-    const latest = allPts.filter(p => p.c != null).sort((a, b) => a.t - b.t).pop()
-    memSummary = latest?.ml ? `${formatBytes(latest.m)} / ${formatBytes(latest.ml)}` : ''
-    memRaw = allPts.sort((a, b) => a.t - b.t).map(p => ({ bytes: p.m || 0, limit: p.ml || 0 }))
+    // mem summary: sum bytes across containers at latest timestamp
+    const ids = Object.keys(c).filter(id => id !== '')
+    const latestTs = Math.max(...ids.flatMap(id => (c[id]?.points || []).map(p => p.t)))
+    let totalMem = 0, totalLimit = 0
+    for (const id of ids) {
+      const pts = c[id]?.points || []
+      const latest = pts.filter(p => p.t === latestTs && p.c != null).pop()
+      if (latest) { totalMem += latest.m || 0; totalLimit = Math.max(totalLimit, latest.ml || 0) }
+    }
+    memSummary = totalLimit ? `${formatBytes(totalMem)} / ${formatBytes(totalLimit)}` : ''
   }
 
   function toggleContainer(label) {
@@ -531,10 +536,14 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <MetricsChart datasets={filterDatasets(cpuDatasets)} label="CPU Usage" unit="%" interval={metricsInterval} />
         <MetricsChart datasets={filterDatasets(memDatasets)} label="Memory Usage" unit="%" subtitle={memSummary} interval={metricsInterval} formatValue={formatBytes} />
-        <MetricsChart datasets={filterDatasets(netRxDatasets)} label="Network RX" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
-        <MetricsChart datasets={filterDatasets(netTxDatasets)} label="Network TX" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
-        <MetricsChart datasets={filterDatasets(diskReadDatasets)} label="Disk Read" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
-        <MetricsChart datasets={filterDatasets(diskWriteDatasets)} label="Disk Write" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
+        <MetricsChart datasets={filterDatasets(netRxDatasets)} label="Network RX" unit=" B/s" interval={metricsInterval}
+          tooltipFormat={(i, v) => `${formatBytes(v)}/s`} />
+        <MetricsChart datasets={filterDatasets(netTxDatasets)} label="Network TX" unit=" B/s" interval={metricsInterval}
+          tooltipFormat={(i, v) => `${formatBytes(v)}/s`} />
+        <MetricsChart datasets={filterDatasets(diskReadDatasets)} label="Disk Read" unit=" B/s" interval={metricsInterval}
+          tooltipFormat={(i, v) => `${formatBytes(v)}/s`} />
+        <MetricsChart datasets={filterDatasets(diskWriteDatasets)} label="Disk Write" unit=" B/s" interval={metricsInterval}
+          tooltipFormat={(i, v) => `${formatBytes(v)}/s`} />
       </div>
 
     {:else if activeTab === 'backups'}

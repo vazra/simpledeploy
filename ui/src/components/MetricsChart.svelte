@@ -114,15 +114,11 @@
               label(ctx) {
                 if (tooltipFormat) return tooltipFormat(ctx.dataIndex, ctx.parsed.y)
                 const raw = ctx.raw
+                const v = ctx.parsed.y?.toFixed(1) ?? '?'
                 if (formatValue && raw?.extra != null) {
-                  // Show both: "redis: 1.2% (9.4 MB)"
-                  return `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1)}${unit} (${formatValue(raw.extra)})`
+                  return `${ctx.dataset.label}: ${v}${unit} (${formatValue(raw.extra)})`
                 }
-                if (formatValue) {
-                  // Format the y value itself: "redis: 1.2 KB/s"
-                  return `${ctx.dataset.label}: ${formatValue(ctx.parsed.y)}`
-                }
-                return `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1)}${unit}`
+                return `${ctx.dataset.label}: ${v}${unit}`
               }
             }
           }
