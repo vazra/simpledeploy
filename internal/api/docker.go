@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
@@ -50,7 +51,23 @@ func (s *Server) handleDockerInfo(w http.ResponseWriter, r *http.Request) {
 		"images":            info.Images,
 		"storage_driver":    info.Driver,
 		"docker_root_dir":   info.DockerRootDir,
+		"logging_driver":    info.LoggingDriver,
+		"logging_options":   readDaemonLogOpts(),
 	})
+}
+
+func readDaemonLogOpts() map[string]string {
+	data, err := os.ReadFile("/etc/docker/daemon.json")
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		LogOpts map[string]string `json:"log-opts"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return nil
+	}
+	return cfg.LogOpts
 }
 
 func (s *Server) handleDockerDiskUsage(w http.ResponseWriter, r *http.Request) {

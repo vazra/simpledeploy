@@ -225,6 +225,27 @@
           <div class="text-sm font-semibold text-text-primary">{dockerInfo.storage_driver}</div>
         </div>
       </div>
+      <div class="mt-4 pt-4 border-t border-border/30">
+        <div class="flex flex-wrap items-start gap-x-8 gap-y-2">
+          <div>
+            <div class="text-xs font-medium text-text-secondary">Log Driver</div>
+            <div class="text-sm font-semibold text-text-primary">{dockerInfo.logging_driver || 'json-file'}</div>
+          </div>
+          <div>
+            <div class="text-xs font-medium text-text-secondary">Log Options</div>
+            <div class="text-sm font-semibold text-text-primary">
+              {#if dockerInfo.logging_options && Object.keys(dockerInfo.logging_options).length > 0}
+                {Object.entries(dockerInfo.logging_options).map(([k, v]) => `${k}: ${v}`).join(', ')}
+              {:else}
+                <span class="text-text-muted">default</span>
+              {/if}
+            </div>
+          </div>
+          <div class="ml-auto self-end">
+            <span class="text-xs text-text-muted">To change, edit <code class="bg-surface-3 px-1 rounded">/etc/docker/daemon.json</code> on the host and restart Docker</span>
+          </div>
+        </div>
+      </div>
     </div>
   {/if}
 
