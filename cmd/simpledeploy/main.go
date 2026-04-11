@@ -303,7 +303,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	jwtSecret := cfg.MasterSecret
 	if jwtSecret == "" {
-		jwtSecret = "simpledeploy-default-secret"
+		// Auto-generate a random secret and persist it
+		generated, err := auth.GenerateRandomSecret(32)
+		if err != nil {
+			return fmt.Errorf("generate secret: %w", err)
+		}
+		jwtSecret = generated
+		fmt.Fprintf(os.Stderr, "WARNING: master_secret not configured. Generated random secret for this session. Set master_secret in config for persistent sessions.\n")
 	}
 	jwtMgr := auth.NewJWTManager(jwtSecret, 24*time.Hour)
 	rl := auth.NewRateLimiter(10, time.Minute)
@@ -733,7 +739,7 @@ func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	id, _ := cmd.Flags().GetInt64("id")
-	if err := db.DeleteAPIKey(id); err != nil {
+	if err := db.DeleteAPIKey(id, 0); err != nil { // CLI is admin context
 		return err
 	}
 
