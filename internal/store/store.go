@@ -33,6 +33,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
+	if _, err := db.Exec("PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set auto_vacuum: %w", err)
+	}
 	if _, err := db.Exec("PRAGMA cache_size=2000"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("set cache size: %w", err)
@@ -58,6 +62,12 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// IncrementalVacuum reclaims free pages from the database file.
+func (s *Store) IncrementalVacuum() error {
+	_, err := s.db.Exec("PRAGMA incremental_vacuum")
+	return err
 }
 
 func (s *Store) DB() *sql.DB {

@@ -31,6 +31,8 @@ func (m *mockAggStore) PruneMetrics(tier string, before time.Time) (int64, error
 	return 0, nil
 }
 
+
+
 func TestRollupRunOnce(t *testing.T) {
 	st := &mockAggStore{}
 	tiers := []TierConfig{

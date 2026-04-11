@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -398,6 +399,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go rollup.Run(ctx)
 	go reqWriter.Run(ctx, 5*time.Second)
 	go reqRollup.Run(ctx)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := db.IncrementalVacuum(); err != nil {
+					log.Printf("incremental vacuum: %v", err)
+				}
+			}
+		}
+	}()
 
 	dispatcher := alerts.NewWebhookDispatcher()
 	evaluator := alerts.NewEvaluator(db, db, db, dispatcher)

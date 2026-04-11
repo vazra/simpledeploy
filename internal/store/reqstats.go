@@ -102,6 +102,13 @@ func (s *Store) AggregateRequestStats(sourceTier, destTier string, olderThan tim
 		return err
 	}
 	bucket := reqStatsBucket(destTier)
+	ts := olderThan.UTC().Format("2006-01-02 15:04:05")
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("aggregate request stats: begin tx: %w", err)
+	}
+	defer tx.Rollback()
 
 	query := fmt.Sprintf(`
 		INSERT INTO request_stats (app_id, timestamp, status_code, latency_ms, method, path_pattern, tier)
@@ -118,15 +125,18 @@ func (s *Store) AggregateRequestStats(sourceTier, destTier string, olderThan tim
 		GROUP BY app_id, method, path_pattern, (status_code / 100) * 100, bucket
 	`, bucket)
 
-	_, err := s.db.Exec(query,
-		destTier,
-		sourceTier,
-		olderThan.UTC().Format("2006-01-02 15:04:05"),
-	)
-	if err != nil {
+	if _, err := tx.Exec(query, destTier, sourceTier, ts); err != nil {
 		return fmt.Errorf("aggregate request stats: %w", err)
 	}
-	return nil
+
+	if _, err := tx.Exec(
+		`DELETE FROM request_stats WHERE tier = ? AND timestamp < ?`,
+		sourceTier, ts,
+	); err != nil {
+		return fmt.Errorf("aggregate request stats: delete source: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // PruneRequestStats deletes request stats with the given tier older than before.

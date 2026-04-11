@@ -128,6 +128,13 @@ func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Tim
 		return err
 	}
 	bucket := timeBucket(destTier)
+	ts := olderThan.UTC().Format("2006-01-02 15:04:05")
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("aggregate metrics: begin tx: %w", err)
+	}
+	defer tx.Rollback()
 
 	query := fmt.Sprintf(`
 		INSERT INTO metrics (app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp, tier)
@@ -148,15 +155,18 @@ func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Tim
 		GROUP BY app_id, container_id, bucket
 	`, bucket)
 
-	_, err := s.db.Exec(query,
-		destTier,
-		sourceTier,
-		olderThan.UTC().Format("2006-01-02 15:04:05"),
-	)
-	if err != nil {
+	if _, err := tx.Exec(query, destTier, sourceTier, ts); err != nil {
 		return fmt.Errorf("aggregate metrics: %w", err)
 	}
-	return nil
+
+	if _, err := tx.Exec(
+		`DELETE FROM metrics WHERE tier = ? AND timestamp < ?`,
+		sourceTier, ts,
+	); err != nil {
+		return fmt.Errorf("aggregate metrics: delete source: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // PruneMetrics deletes metric points with the given tier older than before.
