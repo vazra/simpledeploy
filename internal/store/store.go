@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"sort"
 	"strings"
 
@@ -39,6 +40,12 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+
+	// Restrict database file permissions to owner-only
+	if err := os.Chmod(path, 0600); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("chmod db: %w", err)
 	}
 
 	s := &Store{db: db}
