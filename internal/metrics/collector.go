@@ -133,10 +133,11 @@ func (c *Collector) CollectContainers(ctx context.Context) ([]MetricPoint, error
 	}
 
 	seen := make(map[string]bool, len(containers))
+	collectTs := time.Now().Unix() // single timestamp for all containers in this cycle
 	var points []MetricPoint
 	for _, ctr := range containers {
 		seen[ctr.ID] = true
-		pt, err := c.collectContainer(ctx, ctr)
+		pt, err := c.collectContainer(ctx, ctr, collectTs)
 		if err != nil {
 			log.Printf("metrics: skip container %s: %v", ctr.ID[:12], err)
 			continue
@@ -152,7 +153,7 @@ func (c *Collector) CollectContainers(ctx context.Context) ([]MetricPoint, error
 	return points, nil
 }
 
-func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Summary) (MetricPoint, error) {
+func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Summary, collectTs int64) (MetricPoint, error) {
 	resp, err := c.docker.ContainerStats(ctx, ctr.ID)
 	if err != nil {
 		return MetricPoint{}, fmt.Errorf("ContainerStats: %w", err)
@@ -254,7 +255,7 @@ func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Su
 		DiskRead:    diskReadRate,
 		DiskWrite:   diskWriteRate,
 		Tier:        TierRaw,
-		Ts:          now.Unix(),
+		Ts:          collectTs,
 	}, nil
 }
 
