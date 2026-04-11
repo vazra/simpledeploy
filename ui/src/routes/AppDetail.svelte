@@ -42,6 +42,7 @@
   let actionLoading = $state('')
   let scaleInputs = $state({})
   let editDomain = $state('')
+  let editAccessAllow = $state('')
 
   // Backup form
   let bStrategy = $state('postgres')
@@ -60,6 +61,7 @@
       if (res.error) return
       app = res.data
       editDomain = app?.Domain || ''
+      editAccessAllow = app?.Labels?.['simpledeploy.access.allow'] || ''
       if (!app.deploying) {
         stopPolling()
         loadServices()
@@ -88,6 +90,7 @@
     if (appRes.error) { push('/'); return }
     app = appRes.data
     editDomain = app?.Domain || ''
+    editAccessAllow = app?.Labels?.['simpledeploy.access.allow'] || ''
     loading = false
     if (app?.deploying) startPolling()
   }
@@ -219,6 +222,11 @@
     if (!error) await loadApp()
   }
 
+  async function saveAccessAllow() {
+    const { error } = await api.updateAccess(slug, editAccessAllow)
+    if (!error) await loadApp()
+  }
+
   $effect(() => {
     if (activeTab === 'metrics') loadMetrics()
     if (activeTab === 'backups') loadBackups()
@@ -322,6 +330,31 @@
                 </button>
               {/if}
             </div>
+          </div>
+          <div>
+            <span class="text-xs text-text-muted font-medium">IP Allowlist</span>
+            <div class="flex items-center gap-2 mt-1">
+              <input
+                bind:value={editAccessAllow}
+                placeholder="e.g. 10.0.0.0/8, 192.168.1.5"
+                class="px-2 py-1 text-sm bg-surface-0 border border-border/50 rounded-lg font-mono focus:outline-none focus:border-accent w-80"
+              />
+              {#if editAccessAllow !== (app?.Labels?.['simpledeploy.access.allow'] || '')}
+                <button
+                  onclick={saveAccessAllow}
+                  class="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent/90 transition-colors"
+                >
+                  Save
+                </button>
+              {/if}
+            </div>
+            <p class="text-xs text-text-muted mt-1">
+              {#if editAccessAllow}
+                Only these IPs/CIDRs can access this app
+              {:else}
+                All traffic allowed (no restriction)
+              {/if}
+            </p>
           </div>
           {#if app.ComposeFile}
             <div>
