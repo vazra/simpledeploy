@@ -1,27 +1,29 @@
 package auth
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 )
 
 // GenerateAPIKey generates a 32-byte random key, hex-encoded with "sd_" prefix.
-// Returns plaintext (shown once) and its SHA-256 hash (stored).
-func GenerateAPIKey() (plaintext string, hash string, err error) {
+// Returns plaintext (shown once) and its HMAC-SHA256 hash (stored).
+func GenerateAPIKey(secret string) (plaintext string, hash string, err error) {
 	b := make([]byte, 32)
 	if _, err = rand.Read(b); err != nil {
 		return "", "", err
 	}
 	plaintext = "sd_" + hex.EncodeToString(b)
-	hash = HashAPIKey(plaintext)
+	hash = HashAPIKey(plaintext, secret)
 	return plaintext, hash, nil
 }
 
-// HashAPIKey returns the SHA-256 hex hash of key for deterministic lookup.
-func HashAPIKey(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:])
+// HashAPIKey returns the HMAC-SHA256 hex digest of key using secret.
+func HashAPIKey(key, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(key))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // GenerateRandomSecret generates a cryptographically random hex string of n bytes.

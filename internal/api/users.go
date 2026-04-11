@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -76,6 +78,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	if s.audit != nil {
+		caller := GetAuthUser(r)
+		s.audit.Log(audit.Event{Type: "user_created", Username: caller.Username, Detail: body.Username + " (" + body.Role + ")", Success: true})
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(toUserResponse(u))
@@ -93,6 +99,10 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteUser(id); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
+	}
+	if s.audit != nil {
+		caller := GetAuthUser(r)
+		s.audit.Log(audit.Event{Type: "user_deleted", Username: caller.Username, Detail: fmt.Sprintf("user_id=%d", id), Success: true})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -186,7 +196,7 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	plaintext, hash, err := auth.GenerateAPIKey()
+	plaintext, hash, err := auth.GenerateAPIKey(s.masterSecret)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
@@ -195,6 +205,9 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
+	}
+	if s.audit != nil {
+		s.audit.Log(audit.Event{Type: "apikey_created", Username: user.Username, Detail: body.Name, Success: true})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -224,6 +237,9 @@ func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteAPIKey(id, ownerID); err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
+	}
+	if s.audit != nil {
+		s.audit.Log(audit.Event{Type: "apikey_deleted", Username: user.Username, Detail: fmt.Sprintf("key_id=%d", id), Success: true})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

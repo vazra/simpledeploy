@@ -75,13 +75,14 @@ func TestAuthMiddlewareValidJWT(t *testing.T) {
 
 func TestAuthMiddlewareValidAPIKey(t *testing.T) {
 	srv, s := newMiddlewareTestServer(t)
+	srv.SetMasterSecret("test-master-secret")
 
 	user, err := s.CreateUser("bob", "hash", "admin")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
-	plaintext, hash, err := auth.GenerateAPIKey()
+	plaintext, hash, err := auth.GenerateAPIKey("test-master-secret")
 	if err != nil {
 		t.Fatalf("generate api key: %v", err)
 	}

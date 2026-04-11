@@ -33,7 +33,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// Try API key first (Authorization: Bearer sd_...)
 		if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
-			keyHash := auth.HashAPIKey(token)
+			keyHash := auth.HashAPIKey(token, s.masterSecret)
 			keyRecord, user, err := s.store.GetAPIKeyByHash(keyHash)
 			if err == nil && keyRecord != nil {
 				// Check API key expiry

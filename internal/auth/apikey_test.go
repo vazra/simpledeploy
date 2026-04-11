@@ -5,8 +5,10 @@ import (
 	"testing"
 )
 
+const testSecret = "test-hmac-secret"
+
 func TestGenerateAPIKey(t *testing.T) {
-	plain, hash, err := GenerateAPIKey()
+	plain, hash, err := GenerateAPIKey(testSecret)
 	if err != nil {
 		t.Fatalf("GenerateAPIKey error: %v", err)
 	}
@@ -16,16 +18,15 @@ func TestGenerateAPIKey(t *testing.T) {
 	if hash == "" {
 		t.Fatal("expected non-empty hash")
 	}
-	// Hash is deterministic: rehashing the plaintext should match
-	if HashAPIKey(plain) != hash {
-		t.Error("HashAPIKey(plain) should equal the returned hash")
+	if HashAPIKey(plain, testSecret) != hash {
+		t.Error("HashAPIKey(plain, secret) should equal the returned hash")
 	}
 }
 
 func TestHashAPIKeyDeterministic(t *testing.T) {
 	key := "sd_somekey"
-	h1 := HashAPIKey(key)
-	h2 := HashAPIKey(key)
+	h1 := HashAPIKey(key, testSecret)
+	h2 := HashAPIKey(key, testSecret)
 	if h1 != h2 {
 		t.Error("HashAPIKey should be deterministic")
 	}
@@ -34,12 +35,21 @@ func TestHashAPIKeyDeterministic(t *testing.T) {
 	}
 }
 
+func TestHashAPIKeyDifferentSecrets(t *testing.T) {
+	key := "sd_somekey"
+	h1 := HashAPIKey(key, "secret-a")
+	h2 := HashAPIKey(key, "secret-b")
+	if h1 == h2 {
+		t.Error("different secrets should produce different hashes")
+	}
+}
+
 func TestGenerateAPIKeyUnique(t *testing.T) {
-	plain1, _, err := GenerateAPIKey()
+	plain1, _, err := GenerateAPIKey(testSecret)
 	if err != nil {
 		t.Fatalf("GenerateAPIKey error: %v", err)
 	}
-	plain2, _, err := GenerateAPIKey()
+	plain2, _, err := GenerateAPIKey(testSecret)
 	if err != nil {
 		t.Fatalf("GenerateAPIKey error: %v", err)
 	}
