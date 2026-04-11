@@ -82,7 +82,7 @@ func TestRollupRunOnce(t *testing.T) {
 	}
 
 	// check cutoffs
-	wantCutoffs := []time.Duration{1 * time.Minute, 5 * time.Minute, 1 * time.Hour, 24 * time.Hour}
+	wantCutoffs := []time.Duration{60 * time.Minute, 6 * time.Hour, 24 * time.Hour, 30 * 24 * time.Hour}
 	for i, wantOffset := range wantCutoffs {
 		low := before.Add(-wantOffset - time.Second)
 		high := after.Add(-wantOffset + time.Second)
@@ -137,7 +137,7 @@ func TestReqMetricsRollupRunOnce(t *testing.T) {
 	}
 
 	// check cutoffs
-	wantCutoffs := []time.Duration{1 * time.Minute, 5 * time.Minute, 1 * time.Hour, 24 * time.Hour}
+	wantCutoffs := []time.Duration{60 * time.Minute, 6 * time.Hour, 24 * time.Hour, 30 * 24 * time.Hour}
 	for i, wantOffset := range wantCutoffs {
 		low := before.Add(-wantOffset - time.Second)
 		high := after.Add(-wantOffset + time.Second)

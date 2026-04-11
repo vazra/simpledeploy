@@ -57,7 +57,7 @@ func DefaultConfig() *Config {
 				{Name: "raw", Interval: "10s", Retention: "90m"},
 				{Name: "1m", Retention: "7h"},
 				{Name: "5m", Retention: "26h"},
-				{Name: "1h", Retention: "8d"},
+				{Name: "1h", Retention: "31d"},
 				{Name: "1d", Retention: "400d"},
 			},
 		},

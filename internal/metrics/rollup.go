@@ -45,16 +45,16 @@ func (rm *ReqMetricsRollupManager) Run(ctx context.Context) {
 func (rm *ReqMetricsRollupManager) RunOnce() error {
 	now := time.Now().UTC()
 
-	if err := rm.store.AggregateRequestMetrics(TierRaw, Tier1m, now.Add(-1*time.Minute)); err != nil {
+	if err := rm.store.AggregateRequestMetrics(TierRaw, Tier1m, now.Add(-60*time.Minute)); err != nil {
 		return err
 	}
-	if err := rm.store.AggregateRequestMetrics(Tier1m, Tier5m, now.Add(-5*time.Minute)); err != nil {
+	if err := rm.store.AggregateRequestMetrics(Tier1m, Tier5m, now.Add(-6*time.Hour)); err != nil {
 		return err
 	}
-	if err := rm.store.AggregateRequestMetrics(Tier5m, Tier1h, now.Add(-1*time.Hour)); err != nil {
+	if err := rm.store.AggregateRequestMetrics(Tier5m, Tier1h, now.Add(-24*time.Hour)); err != nil {
 		return err
 	}
-	if err := rm.store.AggregateRequestMetrics(Tier1h, Tier1d, now.Add(-24*time.Hour)); err != nil {
+	if err := rm.store.AggregateRequestMetrics(Tier1h, Tier1d, now.Add(-30*24*time.Hour)); err != nil {
 		return err
 	}
 
@@ -99,20 +99,18 @@ func (rm *RollupManager) Run(ctx context.Context) {
 func (rm *RollupManager) RunOnce() error {
 	now := time.Now().UTC()
 
-	// raw -> 1m
-	if err := rm.store.AggregateMetrics(TierRaw, Tier1m, now.Add(-1*time.Minute)); err != nil {
+	// Thresholds match the view window each tier serves:
+	// raw serves 1h view, 1m serves 6h, 5m serves 24h, 1h serves 1w+1m
+	if err := rm.store.AggregateMetrics(TierRaw, Tier1m, now.Add(-60*time.Minute)); err != nil {
 		return err
 	}
-	// 1m -> 5m
-	if err := rm.store.AggregateMetrics(Tier1m, Tier5m, now.Add(-5*time.Minute)); err != nil {
+	if err := rm.store.AggregateMetrics(Tier1m, Tier5m, now.Add(-6*time.Hour)); err != nil {
 		return err
 	}
-	// 5m -> 1h
-	if err := rm.store.AggregateMetrics(Tier5m, Tier1h, now.Add(-1*time.Hour)); err != nil {
+	if err := rm.store.AggregateMetrics(Tier5m, Tier1h, now.Add(-24*time.Hour)); err != nil {
 		return err
 	}
-	// 1h -> 1d
-	if err := rm.store.AggregateMetrics(Tier1h, Tier1d, now.Add(-24*time.Hour)); err != nil {
+	if err := rm.store.AggregateMetrics(Tier1h, Tier1d, now.Add(-30*24*time.Hour)); err != nil {
 		return err
 	}
 
