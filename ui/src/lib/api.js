@@ -194,4 +194,6 @@ export const api = {
   systemVacuum: () => request('POST', '/system/vacuum'),
   systemAuditLog: (limit = 200) => request('GET', `/system/audit-log?limit=${limit}`),
   systemClearAuditLog: () => request('DELETE', '/system/audit-log'),
+  systemAuditConfig: () => request('GET', '/system/audit-config'),
+  systemUpdateAuditConfig: (maxSize) => request('PUT', '/system/audit-config', { max_size: maxSize }),
 }

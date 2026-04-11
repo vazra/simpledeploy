@@ -23,6 +23,8 @@
   let auditLogs = $state([])
   let auditLoading = $state(false)
   let clearing = $state(false)
+  let auditMaxSize = $state(500)
+  let savingConfig = $state(false)
 
   const tiers = ['raw', '1m', '5m', '1h']
   const tierLabels = { raw: 'Raw', '1m': '1 min', '5m': '5 min', '1h': '1 hour' }
@@ -95,8 +97,12 @@
 
   async function loadAuditLogs() {
     auditLoading = true
-    const res = await api.systemAuditLog(200)
-    if (res.data) auditLogs = res.data
+    const [logsRes, cfgRes] = await Promise.all([
+      api.systemAuditLog(500),
+      api.systemAuditConfig(),
+    ])
+    if (logsRes.data) auditLogs = logsRes.data
+    if (cfgRes.data) auditMaxSize = cfgRes.data.max_size
     auditLoading = false
   }
 
@@ -107,9 +113,20 @@
       toasts.error(res.error)
     } else {
       toasts.success('Audit log cleared')
-      auditLogs = []
+      await loadAuditLogs()
     }
     clearing = false
+  }
+
+  async function saveAuditConfig() {
+    savingConfig = true
+    const res = await api.systemUpdateAuditConfig(auditMaxSize)
+    if (res.error) {
+      toasts.error(res.error)
+    } else {
+      toasts.success(`Buffer resized to ${auditMaxSize} events`)
+    }
+    savingConfig = false
   }
 
   function switchTab(tab) {
@@ -471,6 +488,23 @@
         </div>
       </div>
 
+      <!-- Buffer size config -->
+      <div class="bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50 flex flex-wrap items-center gap-3">
+        <span class="text-xs font-medium text-text-secondary">Buffer limit:</span>
+        <input
+          type="number"
+          min="10"
+          max="10000"
+          bind:value={auditMaxSize}
+          class="w-24 px-3 py-1.5 text-sm bg-surface-1 border border-border/50 rounded-lg text-text-primary focus:outline-none focus:border-accent"
+        />
+        <span class="text-xs text-text-secondary">events</span>
+        <Button size="sm" variant="secondary" onclick={saveAuditConfig} disabled={savingConfig}>
+          {savingConfig ? 'Saving...' : 'Save'}
+        </Button>
+        <span class="text-xs text-text-muted ml-auto">Oldest events auto-pruned when limit is reached</span>
+      </div>
+
       {#if auditLoading && auditLogs.length === 0}
         <Skeleton type="card" count={3} />
       {:else if auditLogs.length === 0}
@@ -520,7 +554,7 @@
             </table>
           </div>
           <div class="border-t border-border/50 px-4 py-2">
-            <span class="text-xs text-text-secondary">{auditLogs.length} events (most recent 200, newest first)</span>
+            <span class="text-xs text-text-secondary">{auditLogs.length} of {auditMaxSize} max events (newest first)</span>
           </div>
         </div>
       {/if}

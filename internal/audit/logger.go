@@ -92,3 +92,23 @@ func (l *Logger) Clear() {
 	l.pos = 0
 	l.full = false
 }
+
+// Resize changes the buffer capacity, discarding all existing entries.
+func (l *Logger) Resize(newSize int) {
+	if newSize < 10 {
+		newSize = 10
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = make([]Event, newSize)
+	l.maxSize = newSize
+	l.pos = 0
+	l.full = false
+}
+
+// MaxSize returns the current buffer capacity.
+func (l *Logger) MaxSize() int {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.maxSize
+}

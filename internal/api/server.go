@@ -228,6 +228,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(http.HandlerFunc(s.handleVacuumDB)))
 	s.mux.Handle("GET /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleAuditLog)))
 	s.mux.Handle("DELETE /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleClearAuditLog)))
+	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleGetAuditConfig)))
+	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleUpdateAuditConfig)))
 
 	// Registry management
 	s.mux.Handle("GET /api/registries", s.authMiddleware(http.HandlerFunc(s.handleListRegistries)))

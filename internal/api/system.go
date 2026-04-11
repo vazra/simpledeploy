@@ -223,11 +223,43 @@ func (s *Server) handleClearAuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.audit != nil {
 		s.audit.Clear()
-		caller := GetAuthUser(r)
-		s.audit.Log(audit.Event{Type: "audit_cleared", Username: caller.Username, Success: true})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUpdateAuditConfig(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	var body struct {
+		MaxSize int `json:"max_size"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if body.MaxSize < 10 || body.MaxSize > 10000 {
+		http.Error(w, "max_size must be between 10 and 10000", http.StatusBadRequest)
+		return
+	}
+	if s.audit != nil {
+		s.audit.Resize(body.MaxSize)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleGetAuditConfig(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	maxSize := 500
+	if s.audit != nil {
+		maxSize = s.audit.MaxSize()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"max_size": maxSize})
 }
 
 func (s *Server) handleVacuumDB(w http.ResponseWriter, r *http.Request) {
