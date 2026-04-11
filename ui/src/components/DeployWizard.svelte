@@ -1,6 +1,7 @@
 <script>
   import Button from './Button.svelte'
   import YamlEditor from './YamlEditor.svelte'
+  import AccordionSection from './AccordionSection.svelte'
   import { api } from '../lib/api.js'
 
   let { onclose = () => {}, onComplete = () => {} } = $props()
@@ -73,6 +74,51 @@
   let parsedServices = $state([])
   let registries = $state([])
   let selectedRegistry = $state('')
+
+  // Routing labels
+  let routingDomain = $state('')
+  let routingPort = $state('')
+  let routingTls = $state(false)
+
+  function injectLabels(yaml) {
+    if (!routingDomain && !routingPort && !routingTls) return yaml
+
+    const labels = []
+    if (routingDomain) labels.push(`      simpledeploy.domain: "${routingDomain}"`)
+    if (routingPort) labels.push(`      simpledeploy.port: "${routingPort}"`)
+    if (routingTls) labels.push(`      simpledeploy.tls: "letsencrypt"`)
+
+    const labelBlock = labels.join('\n')
+    const lines = yaml.split('\n')
+    let inServices = false
+    let firstServiceIndent = -1
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      const stripped = line.trimEnd()
+      if (/^services:\s*$/.test(stripped)) { inServices = true; continue }
+      if (inServices && stripped.trim() && !stripped.startsWith('#')) {
+        const indent = line.search(/\S/)
+        if (firstServiceIndent === -1) firstServiceIndent = indent
+
+        if (indent === firstServiceIndent) {
+          for (let j = i + 1; j < lines.length; j++) {
+            const sline = lines[j]
+            const sindent = sline.search(/\S/)
+            if (sindent <= firstServiceIndent && sline.trim()) break
+            if (sline.trim() === 'labels:') {
+              lines.splice(j + 1, 0, labelBlock)
+              return lines.join('\n')
+            }
+          }
+          const labelsHeader = ' '.repeat(firstServiceIndent + 2) + 'labels:'
+          lines.splice(i + 1, 0, labelsHeader, labelBlock)
+          return lines.join('\n')
+        }
+      }
+    }
+    return yaml
+  }
 
   function parseServicesFromYaml(text) {
     const services = []
@@ -271,6 +317,32 @@
             </select>
           </div>
         {/if}
+
+        <!-- Quick routing labels -->
+        <AccordionSection title="Configure Routing (optional)">
+          <div class="flex flex-col gap-3">
+            <div>
+              <label class="block text-xs font-medium text-text-muted mb-1">Domain</label>
+              <input
+                bind:value={routingDomain}
+                placeholder="app.example.com"
+                class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/30"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-text-muted mb-1">Port</label>
+              <input
+                bind:value={routingPort}
+                placeholder="8080"
+                class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/30"
+              />
+            </div>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" bind:checked={routingTls} class="rounded border-border accent-accent" />
+              <span class="text-xs text-text-primary">Enable TLS (Let's Encrypt)</span>
+            </label>
+          </div>
+        </AccordionSection>
       </div>
     {:else}
       <p class="text-text-muted text-sm">Step 3 placeholder</p>
