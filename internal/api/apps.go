@@ -27,13 +27,18 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+
+	labels, _ := s.store.GetAppLabels(slug)
+
 	type appResponse struct {
 		store.App
-		Deploying bool `json:"deploying"`
+		Deploying bool              `json:"deploying"`
+		Labels    map[string]string `json:"Labels,omitempty"`
 	}
 	resp := appResponse{
 		App:       *app,
 		Deploying: s.reconciler != nil && s.reconciler.IsDeploying(slug),
+		Labels:    labels,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

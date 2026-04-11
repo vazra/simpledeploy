@@ -91,6 +91,35 @@ func TestGetAppNotFound(t *testing.T) {
 	}
 }
 
+func TestGetAppIncludesAccessAllow(t *testing.T) {
+	srv, s := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	s.UpsertApp(&store.App{Name: "ipapp", Slug: "ipapp", ComposePath: "/tmp/test.yml", Status: "running"}, map[string]string{
+		"simpledeploy.access.allow": "10.0.0.0/8,192.168.1.5",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/apps/ipapp", nil)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	labels, ok := resp["Labels"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Labels not in response or not a map")
+	}
+	if labels["simpledeploy.access.allow"] != "10.0.0.0/8,192.168.1.5" {
+		t.Errorf("access.allow = %v, want %q", labels["simpledeploy.access.allow"], "10.0.0.0/8,192.168.1.5")
+	}
+}
+
 func TestListAppsEmpty(t *testing.T) {
 	srv, _ := newTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
