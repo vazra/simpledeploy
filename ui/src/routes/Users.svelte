@@ -23,6 +23,17 @@
   // key form
   let kName = $state('')
 
+  // delete confirmation modal
+  let confirmModal = $state({ open: false, title: '', name: '', onConfirm: null })
+
+  function confirmDelete(title, name, action) {
+    confirmModal = { open: true, title, name, onConfirm: action }
+  }
+
+  function closeModal() {
+    confirmModal = { open: false, title: '', name: '', onConfirm: null }
+  }
+
   const roleVariants = {
     super_admin: 'danger',
     admin: 'warning',
@@ -113,7 +124,7 @@
                   <td class="py-3 px-4 font-medium">{u.username}</td>
                   <td class="py-3 px-4"><Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge></td>
                   <td class="py-3 px-4 text-text-secondary">{u.created_at ? new Date(u.created_at).toLocaleDateString() : ''}</td>
-                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => delUser(u.id)}>Delete</Button></td>
+                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', u.username, () => delUser(u.id))}>Delete</Button></td>
                 </tr>
               {/each}
             </tbody>
@@ -143,7 +154,7 @@
                 <tr class="hover:bg-surface-hover">
                   <td class="py-3 px-4 font-medium">{k.name}</td>
                   <td class="py-3 px-4 text-text-secondary">{new Date(k.created_at).toLocaleString()}</td>
-                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => revokeKey(k.id)}>Revoke</Button></td>
+                  <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => confirmDelete('Revoke API Key?', k.name, () => revokeKey(k.id))}>Revoke</Button></td>
                 </tr>
               {/each}
             </tbody>
@@ -184,4 +195,20 @@
       <Button type="submit">Create Key</Button>
     </form>
   </SlidePanel>
+
+<!-- Delete Confirmation Modal -->
+{#if confirmModal.open}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={closeModal} onkeydown={(e) => e.key === 'Escape' && closeModal()}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="bg-surface-2 rounded-xl border border-border/50 shadow-lg max-w-sm w-full mx-4 p-6" onclick={(e) => e.stopPropagation()}>
+      <h3 class="text-base font-semibold text-text-primary mb-2">{confirmModal.title}</h3>
+      <p class="text-sm text-text-secondary mb-5">This will permanently remove <strong class="text-text-primary">{confirmModal.name}</strong>.</p>
+      <div class="flex justify-end gap-3">
+        <Button size="sm" variant="secondary" onclick={closeModal}>Cancel</Button>
+        <Button size="sm" variant="danger" onclick={() => { confirmModal.onConfirm(); closeModal() }}>Confirm</Button>
+      </div>
+    </div>
+  </div>
+{/if}
 </Layout>
