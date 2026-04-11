@@ -148,6 +148,7 @@
     logsLoading = true
     const res = await api.systemLogs(1000)
     if (res.data) processLogs = res.data
+    if (res.error) toasts.error('Logs: ' + res.error)
     logsLoading = false
   }
 
