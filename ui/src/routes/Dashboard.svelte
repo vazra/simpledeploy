@@ -7,7 +7,6 @@
   import Skeleton from '../components/Skeleton.svelte'
   import Badge from '../components/Badge.svelte'
   import Button from '../components/Button.svelte'
-  import SlidePanel from '../components/SlidePanel.svelte'
   import DeployWizard from '../components/DeployWizard.svelte'
   import { api } from '../lib/api.js'
   import { connection } from '../lib/stores/connection.svelte.js'
@@ -407,7 +406,5 @@
     </div>
   {/if}
 
-  <SlidePanel title="Deploy App" open={showDeployPanel} onclose={() => showDeployPanel = false}>
-    <DeployWizard onclose={() => showDeployPanel = false} onComplete={() => { showDeployPanel = false; loadDashboard() }} />
-  </SlidePanel>
+  <DeployWizard open={showDeployPanel} onclose={() => showDeployPanel = false} onComplete={() => { showDeployPanel = false; loadDashboard() }} />
 </Layout>

@@ -3,9 +3,10 @@
   import Button from './Button.svelte'
   import YamlEditor from './YamlEditor.svelte'
   import AccordionSection from './AccordionSection.svelte'
+  import SlidePanel from './SlidePanel.svelte'
   import { api } from '../lib/api.js'
 
-  let { onclose = () => {}, onComplete = () => {} } = $props()
+  let { open = false, onclose = () => {}, onComplete = () => {} } = $props()
 
   let step = $state(1)
 
@@ -270,6 +271,7 @@
   }
 </script>
 
+<SlidePanel title="Deploy App" {open} onclose={handleClose}>
 <div class="flex flex-col h-full">
   <!-- Step indicator -->
   <div class="flex items-center gap-2 mb-6">
@@ -515,3 +517,4 @@
     </div>
   {/if}
 </div>
+</SlidePanel>
