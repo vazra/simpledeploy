@@ -8,6 +8,7 @@
   import Badge from '../components/Badge.svelte'
   import Button from '../components/Button.svelte'
   import SlidePanel from '../components/SlidePanel.svelte'
+  import DeployWizard from '../components/DeployWizard.svelte'
   import { api } from '../lib/api.js'
   import { connection } from '../lib/stores/connection.svelte.js'
 
@@ -34,32 +35,6 @@
 
   // Deploy form
   let showDeployPanel = $state(false)
-  let deployName = $state('')
-  let deployCompose = $state('')
-  let deployInputMode = $state('paste')
-  let deploying = $state(false)
-
-  async function handleDeploy() {
-    if (!deployName.trim() || !deployCompose.trim()) return
-    deploying = true
-    const encoded = btoa(deployCompose)
-    const res = await api.deploy(deployName.trim(), encoded)
-    deploying = false
-    if (!res.error) {
-      showDeployPanel = false
-      deployName = ''
-      deployCompose = ''
-      loadDashboard()
-    }
-  }
-
-  function handleFileUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => { deployCompose = reader.result }
-    reader.readAsText(file)
-  }
 
   const unsubReconnect = connection.onReconnect(() => loadDashboard())
   onMount(loadDashboard)
@@ -433,57 +408,6 @@
   {/if}
 
   <SlidePanel title="Deploy App" open={showDeployPanel} onclose={() => showDeployPanel = false}>
-    <form onsubmit={(e) => { e.preventDefault(); handleDeploy() }} class="flex flex-col gap-4">
-      <div>
-        <label class="block text-xs font-medium text-text-muted mb-2">App Name</label>
-        <input
-          bind:value={deployName}
-          required
-          placeholder="my-app"
-          class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
-        />
-        <p class="text-xs text-text-muted mt-1">Lowercase letters, numbers, hyphens</p>
-      </div>
-
-      <div>
-        <label class="block text-xs font-medium text-text-muted mb-2">Compose File</label>
-        <div class="flex gap-1 mb-2">
-          <button
-            type="button"
-            onclick={() => deployInputMode = 'paste'}
-            class="px-2 py-1 text-xs rounded border transition-colors {deployInputMode === 'paste' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
-          >Paste</button>
-          <button
-            type="button"
-            onclick={() => deployInputMode = 'upload'}
-            class="px-2 py-1 text-xs rounded border transition-colors {deployInputMode === 'upload' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
-          >Upload</button>
-        </div>
-
-        {#if deployInputMode === 'paste'}
-          <textarea
-            bind:value={deployCompose}
-            required
-            rows="12"
-            placeholder="version: '3'&#10;services:&#10;  web:&#10;    image: nginx:latest&#10;    ports:&#10;      - '80:80'"
-            class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 resize-y"
-          ></textarea>
-        {:else}
-          <input
-            type="file"
-            accept=".yml,.yaml"
-            onchange={handleFileUpload}
-            class="w-full text-sm text-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-border file:text-sm file:bg-surface-3 file:text-text-primary hover:file:bg-surface-3/80"
-          />
-          {#if deployCompose}
-            <p class="text-xs text-success mt-1">File loaded ({deployCompose.length} chars)</p>
-          {/if}
-        {/if}
-      </div>
-
-      <Button type="submit" loading={deploying} disabled={!deployName.trim() || !deployCompose.trim()}>
-        Deploy
-      </Button>
-    </form>
+    <DeployWizard onclose={() => showDeployPanel = false} onComplete={() => { showDeployPanel = false; loadDashboard() }} />
   </SlidePanel>
 </Layout>
