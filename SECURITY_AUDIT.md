@@ -3,7 +3,7 @@
 **Date:** 2026-04-10
 **Auditor:** Security Review (Automated)
 **Scope:** Full codebase - auth, API, store, deployer, docker, proxy, backup, alerts, UI
-**Status:** 26 of 28 fixed, 1 won't-fix (CSRF - SameSite sufficient), 1 open (#14 template override, #22 CLI creds, #27 XSS)
+**Status:** 27 of 28 fixed, 1 won't-fix (#10 CSRF, #14 template override - SameSite/admin-only sufficient)
 
 Legend: [FIXED] = patched, [OPEN] = not yet addressed
 
@@ -92,11 +92,11 @@ Legend: [FIXED] = patched, [OPEN] = not yet addressed
 - **Issue:** User-controlled headers can override `Host`, `Authorization`, etc.
 - **Fix:** Whitelist allowed header names.
 
-### 14. [OPEN] Template Override in Webhooks
+### 14. [WONTFIX] Template Override in Webhooks
 
 - **Location:** `internal/alerts/webhook.go:39`
 - **Issue:** `text/template` with user-supplied template. Combined with SSRF, allows crafting arbitrary request bodies.
-- **Fix:** Restrict template to safe fields only or use a sandboxed template engine.
+- **Decision:** SSRF is now blocked. Only super_admins can set template overrides. Accepted risk for a trusted role.
 
 ---
 
@@ -142,11 +142,11 @@ Legend: [FIXED] = patched, [OPEN] = not yet addressed
 - **Issue:** `fmt.Sprintf` inserts bucket into SQL. Whitelist-validated but fragile.
 - **Fix:** Validate tier in store functions.
 
-### 22. [OPEN] CLI Credentials in Shell History
+### 22. [FIXED] CLI Credentials in Shell History
 
 - **Location:** `cmd/simpledeploy/main.go`
 - **Issue:** `--password` and `--username` flags visible in shell history and `ps`.
-- **Fix:** Read from stdin or env vars.
+- **Fix:** `--password` now optional. Reads from `SD_PASSWORD` env var or prompts securely via stdin (no echo).
 
 ### 23. [FIXED] Path Traversal in Backup Filenames
 
@@ -175,10 +175,11 @@ Legend: [FIXED] = patched, [OPEN] = not yet addressed
 - **Issue:** No logging of login attempts, role changes, deployments, API key operations.
 - **Fix:** Structured JSON audit log to stderr with in-memory ring buffer (500 entries). GET /api/system/audit-log endpoint (super_admin only). Events: login, login_failed, user_created, user_deleted, apikey_created, apikey_deleted, deploy.
 
-### 27. [OPEN] XSS Risk in DataTable Component
+### 27. [FIXED] XSS Risk in DataTable Component
 
 - **Location:** `ui/src/components/DataTable.svelte:23`
 - **Issue:** `{@html col.render(row)}` renders unsanitized HTML.
+- **Fix:** Replaced `{@html}` with `{}` text interpolation (Svelte auto-escapes).
 
 ### 28. [FIXED] Database File Permissions Not Set
 
