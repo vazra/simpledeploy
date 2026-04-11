@@ -30,13 +30,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Always run bcrypt to prevent user enumeration via timing
 	user, err := s.store.GetUserByUsername(req.Username)
-	if err != nil {
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
-		return
+	// Use a dummy hash so bcrypt runs even if user not found
+	hash := "$2a$12$000000000000000000000uGWDRFaOZaHVkxgcvqcEnF8VjqDBqyq"
+	if err == nil {
+		hash = user.PasswordHash
 	}
-
-	if !auth.CheckPassword(user.PasswordHash, req.Password) {
+	if !auth.CheckPassword(hash, req.Password) || err != nil {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -57,7 +58,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
+		MaxAge:   86400, // 24h, matches JWT expiry
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -69,9 +72,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name:   "session",
-		Value:  "",
-		MaxAge: -1,
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
 	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
