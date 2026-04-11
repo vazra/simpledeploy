@@ -21,6 +21,7 @@
   let alertHistory = $state([])
   let backupRunsByApp = $state({})
   let appMetricsMap = $state({})
+  let hostMemory = $state(0)
   let appRequestsMap = $state({})
   let timeRange = $state('1h')
   let metricsInterval = $state(10)
@@ -68,11 +69,13 @@
     loading = true
     loadError = false
 
-    const [appsRes, metricsRes, histRes] = await Promise.all([
+    const [appsRes, metricsRes, histRes, dockerRes] = await Promise.all([
       api.listApps(),
       api.systemMetrics(timeRange),
       api.alertHistory(),
+      api.dockerInfo(),
     ])
+    if (dockerRes.data?.memory) hostMemory = dockerRes.data.memory
 
     if (appsRes.error) {
       loading = false
@@ -124,18 +127,26 @@
           api.listBackupRuns(slug),
         ])
         if (mRes.data?.containers) {
-          const allPoints = []
-          for (const ctr of Object.values(mRes.data.containers)) {
-            allPoints.push(...(ctr.points || []))
+          const containers = Object.values(mRes.data.containers)
+          // Sum latest point from each container
+          let totalCpu = 0, totalMem = 0, totalMemLimit = 0
+          let hasData = false
+          for (const ctr of containers) {
+            const latest = (ctr.points || []).filter(p => p.c != null).pop()
+            if (latest) {
+              hasData = true
+              totalCpu += latest.c || 0
+              totalMem += latest.m || 0
+              totalMemLimit += latest.ml || 0
+            }
           }
-          allPoints.sort((a, b) => a.t - b.t)
-          const latest = allPoints.filter(p => p.c != null).pop()
-          if (latest) {
+          if (hasData) {
+            const effectiveLimit = hostMemory ? Math.min(totalMemLimit, hostMemory) : totalMemLimit
             appMetricsMap = { ...appMetricsMap, [slug]: {
-              cpu: latest.c,
-              memPct: latest.ml ? (latest.m / latest.ml) * 100 : 0,
-              memBytes: latest.m || 0,
-              memLimit: latest.ml || 0,
+              cpu: totalCpu,
+              memPct: effectiveLimit ? (totalMem / effectiveLimit) * 100 : 0,
+              memBytes: totalMem,
+              memLimit: effectiveLimit,
             }}
           }
         }
@@ -247,15 +258,6 @@
       <StatCard label="Disk I/O" value="{latestMetrics?.diskRead || '0 B'}/s" sub="Write: {latestMetrics?.diskWrite || '0 B'}/s" />
     </div>
 
-    <!-- App Summary -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-      <StatCard label="Total Apps" value={apps.length} />
-      <StatCard label="Running" value={runningCount} color="text-success" />
-      <button onclick={() => filterStatus = filterStatus === 'stopped' ? 'all' : 'stopped'} class="text-left">
-        <StatCard label="Stopped / Error" value={stoppedCount} color={stoppedCount > 0 ? 'text-danger' : 'text-text-secondary'} />
-      </button>
-    </div>
-
     <!-- Main Content: Apps + Sidebar panels -->
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 mb-6">
       <!-- Apps Grid (3/5) -->
@@ -282,6 +284,22 @@
               <option value="cpu">CPU</option>
             </select>
           </div>
+        </div>
+
+        <!-- App Summary -->
+        <div class="flex gap-2 mb-4">
+          <button onclick={() => filterStatus = 'all'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'all' ? 'border-accent/50' : ''}">
+            <span class="text-text-muted">Total</span>
+            <span class="font-semibold text-text-primary">{apps.length}</span>
+          </button>
+          <button onclick={() => filterStatus = filterStatus === 'running' ? 'all' : 'running'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'running' ? 'border-accent/50' : ''}">
+            <span class="text-text-muted">Running</span>
+            <span class="font-semibold text-success">{runningCount}</span>
+          </button>
+          <button onclick={() => filterStatus = filterStatus === 'stopped' ? 'all' : 'stopped'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'stopped' ? 'border-accent/50' : ''}">
+            <span class="text-text-muted">Stopped</span>
+            <span class="font-semibold {stoppedCount > 0 ? 'text-danger' : 'text-text-secondary'}">{stoppedCount}</span>
+          </button>
         </div>
 
         <div class="relative mb-4">

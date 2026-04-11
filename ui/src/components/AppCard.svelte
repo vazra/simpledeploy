@@ -45,7 +45,7 @@
         <div class="h-1.5 bg-surface-3/50 rounded-full overflow-hidden">
           <div class="h-full bg-success rounded-full" style="width: {Math.min(metrics.memPct || 0, 100)}%"></div>
         </div>
-        <div class="text-xs text-text-secondary mt-0.5">{metrics.memPct?.toFixed(1) || 0}%</div>
+        <div class="text-xs text-text-secondary mt-0.5">{metrics.memPct?.toFixed(1) || 0}%{#if metrics.memLimit} · {formatBytes(metrics.memBytes)} / {formatBytes(metrics.memLimit)}{/if}</div>
       </div>
     </div>
   {/if}

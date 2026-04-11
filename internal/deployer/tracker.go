@@ -14,36 +14,31 @@ type OutputLine struct {
 }
 
 type DeployLog struct {
-	lines       chan OutputLine
 	mu          sync.Mutex
+	history     []OutputLine // buffered history for late subscribers
 	subscribers []chan OutputLine
 	closed      bool
 }
 
 func newDeployLog() *DeployLog {
-	dl := &DeployLog{
-		lines: make(chan OutputLine, 100),
-	}
-	go dl.broadcast()
-	return dl
-}
-
-func (dl *DeployLog) broadcast() {
-	for line := range dl.lines {
-		dl.mu.Lock()
-		for _, sub := range dl.subscribers {
-			select {
-			case sub <- line:
-			default: // drop if subscriber is slow
-			}
-		}
-		dl.mu.Unlock()
-	}
+	return &DeployLog{}
 }
 
 func (dl *DeployLog) Subscribe() (<-chan OutputLine, func()) {
-	ch := make(chan OutputLine, 100)
+	ch := make(chan OutputLine, 200)
 	dl.mu.Lock()
+	// replay history for late subscribers
+	for _, line := range dl.history {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+	if dl.closed {
+		close(ch)
+		dl.mu.Unlock()
+		return ch, func() {}
+	}
 	dl.subscribers = append(dl.subscribers, ch)
 	dl.mu.Unlock()
 	unsub := func() {
@@ -65,9 +60,12 @@ func (dl *DeployLog) Send(line OutputLine) {
 	if dl.closed {
 		return
 	}
-	select {
-	case dl.lines <- line:
-	default:
+	dl.history = append(dl.history, line)
+	for _, sub := range dl.subscribers {
+		select {
+		case sub <- line:
+		default:
+		}
 	}
 }
 
@@ -79,13 +77,14 @@ func (dl *DeployLog) Close(action string) {
 	}
 	dl.closed = true
 	done := OutputLine{Done: true, Action: action}
+	dl.history = append(dl.history, done)
 	for _, sub := range dl.subscribers {
 		select {
 		case sub <- done:
 		default:
 		}
+		close(sub)
 	}
-	close(dl.lines)
 }
 
 type Tracker struct {
