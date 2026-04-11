@@ -74,6 +74,19 @@
   </nav>
 
   <div class="flex flex-col gap-1 p-3 border-t border-border/30">
+    <a
+      href="#/profile"
+      class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors
+        {isActive('/profile') ? 'bg-surface-3/50 text-text-primary font-medium' : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/30'}"
+      title={forceExpanded || $sidebarExpanded ? '' : 'Profile'}
+    >
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+      </svg>
+      {#if forceExpanded || $sidebarExpanded}
+        <span class="whitespace-nowrap">Profile</span>
+      {/if}
+    </a>
     <div class="flex items-center {$sidebarExpanded ? 'justify-between' : 'justify-center'}">
       <ThemeToggle />
       {#if forceExpanded || $sidebarExpanded}
