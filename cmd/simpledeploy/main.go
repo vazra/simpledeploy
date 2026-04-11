@@ -23,6 +23,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"github.com/vazra/simpledeploy/internal/alerts"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/api"
@@ -45,6 +46,24 @@ var (
 )
 
 var cfgFile string
+
+// readPassword reads a password from: flag value, SD_PASSWORD env var, or stdin prompt.
+func readPassword(cmd *cobra.Command) (string, error) {
+	pw, _ := cmd.Flags().GetString("password")
+	if pw != "" {
+		return pw, nil
+	}
+	if env := os.Getenv("SD_PASSWORD"); env != "" {
+		return env, nil
+	}
+	fmt.Fprint(os.Stderr, "Password: ")
+	b, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("read password: %w", err)
+	}
+	return string(b), nil
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "simpledeploy",
@@ -204,10 +223,9 @@ func init() {
 	removeCmd.MarkFlagRequired("name")
 
 	usersCreateCmd.Flags().String("username", "", "username")
-	usersCreateCmd.Flags().String("password", "", "password")
+	usersCreateCmd.Flags().String("password", "", "password (reads from stdin or SD_PASSWORD env if omitted)")
 	usersCreateCmd.Flags().String("role", "viewer", "role: super_admin, admin, viewer")
 	usersCreateCmd.MarkFlagRequired("username")
-	usersCreateCmd.MarkFlagRequired("password")
 
 	usersDeleteCmd.Flags().Int64("id", 0, "user ID")
 	usersDeleteCmd.MarkFlagRequired("id")
@@ -265,11 +283,10 @@ func init() {
 	registryAddCmd.Flags().String("name", "", "registry name")
 	registryAddCmd.Flags().String("url", "", "registry URL (e.g. ghcr.io)")
 	registryAddCmd.Flags().String("username", "", "username")
-	registryAddCmd.Flags().String("password", "", "password")
+	registryAddCmd.Flags().String("password", "", "password (reads from stdin or SD_PASSWORD env if omitted)")
 	registryAddCmd.MarkFlagRequired("name")
 	registryAddCmd.MarkFlagRequired("url")
 	registryAddCmd.MarkFlagRequired("username")
-	registryAddCmd.MarkFlagRequired("password")
 
 	registryCmd.AddCommand(registryAddCmd, registryListCmd, registryRemoveCmd)
 
@@ -634,7 +651,10 @@ func runUsersCreate(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	username, _ := cmd.Flags().GetString("username")
-	password, _ := cmd.Flags().GetString("password")
+	password, err := readPassword(cmd)
+	if err != nil {
+		return err
+	}
 	role, _ := cmd.Flags().GetString("role")
 
 	hash, err := auth.HashPassword(password)
@@ -1233,7 +1253,10 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 	name, _ := cmd.Flags().GetString("name")
 	url, _ := cmd.Flags().GetString("url")
 	username, _ := cmd.Flags().GetString("username")
-	password, _ := cmd.Flags().GetString("password")
+	password, err := readPassword(cmd)
+	if err != nil {
+		return err
+	}
 
 	usernameEnc, err := auth.Encrypt(username, cfg.MasterSecret)
 	if err != nil {
