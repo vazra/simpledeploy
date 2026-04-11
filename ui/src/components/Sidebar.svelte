@@ -3,7 +3,6 @@
   import { sidebarExpanded } from '../lib/stores/sidebar.js'
   import ThemeToggle from './ThemeToggle.svelte'
   import { api } from '../lib/api.js'
-  import { push } from 'svelte-spa-router'
 
   let { forceExpanded = false } = $props()
   let currentPath = $state(window.location.hash.slice(1) || '/')
@@ -37,11 +36,6 @@
   function isActive(path) {
     if (path === '/') return currentPath === '/'
     return currentPath.startsWith(path)
-  }
-
-  async function logout() {
-    await api.logout()
-    push('/login')
   }
 
   function toggle() {
@@ -99,16 +93,8 @@
         </span>
       {/if}
     </a>
-    <div class="flex items-center {$sidebarExpanded ? 'justify-between' : 'justify-center'}">
+    <div class="flex items-center justify-center">
       <ThemeToggle />
-      {#if forceExpanded || $sidebarExpanded}
-        <button
-          onclick={logout}
-          class="text-xs text-text-muted hover:text-danger transition-colors"
-        >
-          Logout
-        </button>
-      {/if}
     </div>
     <button
       onclick={toggle}

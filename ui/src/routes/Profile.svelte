@@ -4,6 +4,7 @@
   import Button from '../components/Button.svelte'
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
+  import { push } from 'svelte-spa-router'
 
   let loading = $state(true)
   let saving = $state(false)
@@ -123,6 +124,15 @@
           {/if}
           <Button onclick={changePassword} disabled={changingPw}>{changingPw ? 'Changing...' : 'Change Password'}</Button>
         </div>
+      </section>
+      <!-- Logout -->
+      <section class="pt-4 border-t border-border/30">
+        <button
+          onclick={async () => { await api.logout(); push('/login') }}
+          class="text-sm text-danger hover:text-danger/80 transition-colors"
+        >
+          Log out
+        </button>
       </section>
     </div>
   {/if}
