@@ -32,6 +32,7 @@
           tension: 0.3,
           pointRadius: 0,
           borderWidth: 1.5,
+          spanGaps: false,
         }]
       },
       options: {

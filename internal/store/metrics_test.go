@@ -191,8 +191,8 @@ func TestAggregateMetrics(t *testing.T) {
 	if got[0].MemBytes != 200 {
 		t.Errorf("max MemBytes = %v, want 200", got[0].MemBytes)
 	}
-	// sum net_rx = 180
-	if got[0].NetRx != 180 {
-		t.Errorf("sum NetRx = %v, want 180", got[0].NetRx)
+	// max net_rx = 70
+	if got[0].NetRx != 70 {
+		t.Errorf("max NetRx = %v, want 70", got[0].NetRx)
 	}
 }

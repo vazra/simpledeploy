@@ -62,6 +62,20 @@
   onMount(loadDashboard)
   onDestroy(unsubReconnect)
 
+  function withGaps(points) {
+    if (points.length < 2) return points
+    const result = [points[0]]
+    for (let i = 1; i < points.length; i++) {
+      const gap = points[i].x - points[i - 1].x
+      const prev = i >= 2 ? points[i - 1].x - points[i - 2].x : gap
+      if (gap > Math.max(prev * 3, 120000)) {
+        result.push({ x: new Date(points[i - 1].x.getTime() + 1), y: null })
+      }
+      result.push(points[i])
+    }
+    return result
+  }
+
   async function loadDashboard() {
     loading = true
     loadError = false
@@ -96,11 +110,11 @@
         diskRead: formatBytes(latest.disk_read || 0),
         diskWrite: formatBytes(latest.disk_write || 0),
       }
-      cpuHistory = metricsData.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct }))
-      memHistory = metricsData.map((m) => ({
+      cpuHistory = withGaps(metricsData.map((m) => ({ x: new Date(m.timestamp), y: m.cpu_pct })))
+      memHistory = withGaps(metricsData.map((m) => ({
         x: new Date(m.timestamp),
         y: m.mem_limit ? (m.mem_bytes / m.mem_limit) * 100 : 0,
-      }))
+      })))
     }
 
     loading = false

@@ -58,27 +58,43 @@ func (s *Store) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]m
 	var rows *sql.Rows
 	var err error
 
-	if appID == nil {
-		rows, err = s.db.Query(`
-			SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp
-			FROM metrics
-			WHERE app_id IS NULL AND tier = ? AND timestamp >= ? AND timestamp <= ?
-			ORDER BY timestamp
-		`, tier,
-			from.UTC().Format("2006-01-02 15:04:05"),
-			to.UTC().Format("2006-01-02 15:04:05"),
-		)
-	} else {
-		rows, err = s.db.Query(`
-			SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp
-			FROM metrics
-			WHERE app_id = ? AND tier = ? AND timestamp >= ? AND timestamp <= ?
-			ORDER BY timestamp
-		`, *appID, tier,
-			from.UTC().Format("2006-01-02 15:04:05"),
-			to.UTC().Format("2006-01-02 15:04:05"),
-		)
+	fromStr := from.UTC().Format("2006-01-02 15:04:05")
+	toStr := to.UTC().Format("2006-01-02 15:04:05")
+
+	// Query the selected tier plus all finer-grained tiers to avoid gaps.
+	// Rollup moves data from finer to coarser tiers and deletes the source,
+	// so recent data lives in finer tiers while older data is in coarser ones.
+	tiers := tiersForQuery(tier)
+
+	placeholders := ""
+	args := make([]interface{}, 0, len(tiers)+3)
+	if appID != nil {
+		args = append(args, *appID)
 	}
+	for i, t := range tiers {
+		if i > 0 {
+			placeholders += ", "
+		}
+		placeholders += "?"
+		args = append(args, t)
+	}
+	args = append(args, fromStr, toStr)
+
+	var appFilter string
+	if appID == nil {
+		appFilter = "app_id IS NULL"
+	} else {
+		appFilter = "app_id = ?"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp
+		FROM metrics
+		WHERE %s AND tier IN (%s) AND timestamp >= ? AND timestamp <= ?
+		ORDER BY timestamp
+	`, appFilter, placeholders)
+
+	rows, err = s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query metrics: %w", err)
 	}
@@ -144,10 +160,10 @@ func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Tim
 			avg(cpu_pct),
 			max(mem_bytes),
 			max(mem_limit),
-			sum(net_rx),
-			sum(net_tx),
-			sum(disk_read),
-			sum(disk_write),
+			max(net_rx),
+			max(net_tx),
+			max(disk_read),
+			max(disk_write),
 			%s AS bucket,
 			?
 		FROM metrics
@@ -200,6 +216,14 @@ func SelectTier(duration time.Duration) string {
 	default:
 		return metrics.Tier1h
 	}
+}
+
+// tiersForQuery returns all tiers that may contain data for the time range.
+// Rollup progressively moves data: raw->1m (after 2min), 1m->5m (after 10min),
+// 5m->1h (after 2h), deleting the source each time. At any point, data is
+// spread across all tiers, so we must query all of them.
+func tiersForQuery(_ string) []string {
+	return []string{metrics.TierRaw, metrics.Tier1m, metrics.Tier5m, metrics.Tier1h}
 }
 
 func validateMetricsTier(tier string) error {
