@@ -237,9 +237,15 @@ func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Su
 		}
 	}
 
+	// Use compose service name for container_id (e.g. "web", "redis")
+	containerID := ctr.ID
+	if svc, ok := ctr.Labels["com.docker.compose.service"]; ok && svc != "" {
+		containerID = svc
+	}
+
 	return MetricPoint{
 		AppID:       appID,
-		ContainerID: ctr.ID,
+		ContainerID: containerID,
 		CPUPct:      cpuPct,
 		MemBytes:    memBytes,
 		MemLimit:    memLimit,

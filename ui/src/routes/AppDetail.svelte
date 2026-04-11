@@ -119,7 +119,7 @@
     const perContainer = ids.map((id, i) => {
       const pts = containers[id]?.points || []
       return {
-        label: id.slice(0, 12),
+        label: id,
         color: single ? baseColor : containerColors[i % containerColors.length],
         data: pts.map(p => ({ x: new Date(p.t * 1000), y: extract(p) })),
       }
@@ -160,7 +160,7 @@
     // Track container IDs for visibility toggles
     const ids = Object.keys(c).filter(id => id !== '')
     const hasMultiple = ids.length > 1
-    const labels = hasMultiple ? ['Total', ...ids.map(id => id.slice(0, 12))] : ids.map(id => id.slice(0, 12))
+    const labels = hasMultiple ? ['Total', ...ids.map(id => id)] : ids.map(id => id)
     containerIds = labels
     // Preserve existing visibility; default all visible
     if (visibleContainers.size === 0 || ![...visibleContainers].some(v => labels.includes(v))) {
