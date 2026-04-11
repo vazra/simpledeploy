@@ -221,6 +221,32 @@
     if (tab !== 'logs') stopLogsStream()
   }
 
+  const logLevelColors = {
+    debug: 'text-text-muted',
+    info: 'text-blue-400',
+    warn: 'text-yellow-400',
+    error: 'text-red-400',
+    fatal: 'text-red-500',
+    dpanic: 'text-red-500',
+  }
+
+  function parseLogMessage(msg) {
+    try {
+      const obj = JSON.parse(msg)
+      if (obj && typeof obj === 'object' && obj.msg) {
+        const level = obj.level || 'info'
+        const logger = obj.logger || ''
+        const message = obj.msg
+        const extras = Object.entries(obj)
+          .filter(([k]) => !['level', 'ts', 'msg', 'logger'].includes(k))
+          .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+          .join(' ')
+        return { level, logger, message, extras, isJson: true }
+      }
+    } catch {}
+    return { level: 'info', logger: '', message: msg, extras: '', isJson: false }
+  }
+
   const eventTypeColors = {
     login: 'text-emerald-400',
     login_failed: 'text-red-400',
@@ -767,9 +793,17 @@
         >
           <div class="overflow-x-auto max-h-[600px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
             {#each processLogs as entry}
-              <div class="flex gap-3 hover:bg-surface-hover py-0.5 px-1 rounded">
+              {@const parsed = parseLogMessage(entry.message)}
+              <div class="flex gap-2 hover:bg-surface-hover py-0.5 px-1 rounded items-start">
                 <span class="text-text-muted whitespace-nowrap shrink-0">{formatTime(entry.timestamp)}</span>
-                <span class="text-text-primary break-all">{entry.message}</span>
+                {#if parsed.isJson}
+                  <span class="uppercase font-semibold whitespace-nowrap shrink-0 w-10 {logLevelColors[parsed.level] || 'text-text-secondary'}">{parsed.level.slice(0, 4)}</span>
+                  {#if parsed.logger}<span class="text-text-muted whitespace-nowrap shrink-0">[{parsed.logger}]</span>{/if}
+                  <span class="text-text-primary">{parsed.message}</span>
+                  {#if parsed.extras}<span class="text-text-muted">{parsed.extras}</span>{/if}
+                {:else}
+                  <span class="text-text-primary break-all">{parsed.message}</span>
+                {/if}
               </div>
             {/each}
           </div>
