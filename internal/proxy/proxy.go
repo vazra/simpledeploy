@@ -49,6 +49,11 @@ func (c *CaddyProxy) SetRoutes(routes []Route) error {
 		if r.RateLimit != nil {
 			RateLimiters.Set(r.Domain, r.RateLimit)
 		}
+		if r.AllowedIPs != nil {
+			IPAccessRules.Set(r.Domain, r.AllowedIPs)
+		} else {
+			IPAccessRules.Remove(r.Domain)
+		}
 	}
 	return c.reload()
 }
@@ -84,6 +89,7 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 
 	for _, r := range routes {
 		handlers := []interface{}{
+			map[string]interface{}{"handler": "simpledeploy_ipaccess"},
 			map[string]interface{}{"handler": "simpledeploy_ratelimit"},
 			map[string]interface{}{"handler": "simpledeploy_metrics"},
 			map[string]interface{}{

@@ -80,12 +80,12 @@ func TestBuildConfigWithRoutes(t *testing.T) {
 			t.Errorf("route[%d] host: got %q, want %q", i, host, wantDomains[i])
 		}
 
-		// handlers: [ratelimit, metrics, reverse_proxy]
+		// handlers: [ipaccess, ratelimit, metrics, reverse_proxy]
 		handleList := r["handle"].([]interface{})
-		if len(handleList) != 3 {
-			t.Fatalf("route[%d] handle: got %d handlers, want 3", i, len(handleList))
+		if len(handleList) != 4 {
+			t.Fatalf("route[%d] handle: got %d handlers, want 4", i, len(handleList))
 		}
-		rp := handleList[2].(map[string]interface{})
+		rp := handleList[3].(map[string]interface{})
 		dial := rp["upstreams"].([]interface{})[0].(map[string]interface{})["dial"].(string)
 		if dial != wantDials[i] {
 			t.Errorf("route[%d] dial: got %q, want %q", i, dial, wantDials[i])
@@ -104,6 +104,35 @@ func TestBuildConfigTLSOff(t *testing.T) {
 	}
 	if autoHTTPS["disable"] != true {
 		t.Errorf("automatic_https.disable: got %v, want true", autoHTTPS["disable"])
+	}
+}
+
+func TestBuildConfigHandlerOrder(t *testing.T) {
+	p := newTestProxy("off", "")
+	p.mu.Lock()
+	p.routes = []Route{
+		{Domain: "app.example.com", Upstream: "localhost:3000"},
+	}
+	p.mu.Unlock()
+
+	cfg := parseConfig(t, p)
+	server := getServer(t, cfg)
+	routes := server["routes"].([]interface{})
+	r := routes[0].(map[string]interface{})
+	handleList := r["handle"].([]interface{})
+
+	// Expect 4 handlers: ipaccess, ratelimit, metrics, reverse_proxy
+	if len(handleList) != 4 {
+		t.Fatalf("handle: got %d handlers, want 4", len(handleList))
+	}
+
+	wantOrder := []string{"simpledeploy_ipaccess", "simpledeploy_ratelimit", "simpledeploy_metrics", "reverse_proxy"}
+	for i, want := range wantOrder {
+		h := handleList[i].(map[string]interface{})
+		got := h["handler"].(string)
+		if got != want {
+			t.Errorf("handler[%d]: got %q, want %q", i, got, want)
+		}
 	}
 }
 
