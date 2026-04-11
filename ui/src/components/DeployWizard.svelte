@@ -6,6 +6,23 @@
   let step = $state(1)
 
   const steps = ['Compose', 'Review', 'Deploy']
+
+  // Step 1 state
+  let appName = $state('')
+  let nameError = $state('')
+
+  const NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/
+
+  function validateName(val) {
+    if (!val.trim()) return 'App name is required'
+    if (!NAME_REGEX.test(val)) return 'Must start with alphanumeric, then alphanumeric/dot/hyphen/underscore, max 63 chars'
+    return ''
+  }
+
+  function handleNameInput(e) {
+    appName = e.currentTarget.value
+    nameError = appName.trim() ? validateName(appName) : ''
+  }
 </script>
 
 <div class="flex flex-col h-full">
@@ -37,7 +54,26 @@
   <!-- Step content -->
   <div class="flex-1 overflow-y-auto">
     {#if step === 1}
-      <p class="text-text-muted text-sm">Step 1 placeholder</p>
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="block text-xs font-medium text-text-muted mb-2">App Name</label>
+          <input
+            value={appName}
+            oninput={handleNameInput}
+            placeholder="my-app"
+            class="w-full px-3 py-2 bg-input-bg border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30
+              {nameError ? 'border-danger/50' : 'border-border/50'}"
+          />
+          {#if nameError}
+            <p class="text-xs text-danger mt-1">{nameError}</p>
+          {:else}
+            <p class="text-xs text-text-muted mt-1">Alphanumeric, dots, hyphens, underscores. Max 63 chars.</p>
+          {/if}
+        </div>
+
+        <!-- Compose editor placeholder for next task -->
+        <p class="text-text-muted text-sm">Compose editor coming next</p>
+      </div>
     {:else if step === 2}
       <p class="text-text-muted text-sm">Step 2 placeholder</p>
     {:else}
@@ -52,7 +88,9 @@
     {:else}
       <div></div>
     {/if}
-    {#if step < 3}
+    {#if step === 1}
+      <Button size="sm" disabled={!appName.trim() || !!nameError} onclick={() => step++}>Next</Button>
+    {:else if step < 3}
       <Button size="sm" onclick={() => step++}>Next</Button>
     {/if}
   </div>
