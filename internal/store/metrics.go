@@ -88,9 +88,10 @@ func (s *Store) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]m
 	}
 
 	query := fmt.Sprintf(`
-		SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp
+		SELECT app_id, '' as container_id, avg(cpu_pct), max(mem_bytes), max(mem_limit), max(net_rx), max(net_tx), max(disk_read), max(disk_write), timestamp
 		FROM metrics
 		WHERE %s AND tier IN (%s) AND timestamp >= ? AND timestamp <= ?
+		GROUP BY app_id, timestamp
 		ORDER BY timestamp
 	`, appFilter, placeholders)
 

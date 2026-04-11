@@ -97,7 +97,9 @@
 
   // gapThreshold: if two points are further apart than this, break the line.
   // Based on the coarsest tier expected for each range.
-  const gapThreshold = { '1h': 120000, '6h': 600000, '24h': 600000, '7d': 7200000 }
+  // Between normal spacing and smallest gap: 5m-tier=5min, 1h-tier=1hr
+  // A missing point doubles the spacing, so threshold sits at 1.5x normal
+  const gapThreshold = { '1h': 450000, '6h': 450000, '24h': 5400000, '7d': 5400000 }
 
   function withGaps(range, points) {
     if (points.length < 2) return points

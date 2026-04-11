@@ -66,8 +66,8 @@ func TestQueryMetricsByApp(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1", len(got))
 	}
-	if got[0].ContainerID != "cA" {
-		t.Errorf("ContainerID = %q, want cA", got[0].ContainerID)
+	if got[0].CPUPct != 5 {
+		t.Errorf("CPUPct = %v, want 5", got[0].CPUPct)
 	}
 }
 

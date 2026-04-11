@@ -62,7 +62,7 @@
   onMount(loadDashboard)
   onDestroy(unsubReconnect)
 
-  const gapThreshold = { '1h': 120000, '6h': 600000, '24h': 600000, '7d': 7200000 }
+  const gapThreshold = { '1h': 450000, '6h': 450000, '24h': 5400000, '7d': 5400000 }
 
   function withGaps(range, points) {
     if (points.length < 2) return points
