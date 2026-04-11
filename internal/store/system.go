@@ -1,6 +1,9 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
 // DBStats holds aggregate counts for the system info endpoint.
 type DBStats struct {
@@ -43,4 +46,44 @@ func (s *Store) GetDBStats() (DBStats, error) {
 func (s *Store) VacuumDB() error {
 	_, err := s.db.Exec("VACUUM")
 	return err
+}
+
+// TierStat holds the row count for a single tier in a time-series table.
+type TierStat struct {
+	Tier  string `json:"tier"`
+	Count int64  `json:"count"`
+}
+
+// GetMetricsTierStats returns row counts grouped by tier for the metrics table.
+func (s *Store) GetMetricsTierStats() ([]TierStat, error) {
+	return queryTierStats(s.db, "metrics")
+}
+
+// GetRequestStatsTierStats returns row counts grouped by tier for the request_stats table.
+func (s *Store) GetRequestStatsTierStats() ([]TierStat, error) {
+	return queryTierStats(s.db, "request_stats")
+}
+
+func queryTierStats(db *sql.DB, table string) ([]TierStat, error) {
+	// Whitelist table names to prevent SQL injection
+	switch table {
+	case "metrics", "request_stats":
+		// allowed
+	default:
+		return nil, fmt.Errorf("invalid table name: %s", table)
+	}
+	rows, err := db.Query(`SELECT tier, COUNT(*) FROM ` + table + ` GROUP BY tier ORDER BY tier`)
+	if err != nil {
+		return []TierStat{}, err
+	}
+	defer rows.Close()
+	stats := []TierStat{}
+	for rows.Next() {
+		var s TierStat
+		if err := rows.Scan(&s.Tier, &s.Count); err != nil {
+			return []TierStat{}, err
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
 }

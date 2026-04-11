@@ -121,6 +121,12 @@ func (s *Store) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]m
 // groups them by app_id, container_id, and a time bucket, then inserts
 // averages/sums as destTier rows.
 func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Time) error {
+	if err := validateMetricsTier(destTier); err != nil {
+		return err
+	}
+	if err := validateMetricsTier(sourceTier); err != nil {
+		return err
+	}
 	bucket := timeBucket(destTier)
 
 	query := fmt.Sprintf(`
@@ -183,6 +189,15 @@ func SelectTier(duration time.Duration) string {
 		return metrics.Tier5m
 	default:
 		return metrics.Tier1h
+	}
+}
+
+func validateMetricsTier(tier string) error {
+	switch tier {
+	case metrics.TierRaw, metrics.Tier1m, metrics.Tier5m, metrics.Tier1h:
+		return nil
+	default:
+		return fmt.Errorf("invalid metrics tier: %s", tier)
 	}
 }
 

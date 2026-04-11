@@ -95,6 +95,12 @@ func (s *Store) QueryRequestStats(appID int64, tier string, from, to time.Time) 
 // groups them by app_id, method, path_pattern, status group, and time bucket,
 // then inserts averaged rows as destTier.
 func (s *Store) AggregateRequestStats(sourceTier, destTier string, olderThan time.Time) error {
+	if err := validateReqStatsTier(destTier); err != nil {
+		return err
+	}
+	if err := validateReqStatsTier(sourceTier); err != nil {
+		return err
+	}
 	bucket := reqStatsBucket(destTier)
 
 	query := fmt.Sprintf(`
@@ -139,6 +145,15 @@ func (s *Store) PruneRequestStats(tier string, before time.Time) (int64, error) 
 		return 0, fmt.Errorf("rows affected: %w", err)
 	}
 	return n, nil
+}
+
+func validateReqStatsTier(tier string) error {
+	switch tier {
+	case "raw", "1m", "5m", "1h":
+		return nil
+	default:
+		return fmt.Errorf("invalid request stats tier: %s", tier)
+	}
 }
 
 // reqStatsBucket returns the SQLite strftime expression for bucketing by destTier.
