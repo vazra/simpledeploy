@@ -68,6 +68,72 @@
     }
     reader.readAsText(file)
   }
+
+  // Step 2 state
+  let parsedServices = $state([])
+  let registries = $state([])
+  let selectedRegistry = $state('')
+
+  function parseServicesFromYaml(text) {
+    const services = []
+    const lines = text.split('\n')
+    let inServices = false
+    let currentService = null
+    let serviceIndent = -1
+
+    for (const line of lines) {
+      const stripped = line.trimEnd()
+      if (stripped === '' || stripped.startsWith('#')) continue
+      const indent = line.search(/\S/)
+
+      if (/^services:\s*$/.test(stripped)) {
+        inServices = true
+        serviceIndent = -1
+        continue
+      }
+
+      if (inServices) {
+        if (indent === 0) { inServices = false; continue }
+
+        if (serviceIndent === -1) serviceIndent = indent
+        if (indent === serviceIndent && stripped.endsWith(':')) {
+          currentService = { name: stripped.replace(':', '').trim(), image: '', ports: [] }
+          services.push(currentService)
+          continue
+        }
+
+        if (currentService) {
+          const trimmed = stripped.trim()
+          if (trimmed.startsWith('image:')) {
+            currentService.image = trimmed.replace('image:', '').trim().replace(/['"]/g, '')
+          }
+          if (trimmed === 'ports:') currentService._inPorts = true
+          else if (currentService._inPorts && trimmed.startsWith('- ')) {
+            const port = trimmed.replace('- ', '').replace(/['"]/g, '').trim()
+            if (/^\d/.test(port)) currentService.ports.push(port)
+          } else if (!trimmed.startsWith('- ')) {
+            currentService._inPorts = false
+          }
+        }
+      }
+    }
+    return services.map(({ _inPorts, ...s }) => s)
+  }
+
+  function isPrivateImage(image) {
+    const parts = image.split('/')
+    return parts.length > 1 && parts[0].includes('.')
+  }
+
+  async function enterStep2() {
+    parsedServices = parseServicesFromYaml(composeText)
+    const hasPrivate = parsedServices.some(s => isPrivateImage(s.image))
+    if (hasPrivate) {
+      const res = await api.listRegistries()
+      registries = res.data || []
+    }
+    step = 2
+  }
 </script>
 
 <div class="flex flex-col h-full">
@@ -164,7 +230,48 @@
         </div>
       </div>
     {:else if step === 2}
-      <p class="text-text-muted text-sm">Step 2 placeholder</p>
+      <div class="flex flex-col gap-4">
+        <!-- Service summary -->
+        <div>
+          <h4 class="text-xs font-medium text-text-muted mb-2">Services</h4>
+          <div class="flex flex-col gap-2">
+            {#each parsedServices as svc}
+              <div class="bg-surface-3/50 border border-border/30 rounded-lg px-3 py-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium text-text-primary">{svc.name}</span>
+                  {#if svc.ports.length > 0}
+                    {#each svc.ports as port}
+                      <span class="text-xs bg-accent/10 text-accent px-1.5 py-0.5 rounded">{port}</span>
+                    {/each}
+                  {/if}
+                </div>
+                {#if svc.image}
+                  <p class="text-xs text-text-muted mt-1 font-mono">{svc.image}</p>
+                {/if}
+              </div>
+            {/each}
+            {#if parsedServices.length === 0}
+              <p class="text-xs text-text-muted">Could not parse services (compose is still valid)</p>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Registry selector -->
+        {#if registries.length > 0}
+          <div>
+            <label class="block text-xs font-medium text-text-muted mb-2">Private Registry</label>
+            <select
+              bind:value={selectedRegistry}
+              class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/30"
+            >
+              <option value="">None (public images)</option>
+              {#each registries as reg}
+                <option value={reg.id}>{reg.name} ({reg.url})</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
+      </div>
     {:else}
       <p class="text-text-muted text-sm">Step 3 placeholder</p>
     {/if}
@@ -178,7 +285,7 @@
       <div></div>
     {/if}
     {#if step === 1}
-      <Button size="sm" disabled={!appName.trim() || !!nameError || !composeValid} onclick={() => step++}>Next</Button>
+      <Button size="sm" disabled={!appName.trim() || !!nameError || !composeValid} onclick={enterStep2}>Next</Button>
     {:else if step < 3}
       <Button size="sm" onclick={() => step++}>Next</Button>
     {/if}
