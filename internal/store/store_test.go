@@ -79,7 +79,7 @@ func TestMigrationVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query schema_migrations: %v", err)
 	}
-	if version != 12 {
-		t.Errorf("migration version = %d, want 12", version)
+	if version != 13 {
+		t.Errorf("migration version = %d, want 13", version)
 	}
 }

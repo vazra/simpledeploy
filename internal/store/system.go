@@ -10,7 +10,7 @@ type DBStats struct {
 	Apps         int64 `json:"apps"`
 	Users        int64 `json:"users"`
 	Metrics      int64 `json:"metrics"`
-	RequestStats int64 `json:"request_stats"`
+	RequestMetrics int64 `json:"request_metrics"`
 	AlertRules   int64 `json:"alert_rules"`
 	BackupRuns   int64 `json:"backup_runs"`
 	MigrationVer int64 `json:"migration_version"`
@@ -26,7 +26,7 @@ func (s *Store) GetDBStats() (DBStats, error) {
 		{&d.Apps, "SELECT COUNT(*) FROM apps"},
 		{&d.Users, "SELECT COUNT(*) FROM users"},
 		{&d.Metrics, "SELECT COUNT(*) FROM metrics"},
-		{&d.RequestStats, "SELECT COUNT(*) FROM request_stats"},
+		{&d.RequestMetrics, "SELECT COUNT(*) FROM request_metrics"},
 		{&d.AlertRules, "SELECT COUNT(*) FROM alert_rules"},
 		{&d.BackupRuns, "SELECT COUNT(*) FROM backup_runs"},
 	}
@@ -59,15 +59,15 @@ func (s *Store) GetMetricsTierStats() ([]TierStat, error) {
 	return queryTierStats(s.db, "metrics")
 }
 
-// GetRequestStatsTierStats returns row counts grouped by tier for the request_stats table.
-func (s *Store) GetRequestStatsTierStats() ([]TierStat, error) {
-	return queryTierStats(s.db, "request_stats")
+// GetRequestMetricsTierStats returns row counts grouped by tier for the request_metrics table.
+func (s *Store) GetRequestMetricsTierStats() ([]TierStat, error) {
+	return queryTierStats(s.db, "request_metrics")
 }
 
 func queryTierStats(db *sql.DB, table string) ([]TierStat, error) {
 	// Whitelist table names to prevent SQL injection
 	switch table {
-	case "metrics", "request_stats":
+	case "metrics", "request_metrics":
 		// allowed
 	default:
 		return nil, fmt.Errorf("invalid table name: %s", table)

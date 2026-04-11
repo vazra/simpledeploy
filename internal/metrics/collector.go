@@ -110,7 +110,7 @@ func (c *Collector) CollectSystem() (MetricPoint, error) {
 		DiskRead:    0,
 		DiskWrite:   0,
 		Tier:        TierRaw,
-		Timestamp:   time.Now(),
+		Ts:          time.Now().Unix(),
 	}, nil
 }
 
@@ -162,21 +162,21 @@ func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Su
 	memBytes := int64(stats.MemoryStats.Usage)
 	memLimit := int64(stats.MemoryStats.Limit)
 
-	// Network
-	var netRx, netTx int64
+	// Network (cumulative byte counters, cast to float64 for now)
+	var netRx, netTx float64
 	for _, ns := range stats.Networks {
-		netRx += int64(ns.RxBytes)
-		netTx += int64(ns.TxBytes)
+		netRx += float64(ns.RxBytes)
+		netTx += float64(ns.TxBytes)
 	}
 
 	// Block IO
-	var diskRead, diskWrite int64
+	var diskRead, diskWrite float64
 	for _, entry := range stats.BlkioStats.IoServiceBytesRecursive {
 		switch entry.Op {
 		case "Read":
-			diskRead += int64(entry.Value)
+			diskRead += float64(entry.Value)
 		case "Write":
-			diskWrite += int64(entry.Value)
+			diskWrite += float64(entry.Value)
 		}
 	}
 
@@ -200,7 +200,7 @@ func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Su
 		DiskRead:    diskRead,
 		DiskWrite:   diskWrite,
 		Tier:        TierRaw,
-		Timestamp:   time.Now(),
+		Ts:          time.Now().Unix(),
 	}, nil
 }
 

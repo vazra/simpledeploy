@@ -21,7 +21,7 @@ func (s *Store) InsertMetrics(points []metrics.MetricPoint) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO metrics
-			(app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp, tier)
+			(app_id, container_id, ts, tier, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -40,11 +40,10 @@ func (s *Store) InsertMetrics(points []metrics.MetricPoint) error {
 		}
 		if _, err := stmt.Exec(
 			appID, p.ContainerID,
+			p.Ts, tier,
 			p.CPUPct, p.MemBytes, p.MemLimit,
 			p.NetRx, p.NetTx,
 			p.DiskRead, p.DiskWrite,
-			p.Timestamp.UTC().Format("2006-01-02 15:04:05"),
-			tier,
 		); err != nil {
 			return fmt.Errorf("insert metric: %w", err)
 		}
@@ -53,51 +52,76 @@ func (s *Store) InsertMetrics(points []metrics.MetricPoint) error {
 	return tx.Commit()
 }
 
-// QueryMetrics returns metric points for the given app (nil = system/no-app), tier, and time range.
-func (s *Store) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]metrics.MetricPoint, error) {
-	var rows *sql.Rows
-	var err error
-
-	fromStr := from.UTC().Format("2006-01-02 15:04:05")
-	toStr := to.UTC().Format("2006-01-02 15:04:05")
-
-	// Query the selected tier plus all finer-grained tiers to avoid gaps.
-	// Rollup moves data from finer to coarser tiers and deletes the source,
-	// so recent data lives in finer tiers while older data is in coarser ones.
-	tiers := tiersForQuery(tier)
-
-	placeholders := ""
-	args := make([]interface{}, 0, len(tiers)+3)
-	if appID != nil {
-		args = append(args, *appID)
+// SelectTier picks the appropriate tier and interval for a range string.
+func SelectTier(rangeStr string) (string, int) {
+	switch rangeStr {
+	case "1h":
+		return metrics.TierRaw, 10
+	case "6h":
+		return metrics.Tier1m, 60
+	case "24h":
+		return metrics.Tier5m, 300
+	case "1w":
+		return metrics.Tier1h, 3600
+	case "1m":
+		return metrics.Tier1h, 3600
+	case "1yr":
+		return metrics.Tier1d, 86400
+	default:
+		return metrics.TierRaw, 10
 	}
-	for i, t := range tiers {
-		if i > 0 {
-			placeholders += ", "
-		}
-		placeholders += "?"
-		args = append(args, t)
+}
+
+// rangeToDuration converts a range string to a time.Duration.
+func rangeToDuration(rangeStr string) time.Duration {
+	switch rangeStr {
+	case "1h":
+		return time.Hour
+	case "6h":
+		return 6 * time.Hour
+	case "24h":
+		return 24 * time.Hour
+	case "1w":
+		return 7 * 24 * time.Hour
+	case "1m":
+		return 30 * 24 * time.Hour
+	case "1yr":
+		return 365 * 24 * time.Hour
+	default:
+		return time.Hour
 	}
-	args = append(args, fromStr, toStr)
+}
+
+// QueryMetrics returns metric points for the given app and range string.
+// Returns the points, the interval in seconds, and any error.
+func (s *Store) QueryMetrics(appID *int64, rangeStr string) ([]metrics.MetricPoint, int, error) {
+	tier, intervalSec := SelectTier(rangeStr)
+
+	now := time.Now().Unix()
+	dur := rangeToDuration(rangeStr)
+	from := now - int64(dur.Seconds())
+	to := now
 
 	var appFilter string
+	args := make([]interface{}, 0, 5)
 	if appID == nil {
 		appFilter = "app_id IS NULL"
 	} else {
 		appFilter = "app_id = ?"
+		args = append(args, *appID)
 	}
+	args = append(args, tier, from, to)
 
 	query := fmt.Sprintf(`
-		SELECT app_id, '' as container_id, avg(cpu_pct), max(mem_bytes), max(mem_limit), max(net_rx), max(net_tx), max(disk_read), max(disk_write), timestamp
+		SELECT app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, ts, tier
 		FROM metrics
-		WHERE %s AND tier IN (%s) AND timestamp >= ? AND timestamp <= ?
-		GROUP BY app_id, timestamp
-		ORDER BY timestamp
-	`, appFilter, placeholders)
+		WHERE %s AND tier = ? AND ts >= ? AND ts <= ?
+		ORDER BY container_id, ts
+	`, appFilter)
 
-	rows, err = s.db.Query(query, args...)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query metrics: %w", err)
+		return nil, 0, fmt.Errorf("query metrics: %w", err)
 	}
 	defer rows.Close()
 
@@ -105,38 +129,29 @@ func (s *Store) QueryMetrics(appID *int64, tier string, from, to time.Time) ([]m
 	for rows.Next() {
 		var p metrics.MetricPoint
 		var dbAppID sql.NullInt64
-		var ts string
 		if err := rows.Scan(
 			&dbAppID, &p.ContainerID,
 			&p.CPUPct, &p.MemBytes, &p.MemLimit,
 			&p.NetRx, &p.NetTx,
 			&p.DiskRead, &p.DiskWrite,
-			&ts,
+			&p.Ts, &p.Tier,
 		); err != nil {
-			return nil, fmt.Errorf("scan metric: %w", err)
+			return nil, 0, fmt.Errorf("scan metric: %w", err)
 		}
 		if dbAppID.Valid {
 			id := dbAppID.Int64
 			p.AppID = &id
 		}
-		p.Tier = tier
-		t, err := time.Parse("2006-01-02 15:04:05", ts)
-		if err != nil {
-			// try RFC3339 fallback
-			t, err = time.Parse(time.RFC3339, ts)
-			if err != nil {
-				return nil, fmt.Errorf("parse timestamp %q: %w", ts, err)
-			}
-		}
-		p.Timestamp = t.UTC()
 		pts = append(pts, p)
 	}
-	return pts, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return pts, intervalSec, nil
 }
 
-// AggregateMetrics reads raw points from sourceTier older than olderThan,
-// groups them by app_id, container_id, and a time bucket, then inserts
-// averages/sums as destTier rows.
+// AggregateMetrics reads points from sourceTier older than olderThan,
+// groups by app_id, container_id, and time bucket, inserts as destTier.
 func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Time) error {
 	if err := validateMetricsTier(destTier); err != nil {
 		return err
@@ -145,7 +160,7 @@ func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Tim
 		return err
 	}
 	bucket := timeBucket(destTier)
-	ts := olderThan.UTC().Format("2006-01-02 15:04:05")
+	cutoff := olderThan.Unix()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -154,31 +169,31 @@ func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Tim
 	defer tx.Rollback()
 
 	query := fmt.Sprintf(`
-		INSERT INTO metrics (app_id, container_id, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write, timestamp, tier)
+		INSERT INTO metrics (app_id, container_id, ts, tier, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write)
 		SELECT
 			app_id,
 			container_id,
+			%s AS bucket_ts,
+			?,
 			avg(cpu_pct),
-			max(mem_bytes),
+			avg(mem_bytes),
 			max(mem_limit),
-			max(net_rx),
-			max(net_tx),
-			max(disk_read),
-			max(disk_write),
-			%s AS bucket,
-			?
+			avg(net_rx),
+			avg(net_tx),
+			avg(disk_read),
+			avg(disk_write)
 		FROM metrics
-		WHERE tier = ? AND timestamp < ?
-		GROUP BY app_id, container_id, bucket
+		WHERE tier = ? AND ts < ?
+		GROUP BY app_id, container_id, bucket_ts
 	`, bucket)
 
-	if _, err := tx.Exec(query, destTier, sourceTier, ts); err != nil {
+	if _, err := tx.Exec(query, destTier, sourceTier, cutoff); err != nil {
 		return fmt.Errorf("aggregate metrics: %w", err)
 	}
 
 	if _, err := tx.Exec(
-		`DELETE FROM metrics WHERE tier = ? AND timestamp < ?`,
-		sourceTier, ts,
+		`DELETE FROM metrics WHERE tier = ? AND ts < ?`,
+		sourceTier, cutoff,
 	); err != nil {
 		return fmt.Errorf("aggregate metrics: delete source: %w", err)
 	}
@@ -187,12 +202,10 @@ func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Tim
 }
 
 // PruneMetrics deletes metric points with the given tier older than before.
-// Returns the number of rows deleted.
 func (s *Store) PruneMetrics(tier string, before time.Time) (int64, error) {
 	res, err := s.db.Exec(
-		`DELETE FROM metrics WHERE tier = ? AND timestamp < ?`,
-		tier,
-		before.UTC().Format("2006-01-02 15:04:05"),
+		`DELETE FROM metrics WHERE tier = ? AND ts < ?`,
+		tier, before.Unix(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("prune metrics: %w", err)
@@ -204,48 +217,27 @@ func (s *Store) PruneMetrics(tier string, before time.Time) (int64, error) {
 	return n, nil
 }
 
-// SelectTier picks the appropriate metrics tier for a query duration.
-// <= 1h: raw, <= 24h: 1m, <= 7d: 5m, else: 1h
-func SelectTier(duration time.Duration) string {
-	switch {
-	case duration <= time.Hour:
-		return metrics.TierRaw
-	case duration <= 24*time.Hour:
-		return metrics.Tier1m
-	case duration <= 7*24*time.Hour:
-		return metrics.Tier5m
-	default:
-		return metrics.Tier1h
-	}
-}
-
-// tiersForQuery returns all tiers that may contain data for the time range.
-// Rollup progressively moves data: raw->1m (after 2min), 1m->5m (after 10min),
-// 5m->1h (after 2h), deleting the source each time. At any point, data is
-// spread across all tiers, so we must query all of them.
-func tiersForQuery(_ string) []string {
-	return []string{metrics.TierRaw, metrics.Tier1m, metrics.Tier5m, metrics.Tier1h}
-}
-
 func validateMetricsTier(tier string) error {
 	switch tier {
-	case metrics.TierRaw, metrics.Tier1m, metrics.Tier5m, metrics.Tier1h:
+	case metrics.TierRaw, metrics.Tier1m, metrics.Tier5m, metrics.Tier1h, metrics.Tier1d:
 		return nil
 	default:
 		return fmt.Errorf("invalid metrics tier: %s", tier)
 	}
 }
 
-// timeBucket returns the SQLite strftime expression for bucketing by destTier.
+// timeBucket returns integer arithmetic expression for bucketing by destTier.
 func timeBucket(destTier string) string {
 	switch destTier {
 	case metrics.Tier1m:
-		return `strftime('%Y-%m-%d %H:%M:00', timestamp)`
+		return "(ts / 60) * 60"
 	case metrics.Tier5m:
-		return `strftime('%Y-%m-%d %H:', timestamp) || printf('%02d:00', (CAST(strftime('%M', timestamp) AS INTEGER) / 5) * 5)`
+		return "(ts / 300) * 300"
 	case metrics.Tier1h:
-		return `strftime('%Y-%m-%d %H:00:00', timestamp)`
+		return "(ts / 3600) * 3600"
+	case metrics.Tier1d:
+		return "(ts / 86400) * 86400"
 	default:
-		return `strftime('%Y-%m-%d %H:%M:%S', timestamp)`
+		return "ts"
 	}
 }

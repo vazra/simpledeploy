@@ -30,8 +30,8 @@ func TestCollectSystem(t *testing.T) {
 	if pt.MemBytes <= 0 {
 		t.Errorf("MemBytes = %d, want > 0", pt.MemBytes)
 	}
-	if pt.Timestamp.IsZero() {
-		t.Error("Timestamp should not be zero")
+	if pt.Ts == 0 {
+		t.Error("Ts should not be zero")
 	}
 }
 

@@ -36,7 +36,7 @@ func makePoints(n int) []MetricPoint {
 			CPUPct:      float64(i),
 			MemBytes:    int64(i * 100),
 			Tier:        TierRaw,
-			Timestamp:   time.Now().UTC().Add(-time.Duration(n-i) * time.Second),
+			Ts:          time.Now().Add(-time.Duration(n-i) * time.Second).Unix(),
 		}
 	}
 	return pts
