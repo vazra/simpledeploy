@@ -155,3 +155,237 @@ func TestAggregateRequestMetrics(t *testing.T) {
 		t.Errorf("raw rows remaining = %d, want 0", rawCount)
 	}
 }
+
+func TestInsertRequestMetricsEmpty(t *testing.T) {
+	s := newTestStore(t)
+	err := s.InsertRequestMetrics([]metrics.RequestMetricPoint{})
+	if err != nil {
+		t.Errorf("InsertRequestMetrics(empty) error = %v, want nil", err)
+	}
+}
+
+func TestInsertRequestMetricsDefaultTier(t *testing.T) {
+	s := newTestStore(t)
+	appID := makeApp(t, s, "reqm-default-tier")
+
+	now := time.Now().Unix()
+	points := []metrics.RequestMetricPoint{
+		{AppID: appID, Ts: now, Tier: "", Count: 100},
+	}
+	if err := s.InsertRequestMetrics(points); err != nil {
+		t.Fatalf("InsertRequestMetrics: %v", err)
+	}
+
+	var tierStored string
+	err := s.db.QueryRow(`SELECT tier FROM request_metrics WHERE app_id = ?`, appID).Scan(&tierStored)
+	if err != nil {
+		t.Fatalf("QueryRow: %v", err)
+	}
+	if tierStored != metrics.TierRaw {
+		t.Errorf("stored tier = %q, want %q", tierStored, metrics.TierRaw)
+	}
+}
+
+func TestInsertRequestMetricsAllFields(t *testing.T) {
+	s := newTestStore(t)
+	appID := makeApp(t, s, "reqm-all-fields")
+
+	now := time.Now().Unix()
+	points := []metrics.RequestMetricPoint{
+		{AppID: appID, Ts: now, Tier: metrics.TierRaw, Count: 1000, ErrorCount: 50, AvgLatency: 125.5, MaxLatency: 500.0},
+	}
+	if err := s.InsertRequestMetrics(points); err != nil {
+		t.Fatalf("InsertRequestMetrics: %v", err)
+	}
+
+	var p metrics.RequestMetricPoint
+	err := s.db.QueryRow(
+		`SELECT app_id, ts, tier, count, error_count, avg_latency, max_latency FROM request_metrics WHERE app_id = ?`,
+		appID,
+	).Scan(&p.AppID, &p.Ts, &p.Tier, &p.Count, &p.ErrorCount, &p.AvgLatency, &p.MaxLatency)
+	if err != nil {
+		t.Fatalf("QueryRow: %v", err)
+	}
+
+	if p.Count != 1000 {
+		t.Errorf("Count = %d, want 1000", p.Count)
+	}
+	if p.ErrorCount != 50 {
+		t.Errorf("ErrorCount = %d, want 50", p.ErrorCount)
+	}
+	if p.AvgLatency != 125.5 {
+		t.Errorf("AvgLatency = %v, want 125.5", p.AvgLatency)
+	}
+	if p.MaxLatency != 500.0 {
+		t.Errorf("MaxLatency = %v, want 500.0", p.MaxLatency)
+	}
+}
+
+func TestQueryRequestMetricsEmptyResult(t *testing.T) {
+	s := newTestStore(t)
+	appID := makeApp(t, s, "reqm-empty")
+
+	got, _, err := s.QueryRequestMetrics(appID, "1h")
+	if err != nil {
+		t.Fatalf("QueryRequestMetrics: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(got) = %d, want 0", len(got))
+	}
+}
+
+func TestQueryRequestMetricsAllRanges(t *testing.T) {
+	s := newTestStore(t)
+	appID := makeApp(t, s, "reqm-ranges")
+
+	now := time.Now().Unix()
+	points := []metrics.RequestMetricPoint{
+		{AppID: appID, Ts: now - 365*86400, Tier: metrics.TierRaw, Count: 100},
+		{AppID: appID, Ts: now - 30*86400, Tier: metrics.Tier1h, Count: 200},
+		{AppID: appID, Ts: now - 7*86400, Tier: metrics.Tier5m, Count: 300},
+		{AppID: appID, Ts: now - 3600, Tier: metrics.Tier1m, Count: 400},
+		{AppID: appID, Ts: now, Tier: metrics.TierRaw, Count: 500},
+	}
+	if err := s.InsertRequestMetrics(points); err != nil {
+		t.Fatalf("InsertRequestMetrics: %v", err)
+	}
+
+	ranges := []string{"1h", "6h", "24h", "1w", "1m", "1yr", "unknown"}
+	for _, r := range ranges {
+		got, interval, err := s.QueryRequestMetrics(appID, r)
+		if err != nil {
+			t.Fatalf("QueryRequestMetrics(%q): %v", r, err)
+		}
+		if len(got) == 0 {
+			t.Errorf("QueryRequestMetrics(%q) returned 0 points", r)
+		}
+		if interval <= 0 {
+			t.Errorf("QueryRequestMetrics(%q) interval = %d, want > 0", r, interval)
+		}
+	}
+}
+
+func TestAggregateRequestMetricsNoData(t *testing.T) {
+	s := newTestStore(t)
+	olderThan := time.Now()
+	if err := s.AggregateRequestMetrics(metrics.TierRaw, metrics.Tier1m, olderThan); err != nil {
+		t.Fatalf("AggregateRequestMetrics with no data: %v", err)
+	}
+}
+
+func TestAggregateRequestMetricsInvalidTier(t *testing.T) {
+	s := newTestStore(t)
+	olderThan := time.Now()
+	if err := s.AggregateRequestMetrics("invalid", metrics.Tier1m, olderThan); err == nil {
+		t.Error("AggregateRequestMetrics with invalid source tier: want error, got nil")
+	}
+	if err := s.AggregateRequestMetrics(metrics.TierRaw, "invalid", olderThan); err == nil {
+		t.Error("AggregateRequestMetrics with invalid dest tier: want error, got nil")
+	}
+}
+
+func TestAggregateRequestMetricsMultipleApps(t *testing.T) {
+	s := newTestStore(t)
+	appA := makeApp(t, s, "reqm-app-a")
+	appB := makeApp(t, s, "reqm-app-b")
+
+	base := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC).Unix()
+	points := []metrics.RequestMetricPoint{
+		{AppID: appA, Ts: base, Tier: metrics.TierRaw, Count: 100},
+		{AppID: appA, Ts: base + 20, Tier: metrics.TierRaw, Count: 200},
+		{AppID: appB, Ts: base, Tier: metrics.TierRaw, Count: 150},
+		{AppID: appB, Ts: base + 20, Tier: metrics.TierRaw, Count: 250},
+	}
+	if err := s.InsertRequestMetrics(points); err != nil {
+		t.Fatalf("InsertRequestMetrics: %v", err)
+	}
+
+	olderThan := time.Unix(base+60, 0)
+	if err := s.AggregateRequestMetrics(metrics.TierRaw, metrics.Tier1m, olderThan); err != nil {
+		t.Fatalf("AggregateRequestMetrics: %v", err)
+	}
+
+	var countA, countB int
+	s.db.QueryRow(`SELECT COUNT(*) FROM request_metrics WHERE tier = ? AND app_id = ?`, metrics.Tier1m, appA).Scan(&countA)
+	s.db.QueryRow(`SELECT COUNT(*) FROM request_metrics WHERE tier = ? AND app_id = ?`, metrics.Tier1m, appB).Scan(&countB)
+
+	if countA != 1 {
+		t.Errorf("countA = %d, want 1", countA)
+	}
+	if countB != 1 {
+		t.Errorf("countB = %d, want 1", countB)
+	}
+}
+
+func TestAggregateRequestMetricsWeightedAveragePrecision(t *testing.T) {
+	s := newTestStore(t)
+	appID := makeApp(t, s, "reqm-weighted")
+
+	base := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC).Unix()
+	points := []metrics.RequestMetricPoint{
+		{AppID: appID, Ts: base, Tier: metrics.TierRaw, Count: 200, ErrorCount: 0, AvgLatency: 100, MaxLatency: 150},
+		{AppID: appID, Ts: base + 20, Tier: metrics.TierRaw, Count: 100, ErrorCount: 0, AvgLatency: 50, MaxLatency: 75},
+	}
+	if err := s.InsertRequestMetrics(points); err != nil {
+		t.Fatalf("InsertRequestMetrics: %v", err)
+	}
+
+	olderThan := time.Unix(base+60, 0)
+	if err := s.AggregateRequestMetrics(metrics.TierRaw, metrics.Tier1m, olderThan); err != nil {
+		t.Fatalf("AggregateRequestMetrics: %v", err)
+	}
+
+	var avgLatency float64
+	err := s.db.QueryRow(`SELECT avg_latency FROM request_metrics WHERE tier = ?`, metrics.Tier1m).Scan(&avgLatency)
+	if err != nil {
+		t.Fatalf("QueryRow: %v", err)
+	}
+	// (100*200 + 50*100) / 300 = 25000 / 300 = 83.333...
+	expected := 83.33333333333333
+	if avgLatency != expected {
+		t.Errorf("AvgLatency = %v, want %v", avgLatency, expected)
+	}
+}
+
+func TestPruneRequestMetricsNoRows(t *testing.T) {
+	s := newTestStore(t)
+	cutoff := time.Now()
+	n, err := s.PruneRequestMetrics(metrics.TierRaw, cutoff)
+	if err != nil {
+		t.Fatalf("PruneRequestMetrics: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("pruned = %d, want 0", n)
+	}
+}
+
+func TestPruneRequestMetricsMultipleTiers(t *testing.T) {
+	s := newTestStore(t)
+	appID := makeApp(t, s, "reqm-prune-tiers")
+
+	now := time.Now().Unix()
+	points := []metrics.RequestMetricPoint{
+		{AppID: appID, Ts: now - 7200, Tier: metrics.TierRaw, Count: 100},
+		{AppID: appID, Ts: now - 7200, Tier: metrics.Tier1m, Count: 200},
+		{AppID: appID, Ts: now, Tier: metrics.TierRaw, Count: 300},
+		{AppID: appID, Ts: now, Tier: metrics.Tier1m, Count: 400},
+	}
+	if err := s.InsertRequestMetrics(points); err != nil {
+		t.Fatalf("InsertRequestMetrics: %v", err)
+	}
+
+	cutoff := time.Now().Add(-90 * time.Minute)
+	n, err := s.PruneRequestMetrics(metrics.TierRaw, cutoff)
+	if err != nil {
+		t.Fatalf("PruneRequestMetrics raw: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("pruned raw = %d, want 1", n)
+	}
+
+	var count1m int
+	s.db.QueryRow(`SELECT COUNT(*) FROM request_metrics WHERE tier = ?`, metrics.Tier1m).Scan(&count1m)
+	if count1m != 2 {
+		t.Errorf("1m tier count = %d, want 2", count1m)
+	}
+}
