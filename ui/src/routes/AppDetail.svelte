@@ -119,7 +119,7 @@
     const perContainer = ids.map((id, i) => {
       const pts = containers[id]?.points || []
       return {
-        label: single ? 'container' : id.slice(0, 12),
+        label: id.slice(0, 12),
         color: single ? baseColor : containerColors[i % containerColors.length],
         data: pts.map(p => ({ x: new Date(p.t * 1000), y: extract(p) })),
       }
