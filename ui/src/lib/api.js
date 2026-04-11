@@ -187,7 +187,7 @@ export const api = {
   },
   systemLogsWs: () => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return new WebSocket(`${proto}//${window.location.host}/api/system/logs/stream`)
+    return new WebSocket(`${proto}//${window.location.host}/api/system/process-logs/stream`)
   },
 
   // System
@@ -200,7 +200,7 @@ export const api = {
   systemClearAuditLog: () => request('DELETE', '/system/audit-log'),
   systemAuditConfig: () => request('GET', '/system/audit-config'),
   systemUpdateAuditConfig: (maxSize) => request('PUT', '/system/audit-config', { max_size: maxSize }),
-  systemLogs: (limit = 500) => request('GET', `/system/logs?limit=${limit}`),
+  systemLogs: (limit = 500) => request('GET', `/system/process-logs?limit=${limit}`),
   systemBackupDownload: (compact = false) => {
     const url = `/api/system/backup/download?compact=${compact}`
     return fetch(url, { method: 'POST', credentials: 'include' }).then(res => {

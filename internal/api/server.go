@@ -244,8 +244,8 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleUpdateAuditConfig)))
 
 	// System logs
-	s.mux.Handle("GET /api/system/logs", s.authMiddleware(http.HandlerFunc(s.handleSystemLogs)))
-	s.mux.Handle("GET /api/system/logs/stream", s.authMiddleware(http.HandlerFunc(s.handleSystemLogsWS)))
+	s.mux.Handle("GET /api/system/process-logs", s.authMiddleware(http.HandlerFunc(s.handleSystemLogs)))
+	s.mux.Handle("GET /api/system/process-logs/stream", s.authMiddleware(http.HandlerFunc(s.handleSystemLogsWS)))
 
 	// DB backup
 	s.mux.Handle("POST /api/system/backup/download", s.authMiddleware(http.HandlerFunc(s.handleDBBackupDownload)))
