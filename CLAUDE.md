@@ -27,6 +27,7 @@ internal/
   config/             YAML config parsing
   deployer/           Docker compose CLI wrapper (pull, deploy, scale, etc.)
   docker/             Docker client wrapper + mock
+  logbuf/             Ring buffer io.Writer for process log capture + WS streaming
   metrics/            Collector, writer, rollup
   proxy/              Caddy embedding, route management, Caddy handler modules
   reconciler/         Desired-state reconciler, directory watcher
@@ -44,10 +45,12 @@ ui/                   Svelte SPA (Vite build)
 - **Compose labels.** All app config via `simpledeploy.*` labels in docker-compose.yml.
 - **CommandRunner interface.** Deployer shells out to `docker compose` CLI via `CommandRunner` with `MockRunner` for tests.
 - **AES-256-GCM encryption.** Registry credentials encrypted with `master_secret` via `auth.Encrypt`/`auth.Decrypt`.
+- **Log ring buffer.** Process logs captured via `io.MultiWriter` into `logbuf.Buffer`, streamed to UI via WebSocket.
+- **DB backup via VACUUM INTO.** WAL-safe consistent snapshots. Compact mode strips metrics/request_stats before download.
 
 ## Database
 
-SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 10 migrations:
+SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 11 migrations:
 
 1. apps table
 2. app_labels
@@ -59,6 +62,7 @@ SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations
 8. compose_hash (change detection)
 9. compose_versions, deploy_events (deploy safety)
 10. registries (private registry auth)
+11. db_backup_config, db_backup_runs (system DB backup)
 
 ## Testing
 

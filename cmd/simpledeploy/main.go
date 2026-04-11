@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"github.com/vazra/simpledeploy/internal/alerts"
+	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/api"
 	"github.com/vazra/simpledeploy/internal/auth"
@@ -314,6 +315,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	dbPath := filepath.Join(cfg.DataDir, "simpledeploy.db")
+	logBuf := logbuf.New(1000)
+	log.SetOutput(io.MultiWriter(os.Stderr, logBuf))
+
 	db, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -469,6 +473,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetBuildInfo(version, commit, date)
 	srv.SetDBPath(dbPath)
 	srv.SetAudit(audit.New(os.Stderr, 500))
+	srv.SetLogBuffer(logBuf)
+	srv.InitDBBackupSchedule()
 
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)

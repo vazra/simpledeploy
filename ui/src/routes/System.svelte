@@ -26,6 +26,21 @@
   let auditMaxSize = $state(500)
   let savingConfig = $state(false)
 
+  // Logs tab
+  let processLogs = $state([])
+  let logsLoading = $state(false)
+  let logsWs = $state(null)
+  let logsStreaming = $state(false)
+  let logsAutoScroll = $state(true)
+
+  // DB Backup
+  let backupConfig = $state({ schedule: '', destination: '', retention: 7, compact: false, enabled: false })
+  let backupRuns = $state([])
+  let backupLoading = $state(false)
+  let downloading = $state(false)
+  let downloadCompact = $state(false)
+  let savingBackupConfig = $state(false)
+
   const tiers = ['raw', '1m', '5m', '1h']
   const tierLabels = { raw: 'Raw', '1m': '1 min', '5m': '5 min', '1h': '1 hour' }
 
@@ -129,9 +144,80 @@
     savingConfig = false
   }
 
+  async function loadLogs() {
+    logsLoading = true
+    const res = await api.systemLogs(1000)
+    if (res.data) processLogs = res.data
+    logsLoading = false
+  }
+
+  function startLogsStream() {
+    if (logsWs) logsWs.close()
+    const ws = api.systemLogsWs()
+    ws.onmessage = (e) => {
+      const entry = JSON.parse(e.data)
+      processLogs = [...processLogs, entry]
+      // Keep buffer bounded
+      if (processLogs.length > 2000) processLogs = processLogs.slice(-1000)
+      if (logsAutoScroll) {
+        requestAnimationFrame(() => {
+          const el = document.getElementById('logs-container')
+          if (el) el.scrollTop = el.scrollHeight
+        })
+      }
+    }
+    ws.onclose = () => { logsStreaming = false; logsWs = null }
+    ws.onerror = () => { logsStreaming = false }
+    logsWs = ws
+    logsStreaming = true
+  }
+
+  function stopLogsStream() {
+    if (logsWs) { logsWs.close(); logsWs = null }
+    logsStreaming = false
+  }
+
+  async function downloadBackup() {
+    downloading = true
+    const res = await api.systemBackupDownload(downloadCompact)
+    if (res?.error) toasts.error(res.error)
+    else toasts.success('Backup downloaded')
+    downloading = false
+  }
+
+  async function loadBackupConfig() {
+    backupLoading = true
+    const [cfgRes, runsRes] = await Promise.all([
+      api.systemBackupConfig(),
+      api.systemBackupRuns(),
+    ])
+    if (cfgRes.data) {
+      backupConfig = {
+        schedule: cfgRes.data.schedule || '',
+        destination: cfgRes.data.destination || '',
+        retention: parseInt(cfgRes.data.retention) || 7,
+        compact: cfgRes.data.compact === 'true',
+        enabled: cfgRes.data.enabled === 'true',
+      }
+    }
+    if (runsRes.data) backupRuns = runsRes.data
+    backupLoading = false
+  }
+
+  async function saveBackupConfig() {
+    savingBackupConfig = true
+    const res = await api.systemSetBackupConfig(backupConfig)
+    if (res.error) toasts.error(res.error)
+    else toasts.success('Backup config saved')
+    savingBackupConfig = false
+  }
+
   function switchTab(tab) {
     activeTab = tab
     if (tab === 'audit' && auditLogs.length === 0) loadAuditLogs()
+    if (tab === 'logs' && processLogs.length === 0) loadLogs()
+    if (tab === 'maintenance' && backupRuns.length === 0) loadBackupConfig()
+    if (tab !== 'logs') stopLogsStream()
   }
 
   const eventTypeColors = {
@@ -176,7 +262,7 @@
   </div>
 
   <div class="flex overflow-x-auto gap-1 mb-6 border-b border-border/50">
-    {#each [['overview', 'Overview'], ['maintenance', 'Maintenance'], ['audit', 'Audit Log']] as [key, label]}
+    {#each [['overview', 'Overview'], ['maintenance', 'Maintenance'], ['audit', 'Audit Log'], ['logs', 'Logs']] as [key, label]}
       <button
         onclick={() => switchTab(key)}
         class="px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap shrink-0 transition-colors {activeTab === key ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text-primary'}"
@@ -470,6 +556,91 @@
           {vacuuming ? 'Running...' : 'Run VACUUM'}
         </Button>
       </div>
+
+      <!-- Database Backup -->
+      <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
+        <h3 class="text-sm font-semibold text-text-primary mb-1">Database Backup</h3>
+        <p class="text-xs text-text-secondary mb-4">Download or schedule backups of the SimpleDeploy database. Compact mode excludes metrics data.</p>
+
+        <!-- Download Now -->
+        <div class="flex flex-wrap items-center gap-3 mb-5 pb-5 border-b border-border/30">
+          <label class="flex items-center gap-2 text-xs text-text-secondary">
+            <input type="checkbox" bind:checked={downloadCompact} class="rounded border-border accent-accent" />
+            Compact (skip metrics)
+          </label>
+          <Button size="sm" variant="secondary" onclick={downloadBackup} disabled={downloading}>
+            {downloading ? 'Downloading...' : 'Download Now'}
+          </Button>
+        </div>
+
+        <!-- Schedule Config -->
+        <div class="space-y-3">
+          <div class="flex items-center gap-2">
+            <label class="flex items-center gap-2 text-xs text-text-secondary">
+              <input type="checkbox" bind:checked={backupConfig.enabled} class="rounded border-border accent-accent" />
+              Enable scheduled backup
+            </label>
+          </div>
+          {#if backupConfig.enabled}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-text-secondary mb-1">Cron Schedule</label>
+                <input
+                  type="text"
+                  bind:value={backupConfig.schedule}
+                  placeholder="0 2 * * *"
+                  class="w-full px-3 py-1.5 text-sm bg-surface-1 border border-border/50 rounded-lg text-text-primary focus:outline-none focus:border-accent font-mono"
+                />
+                <span class="text-xs text-text-muted mt-1 block">e.g. 0 2 * * * = daily at 2 AM</span>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-text-secondary mb-1">Destination Path</label>
+                <input
+                  type="text"
+                  bind:value={backupConfig.destination}
+                  placeholder="/var/backups/simpledeploy"
+                  class="w-full px-3 py-1.5 text-sm bg-surface-1 border border-border/50 rounded-lg text-text-primary focus:outline-none focus:border-accent font-mono"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-text-secondary mb-1">Retention Count</label>
+                <input
+                  type="number"
+                  min="1"
+                  bind:value={backupConfig.retention}
+                  class="w-24 px-3 py-1.5 text-sm bg-surface-1 border border-border/50 rounded-lg text-text-primary focus:outline-none focus:border-accent"
+                />
+              </div>
+              <div class="flex items-end">
+                <label class="flex items-center gap-2 text-xs text-text-secondary pb-1.5">
+                  <input type="checkbox" bind:checked={backupConfig.compact} class="rounded border-border accent-accent" />
+                  Compact (skip metrics)
+                </label>
+              </div>
+            </div>
+          {/if}
+          <Button size="sm" variant="secondary" onclick={saveBackupConfig} disabled={savingBackupConfig}>
+            {savingBackupConfig ? 'Saving...' : 'Save Schedule'}
+          </Button>
+        </div>
+
+        <!-- Recent Runs -->
+        {#if backupRuns.length > 0}
+          <div class="mt-5 pt-4 border-t border-border/30">
+            <div class="text-xs font-medium text-text-secondary mb-2">Recent Backups</div>
+            <div class="space-y-1.5">
+              {#each backupRuns.slice(0, 10) as run}
+                <div class="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-surface-1/50">
+                  <span class="text-text-secondary font-mono">{formatTime(run.created_at)}</span>
+                  <span class="text-text-primary font-semibold">{formatBytes(run.size_bytes)}</span>
+                  <span class="{run.status === 'ok' ? 'text-emerald-400' : 'text-red-400'}">{run.status}</span>
+                  {#if run.compact}<span class="text-text-muted">compact</span>{/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
   {:else if activeTab === 'audit'}
     <div class="space-y-4">
@@ -555,6 +726,60 @@
           </div>
           <div class="border-t border-border/50 px-4 py-2">
             <span class="text-xs text-text-secondary">{auditLogs.length} of {auditMaxSize} max events (newest first)</span>
+          </div>
+        </div>
+      {/if}
+    </div>
+  {:else if activeTab === 'logs'}
+    <div class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-medium text-text-primary">Process Logs</h2>
+          <p class="text-xs text-text-secondary mt-1">SimpleDeploy application logs from the current session.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-2 text-xs text-text-secondary">
+            <input type="checkbox" bind:checked={logsAutoScroll} class="rounded border-border accent-accent" />
+            Auto-scroll
+          </label>
+          {#if logsStreaming}
+            <Button size="sm" variant="danger" onclick={stopLogsStream}>Stop Stream</Button>
+          {:else}
+            <Button size="sm" variant="secondary" onclick={startLogsStream}>Live Tail</Button>
+          {/if}
+          <Button size="sm" variant="secondary" onclick={loadLogs} disabled={logsLoading}>
+            {logsLoading ? 'Loading...' : 'Refresh'}
+          </Button>
+        </div>
+      </div>
+
+      {#if logsLoading && processLogs.length === 0}
+        <Skeleton type="card" count={5} />
+      {:else if processLogs.length === 0}
+        <div class="bg-surface-2 rounded-xl p-8 shadow-sm border border-border/50 text-center">
+          <p class="text-sm text-text-secondary">No log entries yet.</p>
+        </div>
+      {:else}
+        <div
+          id="logs-container"
+          class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden"
+        >
+          <div class="overflow-x-auto max-h-[600px] overflow-y-auto p-4 font-mono text-xs space-y-0.5">
+            {#each processLogs as entry}
+              <div class="flex gap-3 hover:bg-surface-hover py-0.5 px-1 rounded">
+                <span class="text-text-muted whitespace-nowrap shrink-0">{formatTime(entry.timestamp)}</span>
+                <span class="text-text-primary break-all">{entry.message}</span>
+              </div>
+            {/each}
+          </div>
+          <div class="border-t border-border/50 px-4 py-2 flex items-center justify-between">
+            <span class="text-xs text-text-secondary">{processLogs.length} entries</span>
+            {#if logsStreaming}
+              <span class="text-xs text-emerald-400 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                Streaming
+              </span>
+            {/if}
           </div>
         </div>
       {/if}

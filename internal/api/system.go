@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/vazra/simpledeploy/internal/audit"
+	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -277,4 +280,204 @@ func (s *Server) handleVacuumDB(w http.ResponseWriter, r *http.Request) {
 		"message":    "VACUUM completed",
 		"size_bytes": sizeBytes,
 	})
+}
+
+func (s *Server) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	limit := 500
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 5000 {
+			limit = n
+		}
+	}
+	var entries []logbuf.Entry
+	if s.logBuf != nil {
+		entries = s.logBuf.Recent(limit)
+	}
+	if entries == nil {
+		entries = []logbuf.Entry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
+}
+
+func (s *Server) handleSystemLogsWS(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	if s.logBuf == nil {
+		http.Error(w, "log buffer not available", http.StatusServiceUnavailable)
+		return
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	ch := s.logBuf.Subscribe()
+	defer s.logBuf.Unsubscribe(ch)
+
+	// Read pump to detect disconnect
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case entry, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteJSON(entry); err != nil {
+				return
+			}
+		case <-done:
+			return
+		}
+	}
+}
+
+func (s *Server) handleDBBackupDownload(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	compact := r.URL.Query().Get("compact") == "true"
+
+	tmpFile, err := os.CreateTemp("", "simpledeploy-backup-*.db")
+	if err != nil {
+		httpError(w, fmt.Errorf("create temp file: %w", err), http.StatusInternalServerError)
+		return
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	if err := s.store.VacuumInto(tmpPath); err != nil {
+		httpError(w, fmt.Errorf("backup: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	if compact {
+		if err := stripMetrics(tmpPath); err != nil {
+			httpError(w, fmt.Errorf("compact: %w", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	ts := time.Now().Format("20060102-150405")
+	filename := fmt.Sprintf("simpledeploy-%s.db", ts)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	http.ServeFile(w, r, tmpPath)
+}
+
+func stripMetrics(dbPath string) error {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	for _, table := range []string{"metrics", "request_stats"} {
+		if _, err := db.Exec("DELETE FROM " + table); err != nil {
+			return fmt.Errorf("delete %s: %w", table, err)
+		}
+	}
+	_, err = db.Exec("VACUUM")
+	return err
+}
+
+func (s *Server) handleGetDBBackupConfig(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	cfg, err := s.store.GetDBBackupConfig()
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cfg)
+}
+
+func (s *Server) handleSetDBBackupConfig(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	var body struct {
+		Schedule    string `json:"schedule"`
+		Destination string `json:"destination"`
+		Retention   int    `json:"retention"`
+		Compact     bool   `json:"compact"`
+		Enabled     bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if body.Schedule != "" {
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		if _, err := parser.Parse(body.Schedule); err != nil {
+			http.Error(w, "invalid cron schedule: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if body.Retention <= 0 {
+		body.Retention = 7
+	}
+
+	pairs := map[string]string{
+		"schedule":    body.Schedule,
+		"destination": body.Destination,
+		"retention":   strconv.Itoa(body.Retention),
+		"compact":     strconv.FormatBool(body.Compact),
+		"enabled":     strconv.FormatBool(body.Enabled),
+	}
+	for k, v := range pairs {
+		if err := s.store.SetDBBackupConfig(k, v); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if body.Enabled && body.Schedule != "" && body.Destination != "" {
+		s.scheduleDBBackup(pairs)
+	} else if s.dbBackupCron != nil {
+		s.dbBackupCron.Stop()
+		s.dbBackupCron = nil
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleListDBBackupRuns(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	runs, err := s.store.ListDBBackupRuns(limit)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if runs == nil {
+		runs = []store.DBBackupRun{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(runs)
 }

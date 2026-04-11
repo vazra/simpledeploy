@@ -7,13 +7,18 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -45,6 +50,8 @@ type Server struct {
 	buildCommit     string
 	buildDate       string
 	dbPath          string
+	logBuf          *logbuf.Buffer
+	dbBackupCron    *cron.Cron
 	startedAt       time.Time
 }
 
@@ -84,6 +91,9 @@ func (s *Server) SetLockout(l *auth.LoginLockout) { s.lockout = l }
 
 // SetAudit sets the audit logger.
 func (s *Server) SetAudit(a *audit.Logger) { s.audit = a }
+
+// SetLogBuffer sets the log buffer for system log streaming.
+func (s *Server) SetLogBuffer(lb *logbuf.Buffer) { s.logBuf = lb }
 
 // SetTrustedProxies sets the trusted proxy IPs for X-Forwarded-For parsing.
 func (s *Server) SetTrustedProxies(proxies []string) { s.trustedProxies = proxies }
@@ -231,6 +241,16 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleGetAuditConfig)))
 	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleUpdateAuditConfig)))
 
+	// System logs
+	s.mux.Handle("GET /api/system/logs", s.authMiddleware(http.HandlerFunc(s.handleSystemLogs)))
+	s.mux.Handle("GET /api/system/logs/stream", s.authMiddleware(http.HandlerFunc(s.handleSystemLogsWS)))
+
+	// DB backup
+	s.mux.Handle("POST /api/system/backup/download", s.authMiddleware(http.HandlerFunc(s.handleDBBackupDownload)))
+	s.mux.Handle("GET /api/system/backup/config", s.authMiddleware(http.HandlerFunc(s.handleGetDBBackupConfig)))
+	s.mux.Handle("POST /api/system/backup/config", s.authMiddleware(http.HandlerFunc(s.handleSetDBBackupConfig)))
+	s.mux.Handle("GET /api/system/backup/runs", s.authMiddleware(http.HandlerFunc(s.handleListDBBackupRuns)))
+
 	// Registry management
 	s.mux.Handle("GET /api/registries", s.authMiddleware(http.HandlerFunc(s.handleListRegistries)))
 	s.mux.Handle("POST /api/registries", s.authMiddleware(http.HandlerFunc(s.handleCreateRegistry)))
@@ -259,6 +279,86 @@ func securityHeaders(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) InitDBBackupSchedule() {
+	cfg, err := s.store.GetDBBackupConfig()
+	if err != nil || cfg["enabled"] != "true" {
+		return
+	}
+	s.scheduleDBBackup(cfg)
+}
+
+func (s *Server) scheduleDBBackup(cfg map[string]string) {
+	if s.dbBackupCron != nil {
+		s.dbBackupCron.Stop()
+	}
+	schedule := cfg["schedule"]
+	if schedule == "" {
+		return
+	}
+	dest := cfg["destination"]
+	if dest == "" {
+		return
+	}
+	compact := cfg["compact"] == "true"
+	retention := 7
+	if r, err := strconv.Atoi(cfg["retention"]); err == nil && r > 0 {
+		retention = r
+	}
+
+	c := cron.New()
+	c.AddFunc(schedule, func() {
+		s.runDBBackup(dest, compact, retention)
+	})
+	c.Start()
+	s.dbBackupCron = c
+}
+
+func (s *Server) runDBBackup(destDir string, compact bool, retention int) {
+	ts := time.Now().Format("20060102-150405")
+	fname := fmt.Sprintf("simpledeploy-%s.db", ts)
+	destPath := filepath.Join(destDir, fname)
+
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		log.Printf("[db-backup] mkdir %s: %v", destDir, err)
+		s.store.CreateDBBackupRun(destPath, 0, compact, "failed", err.Error())
+		return
+	}
+
+	if err := s.store.VacuumInto(destPath); err != nil {
+		log.Printf("[db-backup] vacuum into: %v", err)
+		s.store.CreateDBBackupRun(destPath, 0, compact, "failed", err.Error())
+		return
+	}
+
+	if compact {
+		if err := stripMetrics(destPath); err != nil {
+			log.Printf("[db-backup] strip metrics: %v", err)
+			s.store.CreateDBBackupRun(destPath, 0, true, "failed", err.Error())
+			os.Remove(destPath)
+			return
+		}
+	}
+
+	var size int64
+	if fi, err := os.Stat(destPath); err == nil {
+		size = fi.Size()
+	}
+	s.store.CreateDBBackupRun(destPath, size, compact, "ok", "")
+	log.Printf("[db-backup] created %s (%d bytes, compact=%v)", destPath, size, compact)
+
+	// Prune old backups
+	paths, err := s.store.PruneDBBackupRuns(retention)
+	if err != nil {
+		log.Printf("[db-backup] prune records: %v", err)
+		return
+	}
+	for _, p := range paths {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			log.Printf("[db-backup] remove old file %s: %v", p, err)
+		}
+	}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {

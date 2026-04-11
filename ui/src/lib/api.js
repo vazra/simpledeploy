@@ -185,6 +185,10 @@ export const api = {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return new WebSocket(`${proto}//${window.location.host}/api/apps/${slug}/deploy-logs`)
   },
+  systemLogsWs: () => {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return new WebSocket(`${proto}//${window.location.host}/api/system/logs/stream`)
+  },
 
   // System
   systemInfo: () => request('GET', '/system/info'),
@@ -196,4 +200,22 @@ export const api = {
   systemClearAuditLog: () => request('DELETE', '/system/audit-log'),
   systemAuditConfig: () => request('GET', '/system/audit-config'),
   systemUpdateAuditConfig: (maxSize) => request('PUT', '/system/audit-config', { max_size: maxSize }),
+  systemLogs: (limit = 500) => request('GET', `/system/logs?limit=${limit}`),
+  systemBackupDownload: (compact = false) => {
+    const url = `/api/system/backup/download?compact=${compact}`
+    return fetch(url, { method: 'POST', credentials: 'include' }).then(res => {
+      if (!res.ok) return res.text().then(t => ({ error: t }))
+      return res.blob().then(blob => {
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = res.headers.get('content-disposition')?.match(/filename="?([^"]+)"?/)?.[1] || 'backup.db'
+        a.click()
+        URL.revokeObjectURL(a.href)
+        return { data: true, error: null }
+      })
+    }).catch(err => ({ data: null, error: err.message }))
+  },
+  systemBackupConfig: () => request('GET', '/system/backup/config'),
+  systemSetBackupConfig: (cfg) => request('POST', '/system/backup/config', cfg),
+  systemBackupRuns: () => request('GET', '/system/backup/runs'),
 }
