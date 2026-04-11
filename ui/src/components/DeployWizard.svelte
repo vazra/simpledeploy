@@ -49,16 +49,21 @@
 
   async function validateCompose(text) {
     validating = true
-    const encoded = btoa(text)
-    const res = await api.validateCompose(encoded)
-    validating = false
-    if (res.data?.valid) {
-      composeValid = true
-      composeErrors = []
-    } else {
+    try {
+      const encoded = btoa(unescape(encodeURIComponent(text)))
+      const res = await api.validateCompose(encoded)
+      if (res.data?.valid) {
+        composeValid = true
+        composeErrors = []
+      } else {
+        composeValid = false
+        composeErrors = res.data?.errors || ['Invalid compose file']
+      }
+    } catch {
       composeValid = false
-      composeErrors = res.data?.errors || ['Invalid compose file']
+      composeErrors = ['Validation failed (network error)']
     }
+    validating = false
   }
 
   function handleFileUpload(e) {
@@ -74,8 +79,6 @@
 
   // Step 2 state
   let parsedServices = $state([])
-  let registries = $state([])
-  let selectedRegistry = $state('')
 
   // Routing labels
   let routingDomain = $state('')
@@ -136,7 +139,7 @@
     currentAction = 'Starting deploy...'
 
     const finalCompose = injectLabels(composeText)
-    const encoded = btoa(finalCompose)
+    const encoded = btoa(unescape(encodeURIComponent(finalCompose)))
     const res = await api.deploy(appName.trim(), encoded)
 
     if (res.error) {
@@ -192,8 +195,6 @@
     deployLines = []
     currentAction = ''
     parsedServices = []
-    registries = []
-    selectedRegistry = ''
     routingDomain = ''
     routingPort = ''
     routingTls = false
@@ -206,6 +207,7 @@
       confirmClose = true
       return
     }
+    resetWizard()
     onclose()
   }
 
@@ -255,18 +257,8 @@
     return services.map(({ _inPorts, ...s }) => s)
   }
 
-  function isPrivateImage(image) {
-    const parts = image.split('/')
-    return parts.length > 1 && parts[0].includes('.')
-  }
-
   async function enterStep2() {
     parsedServices = parseServicesFromYaml(composeText)
-    const hasPrivate = parsedServices.some(s => isPrivateImage(s.image))
-    if (hasPrivate) {
-      const res = await api.listRegistries()
-      registries = res.data || []
-    }
     step = 2
   }
 </script>
@@ -392,22 +384,6 @@
           </div>
         </div>
 
-        <!-- Registry selector -->
-        {#if registries.length > 0}
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-2">Private Registry</label>
-            <select
-              bind:value={selectedRegistry}
-              class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/30"
-            >
-              <option value="">None (public images)</option>
-              {#each registries as reg}
-                <option value={reg.id}>{reg.name} ({reg.url})</option>
-              {/each}
-            </select>
-          </div>
-        {/if}
-
         <!-- Quick routing labels -->
         <AccordionSection title="Configure Routing (optional)">
           <div class="flex flex-col gap-3">
@@ -491,17 +467,17 @@
   </div>
 
   <!-- Footer -->
-  <div class="flex justify-between pt-4 border-t border-border/50 mt-4">
-    {#if step === 2}
-      <Button variant="secondary" size="sm" onclick={() => step = 1}>Back</Button>
-      <Button size="sm" onclick={startDeploy}>Deploy</Button>
-    {:else if step === 1}
-      <div></div>
-      <Button size="sm" disabled={!appName.trim() || !!nameError || !composeValid} onclick={enterStep2}>Next</Button>
-    {:else}
-      <!-- Step 3: no footer nav, actions are inline above -->
-    {/if}
-  </div>
+  {#if step < 3}
+    <div class="flex justify-between pt-4 border-t border-border/50 mt-4">
+      {#if step === 2}
+        <Button variant="secondary" size="sm" onclick={() => step = 1}>Back</Button>
+        <Button size="sm" onclick={startDeploy}>Deploy</Button>
+      {:else}
+        <div></div>
+        <Button size="sm" disabled={!appName.trim() || !!nameError || !composeValid} onclick={enterStep2}>Next</Button>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Close confirmation during deploy -->
   {#if confirmClose}
