@@ -7,7 +7,8 @@
   Chart.register(...registerables)
 
   // Single dataset: pass `data` + `color`. Multi dataset: pass `datasets` [{label, data, color}].
-  let { data = [], datasets = null, label = '', color = '#58a6ff', unit = '', subtitle = '', tooltipFormat = null, interval = 60 } = $props()
+  // formatValue: optional (value) => string for tooltip display (e.g. show bytes alongside %)
+  let { data = [], datasets = null, label = '', color = '#58a6ff', unit = '', subtitle = '', tooltipFormat = null, formatValue = null, interval = 60 } = $props()
   let canvas
   let chart
 
@@ -110,9 +111,19 @@
           },
           tooltip: {
             callbacks: {
-              label: tooltipFormat
-                ? (ctx) => tooltipFormat(ctx.dataIndex, ctx.parsed.y)
-                : (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}${unit}`
+              label(ctx) {
+                if (tooltipFormat) return tooltipFormat(ctx.dataIndex, ctx.parsed.y)
+                const raw = ctx.raw
+                if (formatValue && raw?.extra != null) {
+                  // Show both: "redis: 1.2% (9.4 MB)"
+                  return `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1)}${unit} (${formatValue(raw.extra)})`
+                }
+                if (formatValue) {
+                  // Format the y value itself: "redis: 1.2 KB/s"
+                  return `${ctx.dataset.label}: ${formatValue(ctx.parsed.y)}`
+                }
+                return `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1)}${unit}`
+              }
             }
           }
         }

@@ -115,13 +115,20 @@
     const ids = Object.keys(containers).filter(id => id !== '')
     const single = ids.length <= 1
 
+    // extract(p) returns either a number (y value) or {y, extra} for metadata
+    function toPoint(p, extracted) {
+      if (extracted == null) return { x: new Date(p.t * 1000), y: null }
+      if (typeof extracted === 'object') return { x: new Date(p.t * 1000), y: extracted.y, extra: extracted.extra }
+      return { x: new Date(p.t * 1000), y: extracted }
+    }
+
     // Per-container series
     const perContainer = ids.map((id, i) => {
       const pts = containers[id]?.points || []
       return {
         label: id,
         color: single ? baseColor : containerColors[i % containerColors.length],
-        data: pts.map(p => ({ x: new Date(p.t * 1000), y: extract(p) })),
+        data: pts.map(p => toPoint(p, extract(p))),
       }
     })
 
@@ -131,7 +138,8 @@
     const byTs = new Map()
     for (const id of ids) {
       for (const p of (containers[id]?.points || [])) {
-        const v = extract(p)
+        const raw = extract(p)
+        const v = typeof raw === 'object' ? raw?.y : raw
         if (v == null) continue
         const existing = byTs.get(p.t)
         if (existing != null) byTs.set(p.t, existing + v)
@@ -168,7 +176,10 @@
     }
 
     cpuDatasets = buildContainerDatasets(c, p => p.c ?? null, '#3b82f6')
-    memDatasets = buildContainerDatasets(c, p => p.ml ? ((p.m || 0) / p.ml) * 100 : null, '#22c55e')
+    memDatasets = buildContainerDatasets(c, p => {
+      if (!p.ml) return null
+      return { y: ((p.m || 0) / p.ml) * 100, extra: p.m || 0 }
+    }, '#22c55e')
     netRxDatasets = buildContainerDatasets(c, p => p.nr ?? null, '#eab308')
     netTxDatasets = buildContainerDatasets(c, p => p.nt ?? null, '#a78bfa')
     diskReadDatasets = buildContainerDatasets(c, p => p.dr ?? null, '#fb923c')
@@ -519,11 +530,11 @@
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <MetricsChart datasets={filterDatasets(cpuDatasets)} label="CPU Usage" unit="%" interval={metricsInterval} />
-        <MetricsChart datasets={filterDatasets(memDatasets)} label="Memory Usage" unit="%" subtitle={memSummary} interval={metricsInterval} />
-        <MetricsChart datasets={filterDatasets(netRxDatasets)} label="Network RX" unit=" B/s" interval={metricsInterval} />
-        <MetricsChart datasets={filterDatasets(netTxDatasets)} label="Network TX" unit=" B/s" interval={metricsInterval} />
-        <MetricsChart datasets={filterDatasets(diskReadDatasets)} label="Disk Read" unit=" B/s" interval={metricsInterval} />
-        <MetricsChart datasets={filterDatasets(diskWriteDatasets)} label="Disk Write" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart datasets={filterDatasets(memDatasets)} label="Memory Usage" unit="%" subtitle={memSummary} interval={metricsInterval} formatValue={formatBytes} />
+        <MetricsChart datasets={filterDatasets(netRxDatasets)} label="Network RX" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
+        <MetricsChart datasets={filterDatasets(netTxDatasets)} label="Network TX" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
+        <MetricsChart datasets={filterDatasets(diskReadDatasets)} label="Disk Read" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
+        <MetricsChart datasets={filterDatasets(diskWriteDatasets)} label="Disk Write" unit=" B/s" interval={metricsInterval} formatValue={(v) => formatBytes(v) + '/s'} />
       </div>
 
     {:else if activeTab === 'backups'}
