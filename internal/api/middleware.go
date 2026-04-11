@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/auth"
 )
@@ -35,6 +36,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			keyHash := auth.HashAPIKey(token)
 			keyRecord, user, err := s.store.GetAPIKeyByHash(keyHash)
 			if err == nil && keyRecord != nil {
+				// Check API key expiry
+				if keyRecord.ExpiresAt != nil && time.Now().After(*keyRecord.ExpiresAt) {
+					http.Error(w, "api key expired", http.StatusUnauthorized)
+					return
+				}
 				r = setAuthUser(r, &AuthUser{ID: user.ID, Username: user.Username, Role: user.Role})
 				next.ServeHTTP(w, r)
 				return
