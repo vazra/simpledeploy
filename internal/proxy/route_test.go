@@ -98,3 +98,42 @@ func TestResolveRouteTLSDefault(t *testing.T) {
 		t.Errorf("TLS: got %q, want %q", r.TLS, "auto")
 	}
 }
+
+func TestResolveRouteWithAllowedIPs(t *testing.T) {
+	app := makeApp("secured", "secure.example.com", "8080", "auto", []compose.ServiceConfig{
+		{Name: "web", Ports: ports("3000", "8080")},
+	})
+	app.AccessAllow = "10.0.0.0/8, 192.168.1.5, bad-entry, 172.16.0.0/12"
+
+	r, err := ResolveRoute(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// bad-entry should be skipped, 3 valid entries remain
+	if len(r.AllowedIPs) != 3 {
+		t.Errorf("AllowedIPs: got %d entries, want 3: %v", len(r.AllowedIPs), r.AllowedIPs)
+	}
+	want := []string{"10.0.0.0/8", "192.168.1.5", "172.16.0.0/12"}
+	for i, w := range want {
+		if i >= len(r.AllowedIPs) {
+			break
+		}
+		if r.AllowedIPs[i] != w {
+			t.Errorf("AllowedIPs[%d]: got %q, want %q", i, r.AllowedIPs[i], w)
+		}
+	}
+}
+
+func TestResolveRouteEmptyAllowedIPs(t *testing.T) {
+	app := makeApp("open", "open.example.com", "", "", []compose.ServiceConfig{
+		{Name: "web", Ports: ports("5000", "80")},
+	})
+	// No AccessAllow set
+	r, err := ResolveRoute(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.AllowedIPs != nil {
+		t.Errorf("AllowedIPs: got %v, want nil", r.AllowedIPs)
+	}
+}

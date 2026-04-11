@@ -2,7 +2,10 @@ package proxy
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -10,11 +13,12 @@ import (
 
 // Route holds routing config for a deployed app.
 type Route struct {
-	AppSlug   string
-	Domain    string
-	Upstream  string // "localhost:{port}"
-	TLS       string // "auto", "custom", "off"
-	RateLimit *RateLimitConfig
+	AppSlug    string
+	Domain     string
+	Upstream   string // "localhost:{port}"
+	TLS        string // "auto", "custom", "off"
+	RateLimit  *RateLimitConfig
+	AllowedIPs []string // validated IPs and CIDRs
 }
 
 // RateLimitConfig holds parsed rate-limit settings for a route.
@@ -64,6 +68,24 @@ func ResolveRoute(app *compose.AppConfig) (*Route, error) {
 				Burst:    burst,
 				By:       by,
 			}
+		}
+	}
+
+	if app.AccessAllow != "" {
+		for _, entry := range strings.Split(app.AccessAllow, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			if net.ParseIP(entry) != nil {
+				route.AllowedIPs = append(route.AllowedIPs, entry)
+				continue
+			}
+			if _, _, err := net.ParseCIDR(entry); err == nil {
+				route.AllowedIPs = append(route.AllowedIPs, entry)
+				continue
+			}
+			log.Printf("[proxy] ignoring invalid IP/CIDR in access.allow: %q", entry)
 		}
 	}
 
