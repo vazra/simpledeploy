@@ -52,7 +52,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		if err == nil && s.jwt != nil {
 			claims, err := s.jwt.Validate(cookie.Value)
 			if err == nil {
-				r = setAuthUser(r, &AuthUser{ID: claims.UserID, Username: claims.Username, Role: claims.Role})
+				// Verify user still exists in DB
+				user, err := s.store.GetUserByID(claims.UserID)
+				if err != nil || user == nil {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				r = setAuthUser(r, &AuthUser{ID: user.ID, Username: user.Username, Role: user.Role})
 				next.ServeHTTP(w, r)
 				return
 			}
