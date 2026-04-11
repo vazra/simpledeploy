@@ -317,6 +317,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	dbPath := filepath.Join(cfg.DataDir, "simpledeploy.db")
 	logBuf := logbuf.New(1000)
 	log.SetOutput(io.MultiWriter(os.Stderr, logBuf))
+	log.Printf("simpledeploy starting (data_dir=%s)", cfg.DataDir)
 
 	db, err := store.Open(dbPath)
 	if err != nil {
