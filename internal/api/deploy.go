@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+var validAppName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
 type reconciler interface {
 	DeployOne(ctx context.Context, composePath, appName string) error
@@ -49,6 +52,10 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name and compose are required", http.StatusBadRequest)
 		return
 	}
+	if !validAppName.MatchString(body.Name) {
+		http.Error(w, "invalid app name: must match [a-zA-Z0-9][a-zA-Z0-9._-]{0,62}", http.StatusBadRequest)
+		return
+	}
 
 	composeData, err := base64.StdEncoding.DecodeString(body.Compose)
 	if err != nil {
@@ -65,6 +72,24 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	composePath := filepath.Join(appDir, "docker-compose.yml")
 	if err := os.WriteFile(composePath, composeData, 0644); err != nil {
 		http.Error(w, "failed to write compose file", http.StatusInternalServerError)
+		return
+	}
+
+	// Validate compose file for dangerous directives
+	parsed, err := compose.ParseFile(composePath, body.Name)
+	if err != nil {
+		os.Remove(composePath)
+		http.Error(w, "invalid compose file", http.StatusBadRequest)
+		return
+	}
+	if violations := compose.ValidateComposeSecurity(parsed); len(violations) > 0 {
+		os.Remove(composePath)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":      "compose file contains disallowed directives",
+			"violations": violations,
+		})
 		return
 	}
 
@@ -86,10 +111,14 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
+	if !validAppName.MatchString(slug) {
+		http.Error(w, "invalid app name", http.StatusBadRequest)
+		return
+	}
 
 	if s.reconciler != nil {
 		if err := s.reconciler.RemoveOne(r.Context(), slug); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
