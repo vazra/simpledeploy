@@ -102,7 +102,7 @@ export const api = {
   login: (username, password) => request('POST', '/auth/login', { username, password }),
   logout: () => request('POST', '/auth/logout'),
   setupStatus: () => request('GET', '/setup/status'),
-  setup: (username, password) => request('POST', '/setup', { username, password }),
+  setup: (username, password, display_name, email) => request('POST', '/setup', { username, password, display_name, email }),
   health: healthCheck,
 
   // Apps
