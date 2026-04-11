@@ -54,10 +54,11 @@ func DefaultConfig() *Config {
 		},
 		Metrics: MetricsConfig{
 			Tiers: []MetricsTier{
-				{Name: "raw", Interval: "10s", Retention: "24h"},
-				{Name: "1m", Retention: "7d"},
-				{Name: "5m", Retention: "30d"},
-				{Name: "1h", Retention: "8760h"},
+				{Name: "raw", Interval: "10s", Retention: "90m"},
+				{Name: "1m", Retention: "7h"},
+				{Name: "5m", Retention: "26h"},
+				{Name: "1h", Retention: "8d"},
+				{Name: "1d", Retention: "400d"},
 			},
 		},
 		RateLimit: RateLimitConfig{

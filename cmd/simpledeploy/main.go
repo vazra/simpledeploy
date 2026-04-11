@@ -418,8 +418,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 		return 0, fmt.Errorf("unknown domain: %s", domain)
 	}
-	reqWriter := metrics.NewRequestStatsWriter(db, reqStatsCh, domainLookup, 200)
-	reqRollup := metrics.NewReqStatsRollupManager(db, tiers)
+	reqWriter := metrics.NewRequestMetricsWriter(db, reqStatsCh, domainLookup, 200)
+	reqRollup := metrics.NewReqMetricsRollupManager(db, tiers)
 
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
