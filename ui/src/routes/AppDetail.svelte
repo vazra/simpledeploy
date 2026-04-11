@@ -22,14 +22,14 @@
   let app = $state(null)
   let activeTab = $state('overview')
   let metricsRange = $state('1h')
-  let cpuData = $state([])
-  let memData = $state([])
+  let cpuDatasets = $state([])
+  let memDatasets = $state([])
   let memSummary = $state('')
   let memRaw = $state([])
-  let netRxData = $state([])
-  let netTxData = $state([])
-  let diskReadData = $state([])
-  let diskWriteData = $state([])
+  let netRxDatasets = $state([])
+  let netTxDatasets = $state([])
+  let diskReadDatasets = $state([])
+  let diskWriteDatasets = $state([])
   let requestStats = $state(null)
   let loading = $state(true)
   let showDeleteModal = $state(false)
@@ -53,6 +53,8 @@
   let bRetention = $state(7)
 
   let metricsInterval = $state(10)
+  let containerIds = $state([])  // ['Total', 'abc123...', 'def456...']
+  let visibleContainers = $state(new Set())
 
   const tabs = ['overview', 'logs', 'events', 'metrics', 'backups', 'config', 'environment']
   const ranges = ['1h', '6h', '24h', '1w', '1m', '1yr']
@@ -107,32 +109,87 @@
     return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i]
   }
 
+  const containerColors = ['#60a5fa', '#34d399', '#fbbf24', '#a78bfa', '#fb923c', '#f87171', '#2dd4bf', '#e879f9']
+
+  function buildContainerDatasets(containers, extract, baseColor) {
+    const ids = Object.keys(containers).filter(id => id !== '')
+    const single = ids.length <= 1
+
+    // Per-container series
+    const perContainer = ids.map((id, i) => {
+      const pts = containers[id]?.points || []
+      return {
+        label: single ? 'container' : id.slice(0, 12),
+        color: single ? baseColor : containerColors[i % containerColors.length],
+        data: pts.map(p => ({ x: new Date(p.t * 1000), y: extract(p) })),
+      }
+    })
+
+    if (single) return perContainer
+
+    // Combined "Total" line: sum values at each timestamp across containers
+    const byTs = new Map()
+    for (const id of ids) {
+      for (const p of (containers[id]?.points || [])) {
+        const v = extract(p)
+        if (v == null) continue
+        const existing = byTs.get(p.t)
+        if (existing != null) byTs.set(p.t, existing + v)
+        else byTs.set(p.t, v)
+      }
+    }
+    const totalData = [...byTs.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([t, v]) => ({ x: new Date(t * 1000), y: v }))
+
+    return [
+      { label: 'Total', color: baseColor, data: totalData },
+      ...perContainer,
+    ]
+  }
+
   async function loadMetrics() {
     const res = await api.appMetrics(slug, metricsRange)
     const data = res.data
     if (!data?.containers) return
 
-    const allPoints = []
-    for (const ctr of Object.values(data.containers)) {
-      allPoints.push(...(ctr.points || []))
-    }
-    allPoints.sort((a, b) => a.t - b.t)
-
     const interval = data.interval || 10
     metricsInterval = interval
+    const c = data.containers
 
-    cpuData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.c ?? null }))
-    memData = allPoints.map(p => ({
-      x: new Date(p.t * 1000),
-      y: p.ml ? ((p.m || 0) / p.ml) * 100 : null,
-    }))
-    memRaw = allPoints.map(p => ({ bytes: p.m || 0, limit: p.ml || 0 }))
-    const latest = allPoints.filter(p => p.c != null).pop()
+    // Track container IDs for visibility toggles
+    const ids = Object.keys(c).filter(id => id !== '')
+    const hasMultiple = ids.length > 1
+    const labels = hasMultiple ? ['Total', ...ids.map(id => id.slice(0, 12))] : ids.map(id => id.slice(0, 12))
+    containerIds = labels
+    // Preserve existing visibility; default all visible
+    if (visibleContainers.size === 0 || ![...visibleContainers].some(v => labels.includes(v))) {
+      visibleContainers = new Set(labels)
+    }
+
+    cpuDatasets = buildContainerDatasets(c, p => p.c ?? null, '#3b82f6')
+    memDatasets = buildContainerDatasets(c, p => p.ml ? ((p.m || 0) / p.ml) * 100 : null, '#22c55e')
+    netRxDatasets = buildContainerDatasets(c, p => p.nr ?? null, '#eab308')
+    netTxDatasets = buildContainerDatasets(c, p => p.nt ?? null, '#a78bfa')
+    diskReadDatasets = buildContainerDatasets(c, p => p.dr ?? null, '#fb923c')
+    diskWriteDatasets = buildContainerDatasets(c, p => p.dw ?? null, '#ef4444')
+
+    // mem summary from latest point across all containers
+    const allPts = Object.values(c).flatMap(ct => ct.points || [])
+    const latest = allPts.filter(p => p.c != null).sort((a, b) => a.t - b.t).pop()
     memSummary = latest?.ml ? `${formatBytes(latest.m)} / ${formatBytes(latest.ml)}` : ''
-    netRxData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.nr ?? null }))
-    netTxData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.nt ?? null }))
-    diskReadData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.dr ?? null }))
-    diskWriteData = allPoints.map(p => ({ x: new Date(p.t * 1000), y: p.dw ?? null }))
+    memRaw = allPts.sort((a, b) => a.t - b.t).map(p => ({ bytes: p.m || 0, limit: p.ml || 0 }))
+  }
+
+  function toggleContainer(label) {
+    const next = new Set(visibleContainers)
+    if (next.has(label)) next.delete(label)
+    else next.add(label)
+    visibleContainers = next
+  }
+
+  function filterDatasets(ds) {
+    return ds.filter(d => visibleContainers.has(d.label))
   }
 
   async function loadServices() {
@@ -431,28 +488,42 @@
       <EventsTab {slug} deploying={app?.deploying} />
 
     {:else if activeTab === 'metrics'}
-      <div class="flex gap-1 mb-4">
-        {#each ranges as range}
-          <button
-            onclick={() => { metricsRange = range; loadMetrics() }}
-            class="px-2 py-1 text-xs rounded-md border transition-colors
-              {metricsRange === range ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
-          >
-            {range}
-          </button>
-        {/each}
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <div class="flex gap-1">
+          {#each ranges as range}
+            <button
+              onclick={() => { metricsRange = range; loadMetrics() }}
+              class="px-2 py-1 text-xs rounded-md border transition-colors
+                {metricsRange === range ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+            >
+              {range}
+            </button>
+          {/each}
+        </div>
+        {#if containerIds.length > 1}
+          <div class="flex flex-wrap items-center gap-2 ml-auto">
+            {#each containerIds as cid, i}
+              <label class="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={visibleContainers.has(cid)}
+                  onchange={() => toggleContainer(cid)}
+                  class="w-3 h-3 rounded accent-current"
+                  style="color: {cid === 'Total' ? '#94a3b8' : containerColors[i - 1] || containerColors[(i - 1) % containerColors.length]}"
+                />
+                <span class="text-text-secondary font-mono">{cid}</span>
+              </label>
+            {/each}
+          </div>
+        {/if}
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <MetricsChart data={cpuData} label="CPU Usage" color="#3b82f6" unit="%" interval={metricsInterval} />
-        <MetricsChart data={memData} label="Memory Usage" color="#22c55e" unit="%" subtitle={memSummary} interval={metricsInterval}
-          tooltipFormat={(i, pct) => {
-            const r = memRaw[i]
-            return r ? `${pct.toFixed(1)}% (${formatBytes(r.bytes)} / ${formatBytes(r.limit)})` : `${pct.toFixed(1)}%`
-          }} />
-        <MetricsChart data={netRxData} label="Network RX" color="#eab308" unit=" B/s" interval={metricsInterval} />
-        <MetricsChart data={netTxData} label="Network TX" color="#a78bfa" unit=" B/s" interval={metricsInterval} />
-        <MetricsChart data={diskReadData} label="Disk Read" color="#fb923c" unit=" B/s" interval={metricsInterval} />
-        <MetricsChart data={diskWriteData} label="Disk Write" color="#ef4444" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart datasets={filterDatasets(cpuDatasets)} label="CPU Usage" unit="%" interval={metricsInterval} />
+        <MetricsChart datasets={filterDatasets(memDatasets)} label="Memory Usage" unit="%" subtitle={memSummary} interval={metricsInterval} />
+        <MetricsChart datasets={filterDatasets(netRxDatasets)} label="Network RX" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart datasets={filterDatasets(netTxDatasets)} label="Network TX" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart datasets={filterDatasets(diskReadDatasets)} label="Disk Read" unit=" B/s" interval={metricsInterval} />
+        <MetricsChart datasets={filterDatasets(diskWriteDatasets)} label="Disk Write" unit=" B/s" interval={metricsInterval} />
       </div>
 
     {:else if activeTab === 'backups'}

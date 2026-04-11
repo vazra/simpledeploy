@@ -6,7 +6,8 @@
 
   Chart.register(...registerables)
 
-  let { data = [], label = '', color = '#58a6ff', unit = '', subtitle = '', tooltipFormat = null, interval = 60 } = $props()
+  // Single dataset: pass `data` + `color`. Multi dataset: pass `datasets` [{label, data, color}].
+  let { data = [], datasets = null, label = '', color = '#58a6ff', unit = '', subtitle = '', tooltipFormat = null, interval = 60 } = $props()
   let canvas
   let chart
 
@@ -19,15 +20,16 @@
   const gapShadePlugin = {
     id: 'gapShade',
     beforeDatasetsDraw(chart) {
+      // Shade gaps on the first dataset (Total or the single series)
       const meta = chart.getDatasetMeta(0)
       const ctx = chart.ctx
       const yScale = chart.scales.y
       if (!meta.data || meta.data.length < 2) return
-      const dataset = chart.data.datasets[0].data
+      const points = chart.data.datasets[0].data
       ctx.save()
       ctx.fillStyle = chart.options.scales.x.grid.color || 'rgba(128,128,128,0.1)'
-      for (let i = 0; i < dataset.length; i++) {
-        if (dataset[i].y === null || dataset[i].y === undefined) {
+      for (let i = 0; i < points.length; i++) {
+        if (points[i].y === null || points[i].y === undefined) {
           const prevPt = i > 0 ? meta.data[i - 1] : null
           const nextPt = i < meta.data.length - 1 ? meta.data[i + 1] : null
           if (prevPt && nextPt) {
@@ -47,23 +49,40 @@
     return theme === 'light' ? '#737373' : '#666666'
   }
 
+  function buildDatasets() {
+    if (datasets && datasets.length > 0) {
+      return datasets.map((ds, i) => ({
+        label: ds.label || `Container ${i + 1}`,
+        data: [...ds.data],
+        borderColor: ds.color,
+        backgroundColor: ds.color + '20',
+        fill: datasets.length === 1,
+        tension: 0.3,
+        pointRadius: 0,
+        borderWidth: 1.5,
+        spanGaps: false,
+      }))
+    }
+    return [{
+      label,
+      data: [...data],
+      borderColor: color,
+      backgroundColor: color + '20',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 0,
+      borderWidth: 1.5,
+      spanGaps: false,
+    }]
+  }
+
   function createChart(theme) {
     if (chart) chart.destroy()
+    const ds = buildDatasets()
+    const multiSeries = ds.length > 1
     chart = new Chart(canvas, {
       type: 'line',
-      data: {
-        datasets: [{
-          label,
-          data: [...data],
-          borderColor: color,
-          backgroundColor: color + '20',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-          borderWidth: 1.5,
-          spanGaps: false,
-        }]
-      },
+      data: { datasets: ds },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -85,12 +104,15 @@
           }
         },
         plugins: {
-          legend: { display: false },
+          legend: {
+            display: multiSeries,
+            labels: { color: getTickColor(theme), font: { size: 10 }, boxWidth: 12 }
+          },
           tooltip: {
             callbacks: {
               label: tooltipFormat
                 ? (ctx) => tooltipFormat(ctx.dataIndex, ctx.parsed.y)
-                : (ctx) => `${label}: ${ctx.parsed.y.toFixed(1)}${unit}`
+                : (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}${unit}`
             }
           }
         }
@@ -114,7 +136,7 @@
   })
 
   $effect(() => {
-    if (mounted && canvas && data) {
+    if (mounted && canvas && (data || datasets)) {
       createChart(currentTheme)
     }
   })
