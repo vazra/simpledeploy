@@ -89,7 +89,7 @@
 </script>
 
 <Layout>
-  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
     <h1 class="text-xl font-semibold tracking-tight text-text-primary">Users & API Keys</h1>
   </div>
 
@@ -100,7 +100,12 @@
   {:else}
     <!-- New Key Display -->
     {#if newKey}
-      <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-5 py-4 mb-6 light:bg-emerald-50">
+      <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-5 py-4 mb-6 light:bg-emerald-50 relative">
+        <button onclick={() => newKey = ''} class="absolute top-3 right-3 text-emerald-400/60 hover:text-emerald-400 light:text-emerald-600/60 light:hover:text-emerald-700 cursor-pointer">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
         <p class="text-xs text-emerald-400 light:text-emerald-700 mb-2">New key created (copy now, shown once):</p>
         <div class="flex items-center gap-2">
           <code class="flex-1 text-xs bg-surface-1 text-text-primary px-3 py-2 rounded break-all font-mono">{newKey}</code>
@@ -152,25 +157,43 @@
     </div>
 
     <!-- API Keys -->
-    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-semibold text-text-primary">API Keys</h3>
+    <div class="bg-surface-2 rounded-xl p-6 shadow-sm border border-border/50">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2.5">
+          <h3 class="text-sm font-semibold text-text-primary">API Keys</h3>
+          {#if keys.length > 0}
+            <Badge>{keys.length}</Badge>
+          {/if}
+        </div>
         <Button size="sm" variant="secondary" onclick={() => showKeyPanel = true}>Create Key</Button>
       </div>
       {#if keys.length === 0}
-        <p class="text-sm text-text-muted">No API keys.</p>
+        <div class="flex flex-col items-center justify-center py-10 text-center">
+          <svg class="w-12 h-12 text-text-muted/40 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+          </svg>
+          <p class="text-sm text-text-muted mb-3">No API keys yet</p>
+          <Button size="sm" variant="secondary" onclick={() => showKeyPanel = true}>Create Key</Button>
+        </div>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead><tr class="border-b border-border/50">
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Name</th>
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Created</th>
+            <thead><tr class="border-b border-border/30">
+              <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Name</th>
+              <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Created</th>
               <th class="py-3 px-4"></th>
             </tr></thead>
             <tbody class="divide-y divide-border/30">
               {#each keys as k}
                 <tr class="hover:bg-surface-hover">
-                  <td class="py-3 px-4 font-medium">{k.name}</td>
+                  <td class="py-3 px-4 font-medium">
+                    <div class="flex items-center gap-2">
+                      <svg class="w-4 h-4 text-text-muted/60 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+                      </svg>
+                      <span>{k.name}</span>
+                    </div>
+                  </td>
                   <td class="py-3 px-4 text-text-secondary">{new Date(k.created_at).toLocaleString()}</td>
                   <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => confirmDelete('Revoke API Key?', k.name, () => revokeKey(k.id))}>Revoke</Button></td>
                 </tr>
