@@ -14,7 +14,31 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: checkWebSocketOrigin,
+}
+
+// checkWebSocketOrigin validates the Origin header for WebSocket connections.
+// Allows same-origin requests and rejects cross-origin requests.
+func checkWebSocketOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // non-browser clients
+	}
+	host := r.Host
+	// Strip port from origin for comparison
+	originHost := origin
+	for _, prefix := range []string{"https://", "http://"} {
+		originHost = strings.TrimPrefix(originHost, prefix)
+	}
+	// Strip port for comparison if present
+	if i := strings.LastIndex(originHost, ":"); i != -1 {
+		originHost = originHost[:i]
+	}
+	hostOnly := host
+	if i := strings.LastIndex(hostOnly, ":"); i != -1 {
+		hostOnly = hostOnly[:i]
+	}
+	return originHost == hostOnly
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {

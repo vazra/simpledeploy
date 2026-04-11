@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/deployer"
 )
@@ -15,7 +16,17 @@ func (s *Server) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ch, unsub, ok := s.reconciler.SubscribeDeployLog(slug)
+	// Wait up to 3s for deploy to start (race between async POST and WS connect)
+	var ch <-chan deployer.OutputLine
+	var unsub func()
+	var ok bool
+	for range 30 {
+		ch, unsub, ok = s.reconciler.SubscribeDeployLog(slug)
+		if ok {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if !ok {
 		conn.WriteJSON(deployer.OutputLine{Done: true, Action: "none"})
 		return
