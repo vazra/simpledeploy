@@ -45,7 +45,7 @@ ui/                   Svelte SPA (Vite build)
 - **Compose labels.** All app config via `simpledeploy.*` labels in docker-compose.yml.
 - **CommandRunner interface.** Deployer shells out to `docker compose` CLI via `CommandRunner` with `MockRunner` for tests.
 - **AES-256-GCM encryption.** Registry credentials encrypted with `master_secret` via `auth.Encrypt`/`auth.Decrypt`.
-- **Log ring buffer.** Process logs captured via `io.MultiWriter` into `logbuf.Buffer`, streamed to UI via WebSocket.
+- **Log ring buffer.** Process stdout/stderr captured via `os.Pipe` into `logbuf.Buffer`, streamed to UI via WebSocket. Size configurable via `log_buffer_size` (default 500).
 - **DB backup via VACUUM INTO.** WAL-safe consistent snapshots. Compact mode strips metrics/request_stats before download.
 
 ## Database
