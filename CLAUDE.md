@@ -87,6 +87,21 @@ go test ./internal/store/ -run TestUpsert  # specific test
 5. Add CLI commands in `cmd/simpledeploy/main.go`
 6. Add UI page in `ui/src/routes/`
 
+## UI Design Philosophy
+
+SimpleDeploy targets non-technical users who want to deploy and maintain Docker Compose apps without complexity. Every UI decision must reflect this.
+
+**Core rule: simple first, advanced easily available.**
+
+- The primary (happy) path should be obvious and require no learning curve.
+- Essential actions go front-and-center. Anything beyond the basics is tucked away but always reachable easily.
+- When exposing technical details, explain it inline.
+- Reveal complexity progressively - never all at once.
+- Provide sensible defaults so most users never need to adjust settings.
+- Error and status messages should be clear, human-readable, and actionable.
+
+When building or modifying UI: ask "would someone who has never heard of Docker Compose understand this?" , If not, simplify it or add inline guidance.
+
 ## Commit Messages
 
 Use Conventional Commits: `type(scope): description`
