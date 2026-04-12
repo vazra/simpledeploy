@@ -279,6 +279,8 @@
   }
 
   let hasResolved = $derived(history.some(h => h.resolved_at))
+  let showActiveOnly = $state(false)
+  let filteredHistory = $derived(showActiveOnly ? history.filter(h => !h.resolved_at) : history)
 </script>
 
 <Layout>
@@ -382,9 +384,19 @@
           </div>
         {/if}
       </div>
-      <p class="text-xs text-text-muted mb-3">Log of all triggered alerts and their resolution status.</p>
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-xs text-text-muted">Log of all triggered alerts and their resolution status.</p>
+        {#if history.length > 0}
+          <label class="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer shrink-0">
+            <input type="checkbox" bind:checked={showActiveOnly} class="rounded border-border/50 accent-accent" />
+            Active only
+          </label>
+        {/if}
+      </div>
       {#if history.length === 0}
         <p class="text-sm text-text-muted">No alerts fired yet.</p>
+      {:else if filteredHistory.length === 0}
+        <p class="text-sm text-text-muted">No active alerts.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -396,7 +408,7 @@
               <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Status</th>
             </tr></thead>
             <tbody class="divide-y divide-border/30">
-              {#each history as h}
+              {#each filteredHistory as h}
                 <tr class="hover:bg-surface-hover">
                   <td class="py-3 px-4 text-text-primary text-xs">{ruleInfo(h.rule_id)}</td>
                   <td class="py-3 px-4 font-mono text-xs">{formatMetricValue(ruleMetric(h.rule_id), h.value)}</td>
