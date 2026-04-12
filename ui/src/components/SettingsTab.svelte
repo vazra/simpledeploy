@@ -10,13 +10,15 @@
 
   let { slug, app, onAppUpdated } = $props()
 
-  // Domain
-  let editDomain = $state(app?.Domain || '')
+  // Domain - initialize from app prop
+  const initDomain = app?.Domain || ''
+  const initAllowlist = app?.Labels?.['simpledeploy.access.allow'] || ''
+  let editDomain = $state(initDomain)
   let savingDomain = $state(false)
 
   // Advanced
   let showAdvanced = $state(false)
-  let editAllowlist = $state(app?.Labels?.['simpledeploy.access.allow'] || '')
+  let editAllowlist = $state(initAllowlist)
   let savingAllowlist = $state(false)
 
   // Danger Zone

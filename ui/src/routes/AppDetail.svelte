@@ -3,17 +3,14 @@
   import Layout from '../components/Layout.svelte'
   import MetricsChart from '../components/MetricsChart.svelte'
   import LogViewer from '../components/LogViewer.svelte'
-  import ConfigTab from '../components/ConfigTab.svelte'
-  import EventsTab from '../components/EventsTab.svelte'
-  import EnvEditor from '../components/EnvEditor.svelte'
-  import StatCard from '../components/StatCard.svelte'
+  import OverviewTab from '../components/OverviewTab.svelte'
+  import SettingsTab from '../components/SettingsTab.svelte'
+  import ActionModal from '../components/ActionModal.svelte'
   import Badge from '../components/Badge.svelte'
   import Button from '../components/Button.svelte'
-  import Modal from '../components/Modal.svelte'
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
-  import { toasts } from '../lib/stores/toast.js'
   import { connection } from '../lib/stores/connection.svelte.js'
 
   let { params } = $props()
@@ -21,47 +18,45 @@
 
   let app = $state(null)
   let activeTab = $state('overview')
+  let loading = $state(true)
+  let services = $state([])
+
+  // Metrics state
   let metricsRange = $state('1h')
   let cpuDatasets = $state([])
   let memDatasets = $state([])
   let memSummary = $state('')
-  let memRaw = $state([])
   let netRxDatasets = $state([])
   let netTxDatasets = $state([])
   let diskReadDatasets = $state([])
   let diskWriteDatasets = $state([])
-  let requestStats = $state(null)
   let requestsPerSecDatasets = $state([])
   let errorRateDatasets = $state([])
   let latencyDatasets = $state([])
-  let loading = $state(true)
-  let showDeleteModal = $state(false)
-  let removing = $state(false)
-  let backupConfigs = $state([])
-  let backupRuns = $state([])
-  let services = $state([])
-  let restoreTarget = $state(null)
-  let showBackupForm = $state(false)
-  let showRestartModal = $state(false)
-  let showScaleModal = $state(false)
-  let actionLoading = $state('')
-  let scaleInputs = $state({})
-  let editDomain = $state('')
-  let editAccessAllow = $state('')
-
-  // Backup form
-  let bStrategy = $state('postgres')
-  let bTarget = $state('s3')
-  let bCron = $state('0 2 * * *')
-  let bRetention = $state(7)
-
   let metricsInterval = $state(10)
-  let containerIds = $state([])  // ['Total', 'abc123...', 'def456...']
+  let containerIds = $state([])
   let visibleContainers = $state(new Set())
 
-  const tabs = ['overview', 'logs', 'events', 'metrics', 'backups', 'config', 'environment']
+  // Action modal state
+  let actionModal = $state({ show: false, action: '' })
+  let showMoreMenu = $state(false)
+  let showScaleModal = $state(false)
+  let showRestartModal = $state(false)
+  let actionLoading = $state('')
+  let scaleInputs = $state({})
+
+  const tabs = ['overview', 'logs', 'metrics', 'settings']
   const ranges = ['1h', '6h', '24h', '1w', '1m', '1yr']
 
+  // Filter non-simpledeploy labels for display as tags
+  let displayLabels = $derived.by(() => {
+    if (!app?.Labels) return []
+    return Object.entries(app.Labels)
+      .filter(([k]) => !k.startsWith('simpledeploy.'))
+      .map(([k, v]) => v || k)
+  })
+
+  // --- Polling for deploy status ---
   let pollTimer = null
   function startPolling() {
     stopPolling()
@@ -69,12 +64,9 @@
       const res = await api.getApp(slug)
       if (res.error) return
       app = res.data
-      editDomain = app?.Domain || ''
-      editAccessAllow = app?.Labels?.['simpledeploy.access.allow'] || ''
       if (!app.deploying) {
         stopPolling()
         loadServices()
-        if (app.Status === 'error') activeTab = 'events'
       }
     }, 3000)
   }
@@ -93,17 +85,81 @@
   async function loadApp() {
     const [appRes] = await Promise.all([
       api.getApp(slug),
-      loadRequests(),
       loadServices(),
     ])
     if (appRes.error) { push('/'); return }
     app = appRes.data
-    editDomain = app?.Domain || ''
-    editAccessAllow = app?.Labels?.['simpledeploy.access.allow'] || ''
     loading = false
     if (app?.deploying) startPolling()
   }
 
+  async function loadServices() {
+    const res = await api.getAppServices(slug)
+    if (res.error) return
+    services = res.data || []
+  }
+
+  // --- Action handlers ---
+  async function handleRestart() {
+    actionLoading = 'restart'
+    const res = await api.restartApp(slug)
+    actionLoading = ''
+    showRestartModal = false
+    if (!res.error) {
+      app = { ...app, deploying: true }
+      actionModal = { show: true, action: 'Restarting' }
+      startPolling()
+    }
+  }
+
+  async function handleStop() {
+    actionLoading = 'stop'
+    await api.stopApp(slug)
+    actionLoading = ''
+    loadApp()
+  }
+
+  async function handleStart() {
+    actionLoading = 'start'
+    await api.startApp(slug)
+    actionLoading = ''
+    loadApp()
+  }
+
+  async function handlePull() {
+    actionLoading = 'pull'
+    const res = await api.pullApp(slug)
+    actionLoading = ''
+    if (!res.error) {
+      app = { ...app, deploying: true }
+      actionModal = { show: true, action: 'Pulling & Updating' }
+      startPolling()
+    }
+  }
+
+  async function cancelDeploy() {
+    await api.cancelDeploy(slug)
+    await loadApp()
+  }
+
+  async function handleScale() {
+    actionLoading = 'scale'
+    const scales = {}
+    for (const [svc, n] of Object.entries(scaleInputs)) {
+      scales[svc] = parseInt(n) || 1
+    }
+    await api.scaleApp(slug, scales)
+    actionLoading = ''
+    showScaleModal = false
+    loadApp()
+  }
+
+  function closeActionModal() {
+    actionModal = { show: false, action: '' }
+    loadApp()
+  }
+
+  // --- Metrics ---
   function formatBytes(bytes) {
     if (!bytes) return '0 B'
     const k = 1024
@@ -118,14 +174,12 @@
     const ids = Object.keys(containers).filter(id => id !== '')
     const single = ids.length <= 1
 
-    // extract(p) returns either a number (y value) or {y, extra} for metadata
     function toPoint(p, extracted) {
       if (extracted == null) return { x: new Date(p.t * 1000), y: null }
       if (typeof extracted === 'object') return { x: new Date(p.t * 1000), y: extracted.y, extra: extracted.extra }
       return { x: new Date(p.t * 1000), y: extracted }
     }
 
-    // Per-container series
     const perContainer = ids.map((id, i) => {
       const pts = containers[id]?.points || []
       return {
@@ -137,7 +191,6 @@
 
     if (single) return perContainer
 
-    // Combined "Total" line: sum y and extra values at each timestamp
     const byTs = new Map()
     for (const id of ids) {
       for (const p of (containers[id]?.points || [])) {
@@ -169,45 +222,64 @@
   }
 
   async function loadMetrics() {
-    const res = await api.appMetrics(slug, metricsRange)
-    const data = res.data
-    if (!data?.containers) return
+    const [metRes, reqRes] = await Promise.all([
+      api.appMetrics(slug, metricsRange),
+      api.appRequests(slug, metricsRange),
+    ])
 
-    const interval = data.interval || 10
-    metricsInterval = interval
-    const c = data.containers
+    // Resource metrics
+    const data = metRes.data
+    if (data?.containers) {
+      const interval = data.interval || 10
+      metricsInterval = interval
+      const c = data.containers
 
-    // Track container IDs for visibility toggles
-    const ids = Object.keys(c).filter(id => id !== '')
-    const hasMultiple = ids.length > 1
-    const labels = hasMultiple ? ['Total', ...ids.map(id => id)] : ids.map(id => id)
-    containerIds = labels
-    // Preserve existing visibility; default all visible
-    if (visibleContainers.size === 0 || ![...visibleContainers].some(v => labels.includes(v))) {
-      visibleContainers = new Set(labels)
+      const ids = Object.keys(c).filter(id => id !== '')
+      const hasMultiple = ids.length > 1
+      const labels = hasMultiple ? ['Total', ...ids] : [...ids]
+      containerIds = labels
+      if (visibleContainers.size === 0 || ![...visibleContainers].some(v => labels.includes(v))) {
+        visibleContainers = new Set(labels)
+      }
+
+      cpuDatasets = buildContainerDatasets(c, p => p.c ?? null, '#3b82f6')
+      memDatasets = buildContainerDatasets(c, p => {
+        if (!p.ml) return null
+        return { y: ((p.m || 0) / p.ml) * 100, extra: p.m || 0 }
+      }, '#22c55e')
+      netRxDatasets = buildContainerDatasets(c, p => p.nr ?? null, '#eab308')
+      netTxDatasets = buildContainerDatasets(c, p => p.nt ?? null, '#a78bfa')
+      diskReadDatasets = buildContainerDatasets(c, p => p.dr ?? null, '#fb923c')
+      diskWriteDatasets = buildContainerDatasets(c, p => p.dw ?? null, '#ef4444')
+
+      const latestTs = Math.max(...ids.flatMap(id => (c[id]?.points || []).map(p => p.t)))
+      let totalMem = 0, totalLimit = 0
+      for (const id of ids) {
+        const pts = c[id]?.points || []
+        const latest = pts.filter(p => p.t === latestTs && p.c != null).pop()
+        if (latest) { totalMem += latest.m || 0; totalLimit = Math.max(totalLimit, latest.ml || 0) }
+      }
+      memSummary = totalLimit ? `${formatBytes(totalMem)} / ${formatBytes(totalLimit)}` : ''
     }
 
-    cpuDatasets = buildContainerDatasets(c, p => p.c ?? null, '#3b82f6')
-    memDatasets = buildContainerDatasets(c, p => {
-      if (!p.ml) return null
-      return { y: ((p.m || 0) / p.ml) * 100, extra: p.m || 0 }
-    }, '#22c55e')
-    netRxDatasets = buildContainerDatasets(c, p => p.nr ?? null, '#eab308')
-    netTxDatasets = buildContainerDatasets(c, p => p.nt ?? null, '#a78bfa')
-    diskReadDatasets = buildContainerDatasets(c, p => p.dr ?? null, '#fb923c')
-    diskWriteDatasets = buildContainerDatasets(c, p => p.dw ?? null, '#ef4444')
-
-    loadRequests()
-
-    // mem summary: sum bytes across containers at latest timestamp
-    const latestTs = Math.max(...ids.flatMap(id => (c[id]?.points || []).map(p => p.t)))
-    let totalMem = 0, totalLimit = 0
-    for (const id of ids) {
-      const pts = c[id]?.points || []
-      const latest = pts.filter(p => p.t === latestTs && p.c != null).pop()
-      if (latest) { totalMem += latest.m || 0; totalLimit = Math.max(totalLimit, latest.ml || 0) }
+    // Request metrics
+    const reqData = reqRes.data
+    if (reqData?.points) {
+      const points = reqData.points
+      const interval = reqData.interval || 10
+      requestsPerSecDatasets = [{
+        label: 'Requests/s', color: '#3b82f6',
+        data: points.map(p => ({ x: new Date(p.t * 1000), y: p.n != null ? p.n / interval : null }))
+      }]
+      errorRateDatasets = [{
+        label: 'Error Rate', color: '#ef4444',
+        data: points.map(p => ({ x: new Date(p.t * 1000), y: (p.n != null && p.n > 0) ? (p.e / p.n) * 100 : null }))
+      }]
+      latencyDatasets = [{
+        label: 'Avg Latency', color: '#a78bfa',
+        data: points.map(p => ({ x: new Date(p.t * 1000), y: p.al ?? null }))
+      }]
     }
-    memSummary = totalLimit ? `${formatBytes(totalMem)} / ${formatBytes(totalLimit)}` : ''
   }
 
   function toggleContainer(label) {
@@ -221,143 +293,8 @@
     return ds.filter(d => visibleContainers.has(d.label))
   }
 
-  async function loadServices() {
-    const res = await api.getAppServices(slug)
-    if (res.error) return
-    services = res.data || []
-  }
-
-  async function loadRequests() {
-    const res = await api.appRequests(slug, metricsRange)
-    if (res.error) return
-    requestStats = res.data
-    const points = res.data?.points || []
-    const interval = res.data?.interval || 10
-    requestsPerSecDatasets = [{
-      label: 'Requests/s',
-      color: '#3b82f6',
-      data: points.map(p => ({ x: new Date(p.t * 1000), y: p.n != null ? p.n / interval : null }))
-    }]
-    errorRateDatasets = [{
-      label: 'Error Rate',
-      color: '#ef4444',
-      data: points.map(p => ({ x: new Date(p.t * 1000), y: (p.n != null && p.n > 0) ? (p.e / p.n) * 100 : null }))
-    }]
-    latencyDatasets = [{
-      label: 'Avg Latency',
-      color: '#a78bfa',
-      data: points.map(p => ({ x: new Date(p.t * 1000), y: p.al ?? null }))
-    }]
-  }
-
-  async function loadBackups() {
-    const [cRes, rRes] = await Promise.all([
-      api.listBackupConfigs(slug),
-      api.listBackupRuns(slug),
-    ])
-    backupConfigs = cRes.data || []
-    backupRuns = rRes.data || []
-  }
-
-  async function handleRemove() {
-    removing = true
-    const res = await api.removeApp(slug)
-    removing = false
-    showDeleteModal = false
-    if (!res.error) push('/')
-  }
-
-  async function createBackupConfig() {
-    const res = await api.createBackupConfig(slug, {
-      strategy: bStrategy, target: bTarget,
-      cron_expr: bCron, retention_days: bRetention,
-    })
-    if (!res.error) { showBackupForm = false; loadBackups() }
-  }
-
-  async function deleteBackupConfig(id) {
-    await api.deleteBackupConfig(id)
-    loadBackups()
-  }
-
-  async function triggerBackup() {
-    await api.triggerBackup(slug)
-    loadBackups()
-  }
-
-  async function confirmRestore() {
-    if (!restoreTarget) return
-    await api.restore(restoreTarget)
-    restoreTarget = null
-    loadBackups()
-  }
-
-  async function handleRestart() {
-    actionLoading = 'restart'
-    const res = await api.restartApp(slug)
-    actionLoading = ''
-    showRestartModal = false
-    if (!res.error) {
-      app = { ...app, deploying: true }
-      startPolling()
-    }
-  }
-
-  async function handleStop() {
-    actionLoading = 'stop'
-    await api.stopApp(slug)
-    actionLoading = ''
-    loadApp()
-  }
-
-  async function handleStart() {
-    actionLoading = 'start'
-    await api.startApp(slug)
-    actionLoading = ''
-    loadApp()
-  }
-
-  async function handlePull() {
-    actionLoading = 'pull'
-    const res = await api.pullApp(slug)
-    actionLoading = ''
-    if (!res.error) {
-      app = { ...app, deploying: true }
-      activeTab = 'events'
-      startPolling()
-    }
-  }
-
-  async function cancelDeploy() {
-    await api.cancelDeploy(slug)
-    await loadApp()
-  }
-
-  async function handleScale() {
-    actionLoading = 'scale'
-    const scales = {}
-    for (const [svc, n] of Object.entries(scaleInputs)) {
-      scales[svc] = parseInt(n) || 1
-    }
-    await api.scaleApp(slug, scales)
-    actionLoading = ''
-    showScaleModal = false
-    loadApp()
-  }
-
-  async function saveDomain() {
-    const { error } = await api.updateDomain(slug, editDomain)
-    if (!error) await loadApp()
-  }
-
-  async function saveAccessAllow() {
-    const { error } = await api.updateAccess(slug, editAccessAllow)
-    if (!error) await loadApp()
-  }
-
   $effect(() => {
     if (activeTab === 'metrics') loadMetrics()
-    if (activeTab === 'backups') loadBackups()
   })
 </script>
 
@@ -372,13 +309,16 @@
     <div class="mb-8">
       <a href="#/" class="text-sm text-text-muted hover:text-text-primary inline-flex items-center gap-1.5 mb-3 transition-colors">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>
-        Dashboard
+        Apps
       </a>
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div class="flex items-center gap-3">
-          <span class="w-3 h-3 rounded-full ring-2 ring-surface-0 {app.Status === 'running' ? 'bg-success' : app.Status === 'degraded' ? 'bg-warning' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="w-3 h-3 rounded-full ring-2 ring-surface-0 shrink-0 {app.Status === 'running' ? 'bg-success' : app.Status === 'degraded' ? 'bg-warning' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
           <h1 class="text-2xl font-semibold text-text-primary tracking-tight">{app.Name}</h1>
           <Badge variant={app.Status === 'running' ? 'success' : app.Status === 'degraded' ? 'warning' : app.Status === 'error' ? 'danger' : 'default'}>{app.Status}</Badge>
+          {#each displayLabels as label}
+            <span class="px-2 py-0.5 text-[11px] rounded-md bg-surface-3/60 text-text-secondary">{label}</span>
+          {/each}
         </div>
         <div class="flex flex-wrap items-center gap-2">
           {#if app.Status === 'running' || app.Status === 'degraded'}
@@ -387,17 +327,24 @@
           {:else if app.Status === 'stopped'}
             <Button variant="primary" size="sm" onclick={handleStart} loading={actionLoading === 'start'}>Start</Button>
           {/if}
-          <Button variant="secondary" size="sm" onclick={handlePull} loading={actionLoading === 'pull'}>Pull &amp; Update</Button>
-          <Button variant="secondary" size="sm" onclick={() => { scaleInputs = {}; showScaleModal = true }}>Scale</Button>
-          {#if app?.deploying}
-            <button
-              onclick={cancelDeploy}
-              class="px-3 py-1.5 text-xs rounded-lg bg-danger text-white hover:bg-danger/90 transition-colors"
-            >
-              Cancel Deploy
-            </button>
-          {/if}
-          <Button variant="danger" size="sm" onclick={() => showDeleteModal = true}>Delete</Button>
+          <Button variant="secondary" size="sm" onclick={handlePull} loading={actionLoading === 'pull'}>Pull & Update</Button>
+          <!-- More dropdown -->
+          <div class="relative">
+            <Button variant="ghost" size="sm" onclick={() => showMoreMenu = !showMoreMenu}>
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+              </svg>
+            </Button>
+            {#if showMoreMenu}
+              <button class="fixed inset-0 z-10" onclick={() => showMoreMenu = false} aria-label="Close menu"></button>
+              <div class="absolute right-0 top-full mt-1 bg-surface-2 border border-border/50 rounded-lg shadow-xl py-1 min-w-36 z-20">
+                <button onclick={() => { scaleInputs = {}; showScaleModal = true; showMoreMenu = false }} class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors">Scale</button>
+                {#if app?.deploying}
+                  <button onclick={() => { cancelDeploy(); showMoreMenu = false }} class="w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover transition-colors">Cancel Deploy</button>
+                {/if}
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
       {#if app.Domain}
@@ -420,118 +367,10 @@
 
     <!-- Tab Content -->
     {#if activeTab === 'overview'}
-      <!-- Stats -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total Requests" value={requestStats?.total ?? 0} />
-        <StatCard label="Avg Latency" value="{requestStats?.avg_latency_ms?.toFixed(1) ?? '0'}ms" />
-        <StatCard label="Error Rate" value="{requestStats?.error_rate?.toFixed(1) ?? '0'}%"
-          color={parseFloat(requestStats?.error_rate || 0) > 5 ? 'text-danger' : 'text-success'} />
-        <StatCard label="Status" value={app.Status} color={app.Status === 'running' ? 'text-success' : app.Status === 'degraded' ? 'text-warning' : 'text-danger'} />
-      </div>
-
-      <!-- Details -->
-      <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-        <h3 class="text-sm font-medium text-text-primary mb-4">Details</h3>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-          <div>
-            <span class="text-xs text-text-muted font-medium">Slug</span>
-            <p class="text-text-primary mt-0.5">{app.Slug}</p>
-          </div>
-          <div>
-            <span class="text-xs text-text-muted font-medium">Status</span>
-            <p class="text-text-primary mt-0.5 capitalize">{app.Status}</p>
-          </div>
-          <div>
-            <span class="text-xs text-text-muted font-medium">Domain</span>
-            <div class="flex items-center gap-2 mt-1">
-              <input
-                bind:value={editDomain}
-                placeholder="example.com"
-                class="px-2 py-1 text-sm bg-surface-0 border border-border/50 rounded-lg font-mono focus:outline-none focus:border-accent w-64"
-              />
-              {#if editDomain !== (app?.Domain || '')}
-                <button
-                  onclick={saveDomain}
-                  class="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent/90 transition-colors"
-                >
-                  Save
-                </button>
-              {/if}
-            </div>
-          </div>
-          <div>
-            <span class="text-xs text-text-muted font-medium">IP Allowlist</span>
-            <div class="flex items-center gap-2 mt-1">
-              <input
-                bind:value={editAccessAllow}
-                placeholder="e.g. 10.0.0.0/8, 192.168.1.5"
-                class="px-2 py-1 text-sm bg-surface-0 border border-border/50 rounded-lg font-mono focus:outline-none focus:border-accent w-80"
-              />
-              {#if editAccessAllow !== (app?.Labels?.['simpledeploy.access.allow'] || '')}
-                <button
-                  onclick={saveAccessAllow}
-                  class="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent/90 transition-colors"
-                >
-                  Save
-                </button>
-              {/if}
-            </div>
-            <p class="text-xs text-text-muted mt-1">
-              {#if editAccessAllow}
-                Only these IPs/CIDRs can access this app
-              {:else}
-                All traffic allowed (no restriction)
-              {/if}
-            </p>
-          </div>
-          {#if app.ComposeFile}
-            <div>
-              <span class="text-xs text-text-muted font-medium">Compose File</span>
-              <p class="text-text-primary mt-0.5 font-mono text-xs">{app.ComposeFile}</p>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Labels -->
-      {#if app.Labels && Object.keys(app.Labels).length > 0}
-        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-          <h3 class="text-sm font-medium text-text-primary mb-4">Labels</h3>
-          <div class="flex flex-col gap-1">
-            {#each Object.entries(app.Labels) as [key, val]}
-              <div class="flex gap-2 text-xs px-2 py-1.5 bg-surface-1 rounded-lg">
-                <span class="text-text-secondary min-w-48 break-all">{key}</span>
-                <span class="text-text-primary break-all">{val}</span>
-              </div>
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      {#if services.length > 0}
-        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-          <h3 class="text-sm font-medium text-text-primary mb-4">Services</h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {#each services as svc}
-              <div class="flex items-center justify-between bg-surface-1 rounded-lg px-4 py-3">
-                <span class="text-sm text-text-primary font-mono">{svc.service}</span>
-                <div class="flex items-center gap-2">
-                  <Badge variant={svc.state === 'running' ? 'success' : svc.state === 'exited' ? 'danger' : 'warning'}>{svc.state}</Badge>
-                  {#if svc.health}
-                    <Badge variant={svc.health === 'healthy' ? 'success' : svc.health === 'unhealthy' ? 'danger' : 'info'}>{svc.health}</Badge>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        </div>
-      {/if}
+      <OverviewTab {slug} {app} {services} onSwitchTab={(tab) => activeTab = tab} />
 
     {:else if activeTab === 'logs'}
       <LogViewer {slug} />
-
-    {:else if activeTab === 'events'}
-      <EventsTab {slug} deploying={app?.deploying} />
 
     {:else if activeTab === 'metrics'}
       <div class="flex flex-wrap items-center gap-3 mb-4">
@@ -581,131 +420,37 @@
           tooltipFormat={(i, v) => `${formatBytes(v)}/s`} />
       </div>
 
-    {:else if activeTab === 'backups'}
-      <!-- Backup Configs -->
-      <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-medium text-text-primary">Backup Configs</h3>
-          <div class="flex gap-2">
-            <Button size="sm" onclick={triggerBackup}>Run Now</Button>
-            <Button size="sm" variant="secondary" onclick={() => showBackupForm = !showBackupForm}>
-              {showBackupForm ? 'Cancel' : 'New Config'}
-            </Button>
+    {:else if activeTab === 'settings'}
+      <SettingsTab {slug} {app} onAppUpdated={loadApp} />
+    {/if}
+
+    <!-- Action Modal -->
+    <ActionModal {slug} action={actionModal.action} show={actionModal.show} onclose={closeActionModal} />
+
+    <!-- Restart confirmation -->
+    {#if showRestartModal}
+      <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+        <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={() => showRestartModal = false} aria-label="Close"></button>
+        <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md shadow-2xl animate-scale-in">
+          <h3 class="text-lg font-semibold text-text-primary tracking-tight mb-2">Restart App</h3>
+          <p class="text-sm text-text-secondary mb-5">This will force-recreate all containers for {app.Name}. Continue?</p>
+          <div class="flex justify-end gap-2">
+            <button onclick={() => showRestartModal = false} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>
+            <Button onclick={handleRestart} loading={actionLoading === 'restart'}>Restart</Button>
           </div>
         </div>
-
-        {#if showBackupForm}
-          <form onsubmit={(e) => { e.preventDefault(); createBackupConfig() }} class="bg-surface-1 rounded-md p-4 mb-4 grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs text-text-muted mb-2">Strategy</label>
-              <select bind:value={bStrategy} class="w-full px-2 py-1.5 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
-                <option>postgres</option><option>volume</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs text-text-muted mb-2">Target</label>
-              <select bind:value={bTarget} class="w-full px-2 py-1.5 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
-                <option>s3</option><option>local</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs text-text-muted mb-2">Cron Schedule</label>
-              <input bind:value={bCron} class="w-full px-2 py-1.5 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary" />
-            </div>
-            <div>
-              <label class="block text-xs text-text-muted mb-2">Retention (days)</label>
-              <input type="number" bind:value={bRetention} class="w-full px-2 py-1.5 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary" />
-            </div>
-            <div class="col-span-2 flex justify-end">
-              <Button type="submit" size="sm">Create</Button>
-            </div>
-          </form>
-        {/if}
-
-        {#if backupConfigs.length === 0}
-          <p class="text-xs text-text-secondary">No backup configs.</p>
-        {:else}
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead><tr class="border-b border-border/50">
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Strategy</th>
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Target</th>
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Schedule</th>
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Retention</th>
-                <th class="py-3 px-4"></th>
-              </tr></thead>
-              <tbody class="divide-y divide-border/30">
-                {#each backupConfigs as c}
-                  <tr class="hover:bg-surface-hover">
-                    <td class="py-3 px-4">{c.strategy}</td>
-                    <td class="py-3 px-4">{c.target}</td>
-                    <td class="py-3 px-4 font-mono text-xs">{c.cron_expr}</td>
-                    <td class="py-3 px-4">{c.retention_days}d</td>
-                    <td class="py-3 px-4"><Button variant="danger" size="sm" onclick={() => deleteBackupConfig(c.id)}>Delete</Button></td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
       </div>
-
-      <!-- Backup Runs -->
-      <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-        <h3 class="text-sm font-medium text-text-primary mb-4">Backup Runs</h3>
-        {#if backupRuns.length === 0}
-          <p class="text-xs text-text-secondary">No backup runs.</p>
-        {:else}
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead><tr class="border-b border-border/50">
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">ID</th>
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Status</th>
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Started</th>
-                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Finished</th>
-                <th class="py-3 px-4"></th>
-              </tr></thead>
-              <tbody class="divide-y divide-border/30">
-                {#each backupRuns as r}
-                  <tr class="hover:bg-surface-hover">
-                    <td class="py-3 px-4">{r.id}</td>
-                    <td class="py-3 px-4"><Badge variant={r.status === 'completed' ? 'success' : 'danger'}>{r.status}</Badge></td>
-                    <td class="py-3 px-4">{r.started_at ? new Date(r.started_at).toLocaleString() : '-'}</td>
-                    <td class="py-3 px-4">{r.finished_at ? new Date(r.finished_at).toLocaleString() : '-'}</td>
-                    <td class="py-3 px-4"><Button variant="secondary" size="sm" onclick={() => restoreTarget = r.id}>Restore</Button></td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-      </div>
-    {:else if activeTab === 'config'}
-      <ConfigTab {slug} />
-    {:else if activeTab === 'environment'}
-      <EnvEditor {slug} />
     {/if}
 
-    {#if showDeleteModal}
-      <Modal title="Delete App" message="This will remove {app.Name} and all its data. Are you sure?" onConfirm={handleRemove} onCancel={() => showDeleteModal = false} />
-    {/if}
-
-    {#if restoreTarget}
-      <Modal title="Confirm Restore" message="This will restore the backup. Are you sure?" onConfirm={confirmRestore} onCancel={() => restoreTarget = null} />
-    {/if}
-
-    {#if showRestartModal}
-      <Modal title="Restart App" message="This will force-recreate all containers for {app.Name}. Continue?" onConfirm={handleRestart} onCancel={() => showRestartModal = false} />
-    {/if}
-
+    <!-- Scale modal -->
     {#if showScaleModal}
       <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
         <button class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick={() => showScaleModal = false} aria-label="Close"></button>
         <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md shadow-2xl animate-scale-in">
           <h3 class="text-lg font-semibold tracking-tight text-text-primary mb-4">Scale Services</h3>
           <div class="space-y-3 mb-5">
-            {#each app.Services || ['web'] as svc}
-              {@const name = typeof svc === 'string' ? svc : svc.Name || svc}
+            {#each services.length ? services : [{ service: 'web' }] as svc}
+              {@const name = svc.service || 'web'}
               <div class="flex items-center gap-3">
                 <label class="text-sm text-text-secondary w-24">{name}</label>
                 <input

@@ -66,9 +66,9 @@
 
 </script>
 
-{#if show}
-  <svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} />
 
+{#if show}
   <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
     <button
       class="absolute inset-0 bg-black/50 backdrop-blur-sm"
