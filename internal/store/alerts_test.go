@@ -215,7 +215,7 @@ func TestAlertHistoryCreateAndResolve(t *testing.T) {
 		t.Fatalf("CreateAlertRule: %v", err)
 	}
 
-	h, err := s.CreateAlertHistory(rule.ID, 1500000)
+	h, err := s.CreateAlertHistory(rule.ID, 1500000, rule)
 	if err != nil {
 		t.Fatalf("CreateAlertHistory: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestGetActiveAlert(t *testing.T) {
 		t.Fatal("expected nil active alert before any history")
 	}
 
-	h, err := s.CreateAlertHistory(rule.ID, 95.0)
+	h, err := s.CreateAlertHistory(rule.ID, 95.0, rule)
 	if err != nil {
 		t.Fatalf("CreateAlertHistory: %v", err)
 	}

@@ -35,6 +35,10 @@ type AlertHistory struct {
 	FiredAt    time.Time  `json:"fired_at"`
 	ResolvedAt *time.Time `json:"resolved_at"`
 	Value      float64    `json:"value"`
+	Metric     string     `json:"metric"`
+	AppSlug    string     `json:"app_slug"`
+	Operator   string     `json:"operator"`
+	Threshold  float64    `json:"threshold"`
 }
 
 func (s *Store) CreateWebhook(w *Webhook) error {
@@ -272,18 +276,30 @@ func (s *Store) DeleteAlertRule(id int64) error {
 	return nil
 }
 
-func (s *Store) CreateAlertHistory(ruleID int64, value float64) (*AlertHistory, error) {
+func (s *Store) CreateAlertHistory(ruleID int64, value float64, rule *AlertRule) (*AlertHistory, error) {
 	var h AlertHistory
 	h.RuleID = ruleID
 	h.Value = value
+	var metric, appSlug, operator string
+	var threshold float64
+	if rule != nil {
+		metric = rule.Metric
+		appSlug = rule.AppSlug
+		operator = rule.Operator
+		threshold = rule.Threshold
+	}
 	err := s.db.QueryRow(`
-		INSERT INTO alert_history (rule_id, value)
-		VALUES (?, ?)
+		INSERT INTO alert_history (rule_id, value, metric, app_slug, operator, threshold)
+		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id, fired_at
-	`, ruleID, value).Scan(&h.ID, &h.FiredAt)
+	`, ruleID, value, metric, appSlug, operator, threshold).Scan(&h.ID, &h.FiredAt)
 	if err != nil {
 		return nil, fmt.Errorf("create alert history: %w", err)
 	}
+	h.Metric = metric
+	h.AppSlug = appSlug
+	h.Operator = operator
+	h.Threshold = threshold
 	return &h, nil
 }
 
@@ -335,15 +351,14 @@ func (s *Store) GetActiveAlert(ruleID int64) (*AlertHistory, error) {
 func (s *Store) ListAlertHistory(ruleID *int64, limit int) ([]AlertHistory, error) {
 	var rows *sql.Rows
 	var err error
+	const cols = `id, rule_id, fired_at, resolved_at, value, metric, app_slug, operator, threshold`
 	if ruleID == nil {
 		rows, err = s.db.Query(`
-			SELECT id, rule_id, fired_at, resolved_at, value
-			FROM alert_history ORDER BY fired_at DESC LIMIT ?
+			SELECT `+cols+` FROM alert_history ORDER BY fired_at DESC LIMIT ?
 		`, limit)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, rule_id, fired_at, resolved_at, value
-			FROM alert_history WHERE rule_id = ? ORDER BY fired_at DESC LIMIT ?
+			SELECT `+cols+` FROM alert_history WHERE rule_id = ? ORDER BY fired_at DESC LIMIT ?
 		`, *ruleID, limit)
 	}
 	if err != nil {
@@ -355,7 +370,7 @@ func (s *Store) ListAlertHistory(ruleID *int64, limit int) ([]AlertHistory, erro
 	for rows.Next() {
 		var h AlertHistory
 		var resolvedAt sql.NullTime
-		if err := rows.Scan(&h.ID, &h.RuleID, &h.FiredAt, &resolvedAt, &h.Value); err != nil {
+		if err := rows.Scan(&h.ID, &h.RuleID, &h.FiredAt, &resolvedAt, &h.Value, &h.Metric, &h.AppSlug, &h.Operator, &h.Threshold); err != nil {
 			return nil, fmt.Errorf("scan alert history: %w", err)
 		}
 		if resolvedAt.Valid {

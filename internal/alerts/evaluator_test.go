@@ -40,7 +40,7 @@ func (m *mockAlertStore) GetActiveAlert(ruleID int64) (*store.AlertHistory, erro
 	return m.activeAlerts[ruleID], nil
 }
 
-func (m *mockAlertStore) CreateAlertHistory(ruleID int64, value float64) (*store.AlertHistory, error) {
+func (m *mockAlertStore) CreateAlertHistory(ruleID int64, value float64, rule *store.AlertRule) (*store.AlertHistory, error) {
 	h := &store.AlertHistory{
 		ID:      m.nextHistoryID,
 		RuleID:  ruleID,

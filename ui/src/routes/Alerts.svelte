@@ -135,11 +135,6 @@
     return value.toFixed(1)
   }
 
-  function ruleMetric(ruleId) {
-    const r = rules.find(r => r.id === ruleId)
-    return r ? r.metric : null
-  }
-
   function ruleName(r) {
     const metric = metricLabels[r.metric] || r.metric
     const threshold = formatMetricValue(r.metric, r.threshold)
@@ -147,10 +142,17 @@
     return `${metric} ${r.operator} ${threshold} - ${app}`
   }
 
-  function ruleInfo(ruleId) {
-    const r = rules.find(r => r.id === ruleId)
-    if (!r) return `Rule #${ruleId}`
-    return ruleName(r)
+  function historyName(h) {
+    if (h.metric) return ruleName(h)
+    const r = rules.find(r => r.id === h.rule_id)
+    if (r) return ruleName(r)
+    return `Rule #${h.rule_id}`
+  }
+
+  function historyMetric(h) {
+    if (h.metric) return h.metric
+    const r = rules.find(r => r.id === h.rule_id)
+    return r ? r.metric : null
   }
 
   function formatDuration(secs) {
@@ -439,8 +441,8 @@
             <tbody class="divide-y divide-border/30">
               {#each filteredHistory as h}
                 <tr class="hover:bg-surface-hover">
-                  <td class="py-3 px-4 text-text-primary text-xs">{ruleInfo(h.rule_id)}</td>
-                  <td class="py-3 px-4 font-mono text-xs">{formatMetricValue(ruleMetric(h.rule_id), h.value)}</td>
+                  <td class="py-3 px-4 text-text-primary text-xs">{historyName(h)}</td>
+                  <td class="py-3 px-4 font-mono text-xs">{formatMetricValue(historyMetric(h), h.value)}</td>
                   <td class="py-3 px-4" title={h.fired_at ? new Date(h.fired_at).toLocaleString() : ''}>{timeAgo(h.fired_at)}</td>
                   <td class="py-3 px-4" title={h.resolved_at ? new Date(h.resolved_at).toLocaleString() : ''}>{h.resolved_at ? timeAgo(h.resolved_at) : '-'}</td>
                   <td class="py-3 px-4">

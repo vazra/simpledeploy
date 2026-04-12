@@ -17,7 +17,7 @@ type MetricQuerier interface {
 type AlertStoreReader interface {
 	ListActiveAlertRules() ([]store.AlertRule, error)
 	GetActiveAlert(ruleID int64) (*store.AlertHistory, error)
-	CreateAlertHistory(ruleID int64, value float64) (*store.AlertHistory, error)
+	CreateAlertHistory(ruleID int64, value float64, rule *store.AlertRule) (*store.AlertHistory, error)
 	ResolveAlert(historyID int64) error
 	GetWebhook(id int64) (*store.Webhook, error)
 }
@@ -102,6 +102,11 @@ func (e *Evaluator) EvaluateOnce(ctx context.Context) error {
 
 		if allSatisfy && active == nil {
 			// fire
+			if rule.AppID != nil {
+				if app, err := e.appLookup.GetAppByID(*rule.AppID); err == nil {
+					rule.AppSlug = app.Slug
+				}
+			}
 			wh, err := e.store.GetWebhook(rule.WebhookID)
 			if err != nil {
 				log.Printf("evaluator: get webhook rule %d: %v", rule.ID, err)
@@ -111,7 +116,7 @@ func (e *Evaluator) EvaluateOnce(ctx context.Context) error {
 			if err := e.dispatcher.Send(*wh, event); err != nil {
 				log.Printf("evaluator: send webhook rule %d: %v", rule.ID, err)
 			}
-			if _, err := e.store.CreateAlertHistory(rule.ID, avg); err != nil {
+			if _, err := e.store.CreateAlertHistory(rule.ID, avg, &rule); err != nil {
 				log.Printf("evaluator: create history rule %d: %v", rule.ID, err)
 			}
 		} else if !allSatisfy && active != nil {

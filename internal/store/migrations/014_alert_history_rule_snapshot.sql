@@ -1,0 +1,4 @@
+ALTER TABLE alert_history ADD COLUMN metric TEXT NOT NULL DEFAULT '';
+ALTER TABLE alert_history ADD COLUMN app_slug TEXT NOT NULL DEFAULT '';
+ALTER TABLE alert_history ADD COLUMN operator TEXT NOT NULL DEFAULT '';
+ALTER TABLE alert_history ADD COLUMN threshold REAL NOT NULL DEFAULT 0;

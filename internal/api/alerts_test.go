@@ -292,7 +292,7 @@ func TestListAlertHistory(t *testing.T) {
 	if err := st.CreateAlertRule(rule); err != nil {
 		t.Fatalf("create rule: %v", err)
 	}
-	if _, err := st.CreateAlertHistory(rule.ID, 95.5); err != nil {
+	if _, err := st.CreateAlertHistory(rule.ID, 95.5, rule); err != nil {
 		t.Fatalf("create history: %v", err)
 	}
 

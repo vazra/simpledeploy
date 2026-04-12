@@ -163,13 +163,18 @@
 
   const metricNames = { cpu_pct: 'CPU Usage', mem_pct: 'Memory %', mem_bytes: 'Memory Used' }
 
-  function ruleLabel(ruleId) {
-    const r = alertRules.find(r => r.id === ruleId)
-    if (!r) return `Rule #${ruleId}`
+  function ruleLabelFromObj(r) {
     const metric = metricNames[r.metric] || r.metric
     const threshold = alertFormatValue(r.metric, r.threshold)
     const app = r.app_slug || 'All Apps'
     return `${metric} ${r.operator} ${threshold} - ${app}`
+  }
+
+  function historyLabel(h) {
+    if (h.metric) return ruleLabelFromObj(h)
+    const r = alertRules.find(r => r.id === h.rule_id)
+    if (r) return ruleLabelFromObj(r)
+    return `Rule #${h.rule_id}`
   }
 
   function alertFormatValue(metric, value) {
@@ -184,8 +189,8 @@
   }
 
   function alertTriggerValue(h) {
-    const r = alertRules.find(r => r.id === h.rule_id)
-    return r ? alertFormatValue(r.metric, h.value) : h.value?.toFixed(1) ?? '-'
+    const metric = h.metric || alertRules.find(r => r.id === h.rule_id)?.metric
+    return metric ? alertFormatValue(metric, h.value) : h.value?.toFixed(1) ?? '-'
   }
 
   function timeAgo(ts) {
@@ -369,7 +374,7 @@
               {#each activeAlerts.slice(0, 5) as alert}
                 <a href="#/alerts" class="flex flex-col gap-1 rounded-lg bg-danger/5 border border-danger/10 px-3 py-2 hover:bg-danger/10 transition-colors">
                   <div class="flex items-center justify-between">
-                    <span class="text-xs font-medium text-text-primary">{ruleLabel(alert.rule_id)}</span>
+                    <span class="text-xs font-medium text-text-primary">{historyLabel(alert)}</span>
                     <span class="text-xs text-text-muted">{timeAgo(alert.fired_at)}</span>
                   </div>
                   <span class="text-xs text-text-secondary">Current: {alertTriggerValue(alert)}</span>
@@ -414,7 +419,7 @@
               {#each (alertHistory || []).slice(0, 5) as h}
                 <div class="flex items-center gap-2 text-xs">
                   <span class="w-1.5 h-1.5 rounded-full shrink-0 {h.resolved_at ? 'bg-success' : 'bg-danger'}"></span>
-                  <span class="text-text-primary truncate" title={ruleLabel(h.rule_id)}>{ruleLabel(h.rule_id)}</span>
+                  <span class="text-text-primary truncate" title={historyLabel(h)}>{historyLabel(h)}</span>
                   <Badge variant={h.resolved_at ? 'success' : 'danger'}>{h.resolved_at ? 'Resolved' : 'Active'}</Badge>
                   <span class="text-text-muted ml-auto whitespace-nowrap" title={formatDate(h.fired_at)}>{timeAgo(h.fired_at)}</span>
                 </div>
