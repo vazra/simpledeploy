@@ -1,20 +1,41 @@
 <script>
   let { label = '', hint = '', rows = [], fields = [], onchange = () => {} } = $props()
 
+  // Local display rows include empties; we only emit non-empty to parent
+  let localRows = $state([])
+  let lastPropJson = $state('')
+
+  // Sync from prop when external data changes (not from our own edits)
+  $effect(() => {
+    const json = JSON.stringify(rows)
+    if (json !== lastPropJson) {
+      lastPropJson = json
+      // Preserve any trailing empty rows we added locally
+      const emptyTrailing = localRows.filter(r => fields.every(f => !r[f.key]))
+      localRows = [...rows, ...emptyTrailing]
+    }
+  })
+
   function addRow() {
     const empty = {}
     for (const f of fields) empty[f.key] = ''
-    onchange([...rows, empty])
+    localRows = [...localRows, empty]
   }
 
   function removeRow(i) {
-    const updated = rows.filter((_, idx) => idx !== i)
-    onchange(updated)
+    localRows = localRows.filter((_, idx) => idx !== i)
+    emit()
   }
 
   function updateRow(i, key, value) {
-    const updated = rows.map((r, idx) => idx === i ? { ...r, [key]: value } : r)
-    onchange(updated)
+    localRows = localRows.map((r, idx) => idx === i ? { ...r, [key]: value } : r)
+    emit()
+  }
+
+  function emit() {
+    const nonEmpty = localRows.filter(r => fields.some(f => r[f.key]))
+    lastPropJson = JSON.stringify(nonEmpty)
+    onchange(nonEmpty)
   }
 </script>
 
@@ -28,7 +49,7 @@
     </div>
   {/if}
 
-  {#each rows as row, i}
+  {#each localRows as row, i}
     <div class="flex items-center gap-2">
       {#each fields as field}
         <input
