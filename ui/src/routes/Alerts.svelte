@@ -246,12 +246,13 @@
   {:else}
     <!-- Webhooks -->
     <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-1">
         <h3 class="text-sm font-semibold text-text-primary">Webhooks</h3>
         <Button size="sm" variant="secondary" onclick={openWebhookCreate}>Add Webhook</Button>
       </div>
+      <p class="text-xs text-text-muted mb-3">Destinations where alert notifications are sent. Supports Slack, Discord, Telegram, or any custom HTTP endpoint.</p>
       {#if webhooks.length === 0}
-        <p class="text-sm text-text-muted">No webhooks configured.</p>
+        <p class="text-sm text-text-muted">No webhooks configured. Add one to start receiving alert notifications.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -280,12 +281,13 @@
 
     <!-- Alert Rules -->
     <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-1">
         <h3 class="text-sm font-semibold text-text-primary">Alert Rules</h3>
         <Button size="sm" variant="secondary" onclick={openRuleCreate}>Add Rule</Button>
       </div>
+      <p class="text-xs text-text-muted mb-3">Rules define when to trigger alerts. When a metric crosses the threshold for the specified duration, a notification is sent to the chosen webhook.</p>
       {#if rules.length === 0}
-        <p class="text-sm text-text-muted">No alert rules.</p>
+        <p class="text-sm text-text-muted">No alert rules. Create a rule to monitor your apps and get notified when something goes wrong.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -322,9 +324,10 @@
 
     <!-- Alert History -->
     <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-      <h3 class="text-sm font-semibold text-text-primary mb-3">Alert History</h3>
+      <h3 class="text-sm font-semibold text-text-primary mb-1">Alert History</h3>
+      <p class="text-xs text-text-muted mb-3">Log of all triggered alerts and their resolution status.</p>
       {#if history.length === 0}
-        <p class="text-sm text-text-muted">No alerts fired.</p>
+        <p class="text-sm text-text-muted">No alerts fired yet.</p>
       {:else}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
