@@ -149,7 +149,7 @@
   </div>
 
   {#if mode === 'visual'}
-    <VisualEditor {compose} onchange={(updated) => { compose = updated }} onerrors={(errs) => { hasValidationErrors = Object.keys(errs).length > 0 }} />
+    <VisualEditor {compose} {slug} onchange={(updated) => { compose = updated }} onerrors={(errs) => { hasValidationErrors = Object.keys(errs).length > 0 }} />
   {:else}
     <YamlEditor value={currentYaml} error={yamlError} onchange={(val) => {
       currentYaml = val

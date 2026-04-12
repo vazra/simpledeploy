@@ -1,11 +1,38 @@
 <script>
+  import { onMount } from 'svelte'
+  import { api } from '../lib/api.js'
   import AccordionSection from './AccordionSection.svelte'
   import RepeatableField from './RepeatableField.svelte'
 
-  let { compose = {}, onchange = () => {}, onerrors = () => {} } = $props()
+  let { compose = {}, slug = '', onchange = () => {}, onerrors = () => {} } = $props()
 
   // ---- Errors ----
   let errors = $state({})
+
+  // ---- .env file state ----
+  let envFileVars = $state([])
+  let envFileLoading = $state(false)
+  let envFileSaving = $state(false)
+  let envFileExpanded = $state(false)
+
+  onMount(async () => {
+    if (!slug) return
+    envFileLoading = true
+    try {
+      const res = await api.getEnv(slug)
+      envFileVars = res.data || []
+    } catch { /* no env file yet */ }
+    envFileLoading = false
+  })
+
+  async function saveEnvFile() {
+    if (!slug) return
+    envFileSaving = true
+    try {
+      await api.putEnv(slug, envFileVars)
+    } catch { /* toast handled by api */ }
+    envFileSaving = false
+  }
 
   // ---- Helpers ----
   function deepClone(obj) {
@@ -131,21 +158,30 @@
     return Object.keys(next).length ? next : undefined
   }
 
-  // ---- depends_on parsing ----
+  // ---- depends_on parsing (per-dependency conditions) ----
   function parseDependsOn(svc) {
     const raw = svc?.depends_on
-    if (!raw) return { services: [], condition: 'service_started' }
-    if (Array.isArray(raw)) return { services: raw, condition: 'service_started' }
+    if (!raw) return { services: [], conditions: {} }
+    if (Array.isArray(raw)) {
+      const conditions = {}
+      for (const s of raw) conditions[s] = 'service_started'
+      return { services: raw, conditions }
+    }
     const services = Object.keys(raw)
-    const condition = services.length ? (raw[services[0]]?.condition ?? 'service_started') : 'service_started'
-    return { services, condition }
+    const conditions = {}
+    for (const s of services) {
+      conditions[s] = raw[s]?.condition ?? 'service_started'
+    }
+    return { services, conditions }
   }
 
-  function serializeDependsOn(svcs, condition) {
+  function serializeDependsOn(svcs, conditions) {
     if (!svcs.length) return undefined
-    if (condition === 'service_started') return svcs
+    // If all conditions are service_started, use simple array format
+    const allDefault = svcs.every((s) => (conditions[s] || 'service_started') === 'service_started')
+    if (allDefault) return svcs
     const obj = {}
-    for (const s of svcs) obj[s] = { condition }
+    for (const s of svcs) obj[s] = { condition: conditions[s] || 'service_started' }
     return obj
   }
 
@@ -170,6 +206,49 @@
   function updateServiceDirect(name, setter) {
     const updated = deepClone(compose)
     setter(updated.services[name])
+    emitChange(updated)
+  }
+
+  // ---- Rename service ----
+  let editingServiceName = $state(null)
+  let editingNameValue = $state('')
+
+  function startRename(svcName) {
+    editingServiceName = svcName
+    editingNameValue = svcName
+  }
+
+  function commitRename(oldName) {
+    const newName = editingNameValue.trim()
+    editingServiceName = null
+    if (!newName || newName === oldName) return
+    if (compose.services?.[newName]) {
+      // duplicate name, abort
+      return
+    }
+    const updated = deepClone(compose)
+    // Rename the service key
+    const svcData = updated.services[oldName]
+    delete updated.services[oldName]
+    // Rebuild services preserving order
+    const newServices = {}
+    for (const [k, v] of Object.entries(compose.services)) {
+      if (k === oldName) newServices[newName] = svcData
+      else newServices[k] = updated.services[k] || v
+    }
+    updated.services = newServices
+    // Update depends_on references in other services
+    for (const [k, svc] of Object.entries(updated.services)) {
+      if (!svc.depends_on) continue
+      if (Array.isArray(svc.depends_on)) {
+        svc.depends_on = svc.depends_on.map((d) => d === oldName ? newName : d)
+      } else {
+        if (svc.depends_on[oldName]) {
+          svc.depends_on[newName] = svc.depends_on[oldName]
+          delete svc.depends_on[oldName]
+        }
+      }
+    }
     emitChange(updated)
   }
 
@@ -216,6 +295,49 @@
       obj[r.name] = r.driver ? { driver: r.driver } : {}
     }
     return Object.keys(obj).length ? obj : undefined
+  }
+
+  // ---- Env var .env helpers ----
+  function isEnvRef(value) {
+    return typeof value === 'string' && /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value)
+  }
+
+  function extractEnvRefKey(value) {
+    const m = value.match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/)
+    return m ? m[1] : null
+  }
+
+  function resolveEnvRef(value) {
+    const key = extractEnvRefKey(value)
+    if (!key) return null
+    const found = envFileVars.find((v) => v.key === key)
+    return found ? found.value : null
+  }
+
+  function moveToEnvFile(svcName, envName, envValue) {
+    // Add to envFileVars if not already there
+    const existing = envFileVars.find((v) => v.key === envName)
+    if (!existing) {
+      envFileVars = [...envFileVars, { key: envName, value: envValue }]
+    }
+    // Update compose env value to ${KEY}
+    updateServiceDirect(svcName, (s) => {
+      if (!s.environment) s.environment = {}
+      s.environment[envName] = `\${${envName}}`
+    })
+    // Auto-save .env
+    saveEnvFile()
+  }
+
+  function moveFromEnvFile(svcName, envName) {
+    // Find current value in .env
+    const found = envFileVars.find((v) => v.key === envName)
+    const val = found ? found.value : ''
+    // Update compose env value to the actual value
+    updateServiceDirect(svcName, (s) => {
+      if (!s.environment) s.environment = {}
+      s.environment[envName] = val
+    })
   }
 
   // ---- Validation ----
@@ -301,10 +423,10 @@
 
 <div class="space-y-3">
 
-  <!-- ======================== SECTION 1: SimpleDeploy Settings ======================== -->
-  <AccordionSection title="SimpleDeploy Settings" expanded={true}>
+  <!-- ======================== SECTION 1: Endpoint ======================== -->
+  <AccordionSection title="Endpoint" expanded={true}>
     {#if !firstService}
-      <p class="text-xs text-text-muted">Add a service to configure SimpleDeploy settings.</p>
+      <p class="text-xs text-text-muted">Add a service to configure endpoint settings.</p>
     {:else}
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
@@ -355,112 +477,9 @@
           <p class="text-xs text-text-muted mt-0.5">How to handle HTTPS</p>
         </div>
 
-        <!-- Rate Limit Requests -->
+        <!-- Metrics Tracking Paths -->
         <div>
-          <label class="block text-xs text-text-secondary mb-1">Rate Limit - Requests</label>
-          <input
-            type="number"
-            value={getLabel(firstService, 'ratelimit.requests')}
-            placeholder="100"
-            oninput={(e) => {
-              if (validateNonNeg(e.currentTarget.value, 'sd.rl.requests')) setLabel('ratelimit.requests', e.currentTarget.value)
-            }}
-            class={inputCls('sd.rl.requests')}
-          />
-          {#if errors['sd.rl.requests']}
-            <p class="text-xs text-danger mt-0.5">{errors['sd.rl.requests']}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-0.5">Max requests per window</p>
-          {/if}
-        </div>
-
-        <!-- Rate Limit Window -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Rate Limit - Window</label>
-          <input
-            type="text"
-            value={getLabel(firstService, 'ratelimit.window')}
-            placeholder="1m"
-            oninput={(e) => setLabel('ratelimit.window', e.currentTarget.value)}
-            class={inputCls('sd.rl.window')}
-          />
-          <p class="text-xs text-text-muted mt-0.5">Time window, e.g. 1m, 5m, 1h</p>
-        </div>
-
-        <!-- Rate Limit Burst -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Rate Limit - Burst</label>
-          <input
-            type="number"
-            value={getLabel(firstService, 'ratelimit.burst')}
-            placeholder="20"
-            oninput={(e) => {
-              if (validateNonNeg(e.currentTarget.value, 'sd.rl.burst')) setLabel('ratelimit.burst', e.currentTarget.value)
-            }}
-            class={inputCls('sd.rl.burst')}
-          />
-          {#if errors['sd.rl.burst']}
-            <p class="text-xs text-danger mt-0.5">{errors['sd.rl.burst']}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-0.5">Extra burst allowance above limit</p>
-          {/if}
-        </div>
-
-        <!-- Rate Limit By -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Rate Limit - By</label>
-          <select
-            value={getLabel(firstService, 'ratelimit.by') || 'ip'}
-            onchange={(e) => setLabel('ratelimit.by', e.currentTarget.value)}
-            class={inputCls('sd.rl.by')}
-          >
-            <option value="ip">ip</option>
-            <option value="header">header</option>
-          </select>
-          <p class="text-xs text-text-muted mt-0.5">What to rate limit by</p>
-        </div>
-
-        <!-- Alert CPU -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Alert CPU %</label>
-          <input
-            type="number"
-            value={getLabel(firstService, 'alert.cpu')}
-            placeholder="80"
-            oninput={(e) => {
-              if (validatePct(e.currentTarget.value, 'sd.alert.cpu')) setLabel('alert.cpu', e.currentTarget.value)
-            }}
-            class={inputCls('sd.alert.cpu')}
-          />
-          {#if errors['sd.alert.cpu']}
-            <p class="text-xs text-danger mt-0.5">{errors['sd.alert.cpu']}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-0.5">Alert when CPU exceeds this %</p>
-          {/if}
-        </div>
-
-        <!-- Alert Memory -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Alert Memory %</label>
-          <input
-            type="number"
-            value={getLabel(firstService, 'alert.memory')}
-            placeholder="80"
-            oninput={(e) => {
-              if (validatePct(e.currentTarget.value, 'sd.alert.mem')) setLabel('alert.memory', e.currentTarget.value)
-            }}
-            class={inputCls('sd.alert.mem')}
-          />
-          {#if errors['sd.alert.mem']}
-            <p class="text-xs text-danger mt-0.5">{errors['sd.alert.mem']}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-0.5">Alert when memory exceeds this %</p>
-          {/if}
-        </div>
-
-        <!-- Path Patterns -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Path Patterns</label>
+          <label class="block text-xs text-text-secondary mb-1">Metrics Tracking Paths</label>
           <input
             type="text"
             value={getLabel(firstService, 'paths')}
@@ -468,7 +487,7 @@
             oninput={(e) => setLabel('paths', e.currentTarget.value)}
             class={inputCls('sd.paths')}
           />
-          <p class="text-xs text-text-muted mt-0.5">URL paths to track, comma-separated</p>
+          <p class="text-xs text-text-muted mt-0.5">Track request metrics for these URL paths. Does not affect routing.</p>
         </div>
 
       </div>
@@ -478,14 +497,36 @@
   <!-- ======================== SECTION 2: Services ======================== -->
   <AccordionSection title="Services" expanded={true}>
     <div class="space-y-4">
-      {#each serviceNames as svcName (svcName)}
+      {#each serviceNames as svcName, svcIdx (svcName)}
         {@const svc = compose.services[svcName]}
         {@const depInfo = parseDependsOn(svc)}
         {@const otherServices = serviceNames.filter((s) => s !== svcName)}
 
+        {@const envRows = parseEnv(svc)}
         <div class="bg-surface-1 border border-border rounded-lg p-4 space-y-3">
-          <!-- Service header -->
-          <h4 class="text-sm font-semibold text-text-primary">{svcName}</h4>
+          <!-- Service header (click-to-edit name) -->
+          {#if editingServiceName === svcName}
+            <input
+              type="text"
+              bind:value={editingNameValue}
+              onblur={() => commitRename(svcName)}
+              onkeydown={(e) => { if (e.key === 'Enter') commitRename(svcName); if (e.key === 'Escape') editingServiceName = null }}
+              class="text-sm font-semibold text-text-primary bg-input-bg border border-accent rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent/50"
+              autofocus
+            />
+          {:else}
+            <button
+              type="button"
+              class="text-sm font-semibold text-text-primary hover:text-accent cursor-pointer flex items-center gap-1.5 group"
+              onclick={() => startRename(svcName)}
+              title="Click to rename"
+            >
+              {svcName}
+              <svg class="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+            </button>
+          {/if}
 
           <!-- Image -->
           <div>
@@ -509,37 +550,191 @@
             {/if}
           </div>
 
-          <!-- Ports -->
-          <RepeatableField
-            label="Ports"
-            hint="Map host port to container port"
-            rows={parsePorts(svc)}
-            fields={[
-              { key: 'host', placeholder: 'Host port' },
-              { key: 'container', placeholder: 'Container port' },
-            ]}
-            onchange={(rows) => updateServiceDirect(svcName, (s) => {
-              const serialized = serializePorts(rows)
-              if (serialized.length) s.ports = serialized
-              else delete s.ports
-            })}
-          />
+          <!-- Environment Variables (enhanced with .env integration) -->
+          <div class="space-y-2">
+            <div>
+              <span class="text-xs font-medium text-text-primary">Environment Variables</span>
+              <span class="text-xs text-text-muted ml-1.5">Set env vars for this service</span>
+            </div>
+            {#each envRows as row, i}
+              {@const isRef = isEnvRef(row.value)}
+              {@const resolved = isRef ? resolveEnvRef(row.value) : null}
+              <div class="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="KEY"
+                  value={row.name}
+                  oninput={(e) => {
+                    const newRows = envRows.map((r, idx) => idx === i ? { ...r, name: e.currentTarget.value } : r)
+                    updateServiceDirect(svcName, (s) => {
+                      const serialized = serializeEnv(newRows)
+                      if (serialized) s.environment = serialized
+                      else delete s.environment
+                    })
+                  }}
+                  class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                />
+                <div class="flex-1 relative min-w-0">
+                  <input
+                    type="text"
+                    placeholder="VALUE"
+                    value={row.value}
+                    oninput={(e) => {
+                      const newRows = envRows.map((r, idx) => idx === i ? { ...r, value: e.currentTarget.value } : r)
+                      updateServiceDirect(svcName, (s) => {
+                        const serialized = serializeEnv(newRows)
+                        if (serialized) s.environment = serialized
+                        else delete s.environment
+                      })
+                    }}
+                    class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 {isRef ? 'pr-16' : ''}"
+                  />
+                  {#if isRef}
+                    <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] bg-accent/15 text-accent px-1.5 py-0.5 rounded font-medium" title={resolved != null ? `Resolved: ${resolved}` : 'Not found in .env'}>
+                      .env
+                    </span>
+                  {/if}
+                </div>
+                {#if slug && row.name}
+                  {#if isRef}
+                    <button
+                      type="button"
+                      onclick={() => moveFromEnvFile(svcName, row.name)}
+                      class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+                      title="Inline value (stop using .env)"
+                    >
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                      </svg>
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      onclick={() => moveToEnvFile(svcName, row.name, row.value)}
+                      class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
+                      title="Move to .env file (shared across services)"
+                    >
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                    </button>
+                  {/if}
+                {/if}
+                <button
+                  type="button"
+                  onclick={() => {
+                    const newRows = envRows.filter((_, idx) => idx !== i)
+                    updateServiceDirect(svcName, (s) => {
+                      const serialized = serializeEnv(newRows)
+                      if (serialized) s.environment = serialized
+                      else delete s.environment
+                    })
+                  }}
+                  class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
+                  aria-label="Remove row"
+                >
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
+              </div>
+            {/each}
+            <button
+              type="button"
+              onclick={() => {
+                const newRows = [...envRows, { name: '', value: '' }]
+                updateServiceDirect(svcName, (s) => {
+                  const serialized = serializeEnv(newRows)
+                  if (serialized) s.environment = serialized
+                  else {
+                    if (!s.environment) s.environment = {}
+                  }
+                })
+              }}
+              class="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary hover:bg-surface-3 px-2 py-1 rounded transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Add
+            </button>
+          </div>
 
-          <!-- Environment Variables -->
-          <RepeatableField
-            label="Environment Variables"
-            hint="Set env vars for this service"
-            rows={parseEnv(svc)}
-            fields={[
-              { key: 'name', placeholder: 'KEY' },
-              { key: 'value', placeholder: 'VALUE' },
-            ]}
-            onchange={(rows) => updateServiceDirect(svcName, (s) => {
-              const serialized = serializeEnv(rows)
-              if (serialized) s.environment = serialized
-              else delete s.environment
-            })}
-          />
+          <!-- Shared Variables (.env file) - only under first service -->
+          {#if slug && svcIdx === 0}
+            <div class="border border-border/50 rounded-lg overflow-hidden">
+              <button
+                type="button"
+                class="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-surface-3/50 transition-colors bg-surface-2/50"
+                onclick={() => envFileExpanded = !envFileExpanded}
+              >
+                <span class="text-xs font-medium text-text-primary">Shared Variables (.env file)</span>
+                <svg
+                  class="w-3.5 h-3.5 text-text-muted transition-transform duration-200 {envFileExpanded ? 'rotate-180' : ''}"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {#if envFileExpanded}
+                <div class="px-3 pb-3 pt-2 space-y-2">
+                  <p class="text-xs text-text-muted">Shared across all services. Reference with <code class="font-mono text-accent/80">${'{VAR_NAME}'}</code>.</p>
+                  {#if envFileLoading}
+                    <p class="text-xs text-text-muted">Loading...</p>
+                  {:else}
+                    {#each envFileVars as v, i}
+                      <div class="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={v.key}
+                          placeholder="KEY"
+                          oninput={(e) => { envFileVars = envFileVars.map((ev, idx) => idx === i ? { ...ev, key: e.currentTarget.value } : ev) }}
+                          class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                        />
+                        <input
+                          type="text"
+                          value={v.value}
+                          placeholder="value"
+                          oninput={(e) => { envFileVars = envFileVars.map((ev, idx) => idx === i ? { ...ev, value: e.currentTarget.value } : ev) }}
+                          class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                        />
+                        <button
+                          type="button"
+                          onclick={() => { envFileVars = envFileVars.filter((_, idx) => idx !== i) }}
+                          class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
+                          aria-label="Remove"
+                        >
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    {/each}
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onclick={() => { envFileVars = [...envFileVars, { key: '', value: '' }] }}
+                        class="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary hover:bg-surface-3 px-2 py-1 rounded transition-colors"
+                      >
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add
+                      </button>
+                      <button
+                        type="button"
+                        onclick={saveEnvFile}
+                        disabled={envFileSaving}
+                        class="text-xs px-2.5 py-1 rounded bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors"
+                      >
+                        {envFileSaving ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/if}
 
           <!-- Volumes -->
           <RepeatableField
@@ -589,7 +784,7 @@
           <!-- Labels (non-SD) -->
           <RepeatableField
             label="Labels"
-            hint="Custom Docker labels (simpledeploy.* labels are in SimpleDeploy Settings)"
+            hint="Custom Docker labels (simpledeploy.* labels are in Endpoint settings)"
             rows={parseLabels(svc)}
             fields={[
               { key: 'key', placeholder: 'Label key' },
@@ -606,6 +801,27 @@
           <div class="pt-1">
             <AccordionSection title="Advanced" expanded={false}>
               <div class="space-y-4">
+
+                <!-- Ports (moved to Advanced) -->
+                <div>
+                  <p class="text-xs text-blue-400 bg-blue-500/10 rounded-md px-3 py-2 mb-2">
+                    For HTTP services, use Endpoint settings above. Port mappings expose directly on the host and bypass the reverse proxy.
+                  </p>
+                  <RepeatableField
+                    label="Ports"
+                    hint="Map host port to container port"
+                    rows={parsePorts(svc)}
+                    fields={[
+                      { key: 'host', placeholder: 'Host port' },
+                      { key: 'container', placeholder: 'Container port' },
+                    ]}
+                    onchange={(rows) => updateServiceDirect(svcName, (s) => {
+                      const serialized = serializePorts(rows)
+                      if (serialized.length) s.ports = serialized
+                      else delete s.ports
+                    })}
+                  />
+                </div>
 
                 <!-- Resource Limits -->
                 <div>
@@ -746,47 +962,50 @@
                   </div>
                 </div>
 
-                <!-- Dependencies -->
+                <!-- Dependencies (per-dependency conditions) -->
                 {#if otherServices.length > 0}
                   <div>
                     <p class="text-xs font-medium text-text-primary mb-1">Dependencies</p>
                     <p class="text-xs text-text-muted mb-2">Services that must start before this one</p>
-                    <div class="space-y-1 mb-2">
+                    <div class="space-y-1.5 mb-2">
                       {#each otherServices as dep (dep)}
-                        <label class="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={depInfo.services.includes(dep)}
-                            onchange={(e) => {
-                              const checked = e.currentTarget.checked
-                              const current = depInfo.services
-                              const next = checked
-                                ? [...current, dep]
-                                : current.filter((s) => s !== dep)
-                              updateService(svcName, 'depends_on', serializeDependsOn(next, depInfo.condition))
-                            }}
-                            class="rounded border-border bg-input-bg accent-accent"
-                          />
-                          <span class="text-sm text-text-primary">{dep}</span>
-                        </label>
+                        {@const isChecked = depInfo.services.includes(dep)}
+                        <div class="flex items-center gap-2">
+                          <label class="flex items-center gap-2 cursor-pointer flex-1">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onchange={(e) => {
+                                const checked = e.currentTarget.checked
+                                const current = depInfo.services
+                                const next = checked
+                                  ? [...current, dep]
+                                  : current.filter((s) => s !== dep)
+                                const conditions = { ...depInfo.conditions }
+                                if (checked) conditions[dep] = 'service_started'
+                                else delete conditions[dep]
+                                updateService(svcName, 'depends_on', serializeDependsOn(next, conditions))
+                              }}
+                              class="rounded border-border bg-input-bg accent-accent"
+                            />
+                            <span class="text-sm text-text-primary">{dep}</span>
+                          </label>
+                          {#if isChecked}
+                            <select
+                              value={depInfo.conditions[dep] || 'service_started'}
+                              onchange={(e) => {
+                                const conditions = { ...depInfo.conditions, [dep]: e.currentTarget.value }
+                                updateService(svcName, 'depends_on', serializeDependsOn(depInfo.services, conditions))
+                              }}
+                              class="text-xs bg-input-bg border border-border rounded px-2 py-1 text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50"
+                            >
+                              <option value="service_started">service_started</option>
+                              <option value="service_healthy">service_healthy</option>
+                            </select>
+                          {/if}
+                        </div>
                       {/each}
                     </div>
-                    {#if depInfo.services.length > 0}
-                      <div>
-                        <label class="block text-xs text-text-secondary mb-1">Condition</label>
-                        <select
-                          value={depInfo.condition}
-                          onchange={(e) => {
-                            updateService(svcName, 'depends_on', serializeDependsOn(depInfo.services, e.currentTarget.value))
-                          }}
-                          class={inputCls(`services.${svcName}.dep.condition`)}
-                        >
-                          <option value="service_started">service_started</option>
-                          <option value="service_healthy">service_healthy</option>
-                        </select>
-                        <p class="text-xs text-text-muted mt-0.5">When to consider dependency ready</p>
-                      </div>
-                    {/if}
                   </div>
                 {/if}
 
@@ -810,47 +1029,87 @@
     </div>
   </AccordionSection>
 
-  <!-- ======================== SECTION 3: Networking ======================== -->
-  <AccordionSection title="Networking" expanded={false}>
-    <div class="space-y-3">
-      <RepeatableField
-        label="Networks"
-        hint="Top-level network definitions"
-        rows={parseNetworks()}
-        fields={[
-          { key: 'name', placeholder: 'Network name' },
-          { key: 'driver', placeholder: 'Driver (bridge)' },
-        ]}
-        onchange={(rows) => {
-          const updated = deepClone(compose)
-          const serialized = serializeNetworks(rows)
-          if (serialized) updated.networks = serialized
-          else delete updated.networks
-          emitChange(updated)
-        }}
-      />
-      {#if serviceNames.length > 0}
+  <!-- ======================== SECTION 3: Rate Limiting ======================== -->
+  <AccordionSection title="Rate Limiting" expanded={false}>
+    {#if !firstService}
+      <p class="text-xs text-text-muted">Add a service to configure rate limiting.</p>
+    {:else}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+        <!-- Requests per window -->
         <div>
-          <p class="text-xs font-medium text-text-primary mb-1">Service network assignments</p>
-          <div class="space-y-1">
-            {#each serviceNames as svcName}
-              {@const svcNetworks = compose.services[svcName]?.networks}
-              {#if svcNetworks}
-                <div class="text-xs text-text-secondary bg-surface-1 rounded px-2 py-1">
-                  <span class="font-medium text-text-primary">{svcName}:</span>
-                  {Array.isArray(svcNetworks) ? svcNetworks.join(', ') : Object.keys(svcNetworks).join(', ')}
-                </div>
-              {/if}
-            {/each}
-          </div>
+          <label class="block text-xs text-text-secondary mb-1">Requests per window</label>
+          <input
+            type="number"
+            value={getLabel(firstService, 'ratelimit.requests')}
+            placeholder="100"
+            oninput={(e) => {
+              if (validateNonNeg(e.currentTarget.value, 'sd.rl.requests')) setLabel('ratelimit.requests', e.currentTarget.value)
+            }}
+            class={inputCls('sd.rl.requests')}
+          />
+          {#if errors['sd.rl.requests']}
+            <p class="text-xs text-danger mt-0.5">{errors['sd.rl.requests']}</p>
+          {:else}
+            <p class="text-xs text-text-muted mt-0.5">Max requests per window</p>
+          {/if}
         </div>
-      {/if}
-    </div>
+
+        <!-- Window -->
+        <div>
+          <label class="block text-xs text-text-secondary mb-1">Window</label>
+          <input
+            type="text"
+            value={getLabel(firstService, 'ratelimit.window')}
+            placeholder="1m"
+            oninput={(e) => setLabel('ratelimit.window', e.currentTarget.value)}
+            class={inputCls('sd.rl.window')}
+          />
+          <p class="text-xs text-text-muted mt-0.5">Time window, e.g. 1m, 5m, 1h</p>
+        </div>
+
+        <!-- Burst -->
+        <div>
+          <label class="block text-xs text-text-secondary mb-1">Burst</label>
+          <input
+            type="number"
+            value={getLabel(firstService, 'ratelimit.burst')}
+            placeholder="20"
+            oninput={(e) => {
+              if (validateNonNeg(e.currentTarget.value, 'sd.rl.burst')) setLabel('ratelimit.burst', e.currentTarget.value)
+            }}
+            class={inputCls('sd.rl.burst')}
+          />
+          {#if errors['sd.rl.burst']}
+            <p class="text-xs text-danger mt-0.5">{errors['sd.rl.burst']}</p>
+          {:else}
+            <p class="text-xs text-text-muted mt-0.5">Extra burst allowance above limit</p>
+          {/if}
+        </div>
+
+        <!-- Limit by -->
+        <div>
+          <label class="block text-xs text-text-secondary mb-1">Limit by</label>
+          <select
+            value={getLabel(firstService, 'ratelimit.by') || 'ip'}
+            onchange={(e) => setLabel('ratelimit.by', e.currentTarget.value)}
+            class={inputCls('sd.rl.by')}
+          >
+            <option value="ip">ip</option>
+            <option value="header">header</option>
+          </select>
+          <p class="text-xs text-text-muted mt-0.5">What to rate limit by</p>
+        </div>
+
+      </div>
+    {/if}
   </AccordionSection>
 
-  <!-- ======================== SECTION 4: Volumes ======================== -->
-  <AccordionSection title="Volumes" expanded={false}>
-    <div class="space-y-3">
+  <!-- ======================== SECTION 4: Networks & Volumes ======================== -->
+  <AccordionSection title="Networks & Volumes" expanded={false}>
+    <div class="space-y-5">
+
+      <!-- Named Volumes -->
       <RepeatableField
         label="Named Volumes"
         hint="Top-level named volume definitions"
@@ -867,7 +1126,7 @@
           emitChange(updated)
         }}
       />
-      {#if serviceNames.length > 0}
+      {#if serviceNames.length > 0 && Object.keys(compose.volumes || {}).length > 0}
         <div>
           <p class="text-xs font-medium text-text-primary mb-1">Volume references</p>
           <div class="space-y-1">
@@ -886,6 +1145,44 @@
             {/each}
           </div>
         </div>
+      {/if}
+
+      <!-- Divider -->
+      <div class="border-t border-border/50"></div>
+
+      <!-- Networks -->
+      <RepeatableField
+        label="Networks"
+        hint="Top-level network definitions"
+        rows={parseNetworks()}
+        fields={[
+          { key: 'name', placeholder: 'Network name' },
+          { key: 'driver', placeholder: 'Driver (bridge)' },
+        ]}
+        onchange={(rows) => {
+          const updated = deepClone(compose)
+          const serialized = serializeNetworks(rows)
+          if (serialized) updated.networks = serialized
+          else delete updated.networks
+          emitChange(updated)
+        }}
+      />
+      {#if serviceNames.length > 0}
+        {@const svcWithNetworks = serviceNames.filter((s) => compose.services[s]?.networks)}
+        {#if svcWithNetworks.length > 0}
+          <div>
+            <p class="text-xs font-medium text-text-primary mb-1">Service network assignments</p>
+            <div class="space-y-1">
+              {#each svcWithNetworks as svcName}
+                {@const svcNetworks = compose.services[svcName]?.networks}
+                <div class="text-xs text-text-secondary bg-surface-1 rounded px-2 py-1">
+                  <span class="font-medium text-text-primary">{svcName}:</span>
+                  {Array.isArray(svcNetworks) ? svcNetworks.join(', ') : Object.keys(svcNetworks).join(', ')}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       {/if}
     </div>
   </AccordionSection>
