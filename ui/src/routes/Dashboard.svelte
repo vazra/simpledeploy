@@ -161,19 +161,15 @@
 
   let activeAlerts = $derived((alertHistory || []).filter((h) => !h.resolved_at))
 
-  const metricNames = { cpu_pct: 'CPU', mem_pct: 'Memory %', mem_bytes: 'Memory' }
+  const metricNames = { cpu_pct: 'CPU Usage', mem_pct: 'Memory %', mem_bytes: 'Memory Used' }
 
   function ruleLabel(ruleId) {
     const r = alertRules.find(r => r.id === ruleId)
     if (!r) return `Rule #${ruleId}`
-    const app = r.app_slug || 'All apps'
-    return `${metricNames[r.metric] || r.metric} - ${app}`
-  }
-
-  function ruleCondition(ruleId) {
-    const r = alertRules.find(r => r.id === ruleId)
-    if (!r) return ''
-    return `${r.operator} ${alertFormatValue(r.metric, r.threshold)}`
+    const metric = metricNames[r.metric] || r.metric
+    const threshold = alertFormatValue(r.metric, r.threshold)
+    const app = r.app_slug || 'All Apps'
+    return `${metric} ${r.operator} ${threshold} - ${app}`
   }
 
   function alertFormatValue(metric, value) {
@@ -376,10 +372,7 @@
                     <span class="text-xs font-medium text-text-primary">{ruleLabel(alert.rule_id)}</span>
                     <span class="text-xs text-text-muted">{timeAgo(alert.fired_at)}</span>
                   </div>
-                  <div class="flex items-center gap-2 text-xs text-text-secondary">
-                    <span>Triggered at {alertTriggerValue(alert)}</span>
-                    <span class="text-text-muted">{ruleCondition(alert.rule_id)}</span>
-                  </div>
+                  <span class="text-xs text-text-secondary">Current: {alertTriggerValue(alert)}</span>
                 </a>
               {/each}
             </div>

@@ -140,11 +140,17 @@
     return r ? r.metric : null
   }
 
+  function ruleName(r) {
+    const metric = metricLabels[r.metric] || r.metric
+    const threshold = formatMetricValue(r.metric, r.threshold)
+    const app = r.app_slug || 'All Apps'
+    return `${metric} ${r.operator} ${threshold} - ${app}`
+  }
+
   function ruleInfo(ruleId) {
     const r = rules.find(r => r.id === ruleId)
     if (!r) return `Rule #${ruleId}`
-    const app = r.app_slug || 'All'
-    return `${app} / ${metricLabels[r.metric] || r.metric} ${r.operator} ${r.threshold}`
+    return ruleName(r)
   }
 
   function formatDuration(secs) {
@@ -368,9 +374,7 @@
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead><tr class="border-b border-border/50">
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">App</th>
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Metric</th>
-              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Condition</th>
+              <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Name</th>
               <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Duration</th>
               <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Webhook</th>
               <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Status</th>
@@ -379,16 +383,14 @@
             <tbody class="divide-y divide-border/30">
               {#each rules as r}
                 <tr class="hover:bg-surface-hover cursor-pointer" onclick={() => openRuleEdit(r)}>
-                  <td class="py-3 px-4 text-text-primary">{r.app_slug || 'All Apps'}</td>
-                  <td class="py-3 px-4"><Badge variant="info">{metricLabels[r.metric] || r.metric}</Badge></td>
-                  <td class="py-3 px-4 font-mono text-xs">{r.operator} {r.threshold}</td>
-                  <td class="py-3 px-4">{formatDuration(r.duration_sec)}</td>
+                  <td class="py-3 px-4 text-text-primary">{ruleName(r)}</td>
+                  <td class="py-3 px-4 text-text-secondary">{formatDuration(r.duration_sec)}</td>
                   <td class="py-3 px-4 text-text-secondary">{webhookName(r.webhook_id)}</td>
                   <td class="py-3 px-4">
                     <Badge variant={r.enabled !== false ? 'success' : 'default'}>{r.enabled !== false ? 'Enabled' : 'Disabled'}</Badge>
                   </td>
                   <td class="py-3 px-4">
-                    <Button variant="danger" size="sm" onclick={(e) => { e.stopPropagation(); deleteTarget = { type: 'rule', id: r.id, label: `rule #${r.id}` } }}>Delete</Button>
+                    <Button variant="danger" size="sm" onclick={(e) => { e.stopPropagation(); deleteTarget = { type: 'rule', id: r.id, label: ruleName(r) } }}>Delete</Button>
                   </td>
                 </tr>
               {/each}
