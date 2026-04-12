@@ -252,6 +252,36 @@
     return true
   }
 
+  function validateMemory(val, errKey) {
+    if (val === '' || val == null) { clearError(errKey); return true }
+    const match = val.match(/^(\d+(?:\.\d+)?)\s*(b|k|kb|m|mb|g|gb|t|tb)?$/i)
+    if (!match) {
+      setError(errKey, 'Use a number with unit: b, k, m, g (e.g. 512m, 1g)')
+      return false
+    }
+    const num = parseFloat(match[1])
+    const unit = (match[2] || 'b').toLowerCase().replace(/b$/, '') || 'b'
+    const multipliers = { b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3, t: 1024 ** 4 }
+    const bytes = num * (multipliers[unit] || 1)
+    if (bytes < 6 * 1024 * 1024) {
+      setError(errKey, 'Minimum 6MB (Docker requirement)')
+      return false
+    }
+    clearError(errKey)
+    return true
+  }
+
+  function validateCpu(val, errKey) {
+    if (val === '' || val == null) { clearError(errKey); return true }
+    const n = parseFloat(val)
+    if (isNaN(n) || n <= 0 || !/^\d+(\.\d+)?$/.test(val)) {
+      setError(errKey, 'Must be a positive number (e.g. 0.5, 2)')
+      return false
+    }
+    clearError(errKey)
+    return true
+  }
+
   function validateImage(svcName, val) {
     const key = `services.${svcName}.image`
     if (!val || !val.trim()) {
@@ -587,10 +617,16 @@
                         type="text"
                         value={svc.deploy?.resources?.limits?.cpus ?? ''}
                         placeholder="0.5"
-                        oninput={(e) => updateService(svcName, 'deploy.resources.limits.cpus', e.currentTarget.value)}
+                        oninput={(e) => {
+                          if (validateCpu(e.currentTarget.value, `services.${svcName}.cpu_limit`)) updateService(svcName, 'deploy.resources.limits.cpus', e.currentTarget.value)
+                        }}
                         class={inputCls(`services.${svcName}.cpu_limit`)}
                       />
-                      <p class="text-xs text-text-muted mt-0.5">Max CPUs, e.g. 0.5, 2</p>
+                      {#if errors[`services.${svcName}.cpu_limit`]}
+                        <p class="text-xs text-danger mt-0.5">{errors[`services.${svcName}.cpu_limit`]}</p>
+                      {:else}
+                        <p class="text-xs text-text-muted mt-0.5">Max CPUs, e.g. 0.5, 2</p>
+                      {/if}
                     </div>
                     <div>
                       <label class="block text-xs text-text-secondary mb-1">CPU Reservation</label>
@@ -598,10 +634,16 @@
                         type="text"
                         value={svc.deploy?.resources?.reservations?.cpus ?? ''}
                         placeholder="0.25"
-                        oninput={(e) => updateService(svcName, 'deploy.resources.reservations.cpus', e.currentTarget.value)}
+                        oninput={(e) => {
+                          if (validateCpu(e.currentTarget.value, `services.${svcName}.cpu_res`)) updateService(svcName, 'deploy.resources.reservations.cpus', e.currentTarget.value)
+                        }}
                         class={inputCls(`services.${svcName}.cpu_res`)}
                       />
-                      <p class="text-xs text-text-muted mt-0.5">Guaranteed CPUs, e.g. 0.25</p>
+                      {#if errors[`services.${svcName}.cpu_res`]}
+                        <p class="text-xs text-danger mt-0.5">{errors[`services.${svcName}.cpu_res`]}</p>
+                      {:else}
+                        <p class="text-xs text-text-muted mt-0.5">Guaranteed CPUs, e.g. 0.25</p>
+                      {/if}
                     </div>
                     <div>
                       <label class="block text-xs text-text-secondary mb-1">Memory Limit</label>
@@ -609,10 +651,16 @@
                         type="text"
                         value={svc.deploy?.resources?.limits?.memory ?? ''}
                         placeholder="512m"
-                        oninput={(e) => updateService(svcName, 'deploy.resources.limits.memory', e.currentTarget.value)}
+                        oninput={(e) => {
+                          if (validateMemory(e.currentTarget.value, `services.${svcName}.mem_limit`)) updateService(svcName, 'deploy.resources.limits.memory', e.currentTarget.value)
+                        }}
                         class={inputCls(`services.${svcName}.mem_limit`)}
                       />
-                      <p class="text-xs text-text-muted mt-0.5">Max memory, e.g. 512m, 1g</p>
+                      {#if errors[`services.${svcName}.mem_limit`]}
+                        <p class="text-xs text-danger mt-0.5">{errors[`services.${svcName}.mem_limit`]}</p>
+                      {:else}
+                        <p class="text-xs text-text-muted mt-0.5">Min 6MB. Use b, k, m, g units (e.g. 512m, 1g)</p>
+                      {/if}
                     </div>
                     <div>
                       <label class="block text-xs text-text-secondary mb-1">Memory Reservation</label>
@@ -620,10 +668,16 @@
                         type="text"
                         value={svc.deploy?.resources?.reservations?.memory ?? ''}
                         placeholder="256m"
-                        oninput={(e) => updateService(svcName, 'deploy.resources.reservations.memory', e.currentTarget.value)}
+                        oninput={(e) => {
+                          if (validateMemory(e.currentTarget.value, `services.${svcName}.mem_res`)) updateService(svcName, 'deploy.resources.reservations.memory', e.currentTarget.value)
+                        }}
                         class={inputCls(`services.${svcName}.mem_res`)}
                       />
-                      <p class="text-xs text-text-muted mt-0.5">Guaranteed memory, e.g. 256m</p>
+                      {#if errors[`services.${svcName}.mem_res`]}
+                        <p class="text-xs text-danger mt-0.5">{errors[`services.${svcName}.mem_res`]}</p>
+                      {:else}
+                        <p class="text-xs text-text-muted mt-0.5">Min 6MB. Use b, k, m, g units (e.g. 256m)</p>
+                      {/if}
                     </div>
                   </div>
                 </div>
