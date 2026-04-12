@@ -386,8 +386,8 @@
           </div>
           <div>
             <label class="block text-xs font-medium text-text-muted mb-1.5">Custom Headers</label>
-            <textarea bind:value={whHeaders} rows="2" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30 font-mono" placeholder='{"Authorization": "Bearer xxx"}'></textarea>
-            <p class="text-xs text-text-muted mt-1">JSON object, e.g. {`{"Authorization": "Bearer xxx"}`}</p>
+            <textarea bind:value={whHeaders} rows="2" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30 font-mono" placeholder={'{"Authorization": "Bearer xxx"}'}></textarea>
+            <p class="text-xs text-text-muted mt-1">JSON object, e.g. {'{"Authorization": "Bearer xxx"}'}</p>
           </div>
         </div>
       {/if}

@@ -2,12 +2,13 @@
   let { open = false, title = '', onclose = () => {}, children } = $props()
 
   function onKeydown(e) {
-    if (e.key === 'Escape') onclose()
+    if (open && e.key === 'Escape') onclose()
   }
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 {#if open}
-  <svelte:window onkeydown={onKeydown} />
   <div class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
     <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={onclose} aria-label="Close"></button>
     <div class="relative bg-surface-2 border border-border/50 rounded-2xl shadow-2xl animate-scale-in max-w-2xl w-full max-h-[80vh] flex flex-col">
