@@ -20,6 +20,10 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
+	// Create a test user so auth middleware can validate JWT user existence
+	if _, err := s.CreateUser("admin", "hashed", "super_admin", "", ""); err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
 	jwtMgr := auth.NewJWTManager("test-secret", time.Hour)
 	srv := NewServer(0, s, jwtMgr, nil)
 	return srv, s

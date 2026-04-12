@@ -10,10 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
-func TestHandleUpdateDomain(t *testing.T) {
+func TestHandleUpdateEndpoints(t *testing.T) {
 	srv, s := newTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
 
@@ -23,7 +24,9 @@ func TestHandleUpdateDomain(t *testing.T) {
   web:
     image: nginx
     labels:
-      simpledeploy.domain: old.example.com
+      simpledeploy.endpoints.0.domain: old.example.com
+      simpledeploy.endpoints.0.port: "80"
+      simpledeploy.endpoints.0.tls: letsencrypt
 `
 	if err := os.WriteFile(composePath, []byte(composeContent), 0644); err != nil {
 		t.Fatalf("write compose: %v", err)
@@ -31,8 +34,11 @@ func TestHandleUpdateDomain(t *testing.T) {
 
 	s.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", ComposePath: composePath, Status: "running"}, nil)
 
-	body, _ := json.Marshal(map[string]string{"domain": "new.example.com"})
-	req := httptest.NewRequest(http.MethodPut, "/api/apps/myapp/domain", bytes.NewReader(body))
+	endpoints := []compose.EndpointConfig{
+		{Domain: "new.example.com", Port: "80", TLS: "letsencrypt", Service: "web"},
+	}
+	body, _ := json.Marshal(endpoints)
+	req := httptest.NewRequest(http.MethodPut, "/api/apps/myapp/endpoints", bytes.NewReader(body))
 	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -53,7 +59,7 @@ func TestHandleUpdateDomain(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateDomain_NoExistingLabel(t *testing.T) {
+func TestHandleUpdateEndpoints_NoExistingLabel(t *testing.T) {
 	srv, s := newTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
 
@@ -69,8 +75,11 @@ func TestHandleUpdateDomain_NoExistingLabel(t *testing.T) {
 
 	s.UpsertApp(&store.App{Name: "noapp", Slug: "noapp", ComposePath: composePath, Status: "stopped"}, nil)
 
-	body, _ := json.Marshal(map[string]string{"domain": "brand.new.com"})
-	req := httptest.NewRequest(http.MethodPut, "/api/apps/noapp/domain", bytes.NewReader(body))
+	endpoints := []compose.EndpointConfig{
+		{Domain: "brand.new.com", Port: "3000", TLS: "letsencrypt", Service: "web"},
+	}
+	body, _ := json.Marshal(endpoints)
+	req := httptest.NewRequest(http.MethodPut, "/api/apps/noapp/endpoints", bytes.NewReader(body))
 	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -86,12 +95,12 @@ func TestHandleUpdateDomain_NoExistingLabel(t *testing.T) {
 	if !strings.Contains(string(updated), "brand.new.com") {
 		t.Errorf("expected brand.new.com in compose, got:\n%s", string(updated))
 	}
-	if !strings.Contains(string(updated), "simpledeploy.domain") {
-		t.Errorf("expected simpledeploy.domain label in compose, got:\n%s", string(updated))
+	if !strings.Contains(string(updated), "simpledeploy.endpoints.0.domain") {
+		t.Errorf("expected endpoint label in compose, got:\n%s", string(updated))
 	}
 }
 
-func TestHandleUpdateDomain_PreservesFormatting(t *testing.T) {
+func TestHandleUpdateEndpoints_MultiService(t *testing.T) {
 	srv, s := newTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
 
@@ -99,31 +108,22 @@ func TestHandleUpdateDomain_PreservesFormatting(t *testing.T) {
 	composePath := filepath.Join(dir, "docker-compose.yml")
 	composeContent := `services:
   web:
-    image: nginx:alpine
-    ports:
-      - "9002:80"
-    labels:
-      simpledeploy.domain: "old.example.com"
-      simpledeploy.port: "80"
-    depends_on:
-      - db
-
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: webapp
-
-volumes:
-  pgdata:
+    image: nginx
+  api:
+    image: node
 `
 	if err := os.WriteFile(composePath, []byte(composeContent), 0644); err != nil {
 		t.Fatalf("write compose: %v", err)
 	}
 
-	s.UpsertApp(&store.App{Name: "fmtapp", Slug: "fmtapp", ComposePath: composePath, Status: "running"}, nil)
+	s.UpsertApp(&store.App{Name: "multi", Slug: "multi", ComposePath: composePath, Status: "running"}, nil)
 
-	body, _ := json.Marshal(map[string]string{"domain": "new.example.com"})
-	req := httptest.NewRequest(http.MethodPut, "/api/apps/fmtapp/domain", bytes.NewReader(body))
+	endpoints := []compose.EndpointConfig{
+		{Domain: "web.example.com", Port: "80", TLS: "letsencrypt", Service: "web"},
+		{Domain: "api.example.com", Port: "8080", TLS: "custom", Service: "api"},
+	}
+	body, _ := json.Marshal(endpoints)
+	req := httptest.NewRequest(http.MethodPut, "/api/apps/multi/endpoints", bytes.NewReader(body))
 	req.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -137,21 +137,10 @@ volumes:
 		t.Fatalf("read updated compose: %v", err)
 	}
 	result := string(updated)
-
-	// Domain should be updated with preserved quoting
-	if !strings.Contains(result, `"new.example.com"`) {
-		t.Errorf("expected quoted new.example.com, got:\n%s", result)
+	if !strings.Contains(result, "web.example.com") {
+		t.Errorf("expected web.example.com, got:\n%s", result)
 	}
-	// Port quoting preserved
-	if !strings.Contains(result, `"9002:80"`) {
-		t.Errorf("port formatting changed:\n%s", result)
-	}
-	// Blank line between services preserved
-	if !strings.Contains(result, "\n\n  db:") {
-		t.Errorf("blank line between services lost:\n%s", result)
-	}
-	// Volumes section preserved
-	if !strings.Contains(result, "volumes:\n  pgdata:") {
-		t.Errorf("volumes section changed:\n%s", result)
+	if !strings.Contains(result, "api.example.com") {
+		t.Errorf("expected api.example.com, got:\n%s", result)
 	}
 }

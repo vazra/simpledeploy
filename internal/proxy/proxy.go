@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"sync"
 
 	caddy "github.com/caddyserver/caddy/v2"
@@ -87,6 +88,9 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	copy(routes, c.routes)
 	c.mu.Unlock()
 
+	// Collect custom TLS cert files
+	var loadFiles []interface{}
+
 	for _, r := range routes {
 		handlers := []interface{}{
 			map[string]interface{}{"handler": "simpledeploy_ipaccess"},
@@ -109,6 +113,14 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 			},
 			"handle": handlers,
 		})
+
+		if r.TLS == "custom" && r.CertDir != "" {
+			loadFiles = append(loadFiles, map[string]interface{}{
+				"certificate": filepath.Join(r.CertDir, r.Domain+".crt"),
+				"key":         filepath.Join(r.CertDir, r.Domain+".key"),
+				"tags":        []string{r.Domain},
+			})
+		}
 	}
 
 	if caddyRoutes == nil {
@@ -139,21 +151,35 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		},
 	}
 
+	// Build TLS config
+	tlsCfg := map[string]interface{}{}
+	hasTLS := false
+
 	if c.tlsMode == "auto" && c.tlsEmail != "" {
-		cfg["apps"].(map[string]interface{})["tls"] = map[string]interface{}{
-			"automation": map[string]interface{}{
-				"policies": []interface{}{
-					map[string]interface{}{
-						"issuers": []interface{}{
-							map[string]interface{}{
-								"module": "acme",
-								"email":  c.tlsEmail,
-							},
+		tlsCfg["automation"] = map[string]interface{}{
+			"policies": []interface{}{
+				map[string]interface{}{
+					"issuers": []interface{}{
+						map[string]interface{}{
+							"module": "acme",
+							"email":  c.tlsEmail,
 						},
 					},
 				},
 			},
 		}
+		hasTLS = true
+	}
+
+	if len(loadFiles) > 0 {
+		tlsCfg["certificates"] = map[string]interface{}{
+			"load_files": loadFiles,
+		}
+		hasTLS = true
+	}
+
+	if hasTLS {
+		cfg["apps"].(map[string]interface{})["tls"] = tlsCfg
 	}
 
 	return cfg

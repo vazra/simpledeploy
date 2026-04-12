@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ type Route struct {
 	Domain     string
 	Upstream   string // "localhost:{port}"
 	TLS        string // "auto", "custom", "off"
+	CertDir    string // directory containing certs for custom TLS
 	RateLimit  *RateLimitConfig
 	AllowedIPs []string // validated IPs and CIDRs
 }
@@ -29,30 +31,15 @@ type RateLimitConfig struct {
 	By       string
 }
 
-// ResolveRoute derives a Route from an AppConfig.
-// Returns an error if app.Domain is empty or no port mapping is found.
-func ResolveRoute(app *compose.AppConfig) (*Route, error) {
-	if app.Domain == "" {
-		return nil, fmt.Errorf("app %q has no domain configured", app.Name)
+// ResolveRoutes derives Routes from an AppConfig (one per endpoint).
+// Returns empty slice if no endpoints are defined (no error).
+func ResolveRoutes(app *compose.AppConfig) ([]Route, error) {
+	if len(app.Endpoints) == 0 {
+		return nil, nil
 	}
 
-	hostPort, err := resolveHostPort(app)
-	if err != nil {
-		return nil, err
-	}
-
-	tls := app.TLS
-	if tls == "" {
-		tls = "auto"
-	}
-
-	route := &Route{
-		AppSlug:  app.Name,
-		Domain:   app.Domain,
-		Upstream: "localhost:" + hostPort,
-		TLS:      tls,
-	}
-
+	// Parse app-level rate limit and access control once
+	var rl *RateLimitConfig
 	if app.RateLimit.Requests != "" {
 		requests, _ := strconv.Atoi(app.RateLimit.Requests)
 		window, _ := time.ParseDuration(app.RateLimit.Window)
@@ -62,7 +49,7 @@ func ResolveRoute(app *compose.AppConfig) (*Route, error) {
 			by = "ip"
 		}
 		if requests > 0 {
-			route.RateLimit = &RateLimitConfig{
+			rl = &RateLimitConfig{
 				Requests: requests,
 				Window:   window,
 				Burst:    burst,
@@ -71,6 +58,7 @@ func ResolveRoute(app *compose.AppConfig) (*Route, error) {
 		}
 	}
 
+	var allowedIPs []string
 	if app.AccessAllow != "" {
 		for _, entry := range strings.Split(app.AccessAllow, ",") {
 			entry = strings.TrimSpace(entry)
@@ -78,42 +66,86 @@ func ResolveRoute(app *compose.AppConfig) (*Route, error) {
 				continue
 			}
 			if net.ParseIP(entry) != nil {
-				route.AllowedIPs = append(route.AllowedIPs, entry)
+				allowedIPs = append(allowedIPs, entry)
 				continue
 			}
 			if _, _, err := net.ParseCIDR(entry); err == nil {
-				route.AllowedIPs = append(route.AllowedIPs, entry)
+				allowedIPs = append(allowedIPs, entry)
 				continue
 			}
 			log.Printf("[proxy] ignoring invalid IP/CIDR in access.allow: %q", entry)
 		}
 	}
 
-	return route, nil
+	certDir := ""
+	if app.ComposePath != "" {
+		certDir = filepath.Join(filepath.Dir(app.ComposePath), "certs")
+	}
+
+	var routes []Route
+	for _, ep := range app.Endpoints {
+		if ep.Domain == "" {
+			continue
+		}
+
+		upstream, err := resolveEndpointUpstream(app, ep)
+		if err != nil {
+			log.Printf("[proxy] skip endpoint %s for %s: %v", ep.Domain, app.Name, err)
+			continue
+		}
+
+		tls := ep.TLS
+		if tls == "" {
+			tls = "auto"
+		}
+
+		route := Route{
+			AppSlug:    app.Name,
+			Domain:     ep.Domain,
+			Upstream:   upstream,
+			TLS:        tls,
+			CertDir:    certDir,
+			RateLimit:  rl,
+			AllowedIPs: allowedIPs,
+		}
+		routes = append(routes, route)
+	}
+
+	return routes, nil
 }
 
-// resolveHostPort finds the host port from app.Services port mappings.
-// If app.Port is set, it matches by container port; otherwise uses the first mapping.
-func resolveHostPort(app *compose.AppConfig) (string, error) {
+// resolveEndpointUpstream finds the upstream address for an endpoint.
+// Looks for a host port mapping matching endpoint.Port in endpoint.Service.
+// If no host port mapping exists, uses the Docker network address (service:port).
+func resolveEndpointUpstream(app *compose.AppConfig, ep compose.EndpointConfig) (string, error) {
 	for _, svc := range app.Services {
+		if svc.Name != ep.Service {
+			continue
+		}
 		for _, pm := range svc.Ports {
-			if app.Port == "" {
-				if pm.Host == "" {
-					continue
+			if pm.Container == ep.Port {
+				if pm.Host != "" {
+					return "localhost:" + pm.Host, nil
 				}
-				return pm.Host, nil
-			}
-			if pm.Container == app.Port {
-				if pm.Host == "" {
-					return "", fmt.Errorf("app %q: container port %s has no host port mapping", app.Name, app.Port)
-				}
-				return pm.Host, nil
+				// No host mapping, use Docker network
+				return fmt.Sprintf("%s:%s", ep.Service, ep.Port), nil
 			}
 		}
+		// Port not in mappings, use Docker network address
+		if ep.Port != "" {
+			return fmt.Sprintf("%s:%s", ep.Service, ep.Port), nil
+		}
+		// No port specified, use first mapping
+		for _, pm := range svc.Ports {
+			if pm.Host != "" {
+				return "localhost:" + pm.Host, nil
+			}
+		}
+		return "", fmt.Errorf("service %q has no port mappings", ep.Service)
 	}
-
-	if app.Port != "" {
-		return "", fmt.Errorf("app %q: no port mapping found for container port %s", app.Name, app.Port)
+	// Service not found in parsed services, use Docker network
+	if ep.Port != "" {
+		return fmt.Sprintf("%s:%s", ep.Service, ep.Port), nil
 	}
-	return "", fmt.Errorf("app %q: no port mappings found", app.Name)
+	return "", fmt.Errorf("service %q not found and no port specified", ep.Service)
 }

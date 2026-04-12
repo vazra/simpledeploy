@@ -188,8 +188,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/apps/{slug}/env", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetEnv))))
 	s.mux.Handle("PUT /api/apps/{slug}/env", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePutEnv))))
 
-	// Domain
-	s.mux.Handle("PUT /api/apps/{slug}/domain", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateDomain))))
+	// Endpoints
+	s.mux.Handle("PUT /api/apps/{slug}/endpoints", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateEndpoints))))
+
+	// Certs
+	s.mux.Handle("PUT /api/apps/{slug}/certs/{domain}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUploadCert))))
+	s.mux.Handle("DELETE /api/apps/{slug}/certs/{domain}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDeleteCert))))
 
 	// IP access
 	s.mux.Handle("PUT /api/apps/{slug}/access", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateAccess))))

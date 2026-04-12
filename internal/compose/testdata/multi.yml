@@ -8,8 +8,8 @@ services:
     depends_on:
       - db
     labels:
-      simpledeploy.domain: "myapp.com"
-      simpledeploy.port: "3000"
+      simpledeploy.endpoints.0.domain: "myapp.com"
+      simpledeploy.endpoints.0.port: "3000"
     restart: unless-stopped
 
   db:

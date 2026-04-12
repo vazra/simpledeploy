@@ -6,13 +6,11 @@ import (
 	"github.com/vazra/simpledeploy/internal/compose"
 )
 
-func makeApp(name, domain, port, tls string, services []compose.ServiceConfig) *compose.AppConfig {
+func makeApp(name string, endpoints []compose.EndpointConfig, services []compose.ServiceConfig) *compose.AppConfig {
 	return &compose.AppConfig{
-		Name:     name,
-		Domain:   domain,
-		Port:     port,
-		TLS:      tls,
-		Services: services,
+		Name:      name,
+		Endpoints: endpoints,
+		Services:  services,
 	}
 }
 
@@ -25,14 +23,23 @@ func ports(mappings ...string) []compose.PortMapping {
 	return pms
 }
 
-func TestResolveRouteBasic(t *testing.T) {
-	app := makeApp("myapp", "example.com", "8080", "auto", []compose.ServiceConfig{
-		{Name: "web", Ports: ports("3000", "8080")},
-	})
-	r, err := ResolveRoute(app)
+func TestResolveRoutesBasic(t *testing.T) {
+	app := makeApp("myapp",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "8080", TLS: "auto", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("3000", "8080")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	r := routes[0]
 	if r.AppSlug != "myapp" {
 		t.Errorf("AppSlug: got %q, want %q", r.AppSlug, "myapp")
 	}
@@ -47,69 +54,118 @@ func TestResolveRouteBasic(t *testing.T) {
 	}
 }
 
-func TestResolveRouteNoDomain(t *testing.T) {
-	app := makeApp("myapp", "", "", "", []compose.ServiceConfig{
+func TestResolveRoutesNoEndpoints(t *testing.T) {
+	app := makeApp("myapp", nil, []compose.ServiceConfig{
 		{Name: "web", Ports: ports("3000", "8080")},
 	})
-	_, err := ResolveRoute(app)
-	if err == nil {
-		t.Fatal("expected error for missing domain, got nil")
-	}
-}
-
-func TestResolveRoutePortLookup(t *testing.T) {
-	// Two services with multiple ports; app.Port targets container port 9000
-	app := makeApp("api", "api.example.com", "9000", "", []compose.ServiceConfig{
-		{Name: "web", Ports: ports("3000", "8080", "4000", "9000")},
-	})
-	r, err := ResolveRoute(app)
+	routes, err := ResolveRoutes(app)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if r.Upstream != "localhost:4000" {
-		t.Errorf("Upstream: got %q, want %q", r.Upstream, "localhost:4000")
+	if len(routes) != 0 {
+		t.Errorf("len(routes) = %d, want 0", len(routes))
 	}
 }
 
-func TestResolveRouteDefaultPort(t *testing.T) {
-	// No app.Port label; should use first port mapping's host port
-	app := makeApp("svc", "svc.example.com", "", "", []compose.ServiceConfig{
-		{Name: "web", Ports: ports("5000", "80", "5001", "443")},
-	})
-	r, err := ResolveRoute(app)
+func TestResolveRoutesMultiEndpoint(t *testing.T) {
+	app := makeApp("multi",
+		[]compose.EndpointConfig{
+			{Domain: "web.example.com", Port: "3000", TLS: "auto", Service: "web"},
+			{Domain: "api.example.com", Port: "8080", TLS: "custom", Service: "api"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("3000", "3000")},
+			{Name: "api", Ports: ports("4000", "8080")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if r.Upstream != "localhost:5000" {
-		t.Errorf("Upstream: got %q, want %q", r.Upstream, "localhost:5000")
+	if len(routes) != 2 {
+		t.Fatalf("len(routes) = %d, want 2", len(routes))
+	}
+	if routes[0].Domain != "web.example.com" {
+		t.Errorf("routes[0].Domain = %q, want %q", routes[0].Domain, "web.example.com")
+	}
+	if routes[0].Upstream != "localhost:3000" {
+		t.Errorf("routes[0].Upstream = %q, want %q", routes[0].Upstream, "localhost:3000")
+	}
+	if routes[1].Domain != "api.example.com" {
+		t.Errorf("routes[1].Domain = %q, want %q", routes[1].Domain, "api.example.com")
+	}
+	if routes[1].Upstream != "localhost:4000" {
+		t.Errorf("routes[1].Upstream = %q, want %q", routes[1].Upstream, "localhost:4000")
+	}
+	if routes[1].TLS != "custom" {
+		t.Errorf("routes[1].TLS = %q, want %q", routes[1].TLS, "custom")
 	}
 }
 
-func TestResolveRouteTLSDefault(t *testing.T) {
-	// TLS not set; should default to "auto"
-	app := makeApp("svc", "svc.example.com", "", "", []compose.ServiceConfig{
-		{Name: "web", Ports: ports("8000", "80")},
-	})
-	r, err := ResolveRoute(app)
+func TestResolveRoutesTLSDefault(t *testing.T) {
+	app := makeApp("svc",
+		[]compose.EndpointConfig{
+			{Domain: "svc.example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("8000", "80")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if r.TLS != "auto" {
-		t.Errorf("TLS: got %q, want %q", r.TLS, "auto")
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	if routes[0].TLS != "auto" {
+		t.Errorf("TLS: got %q, want %q", routes[0].TLS, "auto")
 	}
 }
 
-func TestResolveRouteWithAllowedIPs(t *testing.T) {
-	app := makeApp("secured", "secure.example.com", "8080", "auto", []compose.ServiceConfig{
-		{Name: "web", Ports: ports("3000", "8080")},
-	})
+func TestResolveRoutesDockerNetwork(t *testing.T) {
+	// No host port mapping for container port
+	app := makeApp("internal",
+		[]compose.EndpointConfig{
+			{Domain: "app.example.com", Port: "3000", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("5000", "5000")}, // different port, no match
+		},
+	)
+	routes, err := ResolveRoutes(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	// Falls back to Docker network address
+	if routes[0].Upstream != "web:3000" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "web:3000")
+	}
+}
+
+func TestResolveRoutesWithAllowedIPs(t *testing.T) {
+	app := makeApp("secured",
+		[]compose.EndpointConfig{
+			{Domain: "secure.example.com", Port: "8080", TLS: "auto", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("3000", "8080")},
+		},
+	)
 	app.AccessAllow = "10.0.0.0/8, 192.168.1.5, bad-entry, 172.16.0.0/12"
 
-	r, err := ResolveRoute(app)
+	routes, err := ResolveRoutes(app)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
 	// bad-entry should be skipped, 3 valid entries remain
+	r := routes[0]
 	if len(r.AllowedIPs) != 3 {
 		t.Errorf("AllowedIPs: got %d entries, want 3: %v", len(r.AllowedIPs), r.AllowedIPs)
 	}
@@ -124,16 +180,45 @@ func TestResolveRouteWithAllowedIPs(t *testing.T) {
 	}
 }
 
-func TestResolveRouteEmptyAllowedIPs(t *testing.T) {
-	app := makeApp("open", "open.example.com", "", "", []compose.ServiceConfig{
-		{Name: "web", Ports: ports("5000", "80")},
-	})
-	// No AccessAllow set
-	r, err := ResolveRoute(app)
+func TestResolveRoutesEmptyAllowedIPs(t *testing.T) {
+	app := makeApp("open",
+		[]compose.EndpointConfig{
+			{Domain: "open.example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("5000", "80")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if r.AllowedIPs != nil {
-		t.Errorf("AllowedIPs: got %v, want nil", r.AllowedIPs)
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	if routes[0].AllowedIPs != nil {
+		t.Errorf("AllowedIPs: got %v, want nil", routes[0].AllowedIPs)
+	}
+}
+
+func TestResolveRoutesSkipsEmptyDomain(t *testing.T) {
+	app := makeApp("partial",
+		[]compose.EndpointConfig{
+			{Domain: "", Port: "3000", Service: "web"},
+			{Domain: "real.example.com", Port: "3000", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("3000", "3000")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	if routes[0].Domain != "real.example.com" {
+		t.Errorf("Domain: got %q, want %q", routes[0].Domain, "real.example.com")
 	}
 }

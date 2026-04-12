@@ -7,14 +7,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/vazra/simpledeploy/internal/compose"
 	"gopkg.in/yaml.v3"
 )
 
-type domainRequest struct {
-	Domain string `json:"domain"`
-}
-
-func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	app, err := s.store.GetAppBySlug(slug)
 	if err != nil {
@@ -22,17 +19,25 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req domainRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var endpoints []compose.EndpointConfig
+	if err := json.NewDecoder(r.Body).Decode(&endpoints); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	if req.Domain == "" {
-		http.Error(w, "domain is required", http.StatusBadRequest)
-		return
+
+	// Validate: each endpoint needs at least a domain
+	for i, ep := range endpoints {
+		if ep.Domain == "" {
+			http.Error(w, fmt.Sprintf("endpoint %d: domain is required", i), http.StatusBadRequest)
+			return
+		}
+		if ep.Service == "" {
+			http.Error(w, fmt.Sprintf("endpoint %d: service is required", i), http.StatusBadRequest)
+			return
+		}
 	}
 
-	if err := updateComposeDomain(app.ComposePath, req.Domain); err != nil {
+	if err := updateComposeEndpoints(app.ComposePath, endpoints); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -42,10 +47,11 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "domain": req.Domain})
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "endpoints": endpoints})
 }
 
-func updateComposeDomain(composePath, domain string) error {
+// updateComposeEndpoints removes all existing endpoint labels and writes new ones.
+func updateComposeEndpoints(composePath string, endpoints []compose.EndpointConfig) error {
 	data, err := os.ReadFile(composePath)
 	if err != nil {
 		return fmt.Errorf("read compose: %w", err)
@@ -69,44 +75,53 @@ func updateComposeDomain(composePath, domain string) error {
 		return fmt.Errorf("no services defined")
 	}
 
-	// Collect all domain value nodes across services
-	var domainNodes []*yaml.Node
+	// Remove all existing endpoint labels from all services
 	for i := 1; i < len(servicesNode.Content); i += 2 {
 		svcNode := servicesNode.Content[i]
 		labelsNode := findMapValue(svcNode, "labels")
-		if labelsNode == nil {
+		if labelsNode == nil || labelsNode.Kind != yaml.MappingNode {
 			continue
 		}
-		dv := findMapValue(labelsNode, "simpledeploy.domain")
-		if dv != nil {
-			domainNodes = append(domainNodes, dv)
-		}
+		removeEndpointLabels(labelsNode)
 	}
 
-	// If existing labels found, do surgical replacement preserving formatting
-	if len(domainNodes) > 0 {
-		lines := splitLines(data)
-		for _, node := range domainNodes {
-			lineIdx := node.Line - 1 // yaml.Node.Line is 1-based
-			if lineIdx < 0 || lineIdx >= len(lines) {
-				continue
+	// Group endpoints by service with per-service indexing
+	byService := map[string][]indexedEndpoint{}
+	svcIdx := map[string]int{}
+	for _, ep := range endpoints {
+		idx := svcIdx[ep.Service]
+		svcIdx[ep.Service] = idx + 1
+		byService[ep.Service] = append(byService[ep.Service], indexedEndpoint{index: idx, ep: ep})
+	}
+
+	// Add new endpoint labels to respective services
+	for i := 0; i < len(servicesNode.Content)-1; i += 2 {
+		svcName := servicesNode.Content[i].Value
+		svcNode := servicesNode.Content[i+1]
+
+		eps, ok := byService[svcName]
+		if !ok {
+			continue
+		}
+
+		labelsNode := findMapValue(svcNode, "labels")
+		if labelsNode == nil {
+			keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "labels", Tag: "!!str"}
+			labelsNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			svcNode.Content = append(svcNode.Content, keyNode, labelsNode)
+		}
+
+		for _, ie := range eps {
+			prefix := fmt.Sprintf("simpledeploy.endpoints.%d", ie.index)
+			addLabel(labelsNode, prefix+".domain", ie.ep.Domain)
+			if ie.ep.Port != "" {
+				addLabel(labelsNode, prefix+".port", ie.ep.Port)
 			}
-			lines[lineIdx] = replaceDomainValue(lines[lineIdx], node.Value, domain)
+			if ie.ep.TLS != "" {
+				addLabel(labelsNode, prefix+".tls", ie.ep.TLS)
+			}
 		}
-		return os.WriteFile(composePath, joinLines(lines), 0644)
 	}
-
-	// No existing label: add to first service via full marshal (unavoidable)
-	firstServiceNode := servicesNode.Content[1]
-	labelsNode := findMapValue(firstServiceNode, "labels")
-	if labelsNode == nil {
-		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "labels", Tag: "!!str"}
-		labelsNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		firstServiceNode.Content = append(firstServiceNode.Content, keyNode, labelsNode)
-	}
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: "simpledeploy.domain", Tag: "!!str"}
-	valNode := &yaml.Node{Kind: yaml.ScalarNode, Value: domain, Tag: "!!str"}
-	labelsNode.Content = append(labelsNode.Content, keyNode, valNode)
 
 	out, err := yaml.Marshal(&doc)
 	if err != nil {
@@ -115,27 +130,29 @@ func updateComposeDomain(composePath, domain string) error {
 	return os.WriteFile(composePath, out, 0644)
 }
 
-// replaceDomainValue replaces the old domain value on a YAML line, preserving
-// quoting style and surrounding formatting.
-func replaceDomainValue(line string, oldVal, newVal string) string {
-	// Try quoted variants first, then unquoted
-	for _, pattern := range []string{
-		fmt.Sprintf(`"%s"`, oldVal),
-		fmt.Sprintf(`'%s'`, oldVal),
-		oldVal,
-	} {
-		if idx := strings.Index(line, pattern); idx >= 0 {
-			replacement := newVal
-			// Preserve original quoting
-			if strings.HasPrefix(pattern, `"`) {
-				replacement = fmt.Sprintf(`"%s"`, newVal)
-			} else if strings.HasPrefix(pattern, `'`) {
-				replacement = fmt.Sprintf(`'%s'`, newVal)
-			}
-			return line[:idx] + replacement + line[idx+len(pattern):]
+type indexedEndpoint struct {
+	index int
+	ep    compose.EndpointConfig
+}
+
+func addLabel(labelsNode *yaml.Node, key, value string) {
+	labelsNode.Content = append(labelsNode.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key, Tag: "!!str"},
+		&yaml.Node{Kind: yaml.ScalarNode, Value: value, Tag: "!!str"},
+	)
+}
+
+// removeEndpointLabels removes simpledeploy.endpoints.* keys from a labels mapping node.
+func removeEndpointLabels(labelsNode *yaml.Node) {
+	var filtered []*yaml.Node
+	for i := 0; i < len(labelsNode.Content)-1; i += 2 {
+		key := labelsNode.Content[i].Value
+		if strings.HasPrefix(key, "simpledeploy.endpoints.") {
+			continue
 		}
+		filtered = append(filtered, labelsNode.Content[i], labelsNode.Content[i+1])
 	}
-	return line
+	labelsNode.Content = filtered
 }
 
 func splitLines(data []byte) []string {

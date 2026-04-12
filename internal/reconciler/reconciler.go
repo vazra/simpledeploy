@@ -123,11 +123,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
 	var routes []proxy.Route
 	for _, app := range apps {
-		route, err := proxy.ResolveRoute(app)
+		appRoutes, err := proxy.ResolveRoutes(app)
 		if err != nil {
-			continue // app without domain, skip
+			continue
 		}
-		routes = append(routes, *route)
+		routes = append(routes, appRoutes...)
 	}
 	if err := r.proxy.SetRoutes(routes); err != nil {
 		fmt.Fprintf(os.Stderr, "reconciler: update proxy routes: %v\n", err)
@@ -387,7 +387,7 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		Slug:        slug,
 		ComposePath: cfg.ComposePath,
 		Status:      status,
-		Domain:      cfg.Domain,
+		Domain:      cfg.PrimaryDomain(),
 		ComposeHash: hash,
 	}
 	if err := r.store.UpsertApp(app, labels); err != nil {

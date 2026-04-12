@@ -4,30 +4,46 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
 )
 
+// EndpointConfig holds config for a single endpoint (domain/port/tls bound to a service).
+type EndpointConfig struct {
+	Domain  string `json:"domain"`
+	Port    string `json:"port"`
+	TLS     string `json:"tls"`
+	Service string `json:"service"`
+}
+
 // AppConfig holds the parsed compose file config plus extracted simpledeploy labels.
 type AppConfig struct {
 	Name            string
 	ComposePath     string
-	Domain          string
-	Port            string
-	TLS             string
+	Endpoints       []EndpointConfig
 	BackupStrategy  string
 	BackupSchedule  string
 	BackupTarget    string
 	BackupRetention string
 	AlertCPU        string
 	AlertMemory     string
-	PathPatterns    string
 	Registries      string
 	AccessAllow     string
 	RateLimit       RateLimitLabels
 	Services        []ServiceConfig
 	Project         *types.Project
+}
+
+// PrimaryDomain returns the domain of the first endpoint, or empty string.
+func (a *AppConfig) PrimaryDomain() string {
+	if len(a.Endpoints) > 0 {
+		return a.Endpoints[0].Domain
+	}
+	return ""
 }
 
 // RateLimitLabels holds simpledeploy.ratelimit.* label values.
@@ -57,22 +73,20 @@ type VolumeMount struct {
 	Source, Target, Type string
 }
 
-// LabelConfig holds all extracted simpledeploy.* labels.
+// LabelConfig holds all extracted simpledeploy.* labels (non-endpoint labels).
 type LabelConfig struct {
-	Domain          string
-	Port            string
-	TLS             string
 	BackupStrategy  string
 	BackupSchedule  string
 	BackupTarget    string
 	BackupRetention string
 	AlertCPU        string
 	AlertMemory     string
-	PathPatterns    string
 	Registries      string
 	AccessAllow     string
 	RateLimit       RateLimitLabels
 }
+
+var endpointLabelRe = regexp.MustCompile(`^simpledeploy\.endpoints\.(\d+)\.(domain|port|tls)$`)
 
 // ParseFile parses the compose file at path and returns an AppConfig with appName as the name.
 // simpledeploy.* labels are collected across all services; the first value found wins.
@@ -104,7 +118,7 @@ func ParseFile(path, appName string) (*AppConfig, error) {
 		return nil, fmt.Errorf("load compose: %w", err)
 	}
 
-	// merge all labels, first encountered wins
+	// merge non-endpoint labels, first encountered wins
 	merged := map[string]string{}
 	for _, svc := range project.Services {
 		for k, v := range svc.Labels {
@@ -119,21 +133,27 @@ func ParseFile(path, appName string) (*AppConfig, error) {
 	cfg := &AppConfig{
 		Name:            appName,
 		ComposePath:     absPath,
-		Domain:          lc.Domain,
-		Port:            lc.Port,
-		TLS:             lc.TLS,
 		BackupStrategy:  lc.BackupStrategy,
 		BackupSchedule:  lc.BackupSchedule,
 		BackupTarget:    lc.BackupTarget,
 		BackupRetention: lc.BackupRetention,
 		AlertCPU:        lc.AlertCPU,
 		AlertMemory:     lc.AlertMemory,
-		PathPatterns:    lc.PathPatterns,
 		Registries:      lc.Registries,
 		AccessAllow:     lc.AccessAllow,
 		RateLimit:       lc.RateLimit,
 		Project:         project,
 	}
+
+	// Extract endpoints per service
+	for name, svc := range project.Services {
+		eps := extractEndpoints(svc.Labels, name)
+		cfg.Endpoints = append(cfg.Endpoints, eps...)
+	}
+	// Stable sort by index (extractEndpoints returns sorted per-service)
+	sort.SliceStable(cfg.Endpoints, func(i, j int) bool {
+		return cfg.Endpoints[i].Domain < cfg.Endpoints[j].Domain
+	})
 
 	for name, svc := range project.Services {
 		cfg.Services = append(cfg.Services, convertService(name, svc))
@@ -142,19 +162,15 @@ func ParseFile(path, appName string) (*AppConfig, error) {
 	return cfg, nil
 }
 
-// ExtractLabels extracts all simpledeploy.* labels from the provided map.
+// ExtractLabels extracts non-endpoint simpledeploy.* labels from the provided map.
 func ExtractLabels(labels map[string]string) LabelConfig {
 	return LabelConfig{
-		Domain:          labels["simpledeploy.domain"],
-		Port:            labels["simpledeploy.port"],
-		TLS:             labels["simpledeploy.tls"],
 		BackupStrategy:  labels["simpledeploy.backup.strategy"],
 		BackupSchedule:  labels["simpledeploy.backup.schedule"],
 		BackupTarget:    labels["simpledeploy.backup.target"],
 		BackupRetention: labels["simpledeploy.backup.retention"],
 		AlertCPU:        labels["simpledeploy.alert.cpu"],
 		AlertMemory:     labels["simpledeploy.alert.memory"],
-		PathPatterns:    labels["simpledeploy.paths"],
 		Registries:      labels["simpledeploy.registries"],
 		AccessAllow:     labels["simpledeploy.access.allow"],
 		RateLimit: RateLimitLabels{
@@ -164,6 +180,48 @@ func ExtractLabels(labels map[string]string) LabelConfig {
 			Burst:    labels["simpledeploy.ratelimit.burst"],
 		},
 	}
+}
+
+// extractEndpoints scans labels for simpledeploy.endpoints.N.{domain,port,tls}
+// and returns EndpointConfigs sorted by index, with Service set to serviceName.
+func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig {
+	type epData struct {
+		index int
+		ep    EndpointConfig
+	}
+
+	byIndex := map[int]*EndpointConfig{}
+	for k, v := range labels {
+		m := endpointLabelRe.FindStringSubmatch(k)
+		if m == nil {
+			continue
+		}
+		idx, _ := strconv.Atoi(m[1])
+		if byIndex[idx] == nil {
+			byIndex[idx] = &EndpointConfig{Service: serviceName}
+		}
+		switch m[2] {
+		case "domain":
+			byIndex[idx].Domain = v
+		case "port":
+			byIndex[idx].Port = v
+		case "tls":
+			byIndex[idx].TLS = v
+		}
+	}
+
+	// Sort by index
+	indices := make([]int, 0, len(byIndex))
+	for idx := range byIndex {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	eps := make([]EndpointConfig, 0, len(indices))
+	for _, idx := range indices {
+		eps = append(eps, *byIndex[idx])
+	}
+	return eps
 }
 
 func convertService(name string, svc types.ServiceConfig) ServiceConfig {

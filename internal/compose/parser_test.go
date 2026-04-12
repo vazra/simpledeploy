@@ -20,14 +20,24 @@ func TestParseBasicCompose(t *testing.T) {
 	if cfg.Name != "basicapp" {
 		t.Errorf("Name = %q, want %q", cfg.Name, "basicapp")
 	}
-	if cfg.Domain != "example.com" {
-		t.Errorf("Domain = %q, want %q", cfg.Domain, "example.com")
+	if len(cfg.Endpoints) != 1 {
+		t.Fatalf("len(Endpoints) = %d, want 1", len(cfg.Endpoints))
 	}
-	if cfg.Port != "8080" {
-		t.Errorf("Port = %q, want %q", cfg.Port, "8080")
+	ep := cfg.Endpoints[0]
+	if ep.Domain != "example.com" {
+		t.Errorf("Endpoint.Domain = %q, want %q", ep.Domain, "example.com")
 	}
-	if cfg.TLS != "letsencrypt" {
-		t.Errorf("TLS = %q, want %q", cfg.TLS, "letsencrypt")
+	if ep.Port != "8080" {
+		t.Errorf("Endpoint.Port = %q, want %q", ep.Port, "8080")
+	}
+	if ep.TLS != "letsencrypt" {
+		t.Errorf("Endpoint.TLS = %q, want %q", ep.TLS, "letsencrypt")
+	}
+	if ep.Service != "web" {
+		t.Errorf("Endpoint.Service = %q, want %q", ep.Service, "web")
+	}
+	if cfg.PrimaryDomain() != "example.com" {
+		t.Errorf("PrimaryDomain() = %q, want %q", cfg.PrimaryDomain(), "example.com")
 	}
 	if len(cfg.Services) != 1 {
 		t.Fatalf("len(Services) = %d, want 1", len(cfg.Services))
@@ -85,6 +95,17 @@ func TestParseMultiServiceCompose(t *testing.T) {
 	if len(dbSvc.Volumes) != 1 {
 		t.Errorf("db Volumes len = %d, want 1", len(dbSvc.Volumes))
 	}
+
+	// Check endpoint on web service
+	if len(cfg.Endpoints) != 1 {
+		t.Fatalf("len(Endpoints) = %d, want 1", len(cfg.Endpoints))
+	}
+	if cfg.Endpoints[0].Domain != "myapp.com" {
+		t.Errorf("Endpoint.Domain = %q, want %q", cfg.Endpoints[0].Domain, "myapp.com")
+	}
+	if cfg.Endpoints[0].Service != "web" {
+		t.Errorf("Endpoint.Service = %q, want %q", cfg.Endpoints[0].Service, "web")
+	}
 }
 
 func TestParseFileNotFound(t *testing.T) {
@@ -96,16 +117,12 @@ func TestParseFileNotFound(t *testing.T) {
 
 func TestExtractLabels(t *testing.T) {
 	labels := map[string]string{
-		"simpledeploy.domain":           "test.example.com",
-		"simpledeploy.port":             "9090",
-		"simpledeploy.tls":              "letsencrypt",
-		"simpledeploy.backup.strategy":  "dump",
-		"simpledeploy.backup.schedule":  "0 3 * * *",
-		"simpledeploy.backup.target":    "s3://bucket/path",
-		"simpledeploy.backup.retention": "14d",
-		"simpledeploy.alert.cpu":        "80",
-		"simpledeploy.alert.memory":     "90",
-		"simpledeploy.paths":            "/api,/web",
+		"simpledeploy.backup.strategy":    "dump",
+		"simpledeploy.backup.schedule":    "0 3 * * *",
+		"simpledeploy.backup.target":      "s3://bucket/path",
+		"simpledeploy.backup.retention":   "14d",
+		"simpledeploy.alert.cpu":          "80",
+		"simpledeploy.alert.memory":       "90",
 		"simpledeploy.ratelimit.requests": "100",
 		"simpledeploy.ratelimit.window":   "1m",
 		"simpledeploy.ratelimit.by":       "ip",
@@ -115,15 +132,6 @@ func TestExtractLabels(t *testing.T) {
 
 	lc := ExtractLabels(labels)
 
-	if lc.Domain != "test.example.com" {
-		t.Errorf("Domain = %q, want %q", lc.Domain, "test.example.com")
-	}
-	if lc.Port != "9090" {
-		t.Errorf("Port = %q, want %q", lc.Port, "9090")
-	}
-	if lc.TLS != "letsencrypt" {
-		t.Errorf("TLS = %q, want %q", lc.TLS, "letsencrypt")
-	}
 	if lc.BackupStrategy != "dump" {
 		t.Errorf("BackupStrategy = %q, want %q", lc.BackupStrategy, "dump")
 	}
@@ -142,9 +150,6 @@ func TestExtractLabels(t *testing.T) {
 	if lc.AlertMemory != "90" {
 		t.Errorf("AlertMemory = %q, want %q", lc.AlertMemory, "90")
 	}
-	if lc.PathPatterns != "/api,/web" {
-		t.Errorf("PathPatterns = %q, want %q", lc.PathPatterns, "/api,/web")
-	}
 	if lc.RateLimit.Requests != "100" {
 		t.Errorf("RateLimit.Requests = %q, want %q", lc.RateLimit.Requests, "100")
 	}
@@ -159,5 +164,61 @@ func TestExtractLabels(t *testing.T) {
 	}
 	if lc.AccessAllow != "10.0.0.0/8,192.168.1.5" {
 		t.Errorf("AccessAllow = %q, want %q", lc.AccessAllow, "10.0.0.0/8,192.168.1.5")
+	}
+}
+
+func TestExtractEndpoints(t *testing.T) {
+	labels := map[string]string{
+		"simpledeploy.endpoints.0.domain": "web.example.com",
+		"simpledeploy.endpoints.0.port":   "3000",
+		"simpledeploy.endpoints.0.tls":    "letsencrypt",
+		"simpledeploy.endpoints.1.domain": "admin.example.com",
+		"simpledeploy.endpoints.1.port":   "3001",
+		"simpledeploy.endpoints.1.tls":    "off",
+	}
+
+	eps := extractEndpoints(labels, "web")
+	if len(eps) != 2 {
+		t.Fatalf("len(endpoints) = %d, want 2", len(eps))
+	}
+
+	if eps[0].Domain != "web.example.com" {
+		t.Errorf("eps[0].Domain = %q, want %q", eps[0].Domain, "web.example.com")
+	}
+	if eps[0].Port != "3000" {
+		t.Errorf("eps[0].Port = %q, want %q", eps[0].Port, "3000")
+	}
+	if eps[0].TLS != "letsencrypt" {
+		t.Errorf("eps[0].TLS = %q, want %q", eps[0].TLS, "letsencrypt")
+	}
+	if eps[0].Service != "web" {
+		t.Errorf("eps[0].Service = %q, want %q", eps[0].Service, "web")
+	}
+
+	if eps[1].Domain != "admin.example.com" {
+		t.Errorf("eps[1].Domain = %q, want %q", eps[1].Domain, "admin.example.com")
+	}
+	if eps[1].Port != "3001" {
+		t.Errorf("eps[1].Port = %q, want %q", eps[1].Port, "3001")
+	}
+	if eps[1].TLS != "off" {
+		t.Errorf("eps[1].TLS = %q, want %q", eps[1].TLS, "off")
+	}
+}
+
+func TestExtractEndpointsEmpty(t *testing.T) {
+	labels := map[string]string{
+		"simpledeploy.backup.strategy": "dump",
+	}
+	eps := extractEndpoints(labels, "web")
+	if len(eps) != 0 {
+		t.Errorf("len(endpoints) = %d, want 0", len(eps))
+	}
+}
+
+func TestPrimaryDomainEmpty(t *testing.T) {
+	cfg := &AppConfig{}
+	if cfg.PrimaryDomain() != "" {
+		t.Errorf("PrimaryDomain() = %q, want empty", cfg.PrimaryDomain())
 	}
 }

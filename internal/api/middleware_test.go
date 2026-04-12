@@ -20,6 +20,10 @@ func newMiddlewareTestServer(t *testing.T) (*Server, *store.Store) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
+	// Create test users so auth middleware can validate JWT user existence
+	if _, err := s.CreateUser("admin", "hashed", "super_admin", "", ""); err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
 	jwtMgr := auth.NewJWTManager("middleware-test-secret", time.Hour)
 	srv := NewServer(0, s, jwtMgr, nil)
 	return srv, s
@@ -45,7 +49,7 @@ func TestAuthMiddlewareNoAuth(t *testing.T) {
 func TestAuthMiddlewareValidJWT(t *testing.T) {
 	srv, _ := newMiddlewareTestServer(t)
 
-	token, err := srv.jwt.Generate(42, "alice", "admin")
+	token, err := srv.jwt.Generate(1, "admin", "super_admin")
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
@@ -68,8 +72,8 @@ func TestAuthMiddlewareValidJWT(t *testing.T) {
 	if captured == nil {
 		t.Fatal("auth user not set in context")
 	}
-	if captured.ID != 42 || captured.Username != "alice" || captured.Role != "admin" {
-		t.Errorf("auth user = %+v, want {42 alice admin}", captured)
+	if captured.ID != 1 || captured.Username != "admin" || captured.Role != "super_admin" {
+		t.Errorf("auth user = %+v, want {1 admin super_admin}", captured)
 	}
 }
 

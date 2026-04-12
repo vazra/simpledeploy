@@ -126,8 +126,8 @@ func writeComposeFile(t *testing.T, dir, appName string) {
     ports:
       - "80:80"
     labels:
-      simpledeploy.domain: "` + appName + `.example.com"
-      simpledeploy.port: "80"
+      simpledeploy.endpoints.0.domain: "` + appName + `.example.com"
+      simpledeploy.endpoints.0.port: "80"
 `
 	path := filepath.Join(appDir, "docker-compose.yml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
