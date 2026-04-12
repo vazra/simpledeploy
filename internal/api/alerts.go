@@ -259,9 +259,16 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
+	var appSlug string
+	if req.AppID != nil {
+		if app, err := s.store.GetAppByID(*req.AppID); err == nil {
+			appSlug = app.Slug
+		}
+	}
 	rule := &store.AlertRule{
 		ID:          id,
 		AppID:       req.AppID,
+		AppSlug:     appSlug,
 		Metric:      req.Metric,
 		Operator:    req.Operator,
 		Threshold:   req.Threshold,
