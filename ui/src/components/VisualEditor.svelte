@@ -15,6 +15,9 @@
   let envFileSaving = $state(false)
   let envFileExpanded = $state(false)
 
+  // ---- Pending env rows (local-only empty rows for Add button) ----
+  let pendingEnvRows = $state({})
+
   onMount(async () => {
     if (!slug) return
     envFileLoading = true
@@ -477,19 +480,6 @@
           <p class="text-xs text-text-muted mt-0.5">How to handle HTTPS</p>
         </div>
 
-        <!-- Metrics Tracking Paths -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Metrics Tracking Paths</label>
-          <input
-            type="text"
-            value={getLabel(firstService, 'paths')}
-            placeholder="/api,/health"
-            oninput={(e) => setLabel('paths', e.currentTarget.value)}
-            class={inputCls('sd.paths')}
-          />
-          <p class="text-xs text-text-muted mt-0.5">Track request metrics for these URL paths. Does not affect routing.</p>
-        </div>
-
       </div>
     {/if}
   </AccordionSection>
@@ -503,6 +493,8 @@
         {@const otherServices = serviceNames.filter((s) => s !== svcName)}
 
         {@const envRows = parseEnv(svc)}
+        {@const pending = pendingEnvRows[svcName] || []}
+        {@const allEnvRows = [...envRows, ...pending]}
         <div class="bg-surface-1 border border-border rounded-lg p-4 space-y-3">
           <!-- Service header (click-to-edit name) -->
           {#if editingServiceName === svcName}
@@ -556,7 +548,8 @@
               <span class="text-xs font-medium text-text-primary">Environment Variables</span>
               <span class="text-xs text-text-muted ml-1.5">Set env vars for this service</span>
             </div>
-            {#each envRows as row, i}
+            {#each allEnvRows as row, i}
+              {@const isPending = i >= envRows.length}
               {@const isRef = isEnvRef(row.value)}
               {@const resolved = isRef ? resolveEnvRef(row.value) : null}
               <div class="flex items-center gap-2">
@@ -565,12 +558,29 @@
                   placeholder="KEY"
                   value={row.name}
                   oninput={(e) => {
-                    const newRows = envRows.map((r, idx) => idx === i ? { ...r, name: e.currentTarget.value } : r)
-                    updateServiceDirect(svcName, (s) => {
-                      const serialized = serializeEnv(newRows)
-                      if (serialized) s.environment = serialized
-                      else delete s.environment
-                    })
+                    const val = e.currentTarget.value
+                    if (isPending) {
+                      // Pending row got a name - move to compose state
+                      const pi = i - envRows.length
+                      if (val) {
+                        const newPending = pending.filter((_, idx) => idx !== pi)
+                        pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
+                        updateServiceDirect(svcName, (s) => {
+                          if (!s.environment) s.environment = {}
+                          s.environment[val] = row.value || ''
+                        })
+                      } else {
+                        const newPending = pending.map((r, idx) => idx === pi ? { ...r, name: val } : r)
+                        pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
+                      }
+                    } else {
+                      const newRows = envRows.map((r, idx) => idx === i ? { ...r, name: val } : r)
+                      updateServiceDirect(svcName, (s) => {
+                        const serialized = serializeEnv(newRows)
+                        if (serialized) s.environment = serialized
+                        else delete s.environment
+                      })
+                    }
                   }}
                   class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
                 />
@@ -580,12 +590,19 @@
                     placeholder="VALUE"
                     value={row.value}
                     oninput={(e) => {
-                      const newRows = envRows.map((r, idx) => idx === i ? { ...r, value: e.currentTarget.value } : r)
-                      updateServiceDirect(svcName, (s) => {
-                        const serialized = serializeEnv(newRows)
-                        if (serialized) s.environment = serialized
-                        else delete s.environment
-                      })
+                      const val = e.currentTarget.value
+                      if (isPending) {
+                        const pi = i - envRows.length
+                        const newPending = pending.map((r, idx) => idx === pi ? { ...r, value: val } : r)
+                        pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
+                      } else {
+                        const newRows = envRows.map((r, idx) => idx === i ? { ...r, value: val } : r)
+                        updateServiceDirect(svcName, (s) => {
+                          const serialized = serializeEnv(newRows)
+                          if (serialized) s.environment = serialized
+                          else delete s.environment
+                        })
+                      }
                     }}
                     class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 {isRef ? 'pr-16' : ''}"
                   />
@@ -595,7 +612,7 @@
                     </span>
                   {/if}
                 </div>
-                {#if slug && row.name}
+                {#if slug && row.name && !isPending}
                   {#if isRef}
                     <button
                       type="button"
@@ -623,12 +640,18 @@
                 <button
                   type="button"
                   onclick={() => {
-                    const newRows = envRows.filter((_, idx) => idx !== i)
-                    updateServiceDirect(svcName, (s) => {
-                      const serialized = serializeEnv(newRows)
-                      if (serialized) s.environment = serialized
-                      else delete s.environment
-                    })
+                    if (isPending) {
+                      const pi = i - envRows.length
+                      const newPending = pending.filter((_, idx) => idx !== pi)
+                      pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
+                    } else {
+                      const newRows = envRows.filter((_, idx) => idx !== i)
+                      updateServiceDirect(svcName, (s) => {
+                        const serialized = serializeEnv(newRows)
+                        if (serialized) s.environment = serialized
+                        else delete s.environment
+                      })
+                    }
                   }}
                   class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
                   aria-label="Remove row"
@@ -642,14 +665,8 @@
             <button
               type="button"
               onclick={() => {
-                const newRows = [...envRows, { name: '', value: '' }]
-                updateServiceDirect(svcName, (s) => {
-                  const serialized = serializeEnv(newRows)
-                  if (serialized) s.environment = serialized
-                  else {
-                    if (!s.environment) s.environment = {}
-                  }
-                })
+                const newPending = [...pending, { name: '', value: '' }]
+                pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
               }}
               class="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary hover:bg-surface-3 px-2 py-1 rounded transition-colors"
             >

@@ -10,11 +10,7 @@
 
   let { slug, app, onAppUpdated } = $props()
 
-  // Domain - initialize from app prop
-  const initDomain = app?.Domain || ''
   const initAllowlist = app?.Labels?.['simpledeploy.access.allow'] || ''
-  let editDomain = $state(initDomain)
-  let savingDomain = $state(false)
 
   // Advanced
   let showAdvanced = $state(false)
@@ -55,12 +51,6 @@
     loadingBackups = false
   }
 
-  async function saveDomain() {
-    savingDomain = true
-    const res = await api.updateDomain(slug, editDomain)
-    savingDomain = false
-    if (!res.error) onAppUpdated()
-  }
 
   async function saveAllowlist() {
     savingAllowlist = true
@@ -135,25 +125,7 @@
     <EnvEditor {slug} />
   </div>
 
-  <!-- Section 3: Domain -->
-  <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-    <h3 class="text-sm font-medium text-text-primary mb-4">Domain</h3>
-    <div class="flex items-center gap-3">
-      <label class="{labelClass} whitespace-nowrap" for="domain-input">Domain</label>
-      <input
-        id="domain-input"
-        class={inputClass}
-        type="text"
-        placeholder="e.g. app.example.com"
-        bind:value={editDomain}
-      />
-      {#if editDomain !== (app?.Domain || '')}
-        <Button size="sm" onclick={saveDomain} loading={savingDomain}>Save</Button>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Section 4: Backups -->
+  <!-- Section 3: Backups -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-medium text-text-primary">Backups</h3>
