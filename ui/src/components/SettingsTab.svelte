@@ -294,10 +294,9 @@
       <ConfigTab {slug} />
     {:else}
       <!-- Read-only summary -->
-      {#if Object.keys(app?.Services || compose?.services || {}).length === 0}
-        <p class="text-xs text-text-muted">No services configured.</p>
+      {#if services.length === 0}
+        <p class="text-xs text-text-muted">No services found. Click Edit to view compose file.</p>
       {:else}
-        {@const svcEntries = Object.entries(app?.compose?.services || {})}
         <div class="space-y-2">
           {#each services as svc}
             <div class="flex items-center gap-3 bg-surface-1 rounded-lg px-3 py-2 border border-border/30">
@@ -308,9 +307,6 @@
               {/if}
             </div>
           {/each}
-          {#if services.length === 0}
-            <p class="text-xs text-text-muted">Service details unavailable. Click Edit to view compose file.</p>
-          {/if}
         </div>
       {/if}
     {/if}
