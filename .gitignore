@@ -10,3 +10,5 @@ cmd/simpledeploy/ui_dist/
 dist/
 
 docs/superpowers
+.playwright-mcp/
+screenshots/
