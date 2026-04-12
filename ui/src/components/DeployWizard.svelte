@@ -1,20 +1,29 @@
 <script>
   import { onDestroy } from 'svelte'
+  import yaml from 'js-yaml'
   import Button from './Button.svelte'
   import YamlEditor from './YamlEditor.svelte'
-  import AccordionSection from './AccordionSection.svelte'
-  import SlidePanel from './SlidePanel.svelte'
+  import VisualEditor from './VisualEditor.svelte'
   import { api } from '../lib/api.js'
 
   let { open = false, onclose = () => {}, onComplete = () => {} } = $props()
 
   let step = $state(1)
-
-  const steps = ['Compose', 'Review', 'Deploy']
+  const steps = ['Configure', 'Review', 'Deploy']
 
   // Step 1 state
   let appName = $state('')
   let nameError = $state('')
+  let editorMode = $state('visual') // 'visual' | 'yaml'
+
+  // Compose state (shared between modes)
+  let compose = $state({ services: { web: { image: '' } } })
+  let composeText = $state('')
+  let validating = $state(false)
+  let composeValid = $state(false)
+  let composeErrors = $state([])
+  let validateTimer = $state(null)
+  let visualErrors = $state({})
 
   const NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/
 
@@ -29,28 +38,70 @@
     nameError = appName.trim() ? validateName(appName) : ''
   }
 
-  // Compose state
-  let composeText = $state('')
-  let composeInputMode = $state('paste')
-  let validating = $state(false)
-  let composeValid = $state(false)
-  let composeErrors = $state([])
-  let validateTimer = $state(null)
+  function encodeBase64(str) {
+    return btoa(String.fromCodePoint(...new TextEncoder().encode(str)))
+  }
 
-  function handleComposeChange(val) {
+  // Mode switching (same pattern as ConfigTab)
+  function switchMode(newMode) {
+    if (newMode === editorMode) return
+    if (newMode === 'yaml') {
+      try {
+        composeText = yaml.dump(compose, { lineWidth: -1 })
+        composeValid = false
+        composeErrors = []
+        // Auto-validate the generated YAML
+        scheduleValidation(composeText)
+      } catch (e) {
+        composeErrors = [e.message]
+      }
+    } else {
+      try {
+        compose = yaml.load(composeText) || { services: {} }
+        composeErrors = []
+      } catch (e) {
+        composeErrors = ['Cannot switch to Visual: YAML has syntax errors']
+        return
+      }
+    }
+    editorMode = newMode
+  }
+
+  // Visual mode handlers
+  function handleVisualChange(updated) {
+    compose = updated
+    composeValid = false
+    composeErrors = []
+    // Validate by converting to YAML
+    try {
+      const text = yaml.dump(compose, { lineWidth: -1 })
+      scheduleValidation(text)
+    } catch { /* ignore */ }
+  }
+
+  function handleVisualErrors(errs) {
+    visualErrors = errs
+  }
+
+  // YAML mode handlers
+  function handleYamlChange(val) {
     composeText = val
     composeValid = false
     composeErrors = []
+    scheduleValidation(val)
+  }
+
+  function scheduleValidation(text) {
     if (validateTimer) clearTimeout(validateTimer)
-    if (val.trim()) {
-      validateTimer = setTimeout(() => validateCompose(val), 800)
+    if (text.trim()) {
+      validateTimer = setTimeout(() => runValidation(text), 800)
     }
   }
 
-  async function validateCompose(text) {
+  async function runValidation(text) {
     validating = true
     try {
-      const encoded = btoa(unescape(encodeURIComponent(text)))
+      const encoded = encodeBase64(text)
       const res = await api.validateCompose(encoded)
       if (res.data?.valid) {
         composeValid = true
@@ -71,62 +122,65 @@
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
-      composeText = reader.result
-      handleComposeChange(composeText)
+      const text = reader.result
+      composeText = text
+      try {
+        compose = yaml.load(text) || { services: {} }
+      } catch { /* stay in yaml mode */ }
+      handleYamlChange(text)
     }
     reader.readAsText(file)
   }
 
-  // Step 2 state
-  let parsedServices = $state([])
+  // Check if compose has at least one service with an image
+  let hasServices = $derived(() => {
+    const svcs = compose?.services || {}
+    return Object.values(svcs).some(s => s.image?.trim())
+  })
 
-  // Routing labels
-  let routingDomain = $state('')
-  let routingPort = $state('')
-  let routingTls = $state(false)
+  let canProceed = $derived(
+    appName.trim() && !nameError && composeValid && !Object.keys(visualErrors).length
+  )
 
-  function injectLabels(yaml) {
-    if (!routingDomain && !routingPort && !routingTls) return yaml
+  // Step 2: build review summary from compose object
+  let reviewServices = $derived.by(() => {
+    if (!compose?.services) return []
+    return Object.entries(compose.services).map(([name, svc]) => ({
+      name,
+      image: svc.image || '',
+      ports: (svc.ports || []).map(p => typeof p === 'string' ? p : `${p.published}:${p.target}`),
+      envCount: Array.isArray(svc.environment) ? svc.environment.length : Object.keys(svc.environment || {}).length,
+      volumeCount: (svc.volumes || []).length,
+    }))
+  })
 
-    const labels = []
-    if (routingDomain) labels.push(`      simpledeploy.domain: "${routingDomain}"`)
-    if (routingPort) labels.push(`      simpledeploy.port: "${routingPort}"`)
-    if (routingTls) labels.push(`      simpledeploy.tls: "letsencrypt"`)
-
-    const labelBlock = labels.join('\n')
-    const lines = yaml.split('\n')
-    let inServices = false
-    let firstServiceIndent = -1
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const stripped = line.trimEnd()
-      if (/^services:\s*$/.test(stripped)) { inServices = true; continue }
-      if (inServices && stripped.trim() && !stripped.startsWith('#')) {
-        const indent = line.search(/\S/)
-        if (firstServiceIndent === -1) firstServiceIndent = indent
-
-        if (indent === firstServiceIndent) {
-          for (let j = i + 1; j < lines.length; j++) {
-            const sline = lines[j]
-            const sindent = sline.search(/\S/)
-            if (sindent <= firstServiceIndent && sline.trim()) break
-            if (sline.trim() === 'labels:') {
-              lines.splice(j + 1, 0, labelBlock)
-              return lines.join('\n')
-            }
-          }
-          const labelsHeader = ' '.repeat(firstServiceIndent + 2) + 'labels:'
-          lines.splice(i + 1, 0, labelsHeader, labelBlock)
-          return lines.join('\n')
-        }
+  let reviewLabels = $derived.by(() => {
+    if (!compose?.services) return {}
+    const labels = {}
+    for (const svc of Object.values(compose.services)) {
+      for (const [k, v] of Object.entries(svc.labels || {})) {
+        if (k.startsWith('simpledeploy.')) labels[k] = v
       }
     }
-    return yaml
+    return labels
+  })
+
+  function enterStep2() {
+    // Sync compose text from visual mode before review
+    if (editorMode === 'visual') {
+      try {
+        composeText = yaml.dump(compose, { lineWidth: -1 })
+      } catch { /* already validated */ }
+    } else {
+      try {
+        compose = yaml.load(composeText) || { services: {} }
+      } catch { /* already validated */ }
+    }
+    step = 2
   }
 
   // Step 3 state
-  let deployStatus = $state('deploying') // 'deploying' | 'success' | 'failed'
+  let deployStatus = $state('deploying')
   let deployLines = $state([])
   let currentAction = $state('')
   let deployWs = $state(null)
@@ -138,8 +192,12 @@
     deployLines = []
     currentAction = 'Starting deploy...'
 
-    const finalCompose = injectLabels(composeText)
-    const encoded = btoa(unescape(encodeURIComponent(finalCompose)))
+    // Always deploy from YAML text
+    if (editorMode === 'visual') {
+      try { composeText = yaml.dump(compose, { lineWidth: -1 }) } catch { /* validated */ }
+    }
+
+    const encoded = encodeBase64(composeText)
     const res = await api.deploy(appName.trim(), encoded)
 
     if (res.error) {
@@ -148,7 +206,6 @@
       return
     }
 
-    // Connect to deploy log WebSocket
     deployWs = api.deployLogsWs(appName.trim())
     deployWs.onmessage = (event) => {
       const msg = JSON.parse(event.data)
@@ -187,17 +244,16 @@
   function resetWizard() {
     step = 1
     appName = ''
+    editorMode = 'visual'
+    compose = { services: { web: { image: '' } } }
     composeText = ''
     composeValid = false
     composeErrors = []
+    visualErrors = {}
     nameError = ''
     deployStatus = 'deploying'
     deployLines = []
     currentAction = ''
-    parsedServices = []
-    routingDomain = ''
-    routingPort = ''
-    routingTls = false
   }
 
   let confirmClose = $state(false)
@@ -211,121 +267,93 @@
     onclose()
   }
 
-  function parseServicesFromYaml(text) {
-    const services = []
-    const lines = text.split('\n')
-    let inServices = false
-    let currentService = null
-    let serviceIndent = -1
-
-    for (const line of lines) {
-      const stripped = line.trimEnd()
-      if (stripped === '' || stripped.startsWith('#')) continue
-      const indent = line.search(/\S/)
-
-      if (/^services:\s*$/.test(stripped)) {
-        inServices = true
-        serviceIndent = -1
-        continue
-      }
-
-      if (inServices) {
-        if (indent === 0) { inServices = false; continue }
-
-        if (serviceIndent === -1) serviceIndent = indent
-        if (indent === serviceIndent && stripped.endsWith(':')) {
-          currentService = { name: stripped.replace(':', '').trim(), image: '', ports: [] }
-          services.push(currentService)
-          continue
-        }
-
-        if (currentService) {
-          const trimmed = stripped.trim()
-          if (trimmed.startsWith('image:')) {
-            currentService.image = trimmed.replace('image:', '').trim().replace(/['"]/g, '')
-          }
-          if (trimmed === 'ports:') currentService._inPorts = true
-          else if (currentService._inPorts && trimmed.startsWith('- ')) {
-            const port = trimmed.replace('- ', '').replace(/['"]/g, '').trim()
-            if (/^\d/.test(port)) currentService.ports.push(port)
-          } else if (!trimmed.startsWith('- ')) {
-            currentService._inPorts = false
-          }
-        }
-      }
-    }
-    return services.map(({ _inPorts, ...s }) => s)
-  }
-
-  async function enterStep2() {
-    parsedServices = parseServicesFromYaml(composeText)
-    step = 2
+  function onKeydown(e) {
+    if (open && e.key === 'Escape') handleClose()
   }
 </script>
 
-<SlidePanel title="Deploy App" {open} onclose={handleClose}>
-<div class="flex flex-col h-full">
-  <!-- Step indicator -->
-  <div class="flex items-center gap-2 mb-6">
-    {#each steps as label, i}
-      {@const num = i + 1}
-      {@const active = step === num}
-      {@const done = step > num}
-      <div class="flex items-center gap-2 {i > 0 ? 'flex-1' : ''}">
-        {#if i > 0}
-          <div class="flex-1 h-px {done ? 'bg-accent' : 'bg-border/50'}"></div>
-        {/if}
+<svelte:window onkeydown={onKeydown} />
+
+{#if open}
+<div class="fixed inset-0 z-40" role="dialog" aria-modal="true">
+  <button class="absolute inset-0 bg-black/40 backdrop-blur-sm" onclick={handleClose} aria-label="Close"></button>
+  <div class="absolute inset-4 sm:inset-6 lg:inset-10 bg-surface-2 border border-border/50 rounded-2xl shadow-2xl flex flex-col animate-scale-in overflow-hidden">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
+      <div class="flex items-center gap-4">
+        <h3 class="text-lg font-semibold text-text-primary tracking-tight">Deploy App</h3>
+        <!-- Step indicator -->
         <div class="flex items-center gap-1.5">
-          <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium transition-colors
-            {active ? 'bg-accent text-white' : done ? 'bg-accent/20 text-accent' : 'bg-surface-3 text-text-muted'}">
-            {#if done}
-              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-            {:else}
-              {num}
+          {#each steps as label, i}
+            {@const num = i + 1}
+            {@const active = step === num}
+            {@const done = step > num}
+            {#if i > 0}
+              <div class="w-6 h-px {done ? 'bg-accent' : 'bg-border/50'}"></div>
             {/if}
-          </div>
-          <span class="text-xs font-medium {active ? 'text-text-primary' : 'text-text-muted'}">{label}</span>
+            <div class="flex items-center gap-1">
+              <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-medium
+                {active ? 'bg-accent text-white' : done ? 'bg-accent/20 text-accent' : 'bg-surface-3 text-text-muted'}">
+                {#if done}
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                {:else}
+                  {num}
+                {/if}
+              </div>
+              <span class="text-xs {active ? 'text-text-primary font-medium' : 'text-text-muted'}">{label}</span>
+            </div>
+          {/each}
         </div>
       </div>
-    {/each}
-  </div>
+      <button onclick={handleClose} class="text-text-secondary hover:text-text-primary p-1" aria-label="Close">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
 
-  <!-- Step content -->
-  <div class="flex-1 overflow-y-auto">
-    {#if step === 1}
-      <div class="flex flex-col gap-4">
-        <div>
-          <label class="block text-xs font-medium text-text-muted mb-2">App Name</label>
-          <input
-            value={appName}
-            oninput={handleNameInput}
-            placeholder="my-app"
-            class="w-full px-3 py-2 bg-input-bg border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30
-              {nameError ? 'border-danger/50' : 'border-border/50'}"
-          />
-          {#if nameError}
-            <p class="text-xs text-danger mt-1">{nameError}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-1">Alphanumeric, dots, hyphens, underscores. Max 63 chars.</p>
-          {/if}
-        </div>
-
-        <div>
-          <label class="block text-xs font-medium text-text-muted mb-2">Compose File</label>
-          <div class="flex gap-1 mb-2">
-            <button
-              type="button"
-              onclick={() => composeInputMode = 'paste'}
-              class="px-2 py-1 text-xs rounded border transition-colors {composeInputMode === 'paste' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
-            >Paste</button>
-            <button
-              type="button"
-              onclick={() => composeInputMode = 'upload'}
-              class="px-2 py-1 text-xs rounded border transition-colors {composeInputMode === 'upload' ? 'bg-accent/10 border-accent/30 text-accent' : 'border-border/50 text-text-muted hover:text-text-primary'}"
-            >Upload</button>
+    <!-- Content -->
+    <div class="flex-1 overflow-y-auto px-6 py-5">
+      {#if step === 1}
+        <div class="max-w-3xl mx-auto flex flex-col gap-5">
+          <!-- App Name -->
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1.5">App Name</label>
+            <input
+              value={appName}
+              oninput={handleNameInput}
+              placeholder="my-app"
+              class="w-full max-w-sm px-3 py-2 bg-input-bg border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30
+                {nameError ? 'border-danger/50' : 'border-border/50'}"
+            />
+            {#if nameError}
+              <p class="text-xs text-danger mt-1">{nameError}</p>
+            {:else}
+              <p class="text-xs text-text-muted mt-1">Alphanumeric, dots, hyphens, underscores. Max 63 chars.</p>
+            {/if}
           </div>
 
-          {#if composeInputMode === 'paste'}
+          <!-- Editor mode toggle -->
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <label class="block text-sm font-medium text-text-primary">Compose Configuration</label>
+              <div class="flex items-center gap-1 bg-surface-3/40 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onclick={() => switchMode('visual')}
+                  class="px-3 py-1 text-xs font-medium rounded-md transition-colors
+                    {editorMode === 'visual' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
+                >Visual</button>
+                <button
+                  type="button"
+                  onclick={() => switchMode('yaml')}
+                  class="px-3 py-1 text-xs font-medium rounded-md transition-colors
+                    {editorMode === 'yaml' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
+                >YAML</button>
+              </div>
+            </div>
+
+            <!-- Validation status -->
             {#if validating}
               <div class="flex items-center gap-2 text-xs text-text-muted mb-2">
                 <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
@@ -343,154 +371,164 @@
                 {/each}
               </div>
             {/if}
-            <YamlEditor value={composeText} onchange={handleComposeChange} />
-          {:else}
-            <input
-              type="file"
-              accept=".yml,.yaml"
-              onchange={handleFileUpload}
-              class="w-full text-sm text-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border file:border-border file:text-sm file:bg-surface-3 file:text-text-primary hover:file:bg-surface-3/80"
-            />
-            {#if composeText}
-              <p class="text-xs text-success mt-1">File loaded ({composeText.length} chars)</p>
+
+            {#if editorMode === 'visual'}
+              <VisualEditor {compose} onchange={handleVisualChange} onerrors={handleVisualErrors} />
+            {:else}
+              <div class="flex items-center gap-2 mb-2">
+                <button
+                  type="button"
+                  onclick={() => document.getElementById('deploy-file-upload')?.click()}
+                  class="px-2.5 py-1 text-xs rounded border border-border/50 text-text-muted hover:text-text-primary transition-colors"
+                >Upload file</button>
+                <input
+                  id="deploy-file-upload"
+                  type="file"
+                  accept=".yml,.yaml"
+                  onchange={handleFileUpload}
+                  class="hidden"
+                />
+              </div>
+              <YamlEditor value={composeText} onchange={handleYamlChange} />
             {/if}
-          {/if}
+          </div>
         </div>
-      </div>
-    {:else if step === 2}
-      <div class="flex flex-col gap-4">
-        <!-- Service summary -->
-        <div>
-          <h4 class="text-xs font-medium text-text-muted mb-2">Services</h4>
-          <div class="flex flex-col gap-2">
-            {#each parsedServices as svc}
-              <div class="bg-surface-3/50 border border-border/30 rounded-lg px-3 py-2.5">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-text-primary">{svc.name}</span>
-                  {#if svc.ports.length > 0}
+
+      {:else if step === 2}
+        <div class="max-w-3xl mx-auto flex flex-col gap-5">
+          <div>
+            <h4 class="text-sm font-medium text-text-primary mb-1">App: {appName}</h4>
+            <p class="text-xs text-text-muted">Review your configuration before deploying.</p>
+          </div>
+
+          <!-- Services -->
+          <div>
+            <h4 class="text-xs font-medium text-text-muted mb-2 uppercase tracking-wider">Services</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {#each reviewServices as svc}
+                <div class="bg-surface-3/50 border border-border/30 rounded-lg px-4 py-3">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-sm font-medium text-text-primary">{svc.name}</span>
                     {#each svc.ports as port}
                       <span class="text-xs bg-accent/10 text-accent px-1.5 py-0.5 rounded">{port}</span>
                     {/each}
+                  </div>
+                  {#if svc.image}
+                    <p class="text-xs text-text-muted font-mono">{svc.image}</p>
                   {/if}
+                  <div class="flex gap-3 mt-1.5 text-xs text-text-muted">
+                    {#if svc.envCount > 0}
+                      <span>{svc.envCount} env var{svc.envCount > 1 ? 's' : ''}</span>
+                    {/if}
+                    {#if svc.volumeCount > 0}
+                      <span>{svc.volumeCount} volume{svc.volumeCount > 1 ? 's' : ''}</span>
+                    {/if}
+                  </div>
                 </div>
-                {#if svc.image}
-                  <p class="text-xs text-text-muted mt-1 font-mono">{svc.image}</p>
-                {/if}
+              {/each}
+            </div>
+          </div>
+
+          <!-- SimpleDeploy labels if any -->
+          {#if Object.keys(reviewLabels).length > 0}
+            <div>
+              <h4 class="text-xs font-medium text-text-muted mb-2 uppercase tracking-wider">Routing & Settings</h4>
+              <div class="bg-surface-3/50 border border-border/30 rounded-lg px-4 py-3">
+                <div class="grid grid-cols-2 gap-2">
+                  {#each Object.entries(reviewLabels) as [key, val]}
+                    <div>
+                      <span class="text-xs text-text-muted">{key.replace('simpledeploy.', '')}</span>
+                      <p class="text-sm text-text-primary font-mono">{val}</p>
+                    </div>
+                  {/each}
+                </div>
               </div>
-            {/each}
-            {#if parsedServices.length === 0}
-              <p class="text-xs text-text-muted">Could not parse services (compose is still valid)</p>
+            </div>
+          {/if}
+        </div>
+
+      {:else}
+        <div class="max-w-3xl mx-auto flex flex-col gap-4">
+          <!-- Status badge -->
+          <div class="flex items-center gap-2">
+            {#if deployStatus === 'deploying'}
+              <span class="flex items-center gap-1.5 text-sm font-medium text-warning">
+                <span class="w-2 h-2 rounded-full bg-warning animate-pulse"></span>
+                Deploying...
+              </span>
+            {:else if deployStatus === 'success'}
+              <span class="flex items-center gap-1.5 text-sm font-medium text-success">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                Deployed
+              </span>
+            {:else}
+              <span class="flex items-center gap-1.5 text-sm font-medium text-danger">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                Failed
+              </span>
+            {/if}
+            {#if currentAction}
+              <span class="text-xs text-text-muted">{currentAction}</span>
             {/if}
           </div>
-        </div>
 
-        <!-- Quick routing labels -->
-        <AccordionSection title="Configure Routing (optional)">
-          <div class="flex flex-col gap-3">
-            <div>
-              <label class="block text-xs font-medium text-text-muted mb-1">Domain</label>
-              <input
-                bind:value={routingDomain}
-                placeholder="app.example.com"
-                class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/30"
-              />
+          <!-- Log viewer -->
+          <div
+            bind:this={logContainer}
+            class="min-h-[300px] max-h-[500px] overflow-y-auto bg-[#0c0c0c] light:bg-[#1a1a2e] rounded-lg font-mono text-[13px] leading-5 p-4"
+          >
+            {#if deployLines.length === 0}
+              <div class="flex items-center justify-center h-full min-h-[280px] text-[#555] text-sm">Waiting for output...</div>
+            {:else}
+              {#each deployLines as line}
+                <div class="whitespace-pre-wrap break-all py-px {line.stream === 'stderr' ? 'text-red-400' : 'text-[#d4d4d4] light:text-[#c8c8d8]'}">
+                  {line.line}
+                </div>
+              {/each}
+            {/if}
+          </div>
+
+          <!-- Completion actions -->
+          {#if deployStatus === 'success'}
+            <div class="flex gap-2">
+              <Button size="sm" onclick={() => { onComplete(); window.location.hash = `#/apps/${appName.trim()}` }}>View App</Button>
+              <Button size="sm" variant="secondary" onclick={resetWizard}>Deploy Another</Button>
             </div>
-            <div>
-              <label class="block text-xs font-medium text-text-muted mb-1">Port</label>
-              <input
-                bind:value={routingPort}
-                placeholder="8080"
-                class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/30"
-              />
+          {:else if deployStatus === 'failed'}
+            <div class="flex gap-2">
+              <Button size="sm" variant="secondary" onclick={() => { step = 1 }}>Back to Edit</Button>
             </div>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" bind:checked={routingTls} class="rounded border-border accent-accent" />
-              <span class="text-xs text-text-primary">Enable TLS (Let's Encrypt)</span>
-            </label>
-          </div>
-        </AccordionSection>
-      </div>
-    {:else}
-      <div class="flex flex-col gap-4 h-full">
-        <!-- Status badge -->
-        <div class="flex items-center gap-2">
-          {#if deployStatus === 'deploying'}
-            <span class="flex items-center gap-1.5 text-sm font-medium text-warning">
-              <span class="w-2 h-2 rounded-full bg-warning animate-pulse"></span>
-              Deploying...
-            </span>
-          {:else if deployStatus === 'success'}
-            <span class="flex items-center gap-1.5 text-sm font-medium text-success">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-              Deployed
-            </span>
-          {:else}
-            <span class="flex items-center gap-1.5 text-sm font-medium text-danger">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-              Failed
-            </span>
-          {/if}
-          {#if currentAction}
-            <span class="text-xs text-text-muted">{currentAction}</span>
           {/if}
         </div>
+      {/if}
+    </div>
 
-        <!-- Log viewer -->
-        <div
-          bind:this={logContainer}
-          class="flex-1 min-h-[300px] max-h-[400px] overflow-y-auto bg-[#0c0c0c] light:bg-[#1a1a2e] rounded-lg font-mono text-[13px] leading-5 p-4"
-        >
-          {#if deployLines.length === 0}
-            <div class="flex items-center justify-center h-full text-[#555] text-sm">Waiting for output...</div>
-          {:else}
-            {#each deployLines as line}
-              <div class="whitespace-pre-wrap break-all py-px {line.stream === 'stderr' ? 'text-red-400' : 'text-[#d4d4d4] light:text-[#c8c8d8]'}">
-                {line.line}
-              </div>
-            {/each}
-          {/if}
-        </div>
-
-        <!-- Completion actions -->
-        {#if deployStatus === 'success'}
-          <div class="flex gap-2">
-            <Button size="sm" onclick={() => { onComplete(); window.location.hash = `#/apps/${appName.trim()}` }}>View App</Button>
-            <Button size="sm" variant="secondary" onclick={resetWizard}>Deploy Another</Button>
-          </div>
-        {:else if deployStatus === 'failed'}
-          <div class="flex gap-2">
-            <Button size="sm" variant="secondary" onclick={() => { step = 1 }}>Back to Edit</Button>
-          </div>
+    <!-- Footer -->
+    {#if step < 3}
+      <div class="flex justify-between px-6 py-4 border-t border-border/50 shrink-0">
+        {#if step === 2}
+          <Button variant="secondary" size="sm" onclick={() => step = 1}>Back</Button>
+          <Button size="sm" onclick={startDeploy}>Deploy</Button>
+        {:else}
+          <div></div>
+          <Button size="sm" disabled={!canProceed} onclick={enterStep2}>Next</Button>
         {/if}
       </div>
     {/if}
   </div>
+</div>
+{/if}
 
-  <!-- Footer -->
-  {#if step < 3}
-    <div class="flex justify-between pt-4 border-t border-border/50 mt-4">
-      {#if step === 2}
-        <Button variant="secondary" size="sm" onclick={() => step = 1}>Back</Button>
-        <Button size="sm" onclick={startDeploy}>Deploy</Button>
-      {:else}
-        <div></div>
-        <Button size="sm" disabled={!appName.trim() || !!nameError || !composeValid} onclick={enterStep2}>Next</Button>
-      {/if}
-    </div>
-  {/if}
-
-  <!-- Close confirmation during deploy -->
-  {#if confirmClose}
-    <div class="fixed inset-0 z-50 flex items-center justify-center">
-      <button class="absolute inset-0 bg-black/40" onclick={() => confirmClose = false} aria-label="Cancel"></button>
-      <div class="relative bg-surface-2 border border-border/50 rounded-xl p-6 max-w-sm shadow-2xl">
-        <p class="text-sm text-text-primary mb-4">Deploy in progress. Close anyway?</p>
-        <div class="flex gap-2 justify-end">
-          <Button size="sm" variant="secondary" onclick={() => confirmClose = false}>Cancel</Button>
-          <Button size="sm" variant="danger" onclick={() => { deployWs?.close(); onclose() }}>Close</Button>
-        </div>
+<!-- Close confirmation during deploy -->
+{#if confirmClose}
+  <div class="fixed inset-0 z-50 flex items-center justify-center">
+    <button class="absolute inset-0 bg-black/40" onclick={() => confirmClose = false} aria-label="Cancel"></button>
+    <div class="relative bg-surface-2 border border-border/50 rounded-xl p-6 max-w-sm shadow-2xl">
+      <p class="text-sm text-text-primary mb-4">Deploy in progress. Close anyway?</p>
+      <div class="flex gap-2 justify-end">
+        <Button size="sm" variant="secondary" onclick={() => confirmClose = false}>Cancel</Button>
+        <Button size="sm" variant="danger" onclick={() => { deployWs?.close(); resetWizard(); onclose() }}>Close</Button>
       </div>
     </div>
-  {/if}
-</div>
-</SlidePanel>
+  </div>
+{/if}
