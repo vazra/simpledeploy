@@ -421,7 +421,7 @@
       </div>
 
     {:else if activeTab === 'settings'}
-      <SettingsTab {slug} {app} onAppUpdated={loadApp} />
+      <SettingsTab {slug} {app} {services} onAppUpdated={loadApp} />
     {/if}
 
     <!-- Action Modal -->

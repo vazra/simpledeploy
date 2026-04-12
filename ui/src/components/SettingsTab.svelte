@@ -8,13 +8,15 @@
   import Badge from './Badge.svelte'
   import Modal from './Modal.svelte'
 
-  let { slug, app, onAppUpdated } = $props()
+  let { slug, app, services = [], onAppUpdated } = $props()
+
+  let serviceNames = $derived(services.map(s => s.service || s.name || s).filter(Boolean))
 
   const initAllowlist = app?.Labels?.['simpledeploy.access.allow'] || ''
 
-  // Section expand states (view-first: all collapsed)
+  // Section expand states
   let showComposeEditor = $state(false)
-  let showEnvEditor = $state(false)
+  let editingEndpointIdx = $state(-1) // -1 = none, >=0 = editing that index, -2 = adding new
 
   // Advanced
   let showAdvanced = $state(false)
@@ -26,9 +28,6 @@
   let showDeleteModal = $state(false)
   let deleting = $state(false)
 
-  // Env vars (for read-only view)
-  let envVars = $state([])
-  let envLoading = $state(true)
 
   // Backups
   let backupConfigs = $state([])
@@ -49,16 +48,48 @@
   // Endpoints from app response
   let endpoints = $derived(app?.endpoints || [])
 
-  onMount(() => {
-    loadBackups()
-    loadEnvVars()
-  })
+  // Endpoint editing state
+  let editEndpoint = $state({ domain: '', port: '', tls: 'letsencrypt', service: '' })
+  let savingEndpoints = $state(false)
 
-  async function loadEnvVars() {
-    const res = await api.getEnv(slug)
-    envVars = res.data || []
-    envLoading = false
+  function startEditEndpoint(i) {
+    const ep = endpoints[i]
+    editEndpoint = { ...ep }
+    editingEndpointIdx = i
   }
+
+  function startAddEndpoint() {
+    editEndpoint = { domain: '', port: '', tls: 'letsencrypt', service: '' }
+    editingEndpointIdx = -2
+  }
+
+  function cancelEndpointEdit() {
+    editingEndpointIdx = -1
+  }
+
+  async function saveEndpoint() {
+    savingEndpoints = true
+    let updated = [...endpoints]
+    if (editingEndpointIdx === -2) {
+      updated.push(editEndpoint)
+    } else {
+      updated[editingEndpointIdx] = editEndpoint
+    }
+    await api.updateEndpoints(slug, updated)
+    editingEndpointIdx = -1
+    savingEndpoints = false
+    onAppUpdated()
+  }
+
+  async function deleteEndpoint(i) {
+    savingEndpoints = true
+    const updated = endpoints.filter((_, idx) => idx !== i)
+    await api.updateEndpoints(slug, updated)
+    savingEndpoints = false
+    onAppUpdated()
+  }
+
+  onMount(loadBackups)
 
   async function loadBackups() {
     loadingBackups = true
@@ -144,72 +175,143 @@
 
 <div class="space-y-6">
 
-  <!-- Section 1: Endpoints (read-only cards) -->
+  <!-- Section 1: Endpoints -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-medium text-text-primary">Endpoints</h3>
-      <Button variant="ghost" size="sm" onclick={() => showComposeEditor = !showComposeEditor}>
-        {showComposeEditor ? 'Close Editor' : 'Edit'}
-      </Button>
+      <Button variant="ghost" size="sm" onclick={startAddEndpoint}>+ Add</Button>
     </div>
-    {#if endpoints.length === 0}
-      <p class="text-xs text-text-muted">No endpoints configured. Edit to add a domain.</p>
+    {#if endpoints.length === 0 && editingEndpointIdx !== -2}
+      <p class="text-xs text-text-muted">No endpoints configured.</p>
     {:else}
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {#each endpoints as ep}
-          <div class="flex items-center gap-3 bg-surface-1 rounded-lg px-3 py-2.5 border border-border/30">
-            <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium text-text-primary truncate">{ep.domain || 'No domain'}</div>
-              <div class="flex items-center gap-2 mt-0.5">
-                <span class="text-[11px] text-text-muted">{ep.service || '?'}:{ep.port || '?'}</span>
+      <div class="space-y-2">
+        {#each endpoints as ep, i}
+          {#if editingEndpointIdx === i}
+            <!-- Inline edit form -->
+            <div class="bg-surface-1 rounded-lg p-3 border border-accent/30 space-y-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
+                  <input type="text" bind:value={editEndpoint.domain} placeholder="myapp.example.com" class={inputClass} />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
+                  <select bind:value={editEndpoint.service} class={inputClass}>
+                    <option value="">Select service</option>
+                    {#each serviceNames as svc}
+                      <option value={svc}>{svc}</option>
+                    {/each}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-[11px] text-text-muted mb-0.5">Port</label>
+                  <input type="number" bind:value={editEndpoint.port} placeholder="3000" class={inputClass} />
+                </div>
+                <div>
+                  <label class="block text-[11px] text-text-muted mb-0.5">TLS</label>
+                  <select bind:value={editEndpoint.tls} class={inputClass}>
+                    <option value="letsencrypt">Let's Encrypt (auto)</option>
+                    <option value="custom">Custom certificate</option>
+                    <option value="off">Off</option>
+                  </select>
+                </div>
+              </div>
+              <div class="flex items-center justify-end gap-2 pt-1">
+                <Button variant="ghost" size="sm" onclick={cancelEndpointEdit}>Cancel</Button>
+                <Button size="sm" onclick={saveEndpoint} loading={savingEndpoints}>Save</Button>
               </div>
             </div>
-            <Badge variant={tlsBadgeVariant(ep.tls)}>{tlsLabel(ep.tls)}</Badge>
-          </div>
+          {:else}
+            <!-- Read-only card -->
+            <div class="flex items-center gap-3 bg-surface-1 rounded-lg px-3 py-2.5 border border-border/30 group">
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium text-text-primary truncate">{ep.domain || 'No domain'}</div>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="text-[11px] text-text-muted">{ep.service || '?'}:{ep.port || '?'}</span>
+                </div>
+              </div>
+              <Badge variant={tlsBadgeVariant(ep.tls)}>{tlsLabel(ep.tls)}</Badge>
+              <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button onclick={() => startEditEndpoint(i)} class="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Edit">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                </button>
+                <button onclick={() => deleteEndpoint(i)} class="p-1 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors" title="Delete">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              </div>
+            </div>
+          {/if}
         {/each}
+      </div>
+    {/if}
+    <!-- Add new endpoint form -->
+    {#if editingEndpointIdx === -2}
+      <div class="bg-surface-1 rounded-lg p-3 border border-accent/30 space-y-2 mt-2">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
+            <input type="text" bind:value={editEndpoint.domain} placeholder="myapp.example.com" class={inputClass} />
+          </div>
+          <div>
+            <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
+            <select bind:value={editEndpoint.service} class={inputClass}>
+              <option value="">Select service</option>
+              {#each serviceNames as svc}
+                <option value={svc}>{svc}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] text-text-muted mb-0.5">Port</label>
+            <input type="number" bind:value={editEndpoint.port} placeholder="3000" class={inputClass} />
+          </div>
+          <div>
+            <label class="block text-[11px] text-text-muted mb-0.5">TLS</label>
+            <select bind:value={editEndpoint.tls} class={inputClass}>
+              <option value="letsencrypt">Let's Encrypt (auto)</option>
+              <option value="custom">Custom certificate</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <Button variant="ghost" size="sm" onclick={cancelEndpointEdit}>Cancel</Button>
+          <Button size="sm" onclick={saveEndpoint} loading={savingEndpoints}>Add Endpoint</Button>
+        </div>
       </div>
     {/if}
   </div>
 
-  <!-- Section 2: Compose Configuration (hidden by default, shown when Edit clicked) -->
-  {#if showComposeEditor}
-    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-accent/30">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-medium text-text-primary">Compose Configuration</h3>
-        <Button variant="ghost" size="sm" onclick={() => showComposeEditor = false}>Close</Button>
+  <!-- Section 2: Compose Configuration -->
+  <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden">
+    <button
+      onclick={() => showComposeEditor = !showComposeEditor}
+      class="flex items-center justify-between w-full px-5 py-4 text-left hover:bg-surface-hover transition-colors"
+    >
+      <h3 class="text-sm font-medium text-text-primary">Compose Configuration</h3>
+      <svg
+        class="w-4 h-4 text-text-muted transition-transform {showComposeEditor ? 'rotate-180' : ''}"
+        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+      >
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+      </svg>
+    </button>
+    {#if showComposeEditor}
+      <div class="px-5 pb-5 border-t border-border/30">
+        <ConfigTab {slug} />
       </div>
-      <ConfigTab {slug} />
-    </div>
-  {/if}
+    {/if}
+  </div>
 
-  <!-- Section 3: Environment Variables (read-only view, edit on toggle) -->
+  <!-- Section 3: Environment Variables -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
     <div class="flex items-center justify-between mb-3">
       <div>
         <h3 class="text-sm font-medium text-text-primary">Environment Variables</h3>
         <p class="text-xs text-text-muted mt-0.5">Stored in <code class="font-mono text-[11px]">.env</code> file</p>
       </div>
-      <Button variant="ghost" size="sm" onclick={() => showEnvEditor = !showEnvEditor}>
-        {showEnvEditor ? 'Close Editor' : 'Edit'}
-      </Button>
     </div>
-    {#if showEnvEditor}
-      <EnvEditor {slug} />
-    {:else if envLoading}
-      <p class="text-xs text-text-muted">Loading...</p>
-    {:else if envVars.length === 0}
-      <p class="text-xs text-text-muted">No environment variables.</p>
-    {:else}
-      <div class="flex flex-wrap gap-1.5">
-        {#each envVars as v}
-          <span class="inline-flex items-center gap-1 px-2 py-1 bg-surface-1 border border-border/30 rounded-md text-xs">
-            <span class="font-mono text-text-primary">{v.key}</span>
-            <span class="text-text-muted">=</span>
-            <span class="text-text-muted">****</span>
-          </span>
-        {/each}
-      </div>
-    {/if}
+    <EnvEditor {slug} />
   </div>
 
   <!-- Section 4: Backups -->
