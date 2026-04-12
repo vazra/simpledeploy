@@ -28,6 +28,10 @@
   let whAdvancedOpen = $state(false)
   let whSaving = $state(false)
   let whTesting = $state(false)
+  // Telegram URL builder
+  let tgBotToken = $state('')
+  let tgChatId = $state('')
+  let tgUseBuilder = $state(true)
 
   // Rule modal
   let showRuleModal = $state(false)
@@ -159,9 +163,15 @@
   }
 
   // Webhook CRUD
+  function parseTelegramUrl(url) {
+    const m = url.match(/\/bot([^/]+)\/sendMessage\?chat_id=(.+)/)
+    return m ? { token: m[1], chatId: m[2] } : null
+  }
+
   function openWebhookCreate() {
     editingWebhook = null
     whName = ''; whType = 'slack'; whUrl = ''; whTemplate = ''; whHeaders = ''; whAdvancedOpen = false
+    tgBotToken = ''; tgChatId = ''; tgUseBuilder = true
     showWebhookModal = true
   }
 
@@ -170,12 +180,25 @@
     whName = w.name; whType = w.type; whUrl = w.url
     whTemplate = w.template_override || ''; whHeaders = w.headers_json || ''
     whAdvancedOpen = !!(w.template_override || w.headers_json)
+    if (w.type === 'telegram') {
+      const parsed = parseTelegramUrl(w.url)
+      if (parsed) {
+        tgBotToken = parsed.token; tgChatId = parsed.chatId; tgUseBuilder = true
+      } else {
+        tgBotToken = ''; tgChatId = ''; tgUseBuilder = false
+      }
+    } else {
+      tgBotToken = ''; tgChatId = ''; tgUseBuilder = true
+    }
     showWebhookModal = true
   }
 
   async function saveWebhook() {
     whSaving = true
-    const payload = { name: whName, type: whType, url: whUrl }
+    const url = (whType === 'telegram' && tgUseBuilder && tgBotToken && tgChatId)
+      ? `https://api.telegram.org/bot${tgBotToken}/sendMessage?chat_id=${tgChatId}`
+      : whUrl
+    const payload = { name: whName, type: whType, url }
     if (whTemplate.trim()) payload.template_override = whTemplate
     if (whHeaders.trim()) payload.headers_json = whHeaders
     const res = editingWebhook
@@ -187,9 +210,12 @@
 
   async function testWebhook() {
     whTesting = true
+    const testUrl = (whType === 'telegram' && tgUseBuilder && tgBotToken && tgChatId)
+      ? `https://api.telegram.org/bot${tgBotToken}/sendMessage?chat_id=${tgChatId}`
+      : whUrl
     const data = editingWebhook
       ? { webhook_id: editingWebhook.id }
-      : { type: whType, url: whUrl, template_override: whTemplate || undefined, headers_json: whHeaders || undefined }
+      : { type: whType, url: testUrl, template_override: whTemplate || undefined, headers_json: whHeaders || undefined }
     await api.testWebhook(data)
     whTesting = false
   }
@@ -372,11 +398,40 @@
           {/each}
         </select>
       </div>
-      <div>
-        <label class="block text-xs font-medium text-text-muted mb-1.5">URL</label>
-        <input bind:value={whUrl} required placeholder={urlPlaceholders[whType]} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
-        <p class="text-xs text-text-muted mt-1">{urlHelp[whType]}</p>
-      </div>
+      {#if whType === 'telegram' && tgUseBuilder}
+        <div class="flex flex-col gap-3 p-3 rounded-lg bg-surface-3/50 border border-border/30">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-text-muted">Telegram Setup</span>
+            <button type="button" class="text-xs text-accent hover:underline" onclick={() => tgUseBuilder = false}>Enter URL manually</button>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-text-muted mb-1.5">Bot Token</label>
+            <input bind:value={tgBotToken} required placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30 font-mono" />
+            <p class="text-xs text-text-muted mt-1">Open Telegram, message <strong>@BotFather</strong>, send <code class="px-1 py-0.5 bg-surface-3 rounded text-text-secondary">/newbot</code>, and follow the prompts. Copy the token it gives you.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-text-muted mb-1.5">Chat ID</label>
+            <input bind:value={tgChatId} required placeholder="-1001234567890" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30 font-mono" />
+            <p class="text-xs text-text-muted mt-1">Add the bot to your group/channel, then message <strong>@userinfobot</strong> in that chat to get the Chat ID. For personal chats, message <strong>@userinfobot</strong> directly.</p>
+          </div>
+          {#if tgBotToken && tgChatId}
+            <div class="text-xs text-text-muted bg-surface-3 rounded px-2 py-1.5 font-mono break-all">
+              {`https://api.telegram.org/bot${tgBotToken}/sendMessage?chat_id=${tgChatId}`}
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-xs font-medium text-text-muted">URL</label>
+            {#if whType === 'telegram'}
+              <button type="button" class="text-xs text-accent hover:underline" onclick={() => tgUseBuilder = true}>Use guided setup</button>
+            {/if}
+          </div>
+          <input bind:value={whUrl} required placeholder={urlPlaceholders[whType]} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
+          <p class="text-xs text-text-muted mt-1">{urlHelp[whType]}</p>
+        </div>
+      {/if}
 
       <!-- Advanced -->
       <button type="button" class="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary transition-colors" onclick={() => whAdvancedOpen = !whAdvancedOpen}>
