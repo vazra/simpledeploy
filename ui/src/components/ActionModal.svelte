@@ -93,7 +93,7 @@
       <!-- Terminal -->
       <div
         bind:this={terminalEl}
-        class="bg-[#0c0c0c] light:bg-[#1a1a2e] font-mono text-[13px] leading-5 p-4 overflow-y-auto max-h-[400px] selection:bg-accent/30 rounded-b-2xl {liveStatus ? '' : 'rounded-b-2xl'}"
+        class="bg-[#0c0c0c] light:bg-[#1a1a2e] font-mono text-[13px] leading-5 p-4 overflow-y-auto max-h-[400px] selection:bg-accent/30 {liveStatus ? '' : 'rounded-b-2xl'}"
       >
         {#each liveLines as line}
           <div class="whitespace-pre-wrap break-all py-px {line.stream === 'stderr' ? 'text-red-400' : 'text-[#d4d4d4]'}">
