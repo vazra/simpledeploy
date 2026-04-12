@@ -19,6 +19,7 @@
   let loadError = $state(false)
   let latestMetrics = $state(null)
   let alertHistory = $state([])
+  let alertRules = $state([])
   let backupRunsByApp = $state({})
   let appMetricsMap = $state({})
   let hostMemory = $state(0)
@@ -43,10 +44,11 @@
     loading = true
     loadError = false
 
-    const [appsRes, metricsRes, histRes, dockerRes] = await Promise.all([
+    const [appsRes, metricsRes, histRes, rulesRes, dockerRes] = await Promise.all([
       api.listApps(),
       api.systemMetrics(timeRange),
       api.alertHistory(),
+      api.listAlertRules(),
       api.dockerInfo(),
     ])
     if (dockerRes.data?.memory) hostMemory = dockerRes.data.memory
@@ -59,6 +61,7 @@
 
     apps = appsRes.data || []
     alertHistory = histRes.data || []
+    alertRules = rulesRes.data || []
 
     const metricsData = metricsRes.data
     if (metricsData?.containers) {
@@ -157,6 +160,46 @@
   let stoppedCount = $derived(apps.filter((a) => a.Status !== 'running').length)
 
   let activeAlerts = $derived((alertHistory || []).filter((h) => !h.resolved_at))
+
+  const metricNames = { cpu_pct: 'CPU', mem_pct: 'Memory %', mem_bytes: 'Memory' }
+
+  function ruleLabel(ruleId) {
+    const r = alertRules.find(r => r.id === ruleId)
+    if (!r) return `Rule #${ruleId}`
+    const app = r.app_slug || 'All apps'
+    return `${metricNames[r.metric] || r.metric} - ${app}`
+  }
+
+  function ruleCondition(ruleId) {
+    const r = alertRules.find(r => r.id === ruleId)
+    if (!r) return ''
+    return `${r.operator} ${alertFormatValue(r.metric, r.threshold)}`
+  }
+
+  function alertFormatValue(metric, value) {
+    if (value == null) return '-'
+    if (metric === 'mem_bytes') {
+      if (value >= 1 << 30) return `${(value / (1 << 30)).toFixed(1)} GB`
+      if (value >= 1 << 20) return `${(value / (1 << 20)).toFixed(1)} MB`
+      return `${value.toFixed(0)} B`
+    }
+    if (metric === 'cpu_pct' || metric === 'mem_pct') return `${value.toFixed(1)}%`
+    return value.toFixed(1)
+  }
+
+  function alertTriggerValue(h) {
+    const r = alertRules.find(r => r.id === h.rule_id)
+    return r ? alertFormatValue(r.metric, h.value) : h.value?.toFixed(1) ?? '-'
+  }
+
+  function timeAgo(ts) {
+    if (!ts) return '-'
+    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
+    if (diff < 60) return 'just now'
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+    return `${Math.floor(diff / 86400)}d ago`
+  }
 
   let recentBackups = $derived.by(() => {
     const all = []
@@ -310,21 +353,34 @@
       <!-- Side Panels (2/5) -->
       <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-4 lg:gap-5">
         <!-- Active Alerts -->
-        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
+        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border {activeAlerts.length > 0 ? 'border-danger/30' : 'border-border/50'}">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-text-primary">Active Alerts</h3>
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-semibold text-text-primary">Active Alerts</h3>
+              {#if activeAlerts.length > 0}
+                <span class="text-xs font-medium text-danger bg-danger/10 px-1.5 py-0.5 rounded-full">{activeAlerts.length}</span>
+              {/if}
+            </div>
             <a href="#/alerts" class="text-xs text-accent hover:underline">View all</a>
           </div>
           {#if activeAlerts.length === 0}
-            <p class="text-xs text-text-secondary">No active alerts</p>
+            <div class="flex items-center gap-2 text-xs text-text-secondary">
+              <svg class="w-4 h-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              All clear, no active alerts
+            </div>
           {:else}
-            <div class="flex flex-col gap-2">
+            <div class="flex flex-col gap-2.5">
               {#each activeAlerts.slice(0, 5) as alert}
-                <div class="flex items-center gap-2 text-xs">
-                  <span class="w-1.5 h-1.5 rounded-full bg-danger shrink-0"></span>
-                  <span class="text-text-primary">Rule #{alert.rule_id}</span>
-                  <span class="text-text-muted ml-auto">{formatTime(alert.fired_at)}</span>
-                </div>
+                <a href="#/alerts" class="flex flex-col gap-1 rounded-lg bg-danger/5 border border-danger/10 px-3 py-2 hover:bg-danger/10 transition-colors">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs font-medium text-text-primary">{ruleLabel(alert.rule_id)}</span>
+                    <span class="text-xs text-text-muted">{timeAgo(alert.fired_at)}</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs text-text-secondary">
+                    <span>Triggered at {alertTriggerValue(alert)}</span>
+                    <span class="text-text-muted">{ruleCondition(alert.rule_id)}</span>
+                  </div>
+                </a>
               {/each}
             </div>
           {/if}
@@ -355,17 +411,19 @@
         <!-- Alert History (recent) -->
         <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-text-primary">Alert History</h3>
+            <h3 class="text-sm font-semibold text-text-primary">Recent Alerts</h3>
+            <a href="#/alerts" class="text-xs text-accent hover:underline">History</a>
           </div>
           {#if (alertHistory || []).length === 0}
-            <p class="text-xs text-text-secondary">No alerts fired</p>
+            <p class="text-xs text-text-secondary">No alerts fired yet</p>
           {:else}
             <div class="flex flex-col gap-2">
               {#each (alertHistory || []).slice(0, 5) as h}
                 <div class="flex items-center gap-2 text-xs">
                   <span class="w-1.5 h-1.5 rounded-full shrink-0 {h.resolved_at ? 'bg-success' : 'bg-danger'}"></span>
-                  <span class="text-text-primary">Rule #{h.rule_id}</span>
-                  <span class="text-text-muted ml-auto">{formatDate(h.fired_at)}</span>
+                  <span class="text-text-primary truncate" title={ruleLabel(h.rule_id)}>{ruleLabel(h.rule_id)}</span>
+                  <Badge variant={h.resolved_at ? 'success' : 'danger'}>{h.resolved_at ? 'Resolved' : 'Active'}</Badge>
+                  <span class="text-text-muted ml-auto whitespace-nowrap" title={formatDate(h.fired_at)}>{timeAgo(h.fired_at)}</span>
                 </div>
               {/each}
             </div>
