@@ -534,18 +534,19 @@
     return errors[errKey] ? `${base} border-danger` : `${base} border-border`
   }
 
-  // ---- Read-only vs Edit mode per section ----
-  let editingSections = $state(new Set())
+  // ---- Read-only vs Edit mode ----
+  let editingServices = $state(new Set())
+  let editingRateLimit = $state(false)
 
-  function isEditing(section) {
-    return editingSections.has(section)
+  function isServiceEditing(svcName) {
+    return editingServices.has(svcName)
   }
 
-  function toggleEdit(section) {
-    const next = new Set(editingSections)
-    if (next.has(section)) next.delete(section)
-    else next.add(section)
-    editingSections = next
+  function toggleServiceEdit(svcName) {
+    const next = new Set(editingServices)
+    if (next.has(svcName)) next.delete(svcName)
+    else next.add(svcName)
+    editingServices = next
   }
 </script>
 
@@ -553,28 +554,66 @@
 
   <!-- ======================== SECTION 1: Services ======================== -->
   <AccordionSection title="Services" expanded={true}>
-    {#if !isEditing('services')}
-      <!-- Read-only view -->
-      <div class="space-y-2">
-        {#each serviceNames as svcName}
-          {@const svc = compose.services[svcName]}
-          {@const envRows = parseEnv(svc)}
-          {@const vols = parseVolumes(svc)}
-          <div class="bg-surface-1 border border-border/30 rounded-lg px-4 py-3 space-y-1.5">
+    <div class="space-y-4">
+      {#each serviceNames as svcName, svcIdx (svcName)}
+        {@const svc = compose.services[svcName]}
+        {@const depInfo = parseDependsOn(svc)}
+        {@const otherServices = serviceNames.filter((s) => s !== svcName)}
+        {@const envRows = parseEnv(svc)}
+        {@const pending = pendingEnvRows[svcName] || []}
+        {@const allEnvRows = [...envRows, ...pending]}
+        {@const vols = parseVolumes(svc)}
+        {@const ports = parsePorts(svc)}
+        {@const labels = parseLabels(svc)}
+
+        {#if !isServiceEditing(svcName)}
+          <!-- Read-only card -->
+          <div class="bg-surface-1 border border-border/30 rounded-lg px-4 py-3 space-y-2">
             <div class="flex items-center justify-between">
               <span class="text-sm font-semibold text-text-primary font-mono">{svcName}</span>
-              <span class="text-xs text-text-muted font-mono">{svc.image || 'no image'}</span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-text-muted font-mono">{svc.image || 'no image'}</span>
+                <button onclick={() => toggleServiceEdit(svcName)} class="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Edit {svcName}">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                </button>
+              </div>
             </div>
+            <!-- Detailed read-only info -->
+            {#if envRows.length > 0}
+              <div>
+                <span class="text-[11px] text-text-muted">Environment</span>
+                <div class="flex flex-wrap gap-1 mt-0.5">
+                  {#each envRows as row}
+                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-surface-2 border border-border/30 rounded text-[11px] font-mono">
+                      <span class="text-text-primary">{row.name}</span>
+                      <span class="text-text-muted">=</span>
+                      <span class="text-text-muted truncate max-w-24">{row.value}</span>
+                    </span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if vols.length > 0}
+              <div>
+                <span class="text-[11px] text-text-muted">Volumes</span>
+                <div class="flex flex-wrap gap-1 mt-0.5">
+                  {#each vols as v}
+                    <span class="text-[11px] font-mono text-text-secondary bg-surface-2 border border-border/30 rounded px-1.5 py-0.5">{v.source}:{v.target}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+            {#if ports.length > 0}
+              <div>
+                <span class="text-[11px] text-text-muted">Ports</span>
+                <div class="flex flex-wrap gap-1 mt-0.5">
+                  {#each ports as p}
+                    <span class="text-[11px] font-mono text-text-secondary bg-surface-2 border border-border/30 rounded px-1.5 py-0.5">{p.host}:{p.container}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
             <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted">
-              {#if envRows.length > 0}
-                <span>{envRows.length} env var{envRows.length > 1 ? 's' : ''}</span>
-              {/if}
-              {#if vols.length > 0}
-                <span>{vols.length} volume{vols.length > 1 ? 's' : ''}</span>
-              {/if}
-              {#if svc.ports?.length > 0}
-                <span>{svc.ports.length} port{svc.ports.length > 1 ? 's' : ''}</span>
-              {/if}
               {#if svc.restart && svc.restart !== 'no'}
                 <span>restart: {svc.restart}</span>
               {/if}
@@ -582,54 +621,51 @@
                 <span class="truncate max-w-48">cmd: {Array.isArray(svc.command) ? svc.command.join(' ') : svc.command}</span>
               {/if}
               {#if svc.deploy?.resources?.limits?.memory}
-                <span>mem: {svc.deploy.resources.limits.memory}</span>
+                <span>mem limit: {svc.deploy.resources.limits.memory}</span>
               {/if}
               {#if svc.deploy?.resources?.limits?.cpus}
-                <span>cpu: {svc.deploy.resources.limits.cpus}</span>
+                <span>cpu limit: {svc.deploy.resources.limits.cpus}</span>
+              {/if}
+              {#if svc.healthcheck?.test}
+                <span>healthcheck configured</span>
+              {/if}
+              {#if depInfo.services.length > 0}
+                <span>depends on: {depInfo.services.join(', ')}</span>
+              {/if}
+              {#if labels.length > 0}
+                <span>{labels.length} label{labels.length > 1 ? 's' : ''}</span>
               {/if}
             </div>
           </div>
-        {/each}
-        {#if serviceNames.length === 0}
-          <p class="text-xs text-text-muted">No services defined.</p>
-        {/if}
-      </div>
-      <button type="button" onclick={() => toggleEdit('services')} class="mt-3 text-xs text-accent hover:text-accent/80 transition-colors">Edit services</button>
-    {:else}
-    <!-- Edit view -->
-    <div class="space-y-4">
-      {#each serviceNames as svcName, svcIdx (svcName)}
-        {@const svc = compose.services[svcName]}
-        {@const depInfo = parseDependsOn(svc)}
-        {@const otherServices = serviceNames.filter((s) => s !== svcName)}
-
-        {@const envRows = parseEnv(svc)}
-        {@const pending = pendingEnvRows[svcName] || []}
-        {@const allEnvRows = [...envRows, ...pending]}
-        <div class="bg-surface-1 border border-border rounded-lg p-4 space-y-3">
-          <!-- Service header (click-to-edit name) -->
-          {#if editingServiceName === svcName}
-            <input
-              type="text"
-              bind:value={editingNameValue}
-              onblur={() => commitRename(svcName)}
-              onkeydown={(e) => { if (e.key === 'Enter') commitRename(svcName); if (e.key === 'Escape') editingServiceName = null }}
-              class="text-sm font-semibold text-text-primary bg-input-bg border border-accent rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent/50"
-              autofocus
-            />
-          {:else}
-            <button
-              type="button"
-              class="text-sm font-semibold text-text-primary hover:text-accent cursor-pointer flex items-center gap-1.5 group"
-              onclick={() => startRename(svcName)}
-              title="Click to rename"
-            >
-              {svcName}
-              <svg class="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </svg>
-            </button>
-          {/if}
+        {:else}
+          <!-- Edit view -->
+          <div class="bg-surface-1 border border-border rounded-lg p-4 space-y-3">
+            <!-- Service header (click-to-edit name) -->
+            <div class="flex items-center justify-between">
+              {#if editingServiceName === svcName}
+                <input
+                  type="text"
+                  bind:value={editingNameValue}
+                  onblur={() => commitRename(svcName)}
+                  onkeydown={(e) => { if (e.key === 'Enter') commitRename(svcName); if (e.key === 'Escape') editingServiceName = null }}
+                  class="text-sm font-semibold text-text-primary bg-input-bg border border-accent rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-accent/50"
+                  autofocus
+                />
+              {:else}
+                <button
+                  type="button"
+                  class="text-sm font-semibold text-text-primary hover:text-accent cursor-pointer flex items-center gap-1.5 group"
+                  onclick={() => startRename(svcName)}
+                  title="Click to rename"
+                >
+                  {svcName}
+                  <svg class="w-3 h-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+              {/if}
+              <button type="button" onclick={() => toggleServiceEdit(svcName)} class="text-xs text-text-muted hover:text-text-primary transition-colors">Done</button>
+            </div>
 
           <!-- Image -->
           <div>
@@ -1164,6 +1200,7 @@
             </AccordionSection>
           </div>
         </div>
+        {/if}
       {/each}
 
       <!-- Add Service -->
@@ -1177,9 +1214,7 @@
         </svg>
         Add Service
       </button>
-      <button type="button" onclick={() => toggleEdit('services')} class="mt-2 text-xs text-text-muted hover:text-text-primary transition-colors">Done editing</button>
     </div>
-    {/if}
   </AccordionSection>
 
   <!-- ======================== SECTION 3: Rate Limiting ======================== -->
@@ -1192,7 +1227,7 @@
       {@const rlBurst = getLabel(firstService, 'ratelimit.burst')}
       {@const rlBy = getLabel(firstService, 'ratelimit.by')}
       {@const hasRateLimit = rlRequests || rlWindow}
-      {#if !isEditing('ratelimit')}
+      {#if !editingRateLimit}
         <!-- Read-only -->
         {#if hasRateLimit}
           <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
@@ -1203,7 +1238,7 @@
         {:else}
           <p class="text-xs text-text-muted">No rate limiting configured.</p>
         {/if}
-        <button type="button" onclick={() => toggleEdit('ratelimit')} class="mt-2 text-xs text-accent hover:text-accent/80 transition-colors">Edit</button>
+        <button type="button" onclick={() => editingRateLimit = !editingRateLimit} class="mt-2 text-xs text-accent hover:text-accent/80 transition-colors">Edit</button>
       {:else}
         <!-- Edit view -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1235,7 +1270,7 @@
             </select>
           </div>
         </div>
-        <button type="button" onclick={() => toggleEdit('ratelimit')} class="mt-3 text-xs text-text-muted hover:text-text-primary transition-colors">Done</button>
+        <button type="button" onclick={() => editingRateLimit = !editingRateLimit} class="mt-3 text-xs text-text-muted hover:text-text-primary transition-colors">Done</button>
       {/if}
     {/if}
   </AccordionSection>

@@ -58,7 +58,7 @@
   }
 
   function startAddEndpoint() {
-    editEndpoint = { domain: '', port: '', tls: 'letsencrypt', service: '' }
+    editEndpoint = { domain: '', port: '', tls: 'letsencrypt', service: serviceNames[0] || '' }
     editingEndpointIdx = -2
   }
 
@@ -175,6 +175,72 @@
 
 <div class="space-y-6">
 
+  <!-- Endpoint edit form snippet -->
+  {#snippet endpointForm(saveLabel)}
+    <div class="bg-surface-1 rounded-lg p-3 border border-accent/30 space-y-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div>
+          <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
+          <input type="text" bind:value={editEndpoint.domain} placeholder="myapp.example.com" class={inputClass} />
+        </div>
+        <div>
+          <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
+          <select bind:value={editEndpoint.service} class={inputClass}>
+            {#each serviceNames as svc}
+              <option value={svc}>{svc}</option>
+            {/each}
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] text-text-muted mb-0.5">Port</label>
+          <input type="number" bind:value={editEndpoint.port} placeholder="3000" class={inputClass} />
+        </div>
+        <div>
+          <label class="block text-[11px] text-text-muted mb-0.5">TLS</label>
+          <select bind:value={editEndpoint.tls} class={inputClass}>
+            <option value="letsencrypt">Let's Encrypt (auto)</option>
+            <option value="custom">Custom certificate</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+      </div>
+      {#if editEndpoint.tls === 'custom' && editEndpoint.domain}
+        <div class="bg-surface-2/50 rounded-md p-2.5 space-y-2 border border-border/30">
+          <p class="text-[11px] text-text-muted">Custom certificate for <span class="font-mono text-text-primary">{editEndpoint.domain}</span></p>
+          <div>
+            <label class="block text-[11px] text-text-muted mb-0.5">Certificate (PEM)</label>
+            <textarea placeholder="-----BEGIN CERTIFICATE-----" rows="3" id="ep-cert-input"
+              class="w-full bg-input-bg border border-border/50 rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"></textarea>
+          </div>
+          <div>
+            <label class="block text-[11px] text-text-muted mb-0.5">Private Key (PEM)</label>
+            <textarea placeholder="-----BEGIN PRIVATE KEY-----" rows="3" id="ep-key-input"
+              class="w-full bg-input-bg border border-border/50 rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"></textarea>
+          </div>
+          <div class="flex justify-end">
+            <button type="button"
+              onclick={async () => {
+                const cert = document.getElementById('ep-cert-input')?.value
+                const key = document.getElementById('ep-key-input')?.value
+                if (cert && key && editEndpoint.domain) {
+                  await api.uploadCert(slug, editEndpoint.domain, cert, key)
+                  document.getElementById('ep-cert-input').value = ''
+                  document.getElementById('ep-key-input').value = ''
+                }
+              }}
+              class="px-3 py-1.5 text-xs rounded-lg bg-btn-primary hover:bg-btn-primary-hover text-surface-0 transition-colors">
+              Upload Certificate
+            </button>
+          </div>
+        </div>
+      {/if}
+      <div class="flex items-center justify-end gap-2 pt-1">
+        <Button variant="ghost" size="sm" onclick={cancelEndpointEdit}>Cancel</Button>
+        <Button size="sm" onclick={saveEndpoint} loading={savingEndpoints}>{saveLabel}</Button>
+      </div>
+    </div>
+  {/snippet}
+
   <!-- Section 1: Endpoints -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
     <div class="flex items-center justify-between mb-3">
@@ -187,42 +253,8 @@
       <div class="space-y-2">
         {#each endpoints as ep, i}
           {#if editingEndpointIdx === i}
-            <!-- Inline edit form -->
-            <div class="bg-surface-1 rounded-lg p-3 border border-accent/30 space-y-2">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div>
-                  <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
-                  <input type="text" bind:value={editEndpoint.domain} placeholder="myapp.example.com" class={inputClass} />
-                </div>
-                <div>
-                  <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
-                  <select bind:value={editEndpoint.service} class={inputClass}>
-                    <option value="">Select service</option>
-                    {#each serviceNames as svc}
-                      <option value={svc}>{svc}</option>
-                    {/each}
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-[11px] text-text-muted mb-0.5">Port</label>
-                  <input type="number" bind:value={editEndpoint.port} placeholder="3000" class={inputClass} />
-                </div>
-                <div>
-                  <label class="block text-[11px] text-text-muted mb-0.5">TLS</label>
-                  <select bind:value={editEndpoint.tls} class={inputClass}>
-                    <option value="letsencrypt">Let's Encrypt (auto)</option>
-                    <option value="custom">Custom certificate</option>
-                    <option value="off">Off</option>
-                  </select>
-                </div>
-              </div>
-              <div class="flex items-center justify-end gap-2 pt-1">
-                <Button variant="ghost" size="sm" onclick={cancelEndpointEdit}>Cancel</Button>
-                <Button size="sm" onclick={saveEndpoint} loading={savingEndpoints}>Save</Button>
-              </div>
-            </div>
+            {@render endpointForm('Save')}
           {:else}
-            <!-- Read-only card -->
             <div class="flex items-center gap-3 bg-surface-1 rounded-lg px-3 py-2.5 border border-border/30 group">
               <div class="flex-1 min-w-0">
                 <div class="text-sm font-medium text-text-primary truncate">{ep.domain || 'No domain'}</div>
@@ -244,40 +276,9 @@
         {/each}
       </div>
     {/if}
-    <!-- Add new endpoint form -->
     {#if editingEndpointIdx === -2}
-      <div class="bg-surface-1 rounded-lg p-3 border border-accent/30 space-y-2 mt-2">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <div>
-            <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
-            <input type="text" bind:value={editEndpoint.domain} placeholder="myapp.example.com" class={inputClass} />
-          </div>
-          <div>
-            <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
-            <select bind:value={editEndpoint.service} class={inputClass}>
-              <option value="">Select service</option>
-              {#each serviceNames as svc}
-                <option value={svc}>{svc}</option>
-              {/each}
-            </select>
-          </div>
-          <div>
-            <label class="block text-[11px] text-text-muted mb-0.5">Port</label>
-            <input type="number" bind:value={editEndpoint.port} placeholder="3000" class={inputClass} />
-          </div>
-          <div>
-            <label class="block text-[11px] text-text-muted mb-0.5">TLS</label>
-            <select bind:value={editEndpoint.tls} class={inputClass}>
-              <option value="letsencrypt">Let's Encrypt (auto)</option>
-              <option value="custom">Custom certificate</option>
-              <option value="off">Off</option>
-            </select>
-          </div>
-        </div>
-        <div class="flex items-center justify-end gap-2 pt-1">
-          <Button variant="ghost" size="sm" onclick={cancelEndpointEdit}>Cancel</Button>
-          <Button size="sm" onclick={saveEndpoint} loading={savingEndpoints}>Add Endpoint</Button>
-        </div>
+      <div class="mt-2">
+        {@render endpointForm('Add Endpoint')}
       </div>
     {/if}
   </div>
