@@ -16,6 +16,7 @@
 
   let showUserModal = $state(false)
   let showKeyModal = $state(false)
+  let showEditModal = $state(false)
 
   // user form
   let uName = $state('')
@@ -23,6 +24,24 @@
   let uRole = $state('viewer')
   let uDisplayName = $state('')
   let uEmail = $state('')
+  let uError = $state('')
+
+  // edit form
+  let editUser = $state(null)
+  let eName = $state('')
+  let eEmail = $state('')
+  let eRole = $state('')
+  let eError = $state('')
+
+  // password reset (separate from edit)
+  let showPasswordModal = $state(false)
+  let passwordUser = $state(null)
+  let pCurrentPass = $state('')
+  let pNewPass = $state('')
+  let pError = $state('')
+
+  // current user
+  let currentUser = $state(null)
 
   // key form
   let kName = $state('')
@@ -53,12 +72,14 @@
 
   async function loadAll() {
     loading = true
-    const [uRes, kRes] = await Promise.all([
+    const [uRes, kRes, meRes] = await Promise.all([
       api.listUsers(),
       api.listAPIKeys(),
+      api.getProfile(),
     ])
     users = uRes.data || []
     keys = kRes.data || []
+    currentUser = meRes.data
     loading = false
   }
 
@@ -70,9 +91,80 @@
     confirmModal = { open: false, title: '', message: '', onConfirm: () => {} }
   }
 
+  function resetUserForm() {
+    uName = ''; uPass = ''; uRole = 'viewer'; uDisplayName = ''; uEmail = ''; uError = ''
+  }
+
   async function createUser() {
+    uError = ''
+    if (uPass.length < 8) {
+      uError = 'Password must be at least 8 characters'
+      return
+    }
     const res = await api.createUser({ username: uName, password: uPass, role: uRole, display_name: uDisplayName, email: uEmail })
-    if (!res.error) { uName = ''; uPass = ''; uRole = 'viewer'; uDisplayName = ''; uEmail = ''; showUserModal = false; loadAll() }
+    if (res.error) {
+      uError = res.error
+    } else {
+      resetUserForm()
+      showUserModal = false
+      loadAll()
+    }
+  }
+
+  function openEdit(u) {
+    editUser = u
+    eName = u.display_name || ''
+    eEmail = u.email || ''
+    eRole = u.role
+    eError = ''
+    showEditModal = true
+  }
+
+  async function saveEdit() {
+    eError = ''
+    const res = await api.updateUser(editUser.id, { display_name: eName, email: eEmail, role: eRole })
+    if (res.error) {
+      eError = res.error
+    } else {
+      showEditModal = false
+      editUser = null
+      loadAll()
+    }
+  }
+
+  function openPasswordReset(u) {
+    passwordUser = u
+    pCurrentPass = ''
+    pNewPass = ''
+    pError = ''
+    showPasswordModal = true
+  }
+
+  let isEditingSelf = $derived(passwordUser && currentUser && passwordUser.id === currentUser.id)
+
+  async function resetPassword() {
+    pError = ''
+    if (pNewPass.length < 8) {
+      pError = 'Password must be at least 8 characters'
+      return
+    }
+    if (isEditingSelf && !pCurrentPass) {
+      pError = 'Current password is required'
+      return
+    }
+    const body = { password: pNewPass }
+    if (isEditingSelf) body.current_password = pCurrentPass
+    // Keep other fields unchanged
+    body.display_name = passwordUser.display_name || ''
+    body.email = passwordUser.email || ''
+    body.role = passwordUser.role
+    const res = await api.updateUser(passwordUser.id, body)
+    if (res.error) {
+      pError = res.error
+    } else {
+      showPasswordModal = false
+      passwordUser = null
+    }
   }
 
   async function delUser(id) { await api.deleteUser(id); loadAll() }
@@ -115,7 +207,7 @@
             <Badge>{users.length}</Badge>
           {/if}
         </div>
-        <Button size="sm" variant="secondary" onclick={() => showUserModal = true}>Add User</Button>
+        <Button size="sm" variant="secondary" onclick={() => { resetUserForm(); showUserModal = true }}>Add User</Button>
       </div>
       {#if users.length === 0}
         <div class="flex flex-col items-center justify-center py-10 text-center">
@@ -123,14 +215,56 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z" />
           </svg>
           <p class="text-sm text-text-muted mb-3">No users yet</p>
-          <Button size="sm" variant="secondary" onclick={() => showUserModal = true}>Add User</Button>
+          <Button size="sm" variant="secondary" onclick={() => { resetUserForm(); showUserModal = true }}>Add User</Button>
         </div>
       {:else}
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <!-- Desktop: table -->
+        <div class="hidden sm:block overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-border/30">
+              <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">User</th>
+              <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Role</th>
+              <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Email</th>
+              <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Created</th>
+              <th class="py-3 px-4"></th>
+            </tr></thead>
+            <tbody class="divide-y divide-border/30">
+              {#each users as u}
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-3 px-4">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 {roleCircleColors[u.role] || 'bg-surface-3/60 text-text-secondary'}">
+                        {getInitials(u)}
+                      </div>
+                      <div class="min-w-0">
+                        <span class="font-medium text-text-primary truncate block">{u.display_name || u.username}</span>
+                        {#if u.display_name}
+                          <span class="text-xs text-text-muted truncate block">@{u.username}</span>
+                        {/if}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-4"><Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge></td>
+                  <td class="py-3 px-4 text-text-secondary">{u.email || '-'}</td>
+                  <td class="py-3 px-4 text-text-secondary">{u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</td>
+                  <td class="py-3 px-4">
+                    <div class="flex items-center justify-end gap-2">
+                      <Button variant="secondary" size="sm" onclick={() => openEdit(u)}>Edit</Button>
+                      <Button variant="secondary" size="sm" onclick={() => openPasswordReset(u)}>Reset Password</Button>
+                      <Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', `This will permanently remove "${u.username}".`, () => delUser(u.id))}>Delete</Button>
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        <!-- Mobile: cards -->
+        <div class="sm:hidden space-y-3">
           {#each users as u}
             <div class="bg-surface-1 border border-border/50 rounded-xl p-4">
               <div class="flex items-center gap-3 mb-3">
-                <div class="w-10 h-10 rounded-full flex items-center justify-center text-xs font-semibold shrink-0 {roleCircleColors[u.role] || 'bg-surface-3/60 text-text-secondary'}">
+                <div class="w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 {roleCircleColors[u.role] || 'bg-surface-3/60 text-text-secondary'}">
                   {getInitials(u)}
                 </div>
                 <div class="min-w-0 flex-1">
@@ -139,15 +273,18 @@
                     <Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge>
                   </div>
                   {#if u.display_name}
-                    <span class="text-xs text-text-secondary truncate block">@{u.username}</span>
+                    <span class="text-xs text-text-muted truncate block">@{u.username}</span>
                   {/if}
-                  {#if u.email}
-                    <span class="text-xs text-text-muted truncate block">{u.email}</span>
-                  {/if}
-                  <span class="text-xs text-text-muted">Created {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}</span>
                 </div>
               </div>
-              <div class="flex items-center justify-end">
+              <div class="flex items-center gap-3 text-xs text-text-muted mb-3">
+                {#if u.email}<span class="truncate">{u.email}</span><span class="text-border">|</span>{/if}
+                <span>Created {u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <Button variant="secondary" size="sm" onclick={() => openEdit(u)}>Edit</Button>
+                <Button variant="secondary" size="sm" onclick={() => openPasswordReset(u)}>Password</Button>
+                <div class="flex-1"></div>
                 <Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', `This will permanently remove "${u.username}".`, () => delUser(u.id))}>Delete</Button>
               </div>
             </div>
@@ -225,7 +362,10 @@
   <!-- Add User Modal -->
   <FormModal title="Add User" open={showUserModal} onclose={() => showUserModal = false}>
     <form onsubmit={(e) => { e.preventDefault(); createUser() }} class="flex flex-col gap-4">
-      <div class="grid grid-cols-2 gap-3">
+      {#if uError}
+        <div class="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">{uError}</div>
+      {/if}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium text-text-muted mb-1.5">Display Name</label>
           <input bind:value={uDisplayName} placeholder="e.g. Jane Doe" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
@@ -241,11 +381,11 @@
       </div>
       <div>
         <label class="block text-xs font-medium text-text-muted mb-1.5">Password</label>
-        <input type="password" bind:value={uPass} required placeholder="Min 8 characters" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
+        <input type="password" bind:value={uPass} required minlength="8" placeholder="Min 8 characters" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
       </div>
       <div>
         <label class="block text-xs font-medium text-text-muted mb-1.5">Role</label>
-        <div class="grid grid-cols-3 gap-2">
+        <div class="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
           {#each [
             { value: 'viewer', label: 'Viewer', desc: 'View only' },
             { value: 'admin', label: 'Admin', desc: 'Manage apps' },
@@ -263,6 +403,68 @@
         </div>
       </div>
       <Button type="submit">Create User</Button>
+    </form>
+  </FormModal>
+
+  <!-- Edit User Modal -->
+  <FormModal title="Edit User" open={showEditModal} onclose={() => showEditModal = false}>
+    <form onsubmit={(e) => { e.preventDefault(); saveEdit() }} class="flex flex-col gap-4">
+      {#if eError}
+        <div class="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">{eError}</div>
+      {/if}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-text-muted mb-1.5">Display Name</label>
+          <input bind:value={eName} placeholder="e.g. Jane Doe" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-text-muted mb-1.5">Email</label>
+          <input type="email" bind:value={eEmail} placeholder="jane@example.com" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-text-muted mb-1.5">Role</label>
+        <div class="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
+          {#each [
+            { value: 'viewer', label: 'Viewer', desc: 'View only' },
+            { value: 'admin', label: 'Admin', desc: 'Manage apps' },
+            { value: 'super_admin', label: 'Super Admin', desc: 'Full access' },
+          ] as role}
+            <button
+              type="button"
+              onclick={() => eRole = role.value}
+              class="px-3 py-2.5 rounded-lg border text-left transition-colors cursor-pointer {eRole === role.value ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 bg-input-bg text-text-secondary hover:border-text-muted'}"
+            >
+              <span class="block text-xs font-medium">{role.label}</span>
+              <span class="block text-[10px] text-text-muted mt-0.5">{role.desc}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+      <Button type="submit">Save Changes</Button>
+    </form>
+  </FormModal>
+
+  <!-- Reset Password Modal -->
+  <FormModal title="Reset Password" open={showPasswordModal} onclose={() => showPasswordModal = false}>
+    <form onsubmit={(e) => { e.preventDefault(); resetPassword() }} class="flex flex-col gap-4">
+      {#if pError}
+        <div class="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">{pError}</div>
+      {/if}
+      {#if passwordUser}
+        <p class="text-sm text-text-secondary">Resetting password for <strong class="text-text-primary">{passwordUser.display_name || passwordUser.username}</strong></p>
+      {/if}
+      {#if isEditingSelf}
+        <div>
+          <label class="block text-xs font-medium text-text-muted mb-1.5">Current Password</label>
+          <input type="password" bind:value={pCurrentPass} required placeholder="Enter current password" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
+        </div>
+      {/if}
+      <div>
+        <label class="block text-xs font-medium text-text-muted mb-1.5">New Password</label>
+        <input type="password" bind:value={pNewPass} required minlength="8" placeholder="Min 8 characters" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
+      </div>
+      <Button type="submit">Reset Password</Button>
     </form>
   </FormModal>
 
