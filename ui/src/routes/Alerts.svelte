@@ -65,9 +65,26 @@
 
   const metricLabels = {
     cpu_pct: 'CPU Usage',
-    mem_pct: 'Memory Usage',
-    mem_bytes: 'Memory Bytes',
+    mem_pct: 'Memory %',
+    mem_bytes: 'Memory Used',
   }
+
+  const metricHelp = {
+    cpu_pct: 'Percentage of CPU used by the container. 100% = one full core.',
+    mem_pct: 'Memory used as a percentage of the container memory limit.',
+    mem_bytes: 'Absolute memory used by the container in MB or GB.',
+  }
+
+  const durationPresets = [
+    { label: '30s', value: 30 },
+    { label: '1m', value: 60 },
+    { label: '5m', value: 300 },
+    { label: '10m', value: 600 },
+    { label: '30m', value: 1800 },
+    { label: '1h', value: 3600 },
+  ]
+
+  let thresholdUnit = $state('MB')
 
   const sampleData = {
     AppName: 'my-app', Metric: 'cpu_pct', MetricDisplay: 'CPU',
@@ -247,15 +264,25 @@
   function openRuleEdit(r) {
     editingRule = r
     rApp = r.app_slug || ''; rMetric = r.metric; rOp = r.operator
-    rThreshold = r.threshold; rDuration = r.duration_sec; rWebhook = String(r.webhook_id || ''); rEnabled = r.enabled !== false
+    rDuration = r.duration_sec; rWebhook = String(r.webhook_id || ''); rEnabled = r.enabled !== false
+    if (r.metric === 'mem_bytes') {
+      if (r.threshold >= 1 << 30) { rThreshold = +(r.threshold / (1 << 30)).toFixed(2); thresholdUnit = 'GB' }
+      else { rThreshold = +(r.threshold / (1 << 20)).toFixed(2); thresholdUnit = 'MB' }
+    } else {
+      rThreshold = r.threshold
+    }
     showRuleModal = true
   }
 
   async function saveRule() {
     rSaving = true
+    let threshold = +rThreshold
+    if (rMetric === 'mem_bytes') {
+      threshold = thresholdUnit === 'GB' ? threshold * (1 << 30) : threshold * (1 << 20)
+    }
     const payload = {
       app_slug: rApp, metric: rMetric, operator: rOp,
-      threshold: +rThreshold, duration_sec: +rDuration, webhook_id: +rWebhook, enabled: rEnabled,
+      threshold, duration_sec: +rDuration, webhook_id: +rWebhook, enabled: rEnabled,
     }
     const res = editingRule
       ? await api.updateAlertRule(editingRule.id, payload)
@@ -530,56 +557,101 @@
 
   <!-- Rule Modal -->
   <FormModal open={showRuleModal} title={editingRule ? 'Edit Alert Rule' : 'Create Alert Rule'} onclose={() => showRuleModal = false}>
-    <form onsubmit={(e) => { e.preventDefault(); saveRule() }} class="flex flex-col gap-4">
+    <form onsubmit={(e) => { e.preventDefault(); saveRule() }} class="flex flex-col gap-5">
+      <!-- Rule summary -->
+      <div class="rounded-lg bg-surface-3/50 border border-border/30 px-4 py-3">
+        <p class="text-xs text-text-muted mb-1">This rule will fire when:</p>
+        <p class="text-sm text-text-primary font-medium">
+          {metricLabels[rMetric] || rMetric} of
+          <span class="text-accent">{rApp || 'all apps'}</span>
+          is {rOp} {rThreshold}{rMetric === 'mem_bytes' ? ` ${thresholdUnit}` : rMetric.includes('pct') ? '%' : ''}
+          for {humanDuration(+rDuration) ? humanDuration(+rDuration).slice(2) : `${rDuration}s`}
+        </p>
+      </div>
+
       <div>
         <label class="block text-xs font-medium text-text-muted mb-1.5">App</label>
         <select bind:value={rApp} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
           <option value="">All Apps</option>
           {#each apps as a}<option value={a.Slug || a.slug}>{a.Slug || a.slug}</option>{/each}
         </select>
+        <p class="text-xs text-text-muted mt-1">Choose a specific app or monitor all apps at once.</p>
       </div>
+
       <div>
         <label class="block text-xs font-medium text-text-muted mb-1.5">Metric</label>
         <select bind:value={rMetric} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
           {#each Object.entries(metricLabels) as [val, label]}
-            <option value={val}>{label} ({val})</option>
+            <option value={val}>{label}</option>
           {/each}
         </select>
+        <p class="text-xs text-text-muted mt-1">{metricHelp[rMetric]}</p>
       </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-medium text-text-muted mb-1.5">Operator</label>
-          <select bind:value={rOp} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
-            <option value=">">&gt;</option>
-            <option value="<">&lt;</option>
-            <option value=">=">&gt;=</option>
-            <option value="<=">&lt;=</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-text-muted mb-1.5">Threshold</label>
-          <input type="number" bind:value={rThreshold} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
-        </div>
-      </div>
+
       <div>
-        <label class="block text-xs font-medium text-text-muted mb-1.5">Duration (seconds)</label>
-        <input type="number" bind:value={rDuration} min="1" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
-        {#if rDuration > 0}
-          <p class="text-xs text-text-muted mt-1">{humanDuration(+rDuration)}</p>
+        <label class="block text-xs font-medium text-text-muted mb-1.5">Condition</label>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-text-muted shrink-0">Alert when value is</span>
+          <select bind:value={rOp} class="px-2 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary w-20">
+            <option value=">">above</option>
+            <option value=">=">at or above</option>
+            <option value="<">below</option>
+            <option value="<=">at or below</option>
+          </select>
+          {#if rMetric === 'mem_bytes'}
+            <input type="number" bind:value={rThreshold} min="0" step="any" class="px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30 w-24" />
+            <select bind:value={thresholdUnit} class="px-2 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary w-20">
+              <option>MB</option>
+              <option>GB</option>
+            </select>
+          {:else}
+            <input type="number" bind:value={rThreshold} min="0" max="100" step="any" class="px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30 w-24" />
+            <span class="text-xs text-text-muted">%</span>
+          {/if}
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-text-muted mb-1.5">Duration</label>
+        <div class="flex flex-wrap gap-1.5 mb-2">
+          {#each durationPresets as preset}
+            <button type="button"
+              class="px-2.5 py-1 text-xs rounded-md border transition-colors {+rDuration === preset.value ? 'bg-accent/15 border-accent/40 text-accent' : 'border-border/50 text-text-secondary hover:border-border hover:text-text-primary'}"
+              onclick={() => rDuration = preset.value}
+            >{preset.label}</button>
+          {/each}
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="number" bind:value={rDuration} min="1" class="px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30 w-28" />
+          <span class="text-xs text-text-muted">seconds</span>
+          {#if +rDuration > 0}
+            <span class="text-xs text-text-muted">({humanDuration(+rDuration) ? humanDuration(+rDuration).slice(2) : ''})</span>
+          {/if}
+        </div>
+        <p class="text-xs text-text-muted mt-1">The condition must stay true for this long before an alert fires. Helps avoid noisy alerts from brief spikes.</p>
+      </div>
+
+      <div>
+        <label class="block text-xs font-medium text-text-muted mb-1.5">Notify via</label>
+        {#if webhooks.length === 0}
+          <div class="rounded-lg border border-border/30 bg-surface-3/30 p-3 text-center">
+            <p class="text-sm text-text-muted mb-2">No webhooks configured yet.</p>
+            <Button size="sm" variant="secondary" onclick={() => { showRuleModal = false; openWebhookCreate() }}>Create Webhook First</Button>
+          </div>
+        {:else}
+          <select bind:value={rWebhook} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
+            <option value="">Select webhook</option>
+            {#each webhooks as w}<option value={String(w.id)}>{w.name} ({typeLabels[w.type] || w.type})</option>{/each}
+          </select>
+          <p class="text-xs text-text-muted mt-1">Where to send the alert notification when this rule triggers.</p>
         {/if}
       </div>
-      <div>
-        <label class="block text-xs font-medium text-text-muted mb-1.5">Webhook</label>
-        <select bind:value={rWebhook} class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary">
-          <option value="">Select webhook</option>
-          {#each webhooks as w}<option value={String(w.id)}>{w.name}</option>{/each}
-        </select>
-      </div>
-      <div class="flex items-center gap-2">
-        <input type="checkbox" id="rule-enabled" bind:checked={rEnabled} class="rounded border-border/50 accent-accent" />
-        <label for="rule-enabled" class="text-sm text-text-primary">Enabled</label>
-      </div>
-      <div class="flex justify-end gap-2 pt-2">
+
+      <div class="flex items-center justify-between pt-1">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="rule-enabled" bind:checked={rEnabled} class="rounded border-border/50 accent-accent" />
+          <span class="text-sm text-text-primary">Enabled</span>
+        </label>
         <Button size="sm" loading={rSaving} type="submit">{editingRule ? 'Save' : 'Create'}</Button>
       </div>
     </form>
