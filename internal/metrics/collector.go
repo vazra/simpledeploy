@@ -75,11 +75,28 @@ func (c *Collector) syncStatus(ctx context.Context) {
 		return
 	}
 
-	running := make(map[string]bool)
+	runningCount := make(map[string]int)
 	for _, ctr := range containers {
 		if project, ok := ctr.Labels["com.docker.compose.project"]; ok {
 			slug := strings.TrimPrefix(project, "simpledeploy-")
-			running[slug] = true
+			runningCount[slug]++
+		}
+	}
+
+	// Get all containers (including stopped/exited) to determine total per app
+	allContainers, err := c.docker.ContainerList(ctx, container.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("label", "com.docker.compose.project")),
+		All:     true,
+	})
+	if err != nil {
+		log.Printf("metrics: syncStatus ContainerList(all): %v", err)
+		return
+	}
+	totalCount := make(map[string]int)
+	for _, ctr := range allContainers {
+		if project, ok := ctr.Labels["com.docker.compose.project"]; ok {
+			slug := strings.TrimPrefix(project, "simpledeploy-")
+			totalCount[slug]++
 		}
 	}
 
@@ -87,10 +104,19 @@ func (c *Collector) syncStatus(ctx context.Context) {
 		if app.Status == "stopped" {
 			continue
 		}
-		if running[app.Slug] && app.Status != "running" {
-			c.statusSyncer.UpdateAppStatus(app.Slug, "running")
-		} else if !running[app.Slug] && app.Status == "running" {
-			c.statusSyncer.UpdateAppStatus(app.Slug, "error")
+		running := runningCount[app.Slug]
+		total := totalCount[app.Slug]
+		var want string
+		switch {
+		case running == 0:
+			want = "error"
+		case running < total:
+			want = "degraded"
+		default:
+			want = "running"
+		}
+		if app.Status != want {
+			c.statusSyncer.UpdateAppStatus(app.Slug, want)
 		}
 	}
 }

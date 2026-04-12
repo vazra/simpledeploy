@@ -142,6 +142,7 @@ func (s *Server) routes() {
 	// User management (auth + super_admin)
 	s.mux.Handle("GET /api/users", s.authMiddleware(http.HandlerFunc(s.handleListUsers)))
 	s.mux.Handle("POST /api/users", s.authMiddleware(http.HandlerFunc(s.handleCreateUser)))
+	s.mux.Handle("PUT /api/users/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateUser)))
 	s.mux.Handle("DELETE /api/users/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteUser)))
 	s.mux.Handle("POST /api/users/{id}/access", s.authMiddleware(http.HandlerFunc(s.handleGrantAccess)))
 	s.mux.Handle("DELETE /api/users/{id}/access/{slug}", s.authMiddleware(http.HandlerFunc(s.handleRevokeAccess)))

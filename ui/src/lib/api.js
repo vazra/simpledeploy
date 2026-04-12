@@ -158,6 +158,7 @@ export const api = {
   // Users
   listUsers: () => request('GET', '/users'),
   createUser: (u) => requestWithToast('POST', '/users', u, 'User created'),
+  updateUser: (id, u) => requestWithToast('PUT', `/users/${id}`, u, 'User updated'),
   deleteUser: (id) => requestWithToast('DELETE', `/users/${id}`, null, 'User deleted'),
   listAPIKeys: () => request('GET', '/apikeys'),
   createAPIKey: (name) => requestWithToast('POST', '/apikeys', { name }, 'API key created'),

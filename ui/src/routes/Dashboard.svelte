@@ -156,8 +156,8 @@
     return new Date(ts).toLocaleString()
   }
 
-  let runningCount = $derived(apps.filter((a) => a.Status === 'running').length)
-  let stoppedCount = $derived(apps.filter((a) => a.Status !== 'running').length)
+  let runningCount = $derived(apps.filter((a) => a.Status === 'running' || a.Status === 'degraded').length)
+  let stoppedCount = $derived(apps.filter((a) => a.Status !== 'running' && a.Status !== 'degraded').length)
 
   let activeAlerts = $derived((alertHistory || []).filter((h) => !h.resolved_at))
 
@@ -219,7 +219,7 @@
       result = result.filter((a) => (a.Name || '').toLowerCase().includes(q) || (a.Slug || '').toLowerCase().includes(q))
     }
     if (filterStatus !== 'all') {
-      result = result.filter((a) => a.Status === filterStatus)
+      result = result.filter((a) => filterStatus === 'running' ? (a.Status === 'running' || a.Status === 'degraded') : a.Status === filterStatus)
     }
     if (sortBy === 'name') {
       result = [...result].sort((a, b) => (a.Name || '').localeCompare(b.Name || ''))

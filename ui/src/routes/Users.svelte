@@ -42,6 +42,7 @@
 
   // current user
   let currentUser = $state(null)
+  let isSuperAdmin = $derived(currentUser?.role === 'super_admin')
 
   // key form
   let kName = $state('')
@@ -140,24 +141,23 @@
     showPasswordModal = true
   }
 
-  let isEditingSelf = $derived(passwordUser && currentUser && passwordUser.id === currentUser.id)
-
   async function resetPassword() {
     pError = ''
+    if (!pCurrentPass) {
+      pError = 'Your password is required'
+      return
+    }
     if (pNewPass.length < 8) {
-      pError = 'Password must be at least 8 characters'
+      pError = 'New password must be at least 8 characters'
       return
     }
-    if (isEditingSelf && !pCurrentPass) {
-      pError = 'Current password is required'
-      return
+    const body = {
+      password: pNewPass,
+      current_password: pCurrentPass,
+      display_name: passwordUser.display_name || '',
+      email: passwordUser.email || '',
+      role: passwordUser.role,
     }
-    const body = { password: pNewPass }
-    if (isEditingSelf) body.current_password = pCurrentPass
-    // Keep other fields unchanged
-    body.display_name = passwordUser.display_name || ''
-    body.email = passwordUser.email || ''
-    body.role = passwordUser.role
     const res = await api.updateUser(passwordUser.id, body)
     if (res.error) {
       pError = res.error
@@ -207,7 +207,7 @@
             <Badge>{users.length}</Badge>
           {/if}
         </div>
-        <Button size="sm" variant="secondary" onclick={() => { resetUserForm(); showUserModal = true }}>Add User</Button>
+        {#if isSuperAdmin}<Button size="sm" variant="secondary" onclick={() => { resetUserForm(); showUserModal = true }}>Add User</Button>{/if}
       </div>
       {#if users.length === 0}
         <div class="flex flex-col items-center justify-center py-10 text-center">
@@ -215,7 +215,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z" />
           </svg>
           <p class="text-sm text-text-muted mb-3">No users yet</p>
-          <Button size="sm" variant="secondary" onclick={() => { resetUserForm(); showUserModal = true }}>Add User</Button>
+          {#if isSuperAdmin}<Button size="sm" variant="secondary" onclick={() => { resetUserForm(); showUserModal = true }}>Add User</Button>{/if}
         </div>
       {:else}
         <!-- Desktop: table -->
@@ -226,7 +226,7 @@
               <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Role</th>
               <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Email</th>
               <th class="text-left text-xs font-medium text-text-muted/70 py-3 px-4">Created</th>
-              <th class="py-3 px-4"></th>
+              {#if isSuperAdmin}<th class="py-3 px-4"></th>{/if}
             </tr></thead>
             <tbody class="divide-y divide-border/30">
               {#each users as u}
@@ -247,13 +247,17 @@
                   <td class="py-3 px-4"><Badge variant={roleVariants[u.role] || 'default'}>{u.role}</Badge></td>
                   <td class="py-3 px-4 text-text-secondary">{u.email || '-'}</td>
                   <td class="py-3 px-4 text-text-secondary">{u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</td>
-                  <td class="py-3 px-4">
-                    <div class="flex items-center justify-end gap-2">
-                      <Button variant="secondary" size="sm" onclick={() => openEdit(u)}>Edit</Button>
-                      <Button variant="secondary" size="sm" onclick={() => openPasswordReset(u)}>Reset Password</Button>
-                      <Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', `This will permanently remove "${u.username}".`, () => delUser(u.id))}>Delete</Button>
-                    </div>
-                  </td>
+                  {#if isSuperAdmin}
+                    <td class="py-3 px-4">
+                      <div class="flex items-center justify-end gap-2">
+                        <Button variant="secondary" size="sm" onclick={() => openEdit(u)}>Edit</Button>
+                        <Button variant="secondary" size="sm" onclick={() => openPasswordReset(u)}>Reset Password</Button>
+                        {#if !currentUser || u.id !== currentUser.id}
+                          <Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', `This will permanently remove "${u.username}".`, () => delUser(u.id))}>Delete</Button>
+                        {/if}
+                      </div>
+                    </td>
+                  {/if}
                 </tr>
               {/each}
             </tbody>
@@ -281,12 +285,16 @@
                 {#if u.email}<span class="truncate">{u.email}</span><span class="text-border">|</span>{/if}
                 <span>Created {u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</span>
               </div>
-              <div class="flex items-center gap-2">
-                <Button variant="secondary" size="sm" onclick={() => openEdit(u)}>Edit</Button>
-                <Button variant="secondary" size="sm" onclick={() => openPasswordReset(u)}>Password</Button>
-                <div class="flex-1"></div>
-                <Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', `This will permanently remove "${u.username}".`, () => delUser(u.id))}>Delete</Button>
-              </div>
+              {#if isSuperAdmin}
+                <div class="flex items-center gap-2">
+                  <Button variant="secondary" size="sm" onclick={() => openEdit(u)}>Edit</Button>
+                  <Button variant="secondary" size="sm" onclick={() => openPasswordReset(u)}>Password</Button>
+                  <div class="flex-1"></div>
+                  {#if !currentUser || u.id !== currentUser.id}
+                    <Button variant="danger" size="sm" onclick={() => confirmDelete('Delete User?', `This will permanently remove "${u.username}".`, () => delUser(u.id))}>Delete</Button>
+                  {/if}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -422,25 +430,27 @@
           <input type="email" bind:value={eEmail} placeholder="jane@example.com" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
         </div>
       </div>
-      <div>
-        <label class="block text-xs font-medium text-text-muted mb-1.5">Role</label>
-        <div class="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
-          {#each [
-            { value: 'viewer', label: 'Viewer', desc: 'View only' },
-            { value: 'admin', label: 'Admin', desc: 'Manage apps' },
-            { value: 'super_admin', label: 'Super Admin', desc: 'Full access' },
-          ] as role}
-            <button
-              type="button"
-              onclick={() => eRole = role.value}
-              class="px-3 py-2.5 rounded-lg border text-left transition-colors cursor-pointer {eRole === role.value ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 bg-input-bg text-text-secondary hover:border-text-muted'}"
-            >
-              <span class="block text-xs font-medium">{role.label}</span>
-              <span class="block text-[10px] text-text-muted mt-0.5">{role.desc}</span>
-            </button>
-          {/each}
+      {#if !editUser || !currentUser || editUser.id !== currentUser.id}
+        <div>
+          <label class="block text-xs font-medium text-text-muted mb-1.5">Role</label>
+          <div class="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
+            {#each [
+              { value: 'viewer', label: 'Viewer', desc: 'View only' },
+              { value: 'admin', label: 'Admin', desc: 'Manage apps' },
+              { value: 'super_admin', label: 'Super Admin', desc: 'Full access' },
+            ] as role}
+              <button
+                type="button"
+                onclick={() => eRole = role.value}
+                class="px-3 py-2.5 rounded-lg border text-left transition-colors cursor-pointer {eRole === role.value ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 bg-input-bg text-text-secondary hover:border-text-muted'}"
+              >
+                <span class="block text-xs font-medium">{role.label}</span>
+                <span class="block text-[10px] text-text-muted mt-0.5">{role.desc}</span>
+              </button>
+            {/each}
+          </div>
         </div>
-      </div>
+      {/if}
       <Button type="submit">Save Changes</Button>
     </form>
   </FormModal>
@@ -454,12 +464,10 @@
       {#if passwordUser}
         <p class="text-sm text-text-secondary">Resetting password for <strong class="text-text-primary">{passwordUser.display_name || passwordUser.username}</strong></p>
       {/if}
-      {#if isEditingSelf}
-        <div>
-          <label class="block text-xs font-medium text-text-muted mb-1.5">Current Password</label>
-          <input type="password" bind:value={pCurrentPass} required placeholder="Enter current password" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
-        </div>
-      {/if}
+      <div>
+        <label class="block text-xs font-medium text-text-muted mb-1.5">Your Password</label>
+        <input type="password" bind:value={pCurrentPass} required placeholder="Enter your password to confirm" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />
+      </div>
       <div>
         <label class="block text-xs font-medium text-text-muted mb-1.5">New Password</label>
         <input type="password" bind:value={pNewPass} required minlength="8" placeholder="Min 8 characters" class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:ring-2 focus:ring-accent/30" />

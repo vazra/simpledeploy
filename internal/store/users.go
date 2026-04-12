@@ -274,11 +274,34 @@ func (s *Store) HasAppAccess(userID int64, appSlug string) (bool, error) {
 	return count > 0, nil
 }
 
+// EmailTaken returns true if the email is already used by another user.
+func (s *Store) EmailTaken(email string, excludeID int64) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = ? AND id != ?`, email, excludeID).Scan(&count)
+	return count > 0, err
+}
+
 // UpdateProfile updates the user's display name and email.
 func (s *Store) UpdateProfile(id int64, displayName, email string) error {
 	res, err := s.db.Exec(`UPDATE users SET display_name = ?, email = ? WHERE id = ?`, displayName, email, id)
 	if err != nil {
 		return fmt.Errorf("update profile: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("user %d not found", id)
+	}
+	return nil
+}
+
+// UpdateUserRole updates the user's role.
+func (s *Store) UpdateUserRole(id int64, role string) error {
+	res, err := s.db.Exec(`UPDATE users SET role = ? WHERE id = ?`, role, id)
+	if err != nil {
+		return fmt.Errorf("update role: %w", err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {

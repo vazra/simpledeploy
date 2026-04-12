@@ -5,6 +5,7 @@
 
   const statusVariant = {
     running: 'success',
+    degraded: 'warning',
     stopped: 'default',
     error: 'danger'
   }
@@ -21,7 +22,7 @@
 <a href="#/apps/{app.Slug}" class="block bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 group">
   <div class="flex items-start justify-between mb-2">
     <div class="flex items-center gap-2 min-w-0">
-      <span class="w-2 h-2 rounded-full shrink-0 ring-2 ring-surface-2 {app.Status === 'running' ? 'bg-success' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
+      <span class="w-2 h-2 rounded-full shrink-0 ring-2 ring-surface-2 {app.Status === 'running' ? 'bg-success' : app.Status === 'degraded' ? 'bg-warning' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
       <h3 class="text-sm font-semibold text-text-primary tracking-tight truncate group-hover:text-accent transition-colors">{app.Name}</h3>
     </div>
     <Badge variant={statusVariant[app.Status] || 'default'}>{app.Status}</Badge>

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
@@ -29,19 +31,20 @@ func requireRole(w http.ResponseWriter, r *http.Request, roles ...string) *AuthU
 
 // userResponse omits password_hash from JSON output.
 type userResponse struct {
-	ID          int64  `json:"id"`
-	Username    string `json:"username"`
-	Role        string `json:"role"`
-	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`
+	ID          int64     `json:"id"`
+	Username    string    `json:"username"`
+	Role        string    `json:"role"`
+	DisplayName string    `json:"display_name"`
+	Email       string    `json:"email"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func toUserResponse(u *store.User) userResponse {
-	return userResponse{ID: u.ID, Username: u.Username, Role: u.Role, DisplayName: u.DisplayName, Email: u.Email}
+	return userResponse{ID: u.ID, Username: u.Username, Role: u.Role, DisplayName: u.DisplayName, Email: u.Email, CreatedAt: u.CreatedAt}
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
-	if requireRole(w, r, "super_admin") == nil {
+	if requireRole(w, r, "super_admin", "admin") == nil {
 		return
 	}
 	users, err := s.store.ListUsers()
@@ -152,6 +155,20 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	if body.Username == "" {
+		http.Error(w, "username is required", http.StatusBadRequest)
+		return
+	}
+	if len(body.Password) < 8 {
+		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+	if body.Email != "" {
+		if taken, _ := s.store.EmailTaken(body.Email, 0); taken {
+			http.Error(w, "email already in use", http.StatusConflict)
+			return
+		}
+	}
 	hash, err := auth.HashPassword(body.Password)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
@@ -159,6 +176,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.store.CreateUser(body.Username, hash, body.Role, body.DisplayName, body.Email)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			http.Error(w, "username already exists", http.StatusConflict)
+			return
+		}
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -171,13 +192,100 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(toUserResponse(u))
 }
 
-func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
-	if requireRole(w, r, "super_admin") == nil {
+func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	caller := requireRole(w, r, "super_admin")
+	if caller == nil {
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		DisplayName     string `json:"display_name"`
+		Email           string `json:"email"`
+		Role            string `json:"role"`
+		Password        string `json:"password"`
+		CurrentPassword string `json:"current_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Email != "" {
+		if taken, _ := s.store.EmailTaken(body.Email, id); taken {
+			http.Error(w, "email already in use", http.StatusConflict)
+			return
+		}
+	}
+	if err := s.store.UpdateProfile(id, body.DisplayName, body.Email); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if body.Role != "" {
+		if caller.ID == id && body.Role != "super_admin" {
+			http.Error(w, "cannot change your own role", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.UpdateUserRole(id, body.Role); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	if body.Password != "" {
+		if len(body.Password) < 8 {
+			http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
+			return
+		}
+		// Always require caller's password to reset any user's password
+		if body.CurrentPassword == "" {
+			http.Error(w, "your password is required to reset passwords", http.StatusBadRequest)
+			return
+		}
+		callerUser, err := s.store.GetUserByID(caller.ID)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		if !auth.CheckPassword(callerUser.PasswordHash, body.CurrentPassword) {
+			http.Error(w, "your password is incorrect", http.StatusBadRequest)
+			return
+		}
+		hash, err := auth.HashPassword(body.Password)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		if err := s.store.UpdatePassword(id, hash); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	user, err := s.store.GetUserByID(id)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if s.audit != nil {
+		s.audit.Log(audit.Event{Type: "user_updated", Username: caller.Username, Detail: user.Username, Success: true})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(toUserResponse(user))
+}
+
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	caller := requireRole(w, r, "super_admin")
+	if caller == nil {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if caller.ID == id {
+		http.Error(w, "cannot delete yourself", http.StatusBadRequest)
 		return
 	}
 	if err := s.store.DeleteUser(id); err != nil {

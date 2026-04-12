@@ -354,12 +354,12 @@
       </a>
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div class="flex items-center gap-3">
-          <span class="w-3 h-3 rounded-full ring-2 ring-surface-0 {app.Status === 'running' ? 'bg-success' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
+          <span class="w-3 h-3 rounded-full ring-2 ring-surface-0 {app.Status === 'running' ? 'bg-success' : app.Status === 'degraded' ? 'bg-warning' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
           <h1 class="text-2xl font-semibold text-text-primary tracking-tight">{app.Name}</h1>
-          <Badge variant={app.Status === 'running' ? 'success' : app.Status === 'error' ? 'danger' : 'default'}>{app.Status}</Badge>
+          <Badge variant={app.Status === 'running' ? 'success' : app.Status === 'degraded' ? 'warning' : app.Status === 'error' ? 'danger' : 'default'}>{app.Status}</Badge>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          {#if app.Status === 'running'}
+          {#if app.Status === 'running' || app.Status === 'degraded'}
             <Button variant="secondary" size="sm" onclick={() => showRestartModal = true} loading={actionLoading === 'restart'}>Restart</Button>
             <Button variant="secondary" size="sm" onclick={handleStop} loading={actionLoading === 'stop'}>Stop</Button>
           {:else if app.Status === 'stopped'}
@@ -404,7 +404,7 @@
         <StatCard label="Avg Latency" value="{requestStats?.avg_latency_ms?.toFixed(1) ?? '0'}ms" />
         <StatCard label="Error Rate" value="{requestStats?.error_rate?.toFixed(1) ?? '0'}%"
           color={parseFloat(requestStats?.error_rate || 0) > 5 ? 'text-danger' : 'text-success'} />
-        <StatCard label="Status" value={app.Status} color={app.Status === 'running' ? 'text-success' : 'text-danger'} />
+        <StatCard label="Status" value={app.Status} color={app.Status === 'running' ? 'text-success' : app.Status === 'degraded' ? 'text-warning' : 'text-danger'} />
       </div>
 
       <!-- Details -->

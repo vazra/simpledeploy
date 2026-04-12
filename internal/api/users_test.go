@@ -88,7 +88,7 @@ func TestCreateUser(t *testing.T) {
 
 	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
 		"username": "newuser",
-		"password": "pass123",
+		"password": "pass1234",
 		"role":     "admin",
 	}, cookie)
 	w := httptest.NewRecorder()
@@ -120,7 +120,7 @@ func TestCreateUserForbidden(t *testing.T) {
 
 	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
 		"username": "anotheruser",
-		"password": "pass123",
+		"password": "pass1234",
 		"role":     "admin",
 	}, adminCookie)
 	w := httptest.NewRecorder()
