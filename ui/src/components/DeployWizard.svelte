@@ -481,7 +481,7 @@
               <div class="flex items-center justify-center h-full min-h-[280px] text-[#555] text-sm">Waiting for output...</div>
             {:else}
               {#each deployLines as line}
-                <div class="whitespace-pre-wrap break-all py-px {line.stream === 'stderr' ? 'text-red-400' : 'text-[#d4d4d4] light:text-[#c8c8d8]'}">
+                <div class="whitespace-pre-wrap break-all py-px {/\b(error|fatal|fail)/i.test(line.line) ? 'text-red-400' : 'text-[#d4d4d4] light:text-[#c8c8d8]'}">
                   {line.line}
                 </div>
               {/each}
