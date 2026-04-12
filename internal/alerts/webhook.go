@@ -15,9 +15,9 @@ import (
 )
 
 var builtinTemplates = map[string]string{
-	"slack":    `{"text":"[{{.Status}}] {{.AppName}} - {{.Metric}} {{.Operator}} {{.Threshold}} (current: {{printf "%.1f" .Value}})"}`,
-	"telegram": `{"text":"[{{.Status}}] {{.AppName}}\n{{.Metric}} {{.Operator}} {{.Threshold}} (current: {{printf "%.1f" .Value}})","parse_mode":"HTML"}`,
-	"discord":  `{"content":"[{{.Status}}] {{.AppName}} - {{.Metric}} {{.Operator}} {{.Threshold}} (current: {{printf "%.1f" .Value}})"}`,
+	"slack":    `{"text":"[{{.Status}}] {{.AppName}} - {{.MetricDisplay}} {{.Operator}} {{.ThresholdDisplay}} (current: {{.ValueDisplay}})"}`,
+	"telegram": `{"text":"[{{.Status}}] {{.AppName}}\n{{.MetricDisplay}} {{.Operator}} {{.ThresholdDisplay}} (current: {{.ValueDisplay}})","parse_mode":"HTML"}`,
+	"discord":  `{"content":"[{{.Status}}] {{.AppName}} - {{.MetricDisplay}} {{.Operator}} {{.ThresholdDisplay}} (current: {{.ValueDisplay}})"}`,
 	"custom":   `{"app":"{{.AppName}}","metric":"{{.Metric}}","value":{{printf "%.2f" .Value}},"threshold":{{printf "%.2f" .Threshold}},"status":"{{.Status}}"}`,
 }
 

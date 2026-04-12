@@ -153,6 +153,7 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 		Status:    "firing",
 		FiredAt:   time.Now(),
 	}
+	alerts.EnrichEvent(&event)
 
 	if s.webhookDispatcher == nil {
 		http.Error(w, "webhook dispatcher not configured", http.StatusInternalServerError)

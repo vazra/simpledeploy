@@ -66,7 +66,9 @@
   }
 
   const sampleData = {
-    AppName: 'my-app', Metric: 'cpu_pct', Value: 92.5, Threshold: 80, Operator: '>', Status: 'firing',
+    AppName: 'my-app', Metric: 'cpu_pct', MetricDisplay: 'CPU',
+    Value: 92.5, ValueDisplay: '92.5%', Threshold: 80, ThresholdDisplay: '80.0%',
+    Operator: '>', Status: 'firing',
   }
 
   function builtinPreview(type) {
@@ -74,17 +76,20 @@
       return JSON.stringify({ app: sampleData.AppName, metric: sampleData.Metric, value: 92.50, threshold: 80.00, status: sampleData.Status }, null, 2)
     }
     if (type === 'telegram') {
-      return `[${sampleData.Status}] ${sampleData.AppName}\n${sampleData.Metric} ${sampleData.Operator} ${sampleData.Threshold} (current: ${sampleData.Value})`
+      return `[${sampleData.Status}] ${sampleData.AppName}\n${sampleData.MetricDisplay} ${sampleData.Operator} ${sampleData.ThresholdDisplay} (current: ${sampleData.ValueDisplay})`
     }
-    return `[${sampleData.Status}] ${sampleData.AppName} - ${sampleData.Metric} ${sampleData.Operator} ${sampleData.Threshold} (current: ${sampleData.Value})`
+    return `[${sampleData.Status}] ${sampleData.AppName} - ${sampleData.MetricDisplay} ${sampleData.Operator} ${sampleData.ThresholdDisplay} (current: ${sampleData.ValueDisplay})`
   }
 
   function renderTemplate(tpl) {
     return tpl
       .replace(/\{\{\.AppName\}\}/g, sampleData.AppName)
       .replace(/\{\{\.Metric\}\}/g, sampleData.Metric)
+      .replace(/\{\{\.MetricDisplay\}\}/g, sampleData.MetricDisplay)
       .replace(/\{\{\.Value\}\}/g, String(sampleData.Value))
+      .replace(/\{\{\.ValueDisplay\}\}/g, sampleData.ValueDisplay)
       .replace(/\{\{\.Threshold\}\}/g, String(sampleData.Threshold))
+      .replace(/\{\{\.ThresholdDisplay\}\}/g, sampleData.ThresholdDisplay)
       .replace(/\{\{\.Operator\}\}/g, sampleData.Operator)
       .replace(/\{\{\.Status\}\}/g, sampleData.Status)
       .replace(/\{\{\.FiredAt\}\}/g, new Date().toISOString())

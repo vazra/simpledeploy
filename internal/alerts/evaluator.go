@@ -150,6 +150,7 @@ func (e *Evaluator) buildEvent(rule store.AlertRule, value float64, status strin
 			event.AppSlug = app.Slug
 		}
 	}
+	EnrichEvent(&event)
 	return event
 }
 

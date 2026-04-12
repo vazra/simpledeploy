@@ -12,7 +12,7 @@ import (
 )
 
 func makeEvent() AlertEvent {
-	return AlertEvent{
+	e := AlertEvent{
 		AppName:   "myapp",
 		AppSlug:   "myapp",
 		Metric:    "cpu_pct",
@@ -22,6 +22,8 @@ func makeEvent() AlertEvent {
 		Status:    "firing",
 		FiredAt:   time.Now(),
 	}
+	EnrichEvent(&e)
+	return e
 }
 
 func renderTemplate(t *testing.T, tmplStr string, event AlertEvent) string {
