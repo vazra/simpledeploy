@@ -366,3 +366,17 @@ func (s *Store) ListAlertHistory(ruleID *int64, limit int) ([]AlertHistory, erro
 	}
 	return hist, rows.Err()
 }
+
+func (s *Store) ClearAlertHistory(resolvedOnly bool) error {
+	var q string
+	if resolvedOnly {
+		q = `DELETE FROM alert_history WHERE resolved_at IS NOT NULL`
+	} else {
+		q = `DELETE FROM alert_history`
+	}
+	_, err := s.db.Exec(q)
+	if err != nil {
+		return fmt.Errorf("clear alert history: %w", err)
+	}
+	return nil
+}

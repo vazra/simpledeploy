@@ -321,3 +321,14 @@ func (s *Server) handleListAlertHistory(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(hist)
 }
+
+func (s *Server) handleClearAlertHistory(w http.ResponseWriter, r *http.Request) {
+	mode := r.URL.Query().Get("mode")
+	resolvedOnly := mode != "all"
+	if err := s.store.ClearAlertHistory(resolvedOnly); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}

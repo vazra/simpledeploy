@@ -269,12 +269,16 @@
     if (!deleteTarget) return
     if (deleteTarget.type === 'webhook') {
       await api.deleteWebhook(deleteTarget.id)
+    } else if (deleteTarget.type === 'history') {
+      await api.clearAlertHistory(deleteTarget.mode)
     } else {
       await api.deleteAlertRule(deleteTarget.id)
     }
     deleteTarget = null
     loadAll()
   }
+
+  let hasResolved = $derived(history.some(h => h.resolved_at))
 </script>
 
 <Layout>
@@ -367,7 +371,17 @@
 
     <!-- Alert History -->
     <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-      <h3 class="text-sm font-semibold text-text-primary mb-1">Alert History</h3>
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="text-sm font-semibold text-text-primary">Alert History</h3>
+        {#if history.length > 0}
+          <div class="flex gap-2">
+            {#if hasResolved}
+              <Button size="sm" variant="ghost" onclick={() => deleteTarget = { type: 'history', mode: 'resolved', label: 'resolved alert history' }}>Clear Resolved</Button>
+            {/if}
+            <Button size="sm" variant="danger" onclick={() => deleteTarget = { type: 'history', mode: 'all', label: 'all alert history' }}>Clear All</Button>
+          </div>
+        {/if}
+      </div>
       <p class="text-xs text-text-muted mb-3">Log of all triggered alerts and their resolution status.</p>
       {#if history.length === 0}
         <p class="text-sm text-text-muted">No alerts fired yet.</p>

@@ -153,6 +153,7 @@ export const api = {
   updateAlertRule: (id, r) => requestWithToast('PUT', `/alerts/rules/${id}`, r, 'Alert rule updated'),
   deleteAlertRule: (id) => requestWithToast('DELETE', `/alerts/rules/${id}`, null, 'Alert rule deleted'),
   alertHistory: () => request('GET', '/alerts/history'),
+  clearAlertHistory: (mode) => requestWithToast('DELETE', `/alerts/history?mode=${mode}`, null, 'Alert history cleared'),
 
   // Users
   listUsers: () => request('GET', '/users'),
