@@ -87,6 +87,54 @@ func TestWebhookCRUD(t *testing.T) {
 	}
 }
 
+func TestUpdateWebhook(t *testing.T) {
+	s := newTestStore(t)
+
+	w := &Webhook{
+		Name: "original",
+		Type: "slack",
+		URL:  "https://hooks.slack.com/original",
+	}
+	if err := s.CreateWebhook(w); err != nil {
+		t.Fatalf("CreateWebhook: %v", err)
+	}
+
+	w.Name = "updated"
+	w.Type = "discord"
+	w.URL = "https://discord.com/api/webhooks/456"
+	w.TemplateOverride = `{"content":"test"}`
+	w.HeadersJSON = `{"X-Key":"val"}`
+	if err := s.UpdateWebhook(w); err != nil {
+		t.Fatalf("UpdateWebhook: %v", err)
+	}
+
+	got, err := s.GetWebhook(w.ID)
+	if err != nil {
+		t.Fatalf("GetWebhook: %v", err)
+	}
+	if got.Name != "updated" {
+		t.Errorf("Name = %q, want updated", got.Name)
+	}
+	if got.Type != "discord" {
+		t.Errorf("Type = %q, want discord", got.Type)
+	}
+	if got.URL != "https://discord.com/api/webhooks/456" {
+		t.Errorf("URL = %q", got.URL)
+	}
+	if got.TemplateOverride != `{"content":"test"}` {
+		t.Errorf("TemplateOverride = %q", got.TemplateOverride)
+	}
+	if got.HeadersJSON != `{"X-Key":"val"}` {
+		t.Errorf("HeadersJSON = %q", got.HeadersJSON)
+	}
+
+	// not found
+	w.ID = 9999
+	if err := s.UpdateWebhook(w); err == nil {
+		t.Fatal("expected error for non-existent webhook")
+	}
+}
+
 func TestAlertRuleCRUD(t *testing.T) {
 	s := newTestStore(t)
 	wh := makeTestWebhook(t, s)

@@ -97,6 +97,25 @@ func (s *Store) ListWebhooks() ([]Webhook, error) {
 	return whs, rows.Err()
 }
 
+func (s *Store) UpdateWebhook(w *Webhook) error {
+	res, err := s.db.Exec(`
+		UPDATE webhooks
+		SET name=?, type=?, url=?, template_override=?, headers_json=?
+		WHERE id=?
+	`, w.Name, w.Type, w.URL, nullString(w.TemplateOverride), nullString(w.HeadersJSON), w.ID)
+	if err != nil {
+		return fmt.Errorf("update webhook: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("webhook %d not found", w.ID)
+	}
+	return nil
+}
+
 func (s *Store) DeleteWebhook(id int64) error {
 	res, err := s.db.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
 	if err != nil {

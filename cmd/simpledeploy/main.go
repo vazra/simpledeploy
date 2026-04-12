@@ -495,6 +495,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetMasterSecret(cfg.MasterSecret)
 	srv.SetBuildInfo(version, commit, date)
 	srv.SetDBPath(dbPath)
+	srv.SetWebhookDispatcher(dispatcher)
 	srv.SetAudit(audit.New(os.Stderr, 500))
 	srv.SetLogBuffer(logBuf)
 	srv.InitDBBackupSchedule()

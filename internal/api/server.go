@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/vazra/simpledeploy/internal/alerts"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
@@ -51,8 +52,9 @@ type Server struct {
 	buildDate       string
 	dbPath          string
 	logBuf          *logbuf.Buffer
-	dbBackupCron    *cron.Cron
-	startedAt       time.Time
+	dbBackupCron        *cron.Cron
+	webhookDispatcher   *alerts.WebhookDispatcher
+	startedAt           time.Time
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -94,6 +96,9 @@ func (s *Server) SetAudit(a *audit.Logger) { s.audit = a }
 
 // SetLogBuffer sets the log buffer for system log streaming.
 func (s *Server) SetLogBuffer(lb *logbuf.Buffer) { s.logBuf = lb }
+
+// SetWebhookDispatcher sets the webhook dispatcher for test webhook functionality.
+func (s *Server) SetWebhookDispatcher(d *alerts.WebhookDispatcher) { s.webhookDispatcher = d }
 
 // SetTrustedProxies sets the trusted proxy IPs for X-Forwarded-For parsing.
 func (s *Server) SetTrustedProxies(proxies []string) { s.trustedProxies = proxies }
@@ -199,7 +204,9 @@ func (s *Server) routes() {
 	// Webhooks
 	s.mux.Handle("GET /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleListWebhooks)))
 	s.mux.Handle("POST /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleCreateWebhook)))
+	s.mux.Handle("PUT /api/webhooks/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateWebhook)))
 	s.mux.Handle("DELETE /api/webhooks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteWebhook)))
+	s.mux.Handle("POST /api/webhooks/test", s.authMiddleware(http.HandlerFunc(s.handleTestWebhook)))
 
 	// Alert rules
 	s.mux.Handle("GET /api/alerts/rules", s.authMiddleware(http.HandlerFunc(s.handleListAlertRules)))

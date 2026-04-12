@@ -194,6 +194,85 @@ func TestListAlertRules(t *testing.T) {
 	}
 }
 
+func TestUpdateWebhookAPI(t *testing.T) {
+	srv, _, cookie := setupAlertTestServer(t)
+
+	created := createTestWebhook(t, srv, cookie, "original")
+	id := int64(created["ID"].(float64))
+
+	req := authedRequest(t, http.MethodPut, fmt.Sprintf("/api/webhooks/%d", id), map[string]string{
+		"name": "updated",
+		"type": "discord",
+		"url":  "https://discord.com/api/webhooks/456",
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["Name"] != "updated" {
+		t.Errorf("Name = %q, want updated", resp["Name"])
+	}
+	if resp["Type"] != "discord" {
+		t.Errorf("Type = %q, want discord", resp["Type"])
+	}
+}
+
+func TestUpdateWebhookNotFound(t *testing.T) {
+	srv, _, cookie := setupAlertTestServer(t)
+
+	req := authedRequest(t, http.MethodPut, "/api/webhooks/9999", map[string]string{
+		"name": "x",
+		"type": "slack",
+		"url":  "https://example.com",
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestTestWebhookByID(t *testing.T) {
+	srv, _, cookie := setupAlertTestServer(t)
+
+	// need dispatcher set
+	srv.webhookDispatcher = nil // no dispatcher - should fail gracefully
+
+	created := createTestWebhook(t, srv, cookie, "test-wh")
+	id := int64(created["ID"].(float64))
+
+	req := authedRequest(t, http.MethodPost, "/api/webhooks/test", map[string]any{
+		"webhook_id": id,
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	// without dispatcher, should get 500
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (no dispatcher); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTestWebhookValidation(t *testing.T) {
+	srv, _, cookie := setupAlertTestServer(t)
+
+	// no webhook_id and no type+url
+	req := authedRequest(t, http.MethodPost, "/api/webhooks/test", map[string]any{}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestListAlertHistory(t *testing.T) {
 	srv, st, cookie := setupAlertTestServer(t)
 
