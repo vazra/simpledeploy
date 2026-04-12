@@ -12,6 +12,10 @@
 
   const initAllowlist = app?.Labels?.['simpledeploy.access.allow'] || ''
 
+  // Section expand states (view-first: all collapsed)
+  let showComposeEditor = $state(false)
+  let showEnvEditor = $state(false)
+
   // Advanced
   let showAdvanced = $state(false)
   let editAllowlist = $state(initAllowlist)
@@ -22,13 +26,17 @@
   let showDeleteModal = $state(false)
   let deleting = $state(false)
 
+  // Env vars (for read-only view)
+  let envVars = $state([])
+  let envLoading = $state(true)
+
   // Backups
   let backupConfigs = $state([])
   let backupRuns = $state([])
   let loadingBackups = $state(true)
   let showNewConfigForm = $state(false)
   let triggeringBackup = $state(false)
-  let showRestoreModal = $state(null) // holds run id
+  let showRestoreModal = $state(null)
   let restoringId = $state(null)
 
   let newConfig = $state({
@@ -38,7 +46,19 @@
     retention_days: 7,
   })
 
-  onMount(loadBackups)
+  // Endpoints from app response
+  let endpoints = $derived(app?.endpoints || [])
+
+  onMount(() => {
+    loadBackups()
+    loadEnvVars()
+  })
+
+  async function loadEnvVars() {
+    const res = await api.getEnv(slug)
+    envVars = res.data || []
+    envLoading = false
+  }
 
   async function loadBackups() {
     loadingBackups = true
@@ -50,7 +70,6 @@
     backupRuns = runsRes.data || []
     loadingBackups = false
   }
-
 
   async function saveAllowlist() {
     savingAllowlist = true
@@ -107,25 +126,93 @@
     return 'default'
   }
 
+  function tlsBadgeVariant(tls) {
+    if (tls === 'letsencrypt') return 'success'
+    if (tls === 'custom') return 'info'
+    return 'warning'
+  }
+
+  function tlsLabel(tls) {
+    if (tls === 'letsencrypt') return 'Auto TLS'
+    if (tls === 'custom') return 'Custom TLS'
+    return 'No TLS'
+  }
+
   const inputClass = 'flex-1 bg-surface-3 border border-border/50 rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/60 transition-colors'
   const labelClass = 'text-xs font-medium text-text-secondary'
 </script>
 
 <div class="space-y-6">
 
-  <!-- Section 1: Compose Configuration -->
+  <!-- Section 1: Endpoints (read-only cards) -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-    <h3 class="text-sm font-medium text-text-primary mb-4">Compose Configuration</h3>
-    <ConfigTab {slug} />
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-medium text-text-primary">Endpoints</h3>
+      <Button variant="ghost" size="sm" onclick={() => showComposeEditor = !showComposeEditor}>
+        {showComposeEditor ? 'Close Editor' : 'Edit'}
+      </Button>
+    </div>
+    {#if endpoints.length === 0}
+      <p class="text-xs text-text-muted">No endpoints configured. Edit to add a domain.</p>
+    {:else}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {#each endpoints as ep}
+          <div class="flex items-center gap-3 bg-surface-1 rounded-lg px-3 py-2.5 border border-border/30">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-text-primary truncate">{ep.domain || 'No domain'}</div>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span class="text-[11px] text-text-muted">{ep.service || '?'}:{ep.port || '?'}</span>
+              </div>
+            </div>
+            <Badge variant={tlsBadgeVariant(ep.tls)}>{tlsLabel(ep.tls)}</Badge>
+          </div>
+        {/each}
+      </div>
+    {/if}
   </div>
 
-  <!-- Section 2: Environment Variables -->
+  <!-- Section 2: Compose Configuration (hidden by default, shown when Edit clicked) -->
+  {#if showComposeEditor}
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-accent/30">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-medium text-text-primary">Compose Configuration</h3>
+        <Button variant="ghost" size="sm" onclick={() => showComposeEditor = false}>Close</Button>
+      </div>
+      <ConfigTab {slug} />
+    </div>
+  {/if}
+
+  <!-- Section 3: Environment Variables (read-only view, edit on toggle) -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-    <h3 class="text-sm font-medium text-text-primary mb-4">Environment Variables</h3>
-    <EnvEditor {slug} />
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h3 class="text-sm font-medium text-text-primary">Environment Variables</h3>
+        <p class="text-xs text-text-muted mt-0.5">Stored in <code class="font-mono text-[11px]">.env</code> file</p>
+      </div>
+      <Button variant="ghost" size="sm" onclick={() => showEnvEditor = !showEnvEditor}>
+        {showEnvEditor ? 'Close Editor' : 'Edit'}
+      </Button>
+    </div>
+    {#if showEnvEditor}
+      <EnvEditor {slug} />
+    {:else if envLoading}
+      <p class="text-xs text-text-muted">Loading...</p>
+    {:else if envVars.length === 0}
+      <p class="text-xs text-text-muted">No environment variables.</p>
+    {:else}
+      <div class="flex flex-wrap gap-1.5">
+        {#each envVars as v}
+          <span class="inline-flex items-center gap-1 px-2 py-1 bg-surface-1 border border-border/30 rounded-md text-xs">
+            <span class="font-mono text-text-primary">{v.key}</span>
+            <span class="text-text-muted">=</span>
+            <span class="text-text-muted">****</span>
+          </span>
+        {/each}
+      </div>
+    {/if}
   </div>
 
-  <!-- Section 3: Backups -->
+  <!-- Section 4: Backups -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-medium text-text-primary">Backups</h3>
