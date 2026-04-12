@@ -386,19 +386,61 @@
     return found ? found.value : null
   }
 
-  function moveToEnvFile(svcName, envName, envValue) {
-    // Add to envFileVars if not already there
+  // Confirmation state for move-to-env
+  let envConfirm = $state(null) // { svcName, envName, envValue }
+
+  function requestMoveToEnvFile(svcName, envName, envValue) {
+    envConfirm = { svcName, envName, envValue }
+  }
+
+  function confirmMoveToEnvFile() {
+    if (!envConfirm) return
+    const { svcName, envName, envValue } = envConfirm
     const existing = envFileVars.find((v) => v.key === envName)
     if (!existing) {
       envFileVars = [...envFileVars, { key: envName, value: envValue }]
     }
-    // Update compose env value to ${KEY}
     updateServiceDirect(svcName, (s) => {
       if (!s.environment) s.environment = {}
       s.environment[envName] = `\${${envName}}`
     })
-    // Auto-save .env
     saveEnvFile()
+    envConfirm = null
+  }
+
+  function cancelMoveToEnvFile() {
+    envConfirm = null
+  }
+
+  // Autocomplete state for $ references
+  let envSuggestFor = $state(null) // { svcName, rowIdx }
+  let envSuggestFilter = $state('')
+
+  function getEnvSuggestions(filter) {
+    const q = filter.replace(/^\$\{?/, '').toLowerCase()
+    return envFileVars
+      .filter(v => v.key && v.key.toLowerCase().includes(q))
+      .slice(0, 6)
+  }
+
+  function applySuggestion(svcName, rowIdx, key, isPending) {
+    const ref = `\${${key}}`
+    if (isPending) {
+      const p = pendingEnvRows[svcName] || []
+      const pi = rowIdx - (parseEnv(compose.services?.[svcName]).length)
+      const newPending = p.map((r, idx) => idx === pi ? { ...r, value: ref } : r)
+      pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
+    } else {
+      const envRows = parseEnv(compose.services?.[svcName])
+      const newRows = envRows.map((r, idx) => idx === rowIdx ? { ...r, value: ref } : r)
+      updateServiceDirect(svcName, (s) => {
+        const serialized = serializeEnv(newRows)
+        if (serialized) s.environment = serialized
+        else delete s.environment
+      })
+    }
+    envSuggestFor = null
+    envSuggestFilter = ''
   }
 
   function moveFromEnvFile(svcName, envName) {
@@ -495,140 +537,7 @@
 
 <div class="space-y-3">
 
-  <!-- ======================== SECTION 1: Endpoints ======================== -->
-  <AccordionSection title="Endpoints" expanded={true}>
-    {#if serviceNames.length === 0}
-      <p class="text-xs text-text-muted">Add a service first to configure endpoints.</p>
-    {:else}
-      <p class="text-xs text-text-muted mb-3">Route traffic to your services. Each endpoint maps a domain to a service and port.</p>
-      <div class="space-y-3">
-        {#each endpoints as ep, i}
-          <div class="bg-surface-1 border border-border/50 rounded-lg p-3 space-y-2">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <!-- Domain -->
-              <div>
-                <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
-                <input
-                  type="text"
-                  value={ep.domain}
-                  placeholder="myapp.example.com"
-                  oninput={(e) => updateEndpoint(i, 'domain', e.currentTarget.value)}
-                  class={inputCls(`ep.${i}.domain`)}
-                />
-              </div>
-              <!-- Service -->
-              <div>
-                <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
-                <select
-                  value={ep.service}
-                  onchange={(e) => updateEndpoint(i, 'service', e.currentTarget.value)}
-                  class={inputCls(`ep.${i}.service`)}
-                >
-                  {#each serviceNames as svc}
-                    <option value={svc}>{svc}</option>
-                  {/each}
-                </select>
-              </div>
-              <!-- Port -->
-              <div>
-                <label class="block text-[11px] text-text-muted mb-0.5">Port</label>
-                <input
-                  type="number"
-                  value={ep.port}
-                  placeholder="3000"
-                  oninput={(e) => {
-                    if (validatePort(e.currentTarget.value, `ep.${i}.port`)) updateEndpoint(i, 'port', e.currentTarget.value)
-                  }}
-                  class={inputCls(`ep.${i}.port`)}
-                />
-                {#if errors[`ep.${i}.port`]}
-                  <p class="text-xs text-danger mt-0.5">{errors[`ep.${i}.port`]}</p>
-                {/if}
-              </div>
-              <!-- TLS -->
-              <div>
-                <label class="block text-[11px] text-text-muted mb-0.5">TLS</label>
-                <div class="flex items-center gap-2">
-                  <select
-                    value={ep.tls || 'letsencrypt'}
-                    onchange={(e) => updateEndpoint(i, 'tls', e.currentTarget.value)}
-                    class={inputCls(`ep.${i}.tls`)}
-                  >
-                    <option value="letsencrypt">Let's Encrypt (auto)</option>
-                    <option value="custom">Custom certificate</option>
-                    <option value="off">Off</option>
-                  </select>
-                  <button
-                    type="button"
-                    onclick={() => removeEndpoint(i)}
-                    class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
-                    aria-label="Remove endpoint"
-                  >
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-            {#if ep.tls === 'custom' && slug}
-              <div class="bg-surface-2/50 rounded-md p-2.5 space-y-2 border border-border/30">
-                <p class="text-[11px] text-text-muted">Upload certificate and key for <span class="font-mono text-text-primary">{ep.domain || '...'}</span></p>
-                <div class="grid grid-cols-1 gap-2">
-                  <div>
-                    <label class="block text-[11px] text-text-muted mb-0.5">Certificate (PEM)</label>
-                    <textarea
-                      placeholder="-----BEGIN CERTIFICATE-----"
-                      rows="3"
-                      class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"
-                      data-cert-idx={i}
-                    ></textarea>
-                  </div>
-                  <div>
-                    <label class="block text-[11px] text-text-muted mb-0.5">Private Key (PEM)</label>
-                    <textarea
-                      placeholder="-----BEGIN PRIVATE KEY-----"
-                      rows="3"
-                      class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"
-                      data-key-idx={i}
-                    ></textarea>
-                  </div>
-                  <div class="flex justify-end">
-                    <button
-                      type="button"
-                      onclick={async () => {
-                        const certEl = document.querySelector(`[data-cert-idx="${i}"]`)
-                        const keyEl = document.querySelector(`[data-key-idx="${i}"]`)
-                        if (!certEl?.value || !keyEl?.value || !ep.domain) return
-                        await api.uploadCert(slug, ep.domain, certEl.value, keyEl.value)
-                        certEl.value = ''
-                        keyEl.value = ''
-                      }}
-                      class="px-3 py-1.5 text-xs rounded-lg bg-btn-primary hover:bg-btn-primary-hover text-surface-0 transition-colors"
-                    >
-                      Upload Certificate
-                    </button>
-                  </div>
-                </div>
-              </div>
-            {/if}
-          </div>
-        {/each}
-        <button
-          type="button"
-          onclick={addEndpoint}
-          class="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-surface-3 px-3 py-2 rounded-md border border-dashed border-border transition-colors w-full justify-center"
-        >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          Add Endpoint
-        </button>
-      </div>
-    {/if}
-  </AccordionSection>
-
-  <!-- ======================== SECTION 2: Services ======================== -->
+  <!-- ======================== SECTION 1: Services ======================== -->
   <AccordionSection title="Services" expanded={true}>
     <div class="space-y-4">
       {#each serviceNames as svcName, svcIdx (svcName)}
@@ -696,6 +605,8 @@
               {@const isPending = i >= envRows.length}
               {@const isRef = isEnvRef(row.value)}
               {@const resolved = isRef ? resolveEnvRef(row.value) : null}
+              {@const showSuggestions = envSuggestFor?.svcName === svcName && envSuggestFor?.rowIdx === i}
+              {@const suggestions = showSuggestions ? getEnvSuggestions(envSuggestFilter) : []}
               <div class="flex items-center gap-2">
                 <input
                   type="text"
@@ -735,6 +646,12 @@
                     value={row.value}
                     oninput={(e) => {
                       const val = e.currentTarget.value
+                      if (val.includes('$') && envFileVars.length > 0) {
+                        envSuggestFor = { svcName, rowIdx: i }
+                        envSuggestFilter = val
+                      } else if (envSuggestFor?.svcName === svcName && envSuggestFor?.rowIdx === i) {
+                        envSuggestFor = null
+                      }
                       if (isPending) {
                         const pi = i - envRows.length
                         const newPending = pending.map((r, idx) => idx === pi ? { ...r, value: val } : r)
@@ -748,12 +665,27 @@
                         })
                       }
                     }}
+                    onblur={() => { setTimeout(() => { if (envSuggestFor?.rowIdx === i) envSuggestFor = null }, 150) }}
                     class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 {isRef ? 'pr-16' : ''}"
                   />
                   {#if isRef}
                     <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] bg-accent/15 text-accent px-1.5 py-0.5 rounded font-medium" title={resolved != null ? `Resolved: ${resolved}` : 'Not found in .env'}>
                       .env
                     </span>
+                  {/if}
+                  {#if showSuggestions && suggestions.length > 0}
+                    <div class="absolute left-0 top-full mt-1 w-full bg-surface-2 border border-border/50 rounded-lg shadow-xl z-20 py-1 max-h-40 overflow-y-auto">
+                      {#each suggestions as s}
+                        <button
+                          type="button"
+                          class="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover transition-colors flex items-center justify-between"
+                          onmousedown={() => applySuggestion(svcName, i, s.key, isPending)}
+                        >
+                          <span class="font-mono text-text-primary">${'{' + s.key + '}'}</span>
+                          <span class="text-text-muted truncate ml-2 max-w-32">{s.value}</span>
+                        </button>
+                      {/each}
+                    </div>
                   {/if}
                 </div>
                 {#if slug && row.name && !isPending}
@@ -771,7 +703,7 @@
                   {:else}
                     <button
                       type="button"
-                      onclick={() => moveToEnvFile(svcName, row.name, row.value)}
+                      onclick={() => requestMoveToEnvFile(svcName, row.name, row.value)}
                       class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
                       title="Move to .env file (shared across services)"
                     >
@@ -1349,3 +1281,21 @@
   </AccordionSection>
 
 </div>
+
+<!-- Confirmation dialog for moving env var to .env file -->
+{#if envConfirm}
+  <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={cancelMoveToEnvFile} aria-label="Close"></button>
+    <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md shadow-2xl animate-scale-in">
+      <h3 class="text-lg font-semibold text-text-primary tracking-tight mb-2">Move to .env file?</h3>
+      <p class="text-sm text-text-secondary mb-1">
+        This will store <span class="font-mono font-medium text-text-primary">{envConfirm.envName}</span> in the shared <code class="font-mono text-[11px]">.env</code> file and replace the value in compose with <span class="font-mono text-accent">${'{' + envConfirm.envName + '}'}</span>.
+      </p>
+      <p class="text-xs text-text-muted mb-5">The .env file is shared across all services and loaded automatically by Docker Compose.</p>
+      <div class="flex justify-end gap-2">
+        <button onclick={cancelMoveToEnvFile} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>
+        <button onclick={confirmMoveToEnvFile} class="px-4 py-2 text-sm bg-btn-primary text-surface-0 rounded-lg hover:bg-btn-primary-hover transition-colors shadow-sm">Move to .env</button>
+      </div>
+    </div>
+  </div>
+{/if}

@@ -283,23 +283,36 @@
   </div>
 
   <!-- Section 2: Compose Configuration -->
-  <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden">
-    <button
-      onclick={() => showComposeEditor = !showComposeEditor}
-      class="flex items-center justify-between w-full px-5 py-4 text-left hover:bg-surface-hover transition-colors"
-    >
+  <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
+    <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-medium text-text-primary">Compose Configuration</h3>
-      <svg
-        class="w-4 h-4 text-text-muted transition-transform {showComposeEditor ? 'rotate-180' : ''}"
-        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-      >
-        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-      </svg>
-    </button>
+      <Button variant="ghost" size="sm" onclick={() => showComposeEditor = !showComposeEditor}>
+        {showComposeEditor ? 'Close Editor' : 'Edit'}
+      </Button>
+    </div>
     {#if showComposeEditor}
-      <div class="px-5 pb-5 border-t border-border/30">
-        <ConfigTab {slug} />
-      </div>
+      <ConfigTab {slug} />
+    {:else}
+      <!-- Read-only summary -->
+      {#if Object.keys(app?.Services || compose?.services || {}).length === 0}
+        <p class="text-xs text-text-muted">No services configured.</p>
+      {:else}
+        {@const svcEntries = Object.entries(app?.compose?.services || {})}
+        <div class="space-y-2">
+          {#each services as svc}
+            <div class="flex items-center gap-3 bg-surface-1 rounded-lg px-3 py-2 border border-border/30">
+              <span class="text-sm font-mono text-text-primary">{svc.service}</span>
+              <Badge variant={svc.state === 'running' ? 'success' : svc.state === 'exited' ? 'danger' : 'warning'}>{svc.state || 'unknown'}</Badge>
+              {#if svc.health}
+                <Badge variant={svc.health === 'healthy' ? 'success' : 'danger'}>{svc.health}</Badge>
+              {/if}
+            </div>
+          {/each}
+          {#if services.length === 0}
+            <p class="text-xs text-text-muted">Service details unavailable. Click Edit to view compose file.</p>
+          {/if}
+        </div>
+      {/if}
     {/if}
   </div>
 
