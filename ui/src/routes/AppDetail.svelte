@@ -31,6 +31,9 @@
   let diskReadDatasets = $state([])
   let diskWriteDatasets = $state([])
   let requestStats = $state(null)
+  let requestsPerSecDatasets = $state([])
+  let errorRateDatasets = $state([])
+  let latencyDatasets = $state([])
   let loading = $state(true)
   let showDeleteModal = $state(false)
   let removing = $state(false)
@@ -194,6 +197,8 @@
     diskReadDatasets = buildContainerDatasets(c, p => p.dr ?? null, '#fb923c')
     diskWriteDatasets = buildContainerDatasets(c, p => p.dw ?? null, '#ef4444')
 
+    loadRequests()
+
     // mem summary: sum bytes across containers at latest timestamp
     const latestTs = Math.max(...ids.flatMap(id => (c[id]?.points || []).map(p => p.t)))
     let totalMem = 0, totalLimit = 0
@@ -226,6 +231,23 @@
     const res = await api.appRequests(slug, metricsRange)
     if (res.error) return
     requestStats = res.data
+    const points = res.data?.points || []
+    const interval = res.data?.interval || 10
+    requestsPerSecDatasets = [{
+      label: 'Requests/s',
+      color: '#3b82f6',
+      data: points.map(p => ({ x: new Date(p.t * 1000), y: p.n != null ? p.n / interval : null }))
+    }]
+    errorRateDatasets = [{
+      label: 'Error Rate',
+      color: '#ef4444',
+      data: points.map(p => ({ x: new Date(p.t * 1000), y: (p.n != null && p.n > 0) ? (p.e / p.n) * 100 : null }))
+    }]
+    latencyDatasets = [{
+      label: 'Avg Latency',
+      color: '#a78bfa',
+      data: points.map(p => ({ x: new Date(p.t * 1000), y: p.al ?? null }))
+    }]
   }
 
   async function loadBackups() {
@@ -542,6 +564,11 @@
         {/if}
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Request metrics -->
+        <MetricsChart datasets={requestsPerSecDatasets} label="Requests / sec" unit="" interval={metricsInterval} />
+        <MetricsChart datasets={errorRateDatasets} label="Error Rate" unit="%" interval={metricsInterval} />
+        <MetricsChart datasets={latencyDatasets} label="Avg Latency" unit="ms" interval={metricsInterval} />
+        <!-- Resource metrics -->
         <MetricsChart datasets={filterDatasets(cpuDatasets)} label="CPU Usage" unit="%" interval={metricsInterval} />
         <MetricsChart datasets={filterDatasets(memDatasets)} label="Memory Usage" unit="%" subtitle={memSummary} interval={metricsInterval} formatValue={formatBytes} />
         <MetricsChart datasets={filterDatasets(netRxDatasets)} label="Network RX" unit=" B/s" interval={metricsInterval}
