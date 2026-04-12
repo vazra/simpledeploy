@@ -26,13 +26,13 @@ type APIKeyRecord struct {
 }
 
 // CreateUser inserts a new user and returns it.
-func (s *Store) CreateUser(username, passwordHash, role string) (*User, error) {
+func (s *Store) CreateUser(username, passwordHash, role, displayName, email string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(`
-		INSERT INTO users (username, password_hash, role)
-		VALUES (?, ?, ?)
+		INSERT INTO users (username, password_hash, role, display_name, email)
+		VALUES (?, ?, ?, ?, ?)
 		RETURNING id, username, password_hash, role, display_name, email, created_at
-	`, username, passwordHash, role).Scan(
+	`, username, passwordHash, role, displayName, email).Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt,
 	)
 	if err != nil {

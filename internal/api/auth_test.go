@@ -26,7 +26,7 @@ func setupAuthTestServer(t *testing.T) (*Server, *store.Store) {
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	_, err = s.CreateUser("admin", hash, "super_admin")
+	_, err = s.CreateUser("admin", hash, "super_admin", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

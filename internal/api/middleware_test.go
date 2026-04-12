@@ -77,7 +77,7 @@ func TestAuthMiddlewareValidAPIKey(t *testing.T) {
 	srv, s := newMiddlewareTestServer(t)
 	srv.SetMasterSecret("test-master-secret")
 
-	user, err := s.CreateUser("bob", "hash", "admin")
+	user, err := s.CreateUser("bob", "hash", "admin", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestAppAccessSuperAdmin(t *testing.T) {
 func TestAppAccessAuthorizedUser(t *testing.T) {
 	srv, s := newMiddlewareTestServer(t)
 
-	user, err := s.CreateUser("carol", "hash", "admin")
+	user, err := s.CreateUser("carol", "hash", "admin", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestAppAccessAuthorizedUser(t *testing.T) {
 func TestAppAccessUnauthorizedUser(t *testing.T) {
 	srv, s := newMiddlewareTestServer(t)
 
-	user, err := s.CreateUser("dave", "hash", "admin")
+	user, err := s.CreateUser("dave", "hash", "admin", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

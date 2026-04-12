@@ -692,7 +692,7 @@ func runUsersCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	user, err := db.CreateUser(username, hash, role)
+	user, err := db.CreateUser(username, hash, role, "", "")
 	if err != nil {
 		return err
 	}

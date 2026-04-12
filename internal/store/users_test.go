@@ -7,7 +7,7 @@ import (
 func TestCreateAndGetUser(t *testing.T) {
 	s := newTestStore(t)
 
-	u, err := s.CreateUser("alice", "hash123", "admin")
+	u, err := s.CreateUser("alice", "hash123", "admin", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -42,10 +42,10 @@ func TestCreateAndGetUser(t *testing.T) {
 func TestCreateUserDuplicate(t *testing.T) {
 	s := newTestStore(t)
 
-	if _, err := s.CreateUser("bob", "h1", "viewer"); err != nil {
+	if _, err := s.CreateUser("bob", "h1", "viewer", "", ""); err != nil {
 		t.Fatalf("CreateUser first: %v", err)
 	}
-	if _, err := s.CreateUser("bob", "h2", "viewer"); err == nil {
+	if _, err := s.CreateUser("bob", "h2", "viewer", "", ""); err == nil {
 		t.Fatal("expected error for duplicate username, got nil")
 	}
 }
@@ -53,10 +53,10 @@ func TestCreateUserDuplicate(t *testing.T) {
 func TestListUsers(t *testing.T) {
 	s := newTestStore(t)
 
-	if _, err := s.CreateUser("zara", "h1", "viewer"); err != nil {
+	if _, err := s.CreateUser("zara", "h1", "viewer", "", ""); err != nil {
 		t.Fatalf("CreateUser zara: %v", err)
 	}
-	if _, err := s.CreateUser("adam", "h2", "admin"); err != nil {
+	if _, err := s.CreateUser("adam", "h2", "admin", "", ""); err != nil {
 		t.Fatalf("CreateUser adam: %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestListUsers(t *testing.T) {
 func TestDeleteUser(t *testing.T) {
 	s := newTestStore(t)
 
-	u, err := s.CreateUser("carol", "h1", "viewer")
+	u, err := s.CreateUser("carol", "h1", "viewer", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestUserCount(t *testing.T) {
 		t.Errorf("UserCount = %d, want 0", count)
 	}
 
-	if _, err := s.CreateUser("dave", "h1", "viewer"); err != nil {
+	if _, err := s.CreateUser("dave", "h1", "viewer", "", ""); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestUserCount(t *testing.T) {
 func TestCreateAndGetAPIKey(t *testing.T) {
 	s := newTestStore(t)
 
-	u, err := s.CreateUser("eve", "h1", "viewer")
+	u, err := s.CreateUser("eve", "h1", "viewer", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestCreateAndGetAPIKey(t *testing.T) {
 func TestListAPIKeysByUser(t *testing.T) {
 	s := newTestStore(t)
 
-	u, err := s.CreateUser("frank", "h1", "viewer")
+	u, err := s.CreateUser("frank", "h1", "viewer", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestListAPIKeysByUser(t *testing.T) {
 func TestDeleteAPIKey(t *testing.T) {
 	s := newTestStore(t)
 
-	u, err := s.CreateUser("grace", "h1", "viewer")
+	u, err := s.CreateUser("grace", "h1", "viewer", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestGrantAndCheckAppAccess(t *testing.T) {
 		t.Fatalf("UpsertApp: %v", err)
 	}
 
-	u, err := s.CreateUser("henry", "h1", "viewer")
+	u, err := s.CreateUser("henry", "h1", "viewer", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestSuperAdminBypassesAppAccess(t *testing.T) {
 		t.Fatalf("UpsertApp: %v", err)
 	}
 
-	u, err := s.CreateUser("superuser", "h1", "super_admin")
+	u, err := s.CreateUser("superuser", "h1", "super_admin", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

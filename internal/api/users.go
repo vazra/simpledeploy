@@ -142,9 +142,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Role     string `json:"role"`
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		Role        string `json:"role"`
+		DisplayName string `json:"display_name"`
+		Email       string `json:"email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -155,7 +157,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	u, err := s.store.CreateUser(body.Username, hash, body.Role)
+	u, err := s.store.CreateUser(body.Username, hash, body.Role, body.DisplayName, body.Email)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return

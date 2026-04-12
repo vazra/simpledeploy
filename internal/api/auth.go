@@ -149,7 +149,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := s.store.CreateUser(req.Username, hash, "super_admin")
+	user, err := s.store.CreateUser(req.Username, hash, "super_admin", "", "")
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

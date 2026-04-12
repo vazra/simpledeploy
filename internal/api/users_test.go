@@ -64,7 +64,7 @@ func loginAs(t *testing.T, srv *Server, st *store.Store, username, password, rol
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	if _, err := st.CreateUser(username, hash, role); err != nil {
+	if _, err := st.CreateUser(username, hash, role, "", ""); err != nil {
 		t.Fatalf("create user %q: %v", username, err)
 	}
 	w := postJSON(t, srv, "/api/auth/login", map[string]string{
@@ -136,7 +136,7 @@ func TestListUsers(t *testing.T) {
 
 	// create a second user
 	hash, _ := auth.HashPassword("p")
-	if _, err := st.CreateUser("bob", hash, "admin"); err != nil {
+	if _, err := st.CreateUser("bob", hash, "admin", "", ""); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestDeleteUser(t *testing.T) {
 	srv, st, cookie := setupUserTestServer(t)
 
 	hash, _ := auth.HashPassword("p")
-	created, err := st.CreateUser("todelete", hash, "admin")
+	created, err := st.CreateUser("todelete", hash, "admin", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestGrantAppAccess(t *testing.T) {
 
 	// create target user
 	hash, _ := auth.HashPassword("p")
-	target, err := st.CreateUser("targetuser", hash, "admin")
+	target, err := st.CreateUser("targetuser", hash, "admin", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
