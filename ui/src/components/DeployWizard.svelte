@@ -488,17 +488,18 @@
             {/if}
           </div>
 
-          <!-- Completion actions -->
-          {#if deployStatus === 'success'}
-            <div class="flex gap-2">
+          <!-- Actions -->
+          <div class="flex gap-2">
+            {#if deployStatus === 'success'}
               <Button size="sm" onclick={() => { onComplete(); window.location.hash = `#/apps/${appName.trim()}` }}>View App</Button>
               <Button size="sm" variant="secondary" onclick={resetWizard}>Deploy Another</Button>
-            </div>
-          {:else if deployStatus === 'failed'}
-            <div class="flex gap-2">
+            {:else if deployStatus === 'failed'}
               <Button size="sm" variant="secondary" onclick={() => { step = 1 }}>Back to Edit</Button>
-            </div>
-          {/if}
+              <Button size="sm" variant="secondary" onclick={resetWizard}>Start Over</Button>
+            {:else}
+              <Button size="sm" variant="secondary" onclick={() => { deployWs?.close(); step = 1 }}>Back to Edit</Button>
+            {/if}
+          </div>
         </div>
       {/if}
     </div>
