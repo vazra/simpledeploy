@@ -143,11 +143,14 @@ export const api = {
   // Webhooks
   listWebhooks: () => request('GET', '/webhooks'),
   createWebhook: (w) => requestWithToast('POST', '/webhooks', w, 'Webhook created'),
+  updateWebhook: (id, w) => requestWithToast('PUT', `/webhooks/${id}`, w, 'Webhook updated'),
   deleteWebhook: (id) => requestWithToast('DELETE', `/webhooks/${id}`, null, 'Webhook deleted'),
+  testWebhook: (data) => requestWithToast('POST', '/webhooks/test', data, 'Test sent successfully'),
 
   // Alerts
   listAlertRules: () => request('GET', '/alerts/rules'),
   createAlertRule: (r) => requestWithToast('POST', '/alerts/rules', r, 'Alert rule created'),
+  updateAlertRule: (id, r) => requestWithToast('PUT', `/alerts/rules/${id}`, r, 'Alert rule updated'),
   deleteAlertRule: (id) => requestWithToast('DELETE', `/alerts/rules/${id}`, null, 'Alert rule deleted'),
   alertHistory: () => request('GET', '/alerts/history'),
 
