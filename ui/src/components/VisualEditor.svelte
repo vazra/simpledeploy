@@ -62,8 +62,9 @@
   let serviceNames = $derived(Object.keys(compose.services || {}))
   let firstService = $derived(serviceNames[0] || '')
 
-  // ---- SECTION 1: SimpleDeploy labels ----
+  // ---- SECTION 1: Endpoints (multi-endpoint) ----
   const SD_PREFIX = 'simpledeploy.'
+  const EP_RE = /^simpledeploy\.endpoints\.(\d+)\.(domain|port|tls)$/
 
   function getLabel(svcName, key) {
     return compose.services?.[svcName]?.labels?.[SD_PREFIX + key] ?? ''
@@ -79,6 +80,74 @@
       delete updated.services[firstService].labels[SD_PREFIX + key]
     } else {
       updated.services[firstService].labels[SD_PREFIX + key] = String(value)
+    }
+    emitChange(updated)
+  }
+
+  function parseEndpoints() {
+    const eps = []
+    for (const svcName of serviceNames) {
+      const labels = compose.services?.[svcName]?.labels || {}
+      const byIdx = {}
+      for (const [k, v] of Object.entries(labels)) {
+        const m = EP_RE.exec(k)
+        if (!m) continue
+        const idx = parseInt(m[1])
+        const field = m[2]
+        if (!byIdx[idx]) byIdx[idx] = { domain: '', port: '', tls: 'letsencrypt', service: svcName }
+        byIdx[idx][field] = v
+        byIdx[idx].service = svcName
+      }
+      for (const idx of Object.keys(byIdx).sort((a, b) => a - b)) {
+        eps.push(byIdx[idx])
+      }
+    }
+    return eps
+  }
+
+  let endpoints = $derived(parseEndpoints())
+
+  function updateEndpoint(i, field, value) {
+    const eps = parseEndpoints()
+    if (i >= eps.length) return
+    eps[i] = { ...eps[i], [field]: value }
+    writeEndpointsToCompose(eps)
+  }
+
+  function addEndpoint() {
+    const eps = parseEndpoints()
+    eps.push({ domain: '', port: '', tls: 'letsencrypt', service: serviceNames[0] || '' })
+    writeEndpointsToCompose(eps)
+  }
+
+  function removeEndpoint(i) {
+    const eps = parseEndpoints()
+    eps.splice(i, 1)
+    writeEndpointsToCompose(eps)
+  }
+
+  function writeEndpointsToCompose(eps) {
+    const updated = deepClone(compose)
+    for (const svcName of Object.keys(updated.services || {})) {
+      const labels = updated.services[svcName].labels || {}
+      for (const k of Object.keys(labels)) {
+        if (EP_RE.test(k)) delete labels[k]
+      }
+    }
+    const bySvc = {}
+    for (const ep of eps) {
+      if (!bySvc[ep.service]) bySvc[ep.service] = []
+      bySvc[ep.service].push(ep)
+    }
+    for (const [svcName, svcEps] of Object.entries(bySvc)) {
+      if (!updated.services[svcName]) continue
+      if (!updated.services[svcName].labels) updated.services[svcName].labels = {}
+      svcEps.forEach((ep, idx) => {
+        const prefix = `simpledeploy.endpoints.${idx}`
+        if (ep.domain) updated.services[svcName].labels[prefix + '.domain'] = ep.domain
+        if (ep.port) updated.services[svcName].labels[prefix + '.port'] = ep.port
+        if (ep.tls) updated.services[svcName].labels[prefix + '.tls'] = ep.tls
+      })
     }
     emitChange(updated)
   }
@@ -426,60 +495,135 @@
 
 <div class="space-y-3">
 
-  <!-- ======================== SECTION 1: Endpoint ======================== -->
-  <AccordionSection title="Endpoint" expanded={true}>
-    {#if !firstService}
-      <p class="text-xs text-text-muted">Add a service to configure endpoint settings.</p>
+  <!-- ======================== SECTION 1: Endpoints ======================== -->
+  <AccordionSection title="Endpoints" expanded={true}>
+    {#if serviceNames.length === 0}
+      <p class="text-xs text-text-muted">Add a service first to configure endpoints.</p>
     {:else}
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-
-        <!-- Domain -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Domain</label>
-          <input
-            type="text"
-            value={getLabel(firstService, 'domain')}
-            placeholder="myapp.example.com"
-            oninput={(e) => setLabel('domain', e.currentTarget.value)}
-            class={inputCls('sd.domain')}
-          />
-          <p class="text-xs text-text-muted mt-0.5">Public domain for this app, e.g. myapp.example.com</p>
-        </div>
-
-        <!-- Port -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Port</label>
-          <input
-            type="number"
-            value={getLabel(firstService, 'port')}
-            placeholder="3000"
-            oninput={(e) => {
-              if (validatePort(e.currentTarget.value, 'sd.port')) setLabel('port', e.currentTarget.value)
-            }}
-            class={inputCls('sd.port')}
-          />
-          {#if errors['sd.port']}
-            <p class="text-xs text-danger mt-0.5">{errors['sd.port']}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-0.5">Container port to expose, e.g. 3000, 8080</p>
-          {/if}
-        </div>
-
-        <!-- TLS -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">TLS</label>
-          <select
-            value={getLabel(firstService, 'tls') || 'letsencrypt'}
-            onchange={(e) => setLabel('tls', e.currentTarget.value)}
-            class={inputCls('sd.tls')}
-          >
-            <option value="letsencrypt">letsencrypt</option>
-            <option value="custom">custom</option>
-            <option value="off">off</option>
-          </select>
-          <p class="text-xs text-text-muted mt-0.5">How to handle HTTPS</p>
-        </div>
-
+      <p class="text-xs text-text-muted mb-3">Route traffic to your services. Each endpoint maps a domain to a service and port.</p>
+      <div class="space-y-3">
+        {#each endpoints as ep, i}
+          <div class="bg-surface-1 border border-border/50 rounded-lg p-3 space-y-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <!-- Domain -->
+              <div>
+                <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
+                <input
+                  type="text"
+                  value={ep.domain}
+                  placeholder="myapp.example.com"
+                  oninput={(e) => updateEndpoint(i, 'domain', e.currentTarget.value)}
+                  class={inputCls(`ep.${i}.domain`)}
+                />
+              </div>
+              <!-- Service -->
+              <div>
+                <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
+                <select
+                  value={ep.service}
+                  onchange={(e) => updateEndpoint(i, 'service', e.currentTarget.value)}
+                  class={inputCls(`ep.${i}.service`)}
+                >
+                  {#each serviceNames as svc}
+                    <option value={svc}>{svc}</option>
+                  {/each}
+                </select>
+              </div>
+              <!-- Port -->
+              <div>
+                <label class="block text-[11px] text-text-muted mb-0.5">Port</label>
+                <input
+                  type="number"
+                  value={ep.port}
+                  placeholder="3000"
+                  oninput={(e) => {
+                    if (validatePort(e.currentTarget.value, `ep.${i}.port`)) updateEndpoint(i, 'port', e.currentTarget.value)
+                  }}
+                  class={inputCls(`ep.${i}.port`)}
+                />
+                {#if errors[`ep.${i}.port`]}
+                  <p class="text-xs text-danger mt-0.5">{errors[`ep.${i}.port`]}</p>
+                {/if}
+              </div>
+              <!-- TLS -->
+              <div>
+                <label class="block text-[11px] text-text-muted mb-0.5">TLS</label>
+                <div class="flex items-center gap-2">
+                  <select
+                    value={ep.tls || 'letsencrypt'}
+                    onchange={(e) => updateEndpoint(i, 'tls', e.currentTarget.value)}
+                    class={inputCls(`ep.${i}.tls`)}
+                  >
+                    <option value="letsencrypt">Let's Encrypt (auto)</option>
+                    <option value="custom">Custom certificate</option>
+                    <option value="off">Off</option>
+                  </select>
+                  <button
+                    type="button"
+                    onclick={() => removeEndpoint(i)}
+                    class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
+                    aria-label="Remove endpoint"
+                  >
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            {#if ep.tls === 'custom' && slug}
+              <div class="bg-surface-2/50 rounded-md p-2.5 space-y-2 border border-border/30">
+                <p class="text-[11px] text-text-muted">Upload certificate and key for <span class="font-mono text-text-primary">{ep.domain || '...'}</span></p>
+                <div class="grid grid-cols-1 gap-2">
+                  <div>
+                    <label class="block text-[11px] text-text-muted mb-0.5">Certificate (PEM)</label>
+                    <textarea
+                      placeholder="-----BEGIN CERTIFICATE-----"
+                      rows="3"
+                      class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"
+                      data-cert-idx={i}
+                    ></textarea>
+                  </div>
+                  <div>
+                    <label class="block text-[11px] text-text-muted mb-0.5">Private Key (PEM)</label>
+                    <textarea
+                      placeholder="-----BEGIN PRIVATE KEY-----"
+                      rows="3"
+                      class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"
+                      data-key-idx={i}
+                    ></textarea>
+                  </div>
+                  <div class="flex justify-end">
+                    <button
+                      type="button"
+                      onclick={async () => {
+                        const certEl = document.querySelector(`[data-cert-idx="${i}"]`)
+                        const keyEl = document.querySelector(`[data-key-idx="${i}"]`)
+                        if (!certEl?.value || !keyEl?.value || !ep.domain) return
+                        await api.uploadCert(slug, ep.domain, certEl.value, keyEl.value)
+                        certEl.value = ''
+                        keyEl.value = ''
+                      }}
+                      class="px-3 py-1.5 text-xs rounded-lg bg-btn-primary hover:bg-btn-primary-hover text-surface-0 transition-colors"
+                    >
+                      Upload Certificate
+                    </button>
+                  </div>
+                </div>
+              </div>
+            {/if}
+          </div>
+        {/each}
+        <button
+          type="button"
+          onclick={addEndpoint}
+          class="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-surface-3 px-3 py-2 rounded-md border border-dashed border-border transition-colors w-full justify-center"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          Add Endpoint
+        </button>
       </div>
     {/if}
   </AccordionSection>

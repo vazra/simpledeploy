@@ -125,6 +125,9 @@ export const api = {
   rollbackApp: (slug, versionId) => requestWithToast('POST', `/apps/${slug}/rollback`, { version_id: versionId }, 'Rolled back'),
   getDeployEvents: (slug) => request('GET', `/apps/${slug}/events`),
   updateDomain: (slug, domain) => requestWithToast('PUT', `/apps/${slug}/domain`, { domain }, 'Domain updated'),
+  updateEndpoints: (slug, endpoints) => requestWithToast('PUT', `/apps/${slug}/endpoints`, endpoints, 'Endpoints updated'),
+  uploadCert: (slug, domain, cert, key) => requestWithToast('PUT', `/apps/${slug}/certs/${encodeURIComponent(domain)}`, { cert, key }, 'Certificate uploaded'),
+  deleteCert: (slug, domain) => requestWithToast('DELETE', `/apps/${slug}/certs/${encodeURIComponent(domain)}`, null, 'Certificate removed'),
   updateAccess: (slug, allow) => requestWithToast('PUT', `/apps/${slug}/access`, { allow }, 'IP allowlist updated'),
 
   // Metrics
