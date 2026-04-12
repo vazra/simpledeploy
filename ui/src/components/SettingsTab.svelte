@@ -14,8 +14,7 @@
 
   const initAllowlist = app?.Labels?.['simpledeploy.access.allow'] || ''
 
-  // Section expand states
-  let showComposeEditor = $state(false)
+  // Endpoint editing
   let editingEndpointIdx = $state(-1) // -1 = none, >=0 = editing that index, -2 = adding new
 
   // Advanced
@@ -69,11 +68,12 @@
 
   async function saveEndpoint() {
     savingEndpoints = true
-    let updated = [...endpoints]
+    const ep = { ...editEndpoint, port: String(editEndpoint.port || '') }
+    let updated = [...endpoints.map(e => ({ ...e, port: String(e.port || '') }))]
     if (editingEndpointIdx === -2) {
-      updated.push(editEndpoint)
+      updated.push(ep)
     } else {
-      updated[editingEndpointIdx] = editEndpoint
+      updated[editingEndpointIdx] = ep
     }
     await api.updateEndpoints(slug, updated)
     editingEndpointIdx = -1
@@ -83,7 +83,7 @@
 
   async function deleteEndpoint(i) {
     savingEndpoints = true
-    const updated = endpoints.filter((_, idx) => idx !== i)
+    const updated = endpoints.filter((_, idx) => idx !== i).map(e => ({ ...e, port: String(e.port || '') }))
     await api.updateEndpoints(slug, updated)
     savingEndpoints = false
     onAppUpdated()
@@ -284,32 +284,8 @@
 
   <!-- Section 2: Compose Configuration -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-medium text-text-primary">Compose Configuration</h3>
-      <Button variant="ghost" size="sm" onclick={() => showComposeEditor = !showComposeEditor}>
-        {showComposeEditor ? 'Close Editor' : 'Edit'}
-      </Button>
-    </div>
-    {#if showComposeEditor}
-      <ConfigTab {slug} />
-    {:else}
-      <!-- Read-only summary -->
-      {#if services.length === 0}
-        <p class="text-xs text-text-muted">No services found. Click Edit to view compose file.</p>
-      {:else}
-        <div class="space-y-2">
-          {#each services as svc}
-            <div class="flex items-center gap-3 bg-surface-1 rounded-lg px-3 py-2 border border-border/30">
-              <span class="text-sm font-mono text-text-primary">{svc.service}</span>
-              <Badge variant={svc.state === 'running' ? 'success' : svc.state === 'exited' ? 'danger' : 'warning'}>{svc.state || 'unknown'}</Badge>
-              {#if svc.health}
-                <Badge variant={svc.health === 'healthy' ? 'success' : 'danger'}>{svc.health}</Badge>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {/if}
-    {/if}
+    <h3 class="text-sm font-medium text-text-primary mb-4">Compose Configuration</h3>
+    <ConfigTab {slug} />
   </div>
 
   <!-- Section 3: Environment Variables -->

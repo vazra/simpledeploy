@@ -533,12 +533,70 @@
     const base = 'w-full bg-input-bg border rounded px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50'
     return errors[errKey] ? `${base} border-danger` : `${base} border-border`
   }
+
+  // ---- Read-only vs Edit mode per section ----
+  let editingSections = $state(new Set())
+
+  function isEditing(section) {
+    return editingSections.has(section)
+  }
+
+  function toggleEdit(section) {
+    const next = new Set(editingSections)
+    if (next.has(section)) next.delete(section)
+    else next.add(section)
+    editingSections = next
+  }
 </script>
 
 <div class="space-y-3">
 
   <!-- ======================== SECTION 1: Services ======================== -->
   <AccordionSection title="Services" expanded={true}>
+    {#if !isEditing('services')}
+      <!-- Read-only view -->
+      <div class="space-y-2">
+        {#each serviceNames as svcName}
+          {@const svc = compose.services[svcName]}
+          {@const envRows = parseEnv(svc)}
+          {@const vols = parseVolumes(svc)}
+          <div class="bg-surface-1 border border-border/30 rounded-lg px-4 py-3 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-semibold text-text-primary font-mono">{svcName}</span>
+              <span class="text-xs text-text-muted font-mono">{svc.image || 'no image'}</span>
+            </div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted">
+              {#if envRows.length > 0}
+                <span>{envRows.length} env var{envRows.length > 1 ? 's' : ''}</span>
+              {/if}
+              {#if vols.length > 0}
+                <span>{vols.length} volume{vols.length > 1 ? 's' : ''}</span>
+              {/if}
+              {#if svc.ports?.length > 0}
+                <span>{svc.ports.length} port{svc.ports.length > 1 ? 's' : ''}</span>
+              {/if}
+              {#if svc.restart && svc.restart !== 'no'}
+                <span>restart: {svc.restart}</span>
+              {/if}
+              {#if svc.command}
+                <span class="truncate max-w-48">cmd: {Array.isArray(svc.command) ? svc.command.join(' ') : svc.command}</span>
+              {/if}
+              {#if svc.deploy?.resources?.limits?.memory}
+                <span>mem: {svc.deploy.resources.limits.memory}</span>
+              {/if}
+              {#if svc.deploy?.resources?.limits?.cpus}
+                <span>cpu: {svc.deploy.resources.limits.cpus}</span>
+              {/if}
+            </div>
+          </div>
+        {/each}
+        {#if serviceNames.length === 0}
+          <p class="text-xs text-text-muted">No services defined.</p>
+        {/if}
+      </div>
+      <button type="button" onclick={() => toggleEdit('services')} class="mt-3 text-xs text-accent hover:text-accent/80 transition-colors">Edit services</button>
+    {:else}
+    <!-- Edit view -->
     <div class="space-y-4">
       {#each serviceNames as svcName, svcIdx (svcName)}
         {@const svc = compose.services[svcName]}
@@ -1119,7 +1177,9 @@
         </svg>
         Add Service
       </button>
+      <button type="button" onclick={() => toggleEdit('services')} class="mt-2 text-xs text-text-muted hover:text-text-primary transition-colors">Done editing</button>
     </div>
+    {/if}
   </AccordionSection>
 
   <!-- ======================== SECTION 3: Rate Limiting ======================== -->
@@ -1127,74 +1187,56 @@
     {#if !firstService}
       <p class="text-xs text-text-muted">Add a service to configure rate limiting.</p>
     {:else}
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-
-        <!-- Requests per window -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Requests per window</label>
-          <input
-            type="number"
-            value={getLabel(firstService, 'ratelimit.requests')}
-            placeholder="100"
-            oninput={(e) => {
-              if (validateNonNeg(e.currentTarget.value, 'sd.rl.requests')) setLabel('ratelimit.requests', e.currentTarget.value)
-            }}
-            class={inputCls('sd.rl.requests')}
-          />
-          {#if errors['sd.rl.requests']}
-            <p class="text-xs text-danger mt-0.5">{errors['sd.rl.requests']}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-0.5">Max requests per window</p>
-          {/if}
+      {@const rlRequests = getLabel(firstService, 'ratelimit.requests')}
+      {@const rlWindow = getLabel(firstService, 'ratelimit.window')}
+      {@const rlBurst = getLabel(firstService, 'ratelimit.burst')}
+      {@const rlBy = getLabel(firstService, 'ratelimit.by')}
+      {@const hasRateLimit = rlRequests || rlWindow}
+      {#if !isEditing('ratelimit')}
+        <!-- Read-only -->
+        {#if hasRateLimit}
+          <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
+            {#if rlRequests}<span><span class="text-text-muted">Requests:</span> {rlRequests}/{rlWindow || '?'}</span>{/if}
+            {#if rlBurst}<span><span class="text-text-muted">Burst:</span> {rlBurst}</span>{/if}
+            {#if rlBy}<span><span class="text-text-muted">By:</span> {rlBy}</span>{/if}
+          </div>
+        {:else}
+          <p class="text-xs text-text-muted">No rate limiting configured.</p>
+        {/if}
+        <button type="button" onclick={() => toggleEdit('ratelimit')} class="mt-2 text-xs text-accent hover:text-accent/80 transition-colors">Edit</button>
+      {:else}
+        <!-- Edit view -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">Requests per window</label>
+            <input type="number" value={rlRequests} placeholder="100"
+              oninput={(e) => { if (validateNonNeg(e.currentTarget.value, 'sd.rl.requests')) setLabel('ratelimit.requests', e.currentTarget.value) }}
+              class={inputCls('sd.rl.requests')} />
+            {#if errors['sd.rl.requests']}<p class="text-xs text-danger mt-0.5">{errors['sd.rl.requests']}</p>{/if}
+          </div>
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">Window</label>
+            <input type="text" value={rlWindow} placeholder="1m"
+              oninput={(e) => setLabel('ratelimit.window', e.currentTarget.value)}
+              class={inputCls('sd.rl.window')} />
+          </div>
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">Burst</label>
+            <input type="number" value={rlBurst} placeholder="20"
+              oninput={(e) => { if (validateNonNeg(e.currentTarget.value, 'sd.rl.burst')) setLabel('ratelimit.burst', e.currentTarget.value) }}
+              class={inputCls('sd.rl.burst')} />
+            {#if errors['sd.rl.burst']}<p class="text-xs text-danger mt-0.5">{errors['sd.rl.burst']}</p>{/if}
+          </div>
+          <div>
+            <label class="block text-xs text-text-secondary mb-1">Limit by</label>
+            <select value={rlBy || 'ip'} onchange={(e) => setLabel('ratelimit.by', e.currentTarget.value)} class={inputCls('sd.rl.by')}>
+              <option value="ip">ip</option>
+              <option value="header">header</option>
+            </select>
+          </div>
         </div>
-
-        <!-- Window -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Window</label>
-          <input
-            type="text"
-            value={getLabel(firstService, 'ratelimit.window')}
-            placeholder="1m"
-            oninput={(e) => setLabel('ratelimit.window', e.currentTarget.value)}
-            class={inputCls('sd.rl.window')}
-          />
-          <p class="text-xs text-text-muted mt-0.5">Time window, e.g. 1m, 5m, 1h</p>
-        </div>
-
-        <!-- Burst -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Burst</label>
-          <input
-            type="number"
-            value={getLabel(firstService, 'ratelimit.burst')}
-            placeholder="20"
-            oninput={(e) => {
-              if (validateNonNeg(e.currentTarget.value, 'sd.rl.burst')) setLabel('ratelimit.burst', e.currentTarget.value)
-            }}
-            class={inputCls('sd.rl.burst')}
-          />
-          {#if errors['sd.rl.burst']}
-            <p class="text-xs text-danger mt-0.5">{errors['sd.rl.burst']}</p>
-          {:else}
-            <p class="text-xs text-text-muted mt-0.5">Extra burst allowance above limit</p>
-          {/if}
-        </div>
-
-        <!-- Limit by -->
-        <div>
-          <label class="block text-xs text-text-secondary mb-1">Limit by</label>
-          <select
-            value={getLabel(firstService, 'ratelimit.by') || 'ip'}
-            onchange={(e) => setLabel('ratelimit.by', e.currentTarget.value)}
-            class={inputCls('sd.rl.by')}
-          >
-            <option value="ip">ip</option>
-            <option value="header">header</option>
-          </select>
-          <p class="text-xs text-text-muted mt-0.5">What to rate limit by</p>
-        </div>
-
-      </div>
+        <button type="button" onclick={() => toggleEdit('ratelimit')} class="mt-3 text-xs text-text-muted hover:text-text-primary transition-colors">Done</button>
+      {/if}
     {/if}
   </AccordionSection>
 
