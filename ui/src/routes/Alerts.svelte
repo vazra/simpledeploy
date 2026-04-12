@@ -106,6 +106,23 @@
     return w ? w.name : `#${id}`
   }
 
+  function formatMetricValue(metric, value) {
+    if (value == null) return '-'
+    if (metric === 'mem_bytes') {
+      if (value >= 1 << 30) return `${(value / (1 << 30)).toFixed(1)} GB`
+      if (value >= 1 << 20) return `${(value / (1 << 20)).toFixed(1)} MB`
+      if (value >= 1 << 10) return `${(value / (1 << 10)).toFixed(1)} KB`
+      return `${value.toFixed(0)} B`
+    }
+    if (metric === 'cpu_pct' || metric === 'mem_pct') return `${value.toFixed(1)}%`
+    return value.toFixed(1)
+  }
+
+  function ruleMetric(ruleId) {
+    const r = rules.find(r => r.id === ruleId)
+    return r ? r.metric : null
+  }
+
   function ruleInfo(ruleId) {
     const r = rules.find(r => r.id === ruleId)
     if (!r) return `Rule #${ruleId}`
@@ -368,7 +385,7 @@
               {#each history as h}
                 <tr class="hover:bg-surface-hover">
                   <td class="py-3 px-4 text-text-primary text-xs">{ruleInfo(h.rule_id)}</td>
-                  <td class="py-3 px-4 font-mono text-xs">{h.value != null ? h.value.toFixed(1) : '-'}</td>
+                  <td class="py-3 px-4 font-mono text-xs">{formatMetricValue(ruleMetric(h.rule_id), h.value)}</td>
                   <td class="py-3 px-4" title={h.fired_at ? new Date(h.fired_at).toLocaleString() : ''}>{timeAgo(h.fired_at)}</td>
                   <td class="py-3 px-4" title={h.resolved_at ? new Date(h.resolved_at).toLocaleString() : ''}>{h.resolved_at ? timeAgo(h.resolved_at) : '-'}</td>
                   <td class="py-3 px-4">

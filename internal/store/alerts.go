@@ -227,6 +227,9 @@ func (s *Store) ListActiveAlertRules() ([]AlertRule, error) {
 }
 
 func (s *Store) UpdateAlertRule(r *AlertRule) error {
+	if !r.Enabled {
+		_ = s.ResolveAlertsByRule(r.ID)
+	}
 	var appID interface{}
 	if r.AppID != nil {
 		appID = *r.AppID
@@ -254,6 +257,7 @@ func (s *Store) UpdateAlertRule(r *AlertRule) error {
 }
 
 func (s *Store) DeleteAlertRule(id int64) error {
+	_ = s.ResolveAlertsByRule(id)
 	res, err := s.db.Exec(`DELETE FROM alert_rules WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete alert rule: %w", err)
@@ -281,6 +285,17 @@ func (s *Store) CreateAlertHistory(ruleID int64, value float64) (*AlertHistory, 
 		return nil, fmt.Errorf("create alert history: %w", err)
 	}
 	return &h, nil
+}
+
+func (s *Store) ResolveAlertsByRule(ruleID int64) error {
+	_, err := s.db.Exec(`
+		UPDATE alert_history SET resolved_at = datetime('now')
+		WHERE rule_id = ? AND resolved_at IS NULL
+	`, ruleID)
+	if err != nil {
+		return fmt.Errorf("resolve alerts for rule %d: %w", ruleID, err)
+	}
+	return nil
 }
 
 func (s *Store) ResolveAlert(historyID int64) error {
