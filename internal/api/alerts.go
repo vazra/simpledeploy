@@ -187,6 +187,13 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 	if rules == nil {
 		rules = []store.AlertRule{}
 	}
+	for i, r := range rules {
+		if r.AppID != nil {
+			if app, err := s.store.GetAppByID(*r.AppID); err == nil {
+				rules[i].AppSlug = app.Slug
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rules)
 }

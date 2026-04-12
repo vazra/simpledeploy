@@ -199,7 +199,7 @@
   function openRuleEdit(r) {
     editingRule = r
     rApp = r.app_slug || ''; rMetric = r.metric; rOp = r.operator
-    rThreshold = r.threshold; rDuration = r.duration_secs; rWebhook = String(r.webhook_id || ''); rEnabled = r.enabled !== false
+    rThreshold = r.threshold; rDuration = r.duration_sec; rWebhook = String(r.webhook_id || ''); rEnabled = r.enabled !== false
     showRuleModal = true
   }
 
@@ -207,7 +207,7 @@
     rSaving = true
     const payload = {
       app_slug: rApp, metric: rMetric, operator: rOp,
-      threshold: +rThreshold, duration_secs: +rDuration, webhook_id: +rWebhook, enabled: rEnabled,
+      threshold: +rThreshold, duration_sec: +rDuration, webhook_id: +rWebhook, enabled: rEnabled,
     }
     const res = editingRule
       ? await api.updateAlertRule(editingRule.id, payload)
@@ -299,7 +299,7 @@
                   <td class="py-3 px-4 text-text-primary">{r.app_slug || 'All Apps'}</td>
                   <td class="py-3 px-4"><Badge variant="info">{metricLabels[r.metric] || r.metric}</Badge></td>
                   <td class="py-3 px-4 font-mono text-xs">{r.operator} {r.threshold}</td>
-                  <td class="py-3 px-4">{formatDuration(r.duration_secs)}</td>
+                  <td class="py-3 px-4">{formatDuration(r.duration_sec)}</td>
                   <td class="py-3 px-4 text-text-secondary">{webhookName(r.webhook_id)}</td>
                   <td class="py-3 px-4">
                     <Badge variant={r.enabled !== false ? 'success' : 'default'}>{r.enabled !== false ? 'Enabled' : 'Disabled'}</Badge>
@@ -334,7 +334,7 @@
               {#each history as h}
                 <tr class="hover:bg-surface-hover">
                   <td class="py-3 px-4 text-text-primary text-xs">{ruleInfo(h.rule_id)}</td>
-                  <td class="py-3 px-4 font-mono text-xs">{h.trigger_value != null ? h.trigger_value : '-'}</td>
+                  <td class="py-3 px-4 font-mono text-xs">{h.value != null ? h.value.toFixed(1) : '-'}</td>
                   <td class="py-3 px-4" title={h.fired_at ? new Date(h.fired_at).toLocaleString() : ''}>{timeAgo(h.fired_at)}</td>
                   <td class="py-3 px-4" title={h.resolved_at ? new Date(h.resolved_at).toLocaleString() : ''}>{h.resolved_at ? timeAgo(h.resolved_at) : '-'}</td>
                   <td class="py-3 px-4">

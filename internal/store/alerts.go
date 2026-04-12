@@ -7,31 +7,34 @@ import (
 )
 
 type Webhook struct {
-	ID               int64
-	Name, Type, URL  string
-	TemplateOverride string
-	HeadersJSON      string
-	CreatedAt        time.Time
+	ID               int64     `json:"id"`
+	Name             string    `json:"name"`
+	Type             string    `json:"type"`
+	URL              string    `json:"url"`
+	TemplateOverride string    `json:"template_override"`
+	HeadersJSON      string    `json:"headers_json"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type AlertRule struct {
-	ID          int64
-	AppID       *int64
-	Metric      string
-	Operator    string
-	Threshold   float64
-	DurationSec int
-	WebhookID   int64
-	Enabled     bool
-	CreatedAt   time.Time
+	ID          int64    `json:"id"`
+	AppID       *int64   `json:"app_id"`
+	AppSlug     string   `json:"app_slug,omitempty"`
+	Metric      string   `json:"metric"`
+	Operator    string   `json:"operator"`
+	Threshold   float64  `json:"threshold"`
+	DurationSec int      `json:"duration_sec"`
+	WebhookID   int64    `json:"webhook_id"`
+	Enabled     bool     `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type AlertHistory struct {
-	ID         int64
-	RuleID     int64
-	FiredAt    time.Time
-	ResolvedAt *time.Time
-	Value      float64
+	ID         int64      `json:"id"`
+	RuleID     int64      `json:"rule_id"`
+	FiredAt    time.Time  `json:"fired_at"`
+	ResolvedAt *time.Time `json:"resolved_at"`
+	Value      float64    `json:"value"`
 }
 
 func (s *Store) CreateWebhook(w *Webhook) error {
