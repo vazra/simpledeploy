@@ -10,7 +10,7 @@ function readFixture(name) {
 }
 
 async function deployApp(page, appName, composeContent) {
-  await page.getByRole('button', { name: 'Deploy App' }).click();
+  await page.getByRole('button', { name: 'Deploy App' }).first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByPlaceholder('my-app').fill(appName);
   await page.getByRole('button', { name: 'YAML' }).click();
@@ -53,7 +53,7 @@ test.describe('Deploy Apps', () => {
   test('reject invalid YAML', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/`);
-    await page.getByRole('button', { name: 'Deploy App' }).click();
+    await page.getByRole('button', { name: 'Deploy App' }).first().click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByPlaceholder('my-app').fill('bad-app');
     await page.getByRole('button', { name: 'YAML' }).click();
@@ -66,7 +66,7 @@ test.describe('Deploy Apps', () => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/`);
     const compose = readFixture('compose-nginx.yml');
-    await page.getByRole('button', { name: 'Deploy App' }).click();
+    await page.getByRole('button', { name: 'Deploy App' }).first().click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByPlaceholder('my-app').fill('e2e-nginx');
     await page.getByRole('button', { name: 'YAML' }).click();

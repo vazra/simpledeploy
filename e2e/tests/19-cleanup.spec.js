@@ -27,7 +27,7 @@ test.describe('Cleanup', () => {
     }
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
 
-    await page.waitForURL(url => url.hash === '#/' || url.hash === '', { timeout: 15_000 });
+    await page.waitForSelector('text=Applications', { timeout: 15_000 });
   });
 
   test('remove multi app', async ({ page }) => {
@@ -50,7 +50,7 @@ test.describe('Cleanup', () => {
       await confirmInput.fill('e2e-multi');
     }
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
-    await page.waitForURL(url => url.hash === '#/' || url.hash === '', { timeout: 15_000 });
+    await page.waitForSelector('text=Applications', { timeout: 15_000 });
   });
 
   test('remove nginx app', async ({ page }) => {
@@ -73,7 +73,7 @@ test.describe('Cleanup', () => {
       await confirmInput.fill('e2e-nginx');
     }
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
-    await page.waitForURL(url => url.hash === '#/' || url.hash === '', { timeout: 15_000 });
+    await page.waitForSelector('text=Applications', { timeout: 15_000 });
   });
 
   test('dashboard shows no apps', async ({ page }) => {

@@ -4,7 +4,7 @@ import { getState, TEST_ADMIN, login, loginAsAdmin, logout } from '../helpers/au
 test.describe('Authentication', () => {
   test('login with correct credentials', async ({ page }) => {
     await loginAsAdmin(page);
-    await expect(page.getByText('Deploy App')).toBeVisible();
+    await expect(page.getByText('Deploy App').first()).toBeVisible();
   });
 
   test('login with wrong password shows error', async ({ page }) => {
@@ -42,6 +42,6 @@ test.describe('Authentication', () => {
     await loginAsAdmin(page);
     await logout(page);
     await loginAsAdmin(page);
-    await expect(page.getByText('Deploy App')).toBeVisible();
+    await expect(page.getByText('Deploy App').first()).toBeVisible();
   });
 });

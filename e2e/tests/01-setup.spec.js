@@ -52,6 +52,7 @@ test.describe('Initial Setup', () => {
     await page.locator('#password').fill(TEST_ADMIN.password);
     await page.locator('#confirmPassword').fill(TEST_ADMIN.password);
     await page.getByRole('button', { name: 'Create Account' }).click();
-    await page.waitForURL(url => url.hash === '#/' || url.hash === '' || !url.hash.includes('login'), { timeout: 10_000 });
+    // SPA uses hash routing; wait for sidebar/nav to confirm dashboard loaded
+    await page.waitForSelector('aside nav, nav', { timeout: 10_000 });
   });
 });

@@ -32,11 +32,11 @@ test.describe('Profile', () => {
 
     const state = getState();
     await page.goto(`${state.baseURL}/#/profile`);
-    await page.getByText(/sign out/i).click();
-    await page.waitForURL(url => url.hash.includes('login'), { timeout: 5_000 });
+    await page.getByText(/log out/i).click();
+    await page.waitForSelector('#username', { timeout: 5_000 });
 
     await login(page, TEST_ADMIN.username, newPassword);
-    await expect(page.getByText('Deploy App')).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('Deploy App').first()).toBeVisible({ timeout: 5_000 });
 
     await page.goto(`${state.baseURL}/#/profile`);
     await page.locator('#currentPw').fill(newPassword);

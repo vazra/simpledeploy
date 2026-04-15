@@ -20,7 +20,8 @@ export async function login(page, username, password) {
   await page.locator('#username').fill(username || TEST_ADMIN.username);
   await page.locator('#password').fill(password || TEST_ADMIN.password);
   await page.getByRole('button', { name: 'Sign In' }).click();
-  await page.waitForURL(url => url.hash === '#/' || url.hash === '', { timeout: 10_000 });
+  // SPA uses hash routing; wait for sidebar/nav to confirm dashboard loaded
+  await page.waitForSelector('aside nav, nav', { timeout: 10_000 });
 }
 
 export async function loginAsAdmin(page) {
@@ -29,6 +30,7 @@ export async function loginAsAdmin(page) {
 
 export async function logout(page) {
   await page.goto(`${getState().baseURL}/#/profile`);
-  await page.getByText('Sign out').click();
-  await page.waitForURL(url => url.hash.includes('login'), { timeout: 5_000 });
+  await page.getByText('Log out').click();
+  // Wait for login page to appear
+  await page.waitForSelector('#username', { timeout: 5_000 });
 }
