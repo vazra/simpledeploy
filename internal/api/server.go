@@ -114,6 +114,10 @@ func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
 // SetUIFS serves the embedded SPA with fallback to index.html.
 func (s *Server) SetUIFS(fsys fs.FS) {
 	fileServer := http.FileServer(http.FS(fsys))
+	// Pre-read index.html to serve directly for SPA fallback.
+	// Using fileServer for index.html causes a redirect loop because
+	// http.FileServer redirects /index.html to ./ which resolves to /.
+	indexHTML, _ := fs.ReadFile(fsys, "index.html")
 	s.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path != "/" {
@@ -124,9 +128,9 @@ func (s *Server) SetUIFS(fsys fs.FS) {
 				return
 			}
 		}
-		// SPA fallback
-		r.URL.Path = "/index.html"
-		fileServer.ServeHTTP(w, r)
+		// SPA fallback: serve index.html directly
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(indexHTML)
 	}))
 }
 
