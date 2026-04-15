@@ -22,6 +22,40 @@
   let showDiff = $state(false)
   let hasValidationErrors = $state(false)
 
+  // .env plain text (shown in YAML mode)
+  let envText = $state('')
+  let envOriginal = $state('')
+  let savingEnv = $state(false)
+
+  function envToText(vars) {
+    return vars.map(v => `${v.key}=${v.value}`).join('\n')
+  }
+
+  function textToEnv(text) {
+    return text.split('\n').filter(l => l.trim() && !l.startsWith('#')).map(l => {
+      const idx = l.indexOf('=')
+      if (idx === -1) return { key: l.trim(), value: '' }
+      return { key: l.slice(0, idx).trim(), value: l.slice(idx + 1) }
+    })
+  }
+
+  async function loadEnv() {
+    if (!slug) return
+    try {
+      const res = await api.getEnv(slug)
+      const t = envToText(res.data || [])
+      envText = t
+      envOriginal = t
+    } catch { /* no env file */ }
+  }
+
+  async function saveEnv() {
+    savingEnv = true
+    await api.putEnv(slug, textToEnv(envText))
+    envOriginal = envText
+    savingEnv = false
+  }
+
   let versions = $state([])
   let rollbackTarget = $state(null)
   let rollingBack = $state(false)
@@ -47,12 +81,14 @@
   }
 
   export function reload() {
+    loadEnv()
     return loadCompose()
   }
 
   onMount(() => {
     loadCompose()
     loadHistory()
+    loadEnv()
   })
 
   function switchMode(newMode) {
@@ -164,6 +200,25 @@
       currentYaml = val
       try { yaml.load(val); yamlError = '' } catch (e) { yamlError = e.message }
     }} />
+
+    <!-- .env file editor -->
+    <div class="mt-4">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <span class="text-xs font-medium text-text-primary">.env</span>
+          <span class="text-xs text-text-muted ml-1.5">KEY=value, one per line</span>
+        </div>
+        {#if envText !== envOriginal}
+          <Button variant="secondary" size="sm" onclick={saveEnv} loading={savingEnv}>Save .env</Button>
+        {/if}
+      </div>
+      <textarea
+        class="w-full bg-input-bg border border-border/50 rounded-lg px-3 py-2.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/60 resize-y min-h-20"
+        rows="5"
+        placeholder="DB_HOST=localhost&#10;DB_PORT=5432"
+        bind:value={envText}
+      ></textarea>
+    </div>
   {/if}
 
   <div class="sticky bottom-0 bg-surface-0/80 backdrop-blur-sm border-t border-border/50 py-3 mt-4 flex justify-end">

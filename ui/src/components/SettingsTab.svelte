@@ -298,15 +298,7 @@
   </div>
 
   <!-- Section 3: Environment Variables -->
-  <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-    <div class="flex items-center justify-between mb-3">
-      <div>
-        <h3 class="text-sm font-medium text-text-primary">Environment Variables</h3>
-        <p class="text-xs text-text-muted mt-0.5">Stored in <code class="font-mono text-[11px]">.env</code> file</p>
-      </div>
-    </div>
-    <EnvEditor {slug} />
-  </div>
+  <EnvEditor {slug} />
 
   <!-- Section 4: Backups -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
