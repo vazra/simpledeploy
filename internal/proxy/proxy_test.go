@@ -194,6 +194,38 @@ func TestBuildConfigTLSLocalStorage(t *testing.T) {
 	}
 }
 
+func TestBuildConfigMixedLocalAndOff(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr: ":443",
+		TLSMode:    "local",
+		DataDir:    "/tmp/sd-test",
+	})
+	p.mu.Lock()
+	p.routes = []Route{
+		{Domain: "app.home.lan", Upstream: "localhost:3000", TLS: "local"},
+		{Domain: "plain.home.lan", Upstream: "localhost:4000", TLS: "off"},
+	}
+	p.mu.Unlock()
+
+	cfg := parseConfig(t, p)
+	server := getServer(t, cfg)
+	routes := server["routes"].([]interface{})
+	if len(routes) != 2 {
+		t.Fatalf("routes: got %d, want 2", len(routes))
+	}
+
+	apps := cfg["apps"].(map[string]interface{})
+	tlsCfg, ok := apps["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected tls config")
+	}
+	automation := tlsCfg["automation"].(map[string]interface{})
+	policies := automation["policies"].([]interface{})
+	if len(policies) != 1 {
+		t.Fatalf("expected 1 policy, got %d", len(policies))
+	}
+}
+
 // --- MockProxy tests ---
 
 func TestMockProxySetRoutes(t *testing.T) {
