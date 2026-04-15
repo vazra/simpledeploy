@@ -6,10 +6,10 @@ export default defineConfig({
   plugins: [svelte(), tailwindcss()],
   build: { outDir: 'dist', emptyOutDir: true },
   server: {
-    port: 5173,
+    port: 8500,
     proxy: {
-      '/api': { target: 'http://localhost:8443', ws: true },
-      '/ws': { target: 'ws://localhost:8443', ws: true }
+      '/api': { target: 'http://localhost:9500', ws: true },
+      '/ws': { target: 'ws://localhost:9500', ws: true }
     }
   }
 })

@@ -19,14 +19,14 @@ test:
 	go test ./...
 
 dev:
-	which air > /dev/null || go install github.com/cosmtrek/air@latest
+	go install github.com/air-verse/air@latest
 	@trap 'kill %1 %2 2>/dev/null' EXIT; \
-	air -c .air.toml & \
+	$$(go env GOPATH)/bin/air -c .air.toml & \
 	cd ui && npm run dev
 
 api:
-	which air > /dev/null || go install github.com/cosmtrek/air@latest
-	air -c .air.toml
+	go install github.com/air-verse/air@latest
+	$$(go env GOPATH)/bin/air -c .air.toml
 
 ui:
 	cd ui && npm run dev
