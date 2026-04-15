@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte'
   import { push } from 'svelte-spa-router'
   import { api } from '../lib/api.js'
   import ConfigTab from './ConfigTab.svelte'
@@ -31,22 +30,6 @@
   let showDeleteModal = $state(false)
   let deleting = $state(false)
 
-
-  // Backups
-  let backupConfigs = $state([])
-  let backupRuns = $state([])
-  let loadingBackups = $state(true)
-  let showNewConfigForm = $state(false)
-  let triggeringBackup = $state(false)
-  let showRestoreModal = $state(null)
-  let restoringId = $state(null)
-
-  let newConfig = $state({
-    strategy: 'postgres',
-    target: 's3',
-    cron_expr: '0 2 * * *',
-    retention_days: 7,
-  })
 
   // Endpoints from app response
   let endpoints = $derived(app?.endpoints || [])
@@ -95,57 +78,10 @@
     configTabRef?.reload()
   }
 
-  onMount(loadBackups)
-
-  async function loadBackups() {
-    loadingBackups = true
-    const [cfgRes, runsRes] = await Promise.all([
-      api.listBackupConfigs(slug),
-      api.listBackupRuns(slug),
-    ])
-    backupConfigs = cfgRes.data || []
-    backupRuns = runsRes.data || []
-    loadingBackups = false
-  }
-
   async function saveAllowlist() {
     savingAllowlist = true
     await api.updateAccess(slug, editAllowlist)
     savingAllowlist = false
-  }
-
-  async function triggerBackup() {
-    triggeringBackup = true
-    await api.triggerBackup(slug)
-    triggeringBackup = false
-    await loadBackups()
-  }
-
-  async function createBackupConfig() {
-    const res = await api.createBackupConfig(slug, {
-      strategy: newConfig.strategy,
-      target: newConfig.target,
-      cron_expr: newConfig.cron_expr,
-      retention_days: Number(newConfig.retention_days),
-    })
-    if (!res.error) {
-      showNewConfigForm = false
-      newConfig = { strategy: 'postgres', target: 's3', cron_expr: '0 2 * * *', retention_days: 7 }
-      await loadBackups()
-    }
-  }
-
-  async function deleteBackupConfig(id) {
-    await api.deleteBackupConfig(id)
-    await loadBackups()
-  }
-
-  async function confirmRestore() {
-    if (!showRestoreModal) return
-    restoringId = showRestoreModal
-    await api.restore(showRestoreModal)
-    restoringId = null
-    showRestoreModal = null
   }
 
   async function confirmDelete() {
@@ -154,13 +90,6 @@
     deleting = false
     showDeleteModal = false
     push('/')
-  }
-
-  function runStatusVariant(status) {
-    if (status === 'success') return 'success'
-    if (status === 'failed') return 'danger'
-    if (status === 'running') return 'info'
-    return 'default'
   }
 
   function tlsBadgeVariant(tls) {
@@ -313,120 +242,6 @@
     <EnvEditor {slug} />
   {/if}
 
-  <!-- Section 4: Backups -->
-  <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-medium text-text-primary">Backups</h3>
-      <div class="flex gap-2">
-        <Button variant="secondary" size="sm" onclick={triggerBackup} loading={triggeringBackup}>Run Now</Button>
-        <Button variant="secondary" size="sm" onclick={() => showNewConfigForm = !showNewConfigForm}>
-          {showNewConfigForm ? 'Cancel' : 'New Config'}
-        </Button>
-      </div>
-    </div>
-
-    {#if showNewConfigForm}
-      <div class="bg-surface-3/40 rounded-lg p-4 mb-4 space-y-3 border border-border/30">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="{labelClass} block mb-1" for="new-strategy">Strategy</label>
-            <select id="new-strategy" class="{inputClass} w-full" bind:value={newConfig.strategy}>
-              <option value="postgres">postgres</option>
-              <option value="volume">volume</option>
-            </select>
-          </div>
-          <div>
-            <label class="{labelClass} block mb-1" for="new-target">Target</label>
-            <select id="new-target" class="{inputClass} w-full" bind:value={newConfig.target}>
-              <option value="s3">s3</option>
-              <option value="local">local</option>
-            </select>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="{labelClass} block mb-1" for="new-cron">Cron Schedule</label>
-            <input id="new-cron" class="{inputClass} w-full" type="text" placeholder="0 2 * * *" bind:value={newConfig.cron_expr} />
-          </div>
-          <div>
-            <label class="{labelClass} block mb-1" for="new-retention">Retention (days)</label>
-            <input id="new-retention" class="{inputClass} w-full" type="number" min="1" bind:value={newConfig.retention_days} />
-          </div>
-        </div>
-        <div class="flex justify-end">
-          <Button size="sm" onclick={createBackupConfig}>Create</Button>
-        </div>
-      </div>
-    {/if}
-
-    {#if loadingBackups}
-      <p class="text-xs text-text-muted py-2">Loading...</p>
-    {:else}
-      {#if backupConfigs.length > 0}
-        <div class="overflow-x-auto mb-6">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="border-b border-border/50">
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Strategy</th>
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Target</th>
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Schedule</th>
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Retention</th>
-                <th class="py-2 px-3"></th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border/30">
-              {#each backupConfigs as cfg}
-                <tr class="hover:bg-surface-hover">
-                  <td class="py-2 px-3 text-text-primary">{cfg.strategy}</td>
-                  <td class="py-2 px-3 text-text-primary">{cfg.target}</td>
-                  <td class="py-2 px-3 font-mono text-xs text-text-secondary">{cfg.cron_expr}</td>
-                  <td class="py-2 px-3 text-text-secondary">{cfg.retention_days}d</td>
-                  <td class="py-2 px-3">
-                    <Button variant="ghost" size="sm" onclick={() => deleteBackupConfig(cfg.id)}>Delete</Button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {:else}
-        <p class="text-xs text-text-muted mb-4">No backup configs yet.</p>
-      {/if}
-
-      {#if backupRuns.length > 0}
-        <h4 class="text-xs font-medium text-text-secondary mb-2">Backup Runs</h4>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="border-b border-border/50">
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">ID</th>
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Status</th>
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Started</th>
-                <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Finished</th>
-                <th class="py-2 px-3"></th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border/30">
-              {#each backupRuns as run}
-                <tr class="hover:bg-surface-hover">
-                  <td class="py-2 px-3 font-mono text-xs text-text-muted">{run.id}</td>
-                  <td class="py-2 px-3">
-                    <Badge variant={runStatusVariant(run.status)}>{run.status}</Badge>
-                  </td>
-                  <td class="py-2 px-3 text-text-secondary text-xs">{run.started_at ? new Date(run.started_at).toLocaleString() : '-'}</td>
-                  <td class="py-2 px-3 text-text-secondary text-xs">{run.finished_at ? new Date(run.finished_at).toLocaleString() : '-'}</td>
-                  <td class="py-2 px-3">
-                    <Button variant="secondary" size="sm" onclick={() => showRestoreModal = run.id}>Restore</Button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    {/if}
-  </div>
-
   <!-- Section 5: Advanced (collapsed) -->
   <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden">
     <button
@@ -521,15 +336,6 @@
   </div>
 
 </div>
-
-{#if showRestoreModal}
-  <Modal
-    title="Restore Backup"
-    message="This will restore the app from this backup. The current state will be overwritten. Continue?"
-    onConfirm={confirmRestore}
-    onCancel={() => showRestoreModal = null}
-  />
-{/if}
 
 {#if showDeleteModal}
   <Modal
