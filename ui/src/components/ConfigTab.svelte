@@ -57,6 +57,7 @@
   }
 
   let versions = $state([])
+  let showHistory = $state(false)
   let rollbackTarget = $state(null)
   let rollingBack = $state(false)
   function normalizeYaml(str) {
@@ -142,6 +143,9 @@
 
   async function confirmDeploy() {
     saving = true
+    if (mode === 'yaml' && envText !== envOriginal) {
+      await saveEnv()
+    }
     const encoded = encodeBase64(currentYaml)
     const res = await api.deploy(slug, encoded)
     saving = false
@@ -203,14 +207,9 @@
 
     <!-- .env file editor -->
     <div class="mt-4">
-      <div class="flex items-center justify-between mb-2">
-        <div>
-          <span class="text-xs font-medium text-text-primary">.env</span>
-          <span class="text-xs text-text-muted ml-1.5">KEY=value, one per line</span>
-        </div>
-        {#if envText !== envOriginal}
-          <Button variant="secondary" size="sm" onclick={saveEnv} loading={savingEnv}>Save .env</Button>
-        {/if}
+      <div class="flex items-center mb-2">
+        <span class="text-xs font-medium text-text-primary">.env</span>
+        <span class="text-xs text-text-muted ml-1.5">KEY=value, one per line</span>
       </div>
       <textarea
         class="w-full bg-input-bg border border-border/50 rounded-lg px-3 py-2.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/60 resize-y min-h-20"
@@ -221,36 +220,46 @@
     </div>
   {/if}
 
-  <div class="sticky bottom-0 bg-surface-0/80 backdrop-blur-sm border-t border-border/50 py-3 mt-4 flex justify-end">
+  <div class="flex justify-end mt-4 pt-3 border-t border-border/30">
     <Button onclick={handleSave} loading={saving} disabled={mode === 'visual' && hasValidationErrors}>Save &amp; Deploy</Button>
   </div>
 
   {#if versions.length > 0}
-    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mt-4">
-      <h3 class="text-sm font-semibold text-text-primary mb-3">Deploy History</h3>
+    <button
+      type="button"
+      onclick={() => showHistory = !showHistory}
+      class="w-full flex items-center justify-between mt-4 px-1 py-2 text-left"
+    >
+      <span class="text-xs font-medium text-text-secondary">Deploy History ({versions.length})</span>
+      <svg
+        class="w-3.5 h-3.5 text-text-muted transition-transform {showHistory ? 'rotate-180' : ''}"
+        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+      ><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+    </button>
+    {#if showHistory}
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead><tr class="border-b border-border/50">
-            <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Version</th>
-            <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Hash</th>
-            <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Deployed</th>
-            <th class="py-3 px-4"></th>
+            <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Version</th>
+            <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Hash</th>
+            <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Deployed</th>
+            <th class="py-2 px-3"></th>
           </tr></thead>
           <tbody class="divide-y divide-border/30">
             {#each versions as v}
               <tr class="hover:bg-surface-hover">
-                <td class="py-3 px-4">v{v.version}</td>
-                <td class="py-3 px-4 font-mono text-xs">{v.hash?.slice(0, 12)}</td>
-                <td class="py-3 px-4">{v.created_at ? new Date(v.created_at).toLocaleString() : '-'}</td>
-                <td class="py-3 px-4">
-                  <Button variant="secondary" size="sm" onclick={() => rollbackTarget = v.id}>Rollback</Button>
+                <td class="py-2 px-3 text-xs">v{v.version}</td>
+                <td class="py-2 px-3 font-mono text-xs">{v.hash?.slice(0, 8)}</td>
+                <td class="py-2 px-3 text-xs">{v.created_at ? new Date(v.created_at).toLocaleString() : '-'}</td>
+                <td class="py-2 px-3">
+                  <Button variant="ghost" size="sm" onclick={() => rollbackTarget = v.id}>Rollback</Button>
                 </td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
-    </div>
+    {/if}
   {/if}
 
 {/if}

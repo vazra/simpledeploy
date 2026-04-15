@@ -292,10 +292,7 @@
   {/if}
 
   <!-- Section 2: Compose Configuration -->
-  <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-    <h3 class="text-sm font-medium text-text-primary mb-4">Compose Configuration</h3>
-    <ConfigTab bind:this={configTabRef} {slug} onModeChange={(m) => composeMode = m} />
-  </div>
+  <ConfigTab bind:this={configTabRef} {slug} onModeChange={(m) => composeMode = m} />
 
   <!-- Section 3: Environment Variables -->
   <EnvEditor {slug} />
