@@ -217,3 +217,77 @@ func TestListOldBackupRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestGetBackupSummary(t *testing.T) {
+	s := newTestStore(t)
+	app := makeTestApp(t, s)
+	cfg := makeTestBackupConfig(t, s, app.ID)
+
+	run, err := s.CreateBackupRun(cfg.ID)
+	if err != nil {
+		t.Fatalf("CreateBackupRun: %v", err)
+	}
+	var size int64 = 2048
+	if err := s.UpdateBackupRunSuccess(run.ID, size, "/backups/dump.sql.gz"); err != nil {
+		t.Fatalf("UpdateBackupRunSuccess: %v", err)
+	}
+
+	summaries, err := s.GetBackupSummary()
+	if err != nil {
+		t.Fatalf("GetBackupSummary: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("len(summaries) = %d, want 1", len(summaries))
+	}
+	got := summaries[0]
+	if got.AppSlug != app.Slug {
+		t.Errorf("AppSlug = %q, want %q", got.AppSlug, app.Slug)
+	}
+	if got.ConfigCount != 1 {
+		t.Errorf("ConfigCount = %d, want 1", got.ConfigCount)
+	}
+	if got.TotalSizeBytes != size {
+		t.Errorf("TotalSizeBytes = %d, want %d", got.TotalSizeBytes, size)
+	}
+	if got.LastRunStatus != "success" {
+		t.Errorf("LastRunStatus = %q, want success", got.LastRunStatus)
+	}
+	if got.RecentSuccessCount != 1 {
+		t.Errorf("RecentSuccessCount = %d, want 1", got.RecentSuccessCount)
+	}
+}
+
+func TestListRecentBackupRuns(t *testing.T) {
+	s := newTestStore(t)
+	app := makeTestApp(t, s)
+	cfg := makeTestBackupConfig(t, s, app.ID)
+
+	run, err := s.CreateBackupRun(cfg.ID)
+	if err != nil {
+		t.Fatalf("CreateBackupRun: %v", err)
+	}
+	if err := s.UpdateBackupRunSuccess(run.ID, 512, "/backups/dump.sql.gz"); err != nil {
+		t.Fatalf("UpdateBackupRunSuccess: %v", err)
+	}
+
+	runs, err := s.ListRecentBackupRuns(10)
+	if err != nil {
+		t.Fatalf("ListRecentBackupRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("len(runs) = %d, want 1", len(runs))
+	}
+	got := runs[0]
+	if got.AppName != app.Name {
+		t.Errorf("AppName = %q, want %q", got.AppName, app.Name)
+	}
+	if got.AppSlug != app.Slug {
+		t.Errorf("AppSlug = %q, want %q", got.AppSlug, app.Slug)
+	}
+	if got.Strategy != cfg.Strategy {
+		t.Errorf("Strategy = %q, want %q", got.Strategy, cfg.Strategy)
+	}
+	if got.Status != "success" {
+		t.Errorf("Status = %q, want success", got.Status)
+	}
+}

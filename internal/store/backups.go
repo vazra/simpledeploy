@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,164 @@ type BackupRun struct {
 	FinishedAt     *time.Time
 	ErrorMsg       string
 	FilePath       string
+}
+
+// BackupSummaryApp holds aggregated backup health for one app.
+type BackupSummaryApp struct {
+	AppSlug            string   `json:"app_slug"`
+	AppName            string   `json:"app_name"`
+	ConfigCount        int      `json:"config_count"`
+	Strategies         []string `json:"strategies"`
+	LastRunStatus      string   `json:"last_run_status"`
+	LastRunFinishedAt  *string  `json:"last_run_finished_at"`
+	LastRunSizeBytes   *int64   `json:"last_run_size_bytes"`
+	TotalSizeBytes     int64    `json:"total_size_bytes"`
+	RecentSuccessCount int      `json:"recent_success_count"`
+	RecentFailCount    int      `json:"recent_fail_count"`
+	NextCron           string   `json:"next_cron"`
+}
+
+// BackupRunWithApp extends BackupRun with app and strategy info for cross-app views.
+type BackupRunWithApp struct {
+	BackupRun
+	AppName  string `json:"app_name"`
+	AppSlug  string `json:"app_slug"`
+	Strategy string `json:"strategy"`
+}
+
+func (s *Store) GetBackupSummary() ([]BackupSummaryApp, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			a.slug,
+			a.name,
+			COUNT(DISTINCT bc.id)                                          AS config_count,
+			GROUP_CONCAT(DISTINCT bc.strategy)                            AS strategies,
+			(SELECT br.status FROM backup_runs br
+			 JOIN backup_configs bc2 ON br.backup_config_id = bc2.id
+			 WHERE bc2.app_id = a.id
+			 ORDER BY br.started_at DESC LIMIT 1)                         AS last_run_status,
+			(SELECT br.finished_at FROM backup_runs br
+			 JOIN backup_configs bc2 ON br.backup_config_id = bc2.id
+			 WHERE bc2.app_id = a.id
+			 ORDER BY br.started_at DESC LIMIT 1)                         AS last_run_finished_at,
+			(SELECT br.size_bytes FROM backup_runs br
+			 JOIN backup_configs bc2 ON br.backup_config_id = bc2.id
+			 WHERE bc2.app_id = a.id
+			 ORDER BY br.started_at DESC LIMIT 1)                         AS last_run_size_bytes,
+			COALESCE(SUM(CASE WHEN br.status = 'success' THEN br.size_bytes ELSE 0 END), 0) AS total_size_bytes,
+			COUNT(CASE WHEN br.status = 'success' AND br.started_at >= datetime('now', '-24 hours') THEN 1 END) AS recent_success_count,
+			COUNT(CASE WHEN br.status = 'failed'  AND br.started_at >= datetime('now', '-24 hours') THEN 1 END) AS recent_fail_count,
+			MIN(bc.schedule_cron)                                         AS next_cron
+		FROM apps a
+		JOIN backup_configs bc ON bc.app_id = a.id
+		LEFT JOIN backup_runs br ON br.backup_config_id = bc.id
+		GROUP BY a.id, a.slug, a.name
+		ORDER BY a.name
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("get backup summary: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []BackupSummaryApp
+	for rows.Next() {
+		var sum BackupSummaryApp
+		var strategiesCSV string
+		var lastRunStatus, lastRunFinishedAt sql.NullString
+		var lastRunSizeBytes sql.NullInt64
+		if err := rows.Scan(
+			&sum.AppSlug,
+			&sum.AppName,
+			&sum.ConfigCount,
+			&strategiesCSV,
+			&lastRunStatus,
+			&lastRunFinishedAt,
+			&lastRunSizeBytes,
+			&sum.TotalSizeBytes,
+			&sum.RecentSuccessCount,
+			&sum.RecentFailCount,
+			&sum.NextCron,
+		); err != nil {
+			return nil, fmt.Errorf("scan backup summary: %w", err)
+		}
+		sum.Strategies = splitCSV(strategiesCSV)
+		if lastRunStatus.Valid {
+			sum.LastRunStatus = lastRunStatus.String
+		}
+		if lastRunFinishedAt.Valid {
+			v := lastRunFinishedAt.String
+			sum.LastRunFinishedAt = &v
+		}
+		if lastRunSizeBytes.Valid {
+			v := lastRunSizeBytes.Int64
+			sum.LastRunSizeBytes = &v
+		}
+		summaries = append(summaries, sum)
+	}
+	return summaries, rows.Err()
+}
+
+func (s *Store) ListRecentBackupRuns(limit int) ([]BackupRunWithApp, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			br.id, br.backup_config_id, br.status, br.size_bytes,
+			br.started_at, br.finished_at, br.error_msg, br.file_path,
+			a.name, a.slug, bc.strategy
+		FROM backup_runs br
+		JOIN backup_configs bc ON bc.id = br.backup_config_id
+		JOIN apps a ON a.id = bc.app_id
+		ORDER BY br.started_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent backup runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []BackupRunWithApp
+	for rows.Next() {
+		var r BackupRunWithApp
+		var sizeBytes sql.NullInt64
+		var finishedAt sql.NullTime
+		var errorMsg, filePath sql.NullString
+		if err := rows.Scan(
+			&r.ID, &r.BackupConfigID, &r.Status, &sizeBytes,
+			&r.StartedAt, &finishedAt, &errorMsg, &filePath,
+			&r.AppName, &r.AppSlug, &r.Strategy,
+		); err != nil {
+			return nil, fmt.Errorf("scan recent backup run: %w", err)
+		}
+		if sizeBytes.Valid {
+			v := sizeBytes.Int64
+			r.SizeBytes = &v
+		}
+		if finishedAt.Valid {
+			t := finishedAt.Time
+			r.FinishedAt = &t
+		}
+		if errorMsg.Valid {
+			r.ErrorMsg = errorMsg.String
+		}
+		if filePath.Valid {
+			r.FilePath = filePath.String
+		}
+		runs = append(runs, r)
+	}
+	return runs, rows.Err()
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func (s *Store) CreateBackupConfig(cfg *BackupConfig) error {
