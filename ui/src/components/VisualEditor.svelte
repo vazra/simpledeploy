@@ -412,6 +412,47 @@
     envConfirm = null
   }
 
+  // .env picker dialog state
+  let envPickerFor = $state(null) // { svcName, rowIdx, isPending }
+  let envPickerNewKey = $state('')
+  let envPickerNewValue = $state('')
+  let revealedEnvRef = $state(null) // "svcName:rowIdx" key for toggling
+
+  function openEnvPicker(svcName, rowIdx, isPending) {
+    envPickerFor = { svcName, rowIdx, isPending }
+    envPickerNewKey = ''
+    envPickerNewValue = ''
+  }
+
+  function pickEnvVar(key) {
+    if (!envPickerFor) return
+    const { svcName, rowIdx, isPending } = envPickerFor
+    const ref = `\${${key}}`
+    if (isPending) {
+      const p = pendingEnvRows[svcName] || []
+      const envRows = parseEnv(compose.services?.[svcName])
+      const pi = rowIdx - envRows.length
+      const newPending = p.map((r, idx) => idx === pi ? { ...r, value: ref } : r)
+      pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
+    } else {
+      const envRows = parseEnv(compose.services?.[svcName])
+      const newRows = envRows.map((r, idx) => idx === rowIdx ? { ...r, value: ref } : r)
+      updateServiceDirect(svcName, (s) => {
+        const serialized = serializeEnv(newRows)
+        if (serialized) s.environment = serialized
+        else delete s.environment
+      })
+    }
+    envPickerFor = null
+  }
+
+  function addAndPickEnvVar() {
+    if (!envPickerNewKey || !envPickerFor) return
+    envFileVars = [...envFileVars, { key: envPickerNewKey, value: envPickerNewValue }]
+    saveEnvFile()
+    pickEnvVar(envPickerNewKey)
+  }
+
   // Autocomplete state for $ references
   let envSuggestFor = $state(null) // { svcName, rowIdx }
   let envSuggestFilter = $state('')
@@ -733,39 +774,59 @@
                   }}
                   class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
                 />
-                <div class="flex-1 relative min-w-0">
-                  <input
-                    type="text"
-                    placeholder="VALUE"
-                    value={row.value}
-                    oninput={(e) => {
-                      const val = e.currentTarget.value
-                      if (val.includes('$') && envFileVars.length > 0) {
-                        envSuggestFor = { svcName, rowIdx: i }
-                        envSuggestFilter = val
-                      } else if (envSuggestFor?.svcName === svcName && envSuggestFor?.rowIdx === i) {
-                        envSuggestFor = null
-                      }
-                      if (isPending) {
-                        const pi = i - envRows.length
-                        const newPending = pending.map((r, idx) => idx === pi ? { ...r, value: val } : r)
-                        pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
-                      } else {
-                        const newRows = envRows.map((r, idx) => idx === i ? { ...r, value: val } : r)
-                        updateServiceDirect(svcName, (s) => {
-                          const serialized = serializeEnv(newRows)
-                          if (serialized) s.environment = serialized
-                          else delete s.environment
-                        })
-                      }
-                    }}
-                    onblur={() => { setTimeout(() => { if (envSuggestFor?.rowIdx === i) envSuggestFor = null }, 150) }}
-                    class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 {isRef ? 'pr-16' : ''}"
-                  />
+                <div class="flex-1 relative min-w-0 group/val">
+                  {#if isRef && revealedEnvRef === `${svcName}:${i}`}
+                    <div class="w-full bg-input-bg border border-accent/50 rounded px-2.5 py-1.5 text-sm font-mono text-accent/80 truncate">{resolved != null ? resolved : '(not found in .env)'}</div>
+                  {:else}
+                    <input
+                      type="text"
+                      placeholder="VALUE"
+                      value={row.value}
+                      oninput={(e) => {
+                        const val = e.currentTarget.value
+                        if (val.includes('$') && envFileVars.length > 0) {
+                          envSuggestFor = { svcName, rowIdx: i }
+                          envSuggestFilter = val
+                        } else if (envSuggestFor?.svcName === svcName && envSuggestFor?.rowIdx === i) {
+                          envSuggestFor = null
+                        }
+                        if (isPending) {
+                          const pi = i - envRows.length
+                          const newPending = pending.map((r, idx) => idx === pi ? { ...r, value: val } : r)
+                          pendingEnvRows = { ...pendingEnvRows, [svcName]: newPending }
+                        } else {
+                          const newRows = envRows.map((r, idx) => idx === i ? { ...r, value: val } : r)
+                          updateServiceDirect(svcName, (s) => {
+                            const serialized = serializeEnv(newRows)
+                            if (serialized) s.environment = serialized
+                            else delete s.environment
+                          })
+                        }
+                      }}
+                      onblur={() => { setTimeout(() => { if (envSuggestFor?.rowIdx === i) envSuggestFor = null }, 150) }}
+                      class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
+                    />
+                  {/if}
                   {#if isRef}
-                    <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] bg-accent/15 text-accent px-1.5 py-0.5 rounded font-medium" title={resolved != null ? `Resolved: ${resolved}` : 'Not found in .env'}>
-                      .env
-                    </span>
+                    <button
+                      type="button"
+                      onclick={() => { revealedEnvRef = revealedEnvRef === `${svcName}:${i}` ? null : `${svcName}:${i}` }}
+                      class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded transition-all {revealedEnvRef === `${svcName}:${i}` ? 'text-accent opacity-100' : 'text-text-muted opacity-0 group-hover/val:opacity-100 hover:text-accent'}"
+                      title="Show .env value"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    </button>
+                  {:else if slug && row.name && !isPending && !row.value}
+                    <button
+                      type="button"
+                      onclick={() => openEnvPicker(svcName, i, false)}
+                      class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[11px] text-accent/70 hover:text-accent px-1.5 py-0.5 rounded transition-all opacity-0 group-hover/val:opacity-100 hover:bg-accent/10"
+                    >
+                      Use from .env
+                    </button>
                   {/if}
                   {#if showSuggestions && suggestions.length > 0}
                     <div class="absolute left-0 top-full mt-1 w-full bg-surface-2 border border-border/50 rounded-lg shadow-xl z-20 py-1 max-h-40 overflow-y-auto">
@@ -782,31 +843,6 @@
                     </div>
                   {/if}
                 </div>
-                {#if slug && row.name && !isPending}
-                  {#if isRef}
-                    <button
-                      type="button"
-                      onclick={() => moveFromEnvFile(svcName, row.name)}
-                      class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
-                      title="Inline value (stop using .env)"
-                    >
-                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-                      </svg>
-                    </button>
-                  {:else}
-                    <button
-                      type="button"
-                      onclick={() => requestMoveToEnvFile(svcName, row.name, row.value)}
-                      class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors"
-                      title="Move to .env file (shared across services)"
-                    >
-                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                      </svg>
-                    </button>
-                  {/if}
-                {/if}
                 <button
                   type="button"
                   onclick={() => {
@@ -846,82 +882,6 @@
               Add
             </button>
           </div>
-
-          <!-- Shared Variables (.env file) - only under first service -->
-          {#if slug && svcIdx === 0}
-            <div class="border border-border/50 rounded-lg overflow-hidden">
-              <button
-                type="button"
-                class="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-surface-3/50 transition-colors bg-surface-2/50"
-                onclick={() => envFileExpanded = !envFileExpanded}
-              >
-                <span class="text-xs font-medium text-text-primary">Shared Variables (.env file)</span>
-                <svg
-                  class="w-3.5 h-3.5 text-text-muted transition-transform duration-200 {envFileExpanded ? 'rotate-180' : ''}"
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {#if envFileExpanded}
-                <div class="px-3 pb-3 pt-2 space-y-2">
-                  <p class="text-xs text-text-muted">Shared across all services. Reference with <code class="font-mono text-accent/80">${'{VAR_NAME}'}</code>.</p>
-                  {#if envFileLoading}
-                    <p class="text-xs text-text-muted">Loading...</p>
-                  {:else}
-                    {#each envFileVars as v, i}
-                      <div class="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={v.key}
-                          placeholder="KEY"
-                          oninput={(e) => { envFileVars = envFileVars.map((ev, idx) => idx === i ? { ...ev, key: e.currentTarget.value } : ev) }}
-                          class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
-                        />
-                        <input
-                          type="text"
-                          value={v.value}
-                          placeholder="value"
-                          oninput={(e) => { envFileVars = envFileVars.map((ev, idx) => idx === i ? { ...ev, value: e.currentTarget.value } : ev) }}
-                          class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
-                        />
-                        <button
-                          type="button"
-                          onclick={() => { envFileVars = envFileVars.filter((_, idx) => idx !== i) }}
-                          class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors"
-                          aria-label="Remove"
-                        >
-                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    {/each}
-                    <div class="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onclick={() => { envFileVars = [...envFileVars, { key: '', value: '' }] }}
-                        class="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary hover:bg-surface-3 px-2 py-1 rounded transition-colors"
-                      >
-                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-                        </svg>
-                        Add
-                      </button>
-                      <button
-                        type="button"
-                        onclick={saveEnvFile}
-                        disabled={envFileSaving}
-                        class="text-xs px-2.5 py-1 rounded bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors"
-                      >
-                        {envFileSaving ? 'Saving...' : 'Save'}
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          {/if}
 
           <!-- Volumes -->
           <RepeatableField
@@ -1372,6 +1332,64 @@
       <div class="flex justify-end gap-2">
         <button onclick={cancelMoveToEnvFile} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>
         <button onclick={confirmMoveToEnvFile} class="px-4 py-2 text-sm bg-btn-primary text-surface-0 rounded-lg hover:bg-btn-primary-hover transition-colors shadow-sm">Move to .env</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- .env picker dialog -->
+{#if envPickerFor}
+  <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={() => envPickerFor = null} aria-label="Close"></button>
+    <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md w-full shadow-2xl animate-scale-in">
+      <h3 class="text-sm font-semibold text-text-primary tracking-tight mb-1">Use variable from .env</h3>
+      <p class="text-xs text-text-muted mb-3">Pick an existing variable or create a new one. The value will be referenced as <code class="font-mono text-accent/80">${'{KEY}'}</code> in compose and resolved at runtime from the shared <code class="font-mono text-[11px]">.env</code> file.</p>
+
+      {#if envFileVars.length > 0}
+        <div class="max-h-48 overflow-y-auto space-y-1 mb-4">
+          {#each envFileVars as v}
+            <button
+              type="button"
+              onclick={() => pickEnvVar(v.key)}
+              class="w-full flex items-center justify-between px-3 py-2 text-left rounded-lg hover:bg-surface-hover transition-colors group"
+            >
+              <span class="font-mono text-sm text-text-primary">{v.key}</span>
+              <span class="text-xs text-text-muted truncate ml-3 max-w-40 group-hover:text-text-secondary">{v.value || '(empty)'}</span>
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <p class="text-xs text-text-muted mb-4">No variables in .env yet.</p>
+      {/if}
+
+      <div class="border-t border-border/30 pt-3">
+        <p class="text-[11px] text-text-muted mb-2">Add new variable</p>
+        <div class="flex gap-2">
+          <input
+            type="text"
+            placeholder="KEY"
+            bind:value={envPickerNewKey}
+            class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+          />
+          <input
+            type="text"
+            placeholder="value"
+            bind:value={envPickerNewValue}
+            class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+          />
+          <button
+            type="button"
+            disabled={!envPickerNewKey}
+            onclick={addAndPickEnvVar}
+            class="px-3 py-1.5 text-xs bg-btn-primary text-surface-0 rounded-lg hover:bg-btn-primary-hover transition-colors shadow-sm disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap"
+          >
+            Add & Use
+          </button>
+        </div>
+      </div>
+
+      <div class="flex justify-end mt-4">
+        <button onclick={() => envPickerFor = null} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>
       </div>
     </div>
   </div>
