@@ -68,7 +68,7 @@ registries:
 | `listen_addr` | string | `:443` | Reverse proxy listen address |
 | `management_port` | int | `8443` | Management API port |
 | `domain` | string | - | Management UI domain |
-| `tls.mode` | string | `auto` | TLS mode: `auto`, `custom`, `off` |
+| `tls.mode` | string | `auto` | TLS mode: `auto`, `custom`, `off`, `local` |
 | `tls.email` | string | - | ACME email (required for auto TLS) |
 | `master_secret` | string | - | Encryption/signing key |
 | `metrics.tiers` | list | see above | Metrics rollup tiers |
@@ -83,6 +83,7 @@ registries:
 - **`auto`** - Caddy handles ACME (Let's Encrypt/ZeroSSL) automatically. Requires port 443 and valid domain.
 - **`custom`** - provide cert/key paths in config (for custom certificates).
 - **`off`** - no TLS. Use when running behind another load balancer (e.g., Cloudflare).
+- **`local`** - Caddy acts as a local Certificate Authority, auto-generating certs for all domains. Ideal for home networks and local development with HTTPS. Devices must install the root CA certificate from `http://<server>:<management_port>/trust` to avoid browser warnings.
 
 ### Metrics Tiers
 
