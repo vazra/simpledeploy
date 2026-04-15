@@ -1,5 +1,5 @@
 <script>
-  let { value = '', onchange = () => {}, error = '', minHeight = '400px' } = $props()
+  let { value = '', onchange = () => {}, error = '', minHeight = '400px', bordered = true } = $props()
 
   let textareaEl = $state(null)
   let gutterEl = $state(null)
@@ -32,7 +32,7 @@
   }
 </script>
 
-<div class="bg-surface-1 border border-border rounded-lg overflow-hidden">
+<div class="{bordered ? 'bg-surface-1 border border-border rounded-lg' : 'bg-surface-1'} overflow-hidden">
   {#if error}
     <div class="bg-danger/10 text-danger text-xs px-3 py-2 border-b border-danger/20">
       {error}

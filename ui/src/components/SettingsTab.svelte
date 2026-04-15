@@ -306,7 +306,7 @@
   {/if}
 
   <!-- Section 2: Compose Configuration -->
-  <ConfigTab bind:this={configTabRef} {slug} composePath={app?.ComposeFile} onModeChange={(m) => composeMode = m} />
+  <ConfigTab bind:this={configTabRef} {slug} composePath={app?.ComposePath} onModeChange={(m) => composeMode = m} />
 
   <!-- Section 3: Environment Variables (hidden in YAML mode, shown inline there) -->
   {#if composeMode !== 'yaml'}
@@ -475,11 +475,11 @@
             </div>
             <div class="flex gap-3">
               <span class="text-xs text-text-muted w-24 shrink-0">Compose File</span>
-              <span class="text-xs font-mono text-text-primary break-all">{app?.ComposeFile}</span>
+              <span class="text-xs font-mono text-text-primary break-all">{app?.ComposePath}</span>
             </div>
             <div class="flex gap-3">
               <span class="text-xs text-text-muted w-24 shrink-0">Env File</span>
-              <span class="text-xs font-mono text-text-primary break-all">{app?.ComposeFile ? app.ComposeFile.replace(/[^/]+$/, '.env') : '-'}</span>
+              <span class="text-xs font-mono text-text-primary break-all">{app?.ComposePath ? app.ComposeFile.replace(/[^/]+$/, '.env') : '-'}</span>
             </div>
             <div class="flex gap-3">
               <span class="text-xs text-text-muted w-24 shrink-0">Created</span>

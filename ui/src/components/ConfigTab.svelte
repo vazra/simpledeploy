@@ -191,20 +191,22 @@
   {#if mode === 'visual'}
     <VisualEditor {compose} {slug} onchange={(updated) => { compose = updated }} onerrors={(errs) => { hasValidationErrors = Object.keys(errs).length > 0 }} />
   {:else}
-    <div class="mb-2">
-      <span class="text-xs font-mono text-text-muted">{composePath || 'docker-compose.yml'}</span>
+    <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden">
+      <div class="px-4 py-2 border-b border-border/30 bg-surface-3/30">
+        <span class="text-xs font-mono text-text-secondary">{composePath || 'docker-compose.yml'}</span>
+      </div>
+      <YamlEditor bordered={false} value={currentYaml} error={yamlError} onchange={(val) => {
+        currentYaml = val
+        try { yaml.load(val); yamlError = '' } catch (e) { yamlError = e.message }
+      }} />
     </div>
-    <YamlEditor value={currentYaml} error={yamlError} onchange={(val) => {
-      currentYaml = val
-      try { yaml.load(val); yamlError = '' } catch (e) { yamlError = e.message }
-    }} />
 
     <!-- .env file editor -->
-    <div class="mt-4">
-      <div class="mb-2">
-        <span class="text-xs font-mono text-text-muted">{envPath}</span>
+    <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden mt-4">
+      <div class="px-4 py-2 border-b border-border/30 bg-surface-3/30">
+        <span class="text-xs font-mono text-text-secondary">{envPath}</span>
       </div>
-      <YamlEditor value={envText} onchange={(val) => { envText = val }} minHeight="120px" />
+      <YamlEditor bordered={false} value={envText} onchange={(val) => { envText = val }} minHeight="120px" />
     </div>
   {/if}
 
