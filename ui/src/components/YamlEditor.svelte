@@ -1,5 +1,5 @@
 <script>
-  let { value = '', onchange = () => {}, error = '' } = $props()
+  let { value = '', onchange = () => {}, error = '', minHeight = '400px' } = $props()
 
   let textareaEl = $state(null)
   let gutterEl = $state(null)
@@ -38,7 +38,7 @@
       {error}
     </div>
   {/if}
-  <div class="flex" style="min-height: 400px;">
+  <div class="flex" style="min-height: {minHeight};">
     <div
       bind:this={gutterEl}
       class="bg-surface-2 text-text-muted text-xs font-mono select-none overflow-hidden flex-shrink-0 py-2 px-2 text-right"
@@ -60,7 +60,7 @@
       autocorrect="off"
       autocapitalize="off"
       class="flex-1 bg-transparent text-text-primary text-sm font-mono resize-none border-none outline-none p-2 leading-5 overflow-y-auto"
-      style="min-height: 400px;"
+      style="min-height: {minHeight};"
     ></textarea>
   </div>
 </div>

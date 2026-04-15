@@ -247,6 +247,20 @@
     </div>
   {/snippet}
 
+  <!-- Mode toggle -->
+  <div class="flex gap-0.5 bg-surface-3/40 rounded-lg p-0.5 w-fit">
+    <button
+      class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors
+        {composeMode === 'visual' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
+      onclick={() => configTabRef?.switchToMode('visual')}
+    >Visual</button>
+    <button
+      class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors
+        {composeMode === 'yaml' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
+      onclick={() => configTabRef?.switchToMode('yaml')}
+    >YAML</button>
+  </div>
+
   <!-- Section 1: Endpoints (hidden in YAML mode, managed via compose labels there) -->
   {#if composeMode !== 'yaml'}
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
@@ -292,10 +306,12 @@
   {/if}
 
   <!-- Section 2: Compose Configuration -->
-  <ConfigTab bind:this={configTabRef} {slug} onModeChange={(m) => composeMode = m} />
+  <ConfigTab bind:this={configTabRef} {slug} composePath={app?.ComposeFile} onModeChange={(m) => composeMode = m} />
 
-  <!-- Section 3: Environment Variables -->
-  <EnvEditor {slug} />
+  <!-- Section 3: Environment Variables (hidden in YAML mode, shown inline there) -->
+  {#if composeMode !== 'yaml'}
+    <EnvEditor {slug} />
+  {/if}
 
   <!-- Section 4: Backups -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">

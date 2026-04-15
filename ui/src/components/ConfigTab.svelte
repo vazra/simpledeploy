@@ -10,7 +10,9 @@
   import Skeleton from './Skeleton.svelte'
   import Modal from './Modal.svelte'
 
-  let { slug, onModeChange = () => {} } = $props()
+  let { slug, composePath = '', onModeChange = () => {} } = $props()
+
+  let envPath = $derived(composePath ? composePath.replace(/[^/]+$/, '.env') : '.env')
 
   let mode = $state('visual')
   let originalYaml = $state('')
@@ -91,6 +93,8 @@
     loadHistory()
     loadEnv()
   })
+
+  export function switchToMode(newMode) { switchMode(newMode) }
 
   function switchMode(newMode) {
     if (newMode === mode) return
@@ -184,22 +188,12 @@
     <Skeleton type="card" count={3} />
   </div>
 {:else}
-  <div class="flex gap-0.5 bg-surface-3/40 rounded-lg p-0.5 w-fit mb-4">
-    <button
-      class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors
-        {mode === 'visual' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
-      onclick={() => switchMode('visual')}
-    >Visual</button>
-    <button
-      class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors
-        {mode === 'yaml' ? 'bg-surface-2 text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}"
-      onclick={() => switchMode('yaml')}
-    >YAML</button>
-  </div>
-
   {#if mode === 'visual'}
     <VisualEditor {compose} {slug} onchange={(updated) => { compose = updated }} onerrors={(errs) => { hasValidationErrors = Object.keys(errs).length > 0 }} />
   {:else}
+    <div class="mb-2">
+      <span class="text-xs font-mono text-text-muted">{composePath || 'docker-compose.yml'}</span>
+    </div>
     <YamlEditor value={currentYaml} error={yamlError} onchange={(val) => {
       currentYaml = val
       try { yaml.load(val); yamlError = '' } catch (e) { yamlError = e.message }
@@ -207,16 +201,10 @@
 
     <!-- .env file editor -->
     <div class="mt-4">
-      <div class="flex items-center mb-2">
-        <span class="text-xs font-medium text-text-primary">.env</span>
-        <span class="text-xs text-text-muted ml-1.5">KEY=value, one per line</span>
+      <div class="mb-2">
+        <span class="text-xs font-mono text-text-muted">{envPath}</span>
       </div>
-      <textarea
-        class="w-full bg-input-bg border border-border/50 rounded-lg px-3 py-2.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-accent/40 focus:border-accent/60 resize-y min-h-20"
-        rows="5"
-        placeholder="DB_HOST=localhost&#10;DB_PORT=5432"
-        bind:value={envText}
-      ></textarea>
+      <YamlEditor value={envText} onchange={(val) => { envText = val }} minHeight="120px" />
     </div>
   {/if}
 
@@ -225,41 +213,43 @@
   </div>
 
   {#if versions.length > 0}
-    <button
-      type="button"
-      onclick={() => showHistory = !showHistory}
-      class="w-full flex items-center justify-between mt-4 px-1 py-2 text-left"
-    >
-      <span class="text-xs font-medium text-text-secondary">Deploy History ({versions.length})</span>
-      <svg
-        class="w-3.5 h-3.5 text-text-muted transition-transform {showHistory ? 'rotate-180' : ''}"
-        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-      ><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
-    </button>
-    {#if showHistory}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead><tr class="border-b border-border/50">
-            <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Version</th>
-            <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Hash</th>
-            <th class="text-left text-xs font-medium text-text-muted py-2 px-3">Deployed</th>
-            <th class="py-2 px-3"></th>
-          </tr></thead>
-          <tbody class="divide-y divide-border/30">
-            {#each versions as v}
-              <tr class="hover:bg-surface-hover">
-                <td class="py-2 px-3 text-xs">v{v.version}</td>
-                <td class="py-2 px-3 font-mono text-xs">{v.hash?.slice(0, 8)}</td>
-                <td class="py-2 px-3 text-xs">{v.created_at ? new Date(v.created_at).toLocaleString() : '-'}</td>
-                <td class="py-2 px-3">
-                  <Button variant="ghost" size="sm" onclick={() => rollbackTarget = v.id}>Rollback</Button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
+    <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden mt-4">
+      <button
+        type="button"
+        onclick={() => showHistory = !showHistory}
+        class="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-surface-hover transition-colors"
+      >
+        <span class="text-xs font-medium text-text-primary">Deploy History ({versions.length})</span>
+        <svg
+          class="w-3.5 h-3.5 text-text-muted transition-transform {showHistory ? 'rotate-180' : ''}"
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+        ><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {#if showHistory}
+        <div class="overflow-x-auto border-t border-border/30">
+          <table class="w-full text-sm">
+            <thead><tr class="border-b border-border/50">
+              <th class="text-left text-xs font-medium text-text-muted py-2 px-4">Version</th>
+              <th class="text-left text-xs font-medium text-text-muted py-2 px-4">Hash</th>
+              <th class="text-left text-xs font-medium text-text-muted py-2 px-4">Deployed</th>
+              <th class="py-2 px-4"></th>
+            </tr></thead>
+            <tbody class="divide-y divide-border/30">
+              {#each versions as v}
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-2 px-4 text-xs">v{v.version}</td>
+                  <td class="py-2 px-4 font-mono text-xs">{v.hash?.slice(0, 8)}</td>
+                  <td class="py-2 px-4 text-xs">{v.created_at ? new Date(v.created_at).toLocaleString() : '-'}</td>
+                  <td class="py-2 px-4">
+                    <Button variant="ghost" size="sm" onclick={() => rollbackTarget = v.id}>Rollback</Button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
   {/if}
 
 {/if}
