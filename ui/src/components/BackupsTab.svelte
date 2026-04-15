@@ -225,11 +225,11 @@
             {#each configs as cfg}
               <tr class="hover:bg-surface-hover">
                 <td class="py-2.5 px-3 text-text-primary">{strategyLabel(cfg.strategy)}</td>
-                <td class="py-2.5 px-3 text-text-secondary">{targetLabel(cfg.target, cfg.config_json || cfg.config)}</td>
-                <td class="py-2.5 px-3 text-text-secondary">{cronLabel(cfg.schedule_cron || cfg.cron_expr)}</td>
+                <td class="py-2.5 px-3 text-text-secondary">{targetLabel(cfg.target, cfg.target_config_json)}</td>
+                <td class="py-2.5 px-3 text-text-secondary">{cronLabel(cfg.schedule_cron)}</td>
                 <td class="py-2.5 px-3 text-text-secondary">
-                  {#if cfg.retention_count || cfg.retention_days}
-                    {cfg.retention_count || cfg.retention_days} {cfg.retention_count ? 'backups' : 'days'}
+                  {#if cfg.retention_count}
+                    Keep last {cfg.retention_count}
                   {:else}
                     -
                   {/if}

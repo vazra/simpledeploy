@@ -8,25 +8,25 @@ import (
 )
 
 type BackupConfig struct {
-	ID               int64
-	AppID            int64
-	Strategy         string
-	Target           string
-	ScheduleCron     string
-	TargetConfigJSON string
-	RetentionCount   int
-	CreatedAt        time.Time
+	ID               int64     `json:"id"`
+	AppID            int64     `json:"app_id"`
+	Strategy         string    `json:"strategy"`
+	Target           string    `json:"target"`
+	ScheduleCron     string    `json:"schedule_cron"`
+	TargetConfigJSON string    `json:"target_config_json"`
+	RetentionCount   int       `json:"retention_count"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type BackupRun struct {
-	ID             int64
-	BackupConfigID int64
-	Status         string
-	SizeBytes      *int64
-	StartedAt      time.Time
-	FinishedAt     *time.Time
-	ErrorMsg       string
-	FilePath       string
+	ID             int64      `json:"id"`
+	BackupConfigID int64      `json:"backup_config_id"`
+	Status         string     `json:"status"`
+	SizeBytes      *int64     `json:"size_bytes"`
+	StartedAt      time.Time  `json:"started_at"`
+	FinishedAt     *time.Time `json:"finished_at"`
+	ErrorMsg       string     `json:"error_msg"`
+	FilePath       string     `json:"file_path"`
 }
 
 // BackupSummaryApp holds aggregated backup health for one app.
