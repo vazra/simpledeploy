@@ -5,6 +5,7 @@
   import LogViewer from '../components/LogViewer.svelte'
   import OverviewTab from '../components/OverviewTab.svelte'
   import SettingsTab from '../components/SettingsTab.svelte'
+  import BackupsTab from '../components/BackupsTab.svelte'
   import ActionModal from '../components/ActionModal.svelte'
   import Badge from '../components/Badge.svelte'
   import Button from '../components/Button.svelte'
@@ -45,7 +46,7 @@
   let actionLoading = $state('')
   let scaleInputs = $state({})
 
-  const tabs = ['overview', 'logs', 'metrics', 'settings']
+  const tabs = ['overview', 'logs', 'metrics', 'backups', 'settings']
   const ranges = ['1h', '6h', '24h', '1w', '1m', '1yr']
 
   // Filter non-simpledeploy labels for display as tags
@@ -79,7 +80,14 @@
   }
 
   const unsubReconnect = connection.onReconnect(() => loadApp())
-  onMount(loadApp)
+  onMount(() => {
+    loadApp()
+    const hash = window.location.hash
+    const tabMatch = hash.match(/[?&]tab=(\w+)/)
+    if (tabMatch && tabs.includes(tabMatch[1])) {
+      activeTab = tabMatch[1]
+    }
+  })
   onDestroy(() => { unsubReconnect(); stopPolling() })
 
   async function loadApp() {
@@ -419,6 +427,9 @@
         <MetricsChart datasets={filterDatasets(diskWriteDatasets)} label="Disk Write" unit=" B/s" interval={metricsInterval}
           tooltipFormat={(i, v) => `${formatBytes(v)}/s`} />
       </div>
+
+    {:else if activeTab === 'backups'}
+      <BackupsTab {slug} />
 
     {:else if activeTab === 'settings'}
       <SettingsTab {slug} {app} {services} onAppUpdated={loadApp} />
