@@ -3,6 +3,8 @@
   import { api } from '../lib/api.js'
   import AccordionSection from './AccordionSection.svelte'
   import RepeatableField from './RepeatableField.svelte'
+  import { serviceTemplates } from '../lib/serviceTemplates.js'
+  import { getImageDefaults, getHealthcheckSuggestion } from '../lib/imageDefaults.js'
 
   let { compose = {}, slug = '', onchange = () => {}, onerrors = () => {} } = $props()
 
@@ -157,17 +159,23 @@
     const raw = svc?.ports || []
     return raw.map((p) => {
       if (typeof p === 'string') {
-        const [host, container] = p.split(':')
-        return { host: host ?? '', container: container ?? '' }
+        const slashIdx = p.indexOf('/')
+        const protocol = slashIdx !== -1 ? p.slice(slashIdx + 1) : 'tcp'
+        const portPart = slashIdx !== -1 ? p.slice(0, slashIdx) : p
+        const [host, container] = portPart.split(':')
+        return { host: host ?? '', container: container ?? '', protocol }
       }
-      return { host: String(p.published ?? ''), container: String(p.target ?? '') }
+      return { host: String(p.published ?? ''), container: String(p.target ?? ''), protocol: p.protocol ?? 'tcp' }
     })
   }
 
   function serializePorts(rows) {
     return rows
       .filter((r) => r.host || r.container)
-      .map((r) => `${r.host}:${r.container}`)
+      .map((r) => {
+        const base = `${r.host}:${r.container}`
+        return r.protocol && r.protocol !== 'tcp' ? `${base}/${r.protocol}` : base
+      })
   }
 
   // ---- Environment parsing/serializing ----
@@ -197,17 +205,20 @@
     const raw = svc?.volumes || []
     return raw.map((v) => {
       if (typeof v === 'string') {
-        const [source, target] = v.split(':')
-        return { source: source ?? '', target: target ?? '' }
+        const parts = v.split(':')
+        const ro = parts.length > 2 && parts[parts.length - 1] === 'ro'
+        const source = parts[0] ?? ''
+        const target = ro ? parts.slice(1, -1).join(':') : parts.slice(1).join(':')
+        return { source, target, ro }
       }
-      return { source: v.source ?? '', target: v.target ?? '' }
+      return { source: v.source ?? '', target: v.target ?? '', ro: v.read_only ?? false }
     })
   }
 
   function serializeVolumes(rows) {
     return rows
       .filter((r) => r.source || r.target)
-      .map((r) => `${r.source}:${r.target}`)
+      .map((r) => r.ro ? `${r.source}:${r.target}:ro` : `${r.source}:${r.target}`)
   }
 
   // ---- Labels parsing/serializing (non-SD) ----
@@ -325,13 +336,50 @@
   }
 
   // ---- Add service ----
-  function addService() {
+  function addService(template = null) {
     const updated = deepClone(compose)
-    const baseName = 'service'
-    let n = 1
-    while (updated.services?.[`${baseName}${n}`]) n++
     if (!updated.services) updated.services = {}
-    updated.services[`${baseName}${n}`] = { image: '' }
+    const baseName = template?.id === 'blank' || !template ? 'service' : template.id.replace(/-/g, '_')
+    let name = baseName
+    let n = 1
+    while (updated.services[name]) { n++; name = `${baseName}${n}` }
+    updated.services[name] = template?.config ? deepClone(template.config) : { image: '', restart: 'unless-stopped' }
+    emitChange(updated)
+    showTemplatesPicker = false
+    editingServices = new Set([...editingServices, name])
+  }
+
+  // ---- Delete service ----
+  function deleteService(name) {
+    const updated = deepClone(compose)
+    delete updated.services[name]
+    for (const [k, svc] of Object.entries(updated.services)) {
+      if (!svc.depends_on) continue
+      if (Array.isArray(svc.depends_on)) {
+        svc.depends_on = svc.depends_on.filter(d => d !== name)
+        if (!svc.depends_on.length) delete svc.depends_on
+      } else {
+        delete svc.depends_on[name]
+        if (!Object.keys(svc.depends_on).length) delete svc.depends_on
+      }
+    }
+    editingServices.delete(name)
+    editingServices = new Set(editingServices)
+    emitChange(updated)
+  }
+
+  // ---- Move service ----
+  function moveService(name, direction) {
+    const names = Object.keys(compose.services || {})
+    const idx = names.indexOf(name)
+    if (idx === -1) return
+    const newIdx = idx + direction
+    if (newIdx < 0 || newIdx >= names.length) return
+    ;[names[idx], names[newIdx]] = [names[newIdx], names[idx]]
+    const updated = deepClone(compose)
+    const reordered = {}
+    for (const n of names) reordered[n] = updated.services[n]
+    updated.services = reordered
     emitChange(updated)
   }
 
@@ -388,6 +436,9 @@
 
   // Confirmation state for move-to-env
   let envConfirm = $state(null) // { svcName, envName, envValue }
+  let deleteConfirmService = $state(null)
+  let showTemplatesPicker = $state(false)
+  let autoFilledServices = $state(new Set())
 
   function requestMoveToEnvFile(svcName, envName, envValue) {
     envConfirm = { svcName, envName, envValue }
@@ -606,14 +657,26 @@
         {@const vols = parseVolumes(svc)}
         {@const ports = parsePorts(svc)}
         {@const labels = parseLabels(svc)}
+        {@const hcSuggestion = getHealthcheckSuggestion(svc.image)}
+        {@const topNetworks = Object.keys(compose.networks || {})}
 
         {#if !isServiceEditing(svcName)}
           <!-- Read-only card -->
           <div class="bg-surface-1 border border-border/30 rounded-lg px-4 py-3 space-y-2">
             <div class="flex items-center justify-between">
               <span class="text-sm font-semibold text-text-primary font-mono">{svcName}</span>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1">
                 <span class="text-xs text-text-muted font-mono">{svc.image || 'no image'}</span>
+                {#if svcIdx > 0}
+                  <button onclick={() => moveService(svcName, -1)} class="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors" title="Move up">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>
+                  </button>
+                {/if}
+                {#if svcIdx < serviceNames.length - 1}
+                  <button onclick={() => moveService(svcName, 1)} class="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors" title="Move down">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                {/if}
                 <button onclick={() => toggleServiceEdit(svcName)} class="p-1 rounded text-text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Edit {svcName}">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                 </button>
@@ -676,6 +739,18 @@
               {#if labels.length > 0}
                 <span>{labels.length} label{labels.length > 1 ? 's' : ''}</span>
               {/if}
+              {#if svc.container_name}
+                <span>name: {svc.container_name}</span>
+              {/if}
+              {#if svc.logging?.driver}
+                <span>logging: {svc.logging.driver}</span>
+              {/if}
+              {#if svc.init}
+                <span>init</span>
+              {/if}
+              {#if svc.read_only}
+                <span>read-only</span>
+              {/if}
             </div>
           </div>
         {:else}
@@ -705,7 +780,12 @@
                   </svg>
                 </button>
               {/if}
-              <button type="button" onclick={() => toggleServiceEdit(svcName)} class="px-3 py-1 text-xs font-medium rounded-lg bg-accent text-surface-0 hover:bg-accent/90 transition-colors shadow-sm">Done</button>
+              <div class="flex items-center gap-1.5">
+                <button type="button" onclick={() => deleteConfirmService = svcName} class="p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors" title="Delete service">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+                <button type="button" onclick={() => toggleServiceEdit(svcName)} class="px-3 py-1 text-xs font-medium rounded-lg bg-accent text-surface-0 hover:bg-accent/90 transition-colors shadow-sm">Done</button>
+              </div>
             </div>
 
           <!-- Essential: Image + Restart + Command -->
@@ -717,13 +797,39 @@
                 value={svc.image ?? ''}
                 placeholder="e.g. nginx:alpine"
                 oninput={(e) => {
-                  validateImage(svcName, e.currentTarget.value)
-                  updateService(svcName, 'image', e.currentTarget.value)
+                  const val = e.currentTarget.value
+                  validateImage(svcName, val)
+                  updateService(svcName, 'image', val)
+                }}
+                onblur={(e) => {
+                  const val = e.currentTarget.value
+                  if (!val) return
+                  const defaults = getImageDefaults(val)
+                  if (!defaults) return
+                  const current = compose.services[svcName]
+                  const needsFill = (!current.environment || !Object.keys(current.environment).length) && defaults.environment
+                    || (!current.volumes?.length && defaults.volumes)
+                    || (!current.healthcheck?.test && defaults.healthcheck)
+                  if (!needsFill) return
+                  updateServiceDirect(svcName, (s) => {
+                    if ((!s.environment || !Object.keys(s.environment).length) && defaults.environment) s.environment = { ...defaults.environment }
+                    if (!s.volumes?.length && defaults.volumes) s.volumes = [...defaults.volumes]
+                    if (!s.healthcheck?.test && defaults.healthcheck) s.healthcheck = { ...defaults.healthcheck }
+                    if (!s.ports?.length && defaults.ports) s.ports = [...defaults.ports]
+                    if (!s.command && defaults.command) s.command = defaults.command
+                  })
+                  autoFilledServices = new Set([...autoFilledServices, svcName])
                 }}
                 class={inputCls(`services.${svcName}.image`)}
               />
               {#if errors[`services.${svcName}.image`]}
                 <p class="text-xs text-danger mt-0.5">{errors[`services.${svcName}.image`]}</p>
+              {/if}
+              {#if autoFilledServices.has(svcName)}
+                <p class="text-xs text-accent mt-0.5 flex items-center gap-1">
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                  Auto-filled defaults based on image. You can edit all fields.
+                </p>
               {/if}
             </div>
             <div>
@@ -747,6 +853,26 @@
                 placeholder="e.g. node server.js"
                 oninput={(e) => updateService(svcName, 'command', e.currentTarget.value)}
                 class={inputCls(`services.${svcName}.command`)}
+              />
+            </div>
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">Container Name</label>
+              <input
+                type="text"
+                value={svc.container_name ?? ''}
+                placeholder="Optional fixed name"
+                oninput={(e) => updateService(svcName, 'container_name', e.currentTarget.value)}
+                class={inputCls(`services.${svcName}.container_name`)}
+              />
+            </div>
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">Entrypoint</label>
+              <input
+                type="text"
+                value={Array.isArray(svc.entrypoint) ? svc.entrypoint.join(' ') : (svc.entrypoint ?? '')}
+                placeholder="Override default entrypoint"
+                oninput={(e) => updateService(svcName, 'entrypoint', e.currentTarget.value)}
+                class={inputCls(`services.${svcName}.entrypoint`)}
               />
             </div>
           </div>
@@ -902,24 +1028,75 @@
               </svg>
               Add
             </button>
+            {#if svc.env_file}
+              <div class="pt-1">
+                <RepeatableField
+                  label="Env Files"
+                  hint="Additional .env files to load"
+                  rows={(Array.isArray(svc.env_file) ? svc.env_file : [svc.env_file]).map(f => ({ path: f }))}
+                  fields={[{ key: 'path', placeholder: '.env.production' }]}
+                  onchange={(rows) => updateServiceDirect(svcName, (s) => {
+                    const files = rows.filter(r => r.path).map(r => r.path)
+                    if (files.length) s.env_file = files
+                    else delete s.env_file
+                  })}
+                />
+              </div>
+            {/if}
           </div>
 
           <!-- Volumes -->
           <div class="pt-2 border-t border-border/20">
-          <RepeatableField
-            label="Volumes"
-            hint="Mount host path or named volume"
-            rows={parseVolumes(svc)}
-            fields={[
-              { key: 'source', placeholder: 'Host path or volume' },
-              { key: 'target', placeholder: 'Container path' },
-            ]}
-            onchange={(rows) => updateServiceDirect(svcName, (s) => {
-              const serialized = serializeVolumes(rows)
-              if (serialized.length) s.volumes = serialized
-              else delete s.volumes
-            })}
-          />
+            <div class="space-y-2">
+              <div>
+                <span class="text-xs font-medium text-text-primary">Volumes</span>
+                <span class="text-xs text-text-muted ml-1.5">Mount host path or named volume</span>
+              </div>
+              {#each parseVolumes(svc) as vol, vi}
+                <div class="flex items-center gap-2">
+                  <input type="text" placeholder="Host path or volume" value={vol.source}
+                    oninput={(e) => {
+                      const rows = parseVolumes(svc)
+                      rows[vi] = { ...rows[vi], source: e.currentTarget.value }
+                      updateServiceDirect(svcName, (s) => { const ser = serializeVolumes(rows); if (ser.length) s.volumes = ser; else delete s.volumes })
+                    }}
+                    class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                  />
+                  <input type="text" placeholder="Container path" value={vol.target}
+                    oninput={(e) => {
+                      const rows = parseVolumes(svc)
+                      rows[vi] = { ...rows[vi], target: e.currentTarget.value }
+                      updateServiceDirect(svcName, (s) => { const ser = serializeVolumes(rows); if (ser.length) s.volumes = ser; else delete s.volumes })
+                    }}
+                    class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                  />
+                  <label class="flex items-center gap-1 text-xs text-text-muted cursor-pointer whitespace-nowrap" title="Read-only mount">
+                    <input type="checkbox" checked={vol.ro}
+                      onchange={(e) => {
+                        const rows = parseVolumes(svc)
+                        rows[vi] = { ...rows[vi], ro: e.currentTarget.checked }
+                        updateServiceDirect(svcName, (s) => { const ser = serializeVolumes(rows); if (ser.length) s.volumes = ser; else delete s.volumes })
+                      }}
+                      class="rounded border-border bg-input-bg accent-accent"
+                    />
+                    ro
+                  </label>
+                  <button type="button" onclick={() => {
+                    const rows = parseVolumes(svc).filter((_, idx) => idx !== vi)
+                    updateServiceDirect(svcName, (s) => { const ser = serializeVolumes(rows); if (ser.length) s.volumes = ser; else delete s.volumes })
+                  }} class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors" aria-label="Remove volume">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                </div>
+              {/each}
+              <button type="button" onclick={() => {
+                const rows = [...parseVolumes(svc), { source: '', target: '', ro: false }]
+                updateServiceDirect(svcName, (s) => { s.volumes = serializeVolumes(rows) })
+              }} class="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary hover:bg-surface-3 px-2 py-1 rounded transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+                Add
+              </button>
+            </div>
           </div>
 
           <!-- Labels (non-SD) -->
@@ -950,20 +1127,53 @@
                   <p class="text-xs text-blue-400 bg-blue-500/10 rounded-md px-3 py-2 mb-2">
                     For HTTP services, use Endpoint settings above. Port mappings expose directly on the host and bypass the reverse proxy.
                   </p>
-                  <RepeatableField
-                    label="Ports"
-                    hint="Map host port to container port"
-                    rows={parsePorts(svc)}
-                    fields={[
-                      { key: 'host', placeholder: 'Host port' },
-                      { key: 'container', placeholder: 'Container port' },
-                    ]}
-                    onchange={(rows) => updateServiceDirect(svcName, (s) => {
-                      const serialized = serializePorts(rows)
-                      if (serialized.length) s.ports = serialized
-                      else delete s.ports
-                    })}
-                  />
+                  <div class="space-y-2">
+                    <span class="text-xs font-medium text-text-primary">Ports</span>
+                    {#each parsePorts(svc) as port, pi}
+                      <div class="flex items-center gap-2">
+                        <input type="text" placeholder="Host port" value={port.host}
+                          oninput={(e) => {
+                            const rows = parsePorts(svc)
+                            rows[pi] = { ...rows[pi], host: e.currentTarget.value }
+                            updateServiceDirect(svcName, (s) => { const ser = serializePorts(rows); if (ser.length) s.ports = ser; else delete s.ports })
+                          }}
+                          class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                        />
+                        <input type="text" placeholder="Container port" value={port.container}
+                          oninput={(e) => {
+                            const rows = parsePorts(svc)
+                            rows[pi] = { ...rows[pi], container: e.currentTarget.value }
+                            updateServiceDirect(svcName, (s) => { const ser = serializePorts(rows); if (ser.length) s.ports = ser; else delete s.ports })
+                          }}
+                          class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                        />
+                        <select value={port.protocol}
+                          onchange={(e) => {
+                            const rows = parsePorts(svc)
+                            rows[pi] = { ...rows[pi], protocol: e.currentTarget.value }
+                            updateServiceDirect(svcName, (s) => { const ser = serializePorts(rows); if (ser.length) s.ports = ser; else delete s.ports })
+                          }}
+                          class="w-16 bg-input-bg border border-border rounded px-1.5 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50"
+                        >
+                          <option value="tcp">TCP</option>
+                          <option value="udp">UDP</option>
+                        </select>
+                        <button type="button" onclick={() => {
+                          const rows = parsePorts(svc).filter((_, idx) => idx !== pi)
+                          updateServiceDirect(svcName, (s) => { const ser = serializePorts(rows); if (ser.length) s.ports = ser; else delete s.ports })
+                        }} class="flex-shrink-0 p-1.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition-colors" aria-label="Remove port">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    {/each}
+                    <button type="button" onclick={() => {
+                      const rows = [...parsePorts(svc), { host: '', container: '', protocol: 'tcp' }]
+                      updateServiceDirect(svcName, (s) => { s.ports = serializePorts(rows) })
+                    }} class="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary hover:bg-surface-3 px-2 py-1 rounded transition-colors">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+                      Add
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Resource Limits -->
@@ -1057,6 +1267,16 @@
                         class={inputCls(`services.${svcName}.hc.test`)}
                       />
                       <p class="text-xs text-text-muted mt-0.5">Health check command, e.g. curl -f http://localhost/</p>
+                      {#if hcSuggestion && !svc.healthcheck?.test}
+                        <button
+                          type="button"
+                          onclick={() => updateService(svcName, 'healthcheck.test', ['CMD-SHELL', hcSuggestion])}
+                          class="text-xs text-accent hover:text-accent/80 mt-1 flex items-center gap-1"
+                        >
+                          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                          Use: {hcSuggestion}
+                        </button>
+                      {/if}
                     </div>
                     <div>
                       <label class="block text-xs text-text-secondary mb-1">Interval</label>
@@ -1152,6 +1372,187 @@
                   </div>
                 {/if}
 
+                <!-- Network assignments -->
+                {#if topNetworks.length > 0}
+                  <div>
+                    <p class="text-xs font-medium text-text-primary mb-1">Networks</p>
+                    <p class="text-xs text-text-muted mb-2">Attach this service to defined networks</p>
+                    <div class="space-y-1.5">
+                      {#each topNetworks as net}
+                        {@const svcNets = svc.networks}
+                        {@const isAttached = Array.isArray(svcNets) ? svcNets.includes(net) : (svcNets ? net in svcNets : false)}
+                        <label class="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isAttached}
+                            onchange={(e) => {
+                              updateServiceDirect(svcName, (s) => {
+                                let nets = s.networks || []
+                                if (Array.isArray(nets)) {
+                                  if (e.currentTarget.checked) nets = [...nets, net]
+                                  else nets = nets.filter(n => n !== net)
+                                } else {
+                                  nets = { ...nets }
+                                  if (e.currentTarget.checked) nets[net] = {}
+                                  else delete nets[net]
+                                }
+                                const isEmpty = Array.isArray(nets) ? !nets.length : !Object.keys(nets).length
+                                if (isEmpty) delete s.networks
+                                else s.networks = nets
+                              })
+                            }}
+                            class="rounded border-border bg-input-bg accent-accent"
+                          />
+                          <span class="text-sm text-text-primary">{net}</span>
+                        </label>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+
+                <!-- Logging -->
+                <div>
+                  <p class="text-xs font-medium text-text-primary mb-2">Logging</p>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="col-span-2">
+                      <label class="block text-xs text-text-secondary mb-1">Driver</label>
+                      <select
+                        value={svc.logging?.driver ?? ''}
+                        onchange={(e) => {
+                          const val = e.currentTarget.value
+                          updateServiceDirect(svcName, (s) => {
+                            if (!val) { delete s.logging; return }
+                            if (!s.logging) s.logging = {}
+                            s.logging.driver = val
+                            if (val === 'json-file' || val === 'local') {
+                              if (!s.logging.options) s.logging.options = { 'max-size': '10m', 'max-file': '3' }
+                            } else if (val === 'none') {
+                              delete s.logging.options
+                            }
+                          })
+                        }}
+                        class={inputCls(`services.${svcName}.logging`)}
+                      >
+                        <option value="">default</option>
+                        <option value="json-file">json-file</option>
+                        <option value="local">local</option>
+                        <option value="syslog">syslog</option>
+                        <option value="none">none</option>
+                      </select>
+                    </div>
+                    {#if svc.logging?.driver === 'json-file' || svc.logging?.driver === 'local'}
+                      <div>
+                        <label class="block text-xs text-text-secondary mb-1">Max Size</label>
+                        <input
+                          type="text"
+                          value={svc.logging?.options?.['max-size'] ?? '10m'}
+                          placeholder="10m"
+                          oninput={(e) => updateService(svcName, 'logging.options.max-size', e.currentTarget.value)}
+                          class={inputCls(`services.${svcName}.log.maxsize`)}
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-xs text-text-secondary mb-1">Max Files</label>
+                        <input
+                          type="text"
+                          value={svc.logging?.options?.['max-file'] ?? '3'}
+                          placeholder="3"
+                          oninput={(e) => updateService(svcName, 'logging.options.max-file', e.currentTarget.value)}
+                          class={inputCls(`services.${svcName}.log.maxfile`)}
+                        />
+                      </div>
+                    {/if}
+                    {#if svc.logging?.driver === 'syslog'}
+                      <div class="col-span-2">
+                        <label class="block text-xs text-text-secondary mb-1">Syslog Address</label>
+                        <input
+                          type="text"
+                          value={svc.logging?.options?.['syslog-address'] ?? ''}
+                          placeholder="udp://logs.example.com:514"
+                          oninput={(e) => updateService(svcName, 'logging.options.syslog-address', e.currentTarget.value)}
+                          class={inputCls(`services.${svcName}.log.syslog`)}
+                        />
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+                <!-- Extra Hosts -->
+                <RepeatableField
+                  label="Extra Hosts"
+                  hint="Custom /etc/hosts entries"
+                  rows={(svc.extra_hosts || []).map(h => { const [hostname, ip] = h.split(':'); return { hostname: hostname ?? '', ip: ip ?? '' } })}
+                  fields={[
+                    { key: 'hostname', placeholder: 'hostname' },
+                    { key: 'ip', placeholder: 'IP address' },
+                  ]}
+                  onchange={(rows) => updateServiceDirect(svcName, (s) => {
+                    const hosts = rows.filter(r => r.hostname && r.ip).map(r => `${r.hostname}:${r.ip}`)
+                    if (hosts.length) s.extra_hosts = hosts
+                    else delete s.extra_hosts
+                  })}
+                />
+
+                <!-- User + Pull Policy -->
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-xs text-text-secondary mb-1">User</label>
+                    <input
+                      type="text"
+                      value={svc.user ?? ''}
+                      placeholder="e.g. 1000:1000"
+                      oninput={(e) => updateService(svcName, 'user', e.currentTarget.value)}
+                      class={inputCls(`services.${svcName}.user`)}
+                    />
+                    <p class="text-xs text-text-muted mt-0.5">Run as specific user:group</p>
+                  </div>
+                  <div>
+                    <label class="block text-xs text-text-secondary mb-1">Pull Policy</label>
+                    <select
+                      value={svc.pull_policy ?? ''}
+                      onchange={(e) => updateService(svcName, 'pull_policy', e.currentTarget.value)}
+                      class={inputCls(`services.${svcName}.pull_policy`)}
+                    >
+                      <option value="">default</option>
+                      <option value="always">always</option>
+                      <option value="missing">missing</option>
+                      <option value="never">never</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Stop Grace Period -->
+                <div>
+                  <label class="block text-xs text-text-secondary mb-1">Stop Grace Period</label>
+                  <input
+                    type="text"
+                    value={svc.stop_grace_period ?? ''}
+                    placeholder="e.g. 30s"
+                    oninput={(e) => updateService(svcName, 'stop_grace_period', e.currentTarget.value)}
+                    class={inputCls(`services.${svcName}.stop_grace`)}
+                  />
+                  <p class="text-xs text-text-muted mt-0.5">Time to wait before force-killing</p>
+                </div>
+
+                <!-- Checkboxes -->
+                <div class="flex flex-wrap gap-x-6 gap-y-2">
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={svc.init ?? false}
+                      onchange={(e) => updateService(svcName, 'init', e.currentTarget.checked || undefined)}
+                      class="rounded border-border bg-input-bg accent-accent"
+                    />
+                    <span class="text-sm text-text-primary">Init process</span>
+                    <span class="text-xs text-text-muted">(PID 1 reaper)</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={svc.read_only ?? false}
+                      onchange={(e) => updateService(svcName, 'read_only', e.currentTarget.checked || undefined)}
+                      class="rounded border-border bg-input-bg accent-accent"
+                    />
+                    <span class="text-sm text-text-primary">Read-only filesystem</span>
+                  </label>
+                </div>
+
               </div>
             </AccordionSection>
           </div>
@@ -1160,16 +1561,32 @@
       {/each}
 
       <!-- Add Service -->
-      <button
-        type="button"
-        onclick={addService}
-        class="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-surface-3 px-3 py-2 rounded-md border border-dashed border-border transition-colors w-full justify-center"
-      >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-        </svg>
-        Add Service
-      </button>
+      <div class="relative">
+        <button
+          type="button"
+          onclick={() => showTemplatesPicker = !showTemplatesPicker}
+          class="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-surface-3 px-3 py-2 rounded-md border border-dashed border-border transition-colors w-full justify-center"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          Add Service
+        </button>
+        {#if showTemplatesPicker}
+          <div class="absolute left-0 right-0 top-full mt-1 bg-surface-2 border border-border/50 rounded-xl shadow-xl z-20 p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            {#each serviceTemplates as tpl}
+              <button
+                type="button"
+                onclick={() => addService(tpl)}
+                class="flex flex-col items-center gap-1 px-3 py-2.5 rounded-lg hover:bg-surface-hover transition-colors text-center"
+              >
+                <span class="text-lg">{tpl.icon}</span>
+                <span class="text-xs font-medium text-text-primary">{tpl.name}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
   </AccordionSection>
 
@@ -1314,6 +1731,21 @@
   </AccordionSection>
 
 </div>
+
+<!-- Delete service confirmation -->
+{#if deleteConfirmService}
+  <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+    <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={() => deleteConfirmService = null} aria-label="Close"></button>
+    <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md shadow-2xl animate-scale-in">
+      <h3 class="text-lg font-semibold text-text-primary tracking-tight mb-2">Delete service?</h3>
+      <p class="text-sm text-text-secondary mb-5">Remove <span class="font-mono font-medium text-text-primary">{deleteConfirmService}</span> and clean up all references to it.</p>
+      <div class="flex justify-end gap-2">
+        <button onclick={() => deleteConfirmService = null} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>
+        <button onclick={() => { deleteService(deleteConfirmService); deleteConfirmService = null }} class="px-4 py-2 text-sm bg-danger text-white rounded-lg hover:bg-danger/90 transition-colors shadow-sm">Delete</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- Confirmation dialog for moving env var to .env file -->
 {#if envConfirm}
