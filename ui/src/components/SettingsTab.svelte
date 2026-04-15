@@ -95,12 +95,14 @@
   function tlsBadgeVariant(tls) {
     if (tls === 'letsencrypt') return 'success'
     if (tls === 'custom') return 'info'
+    if (tls === 'local') return 'warning'
     return 'warning'
   }
 
   function tlsLabel(tls) {
     if (tls === 'letsencrypt') return 'Auto TLS'
     if (tls === 'custom') return 'Custom TLS'
+    if (tls === 'local') return 'Local CA'
     return 'No TLS'
   }
 
@@ -135,10 +137,18 @@
           <select bind:value={editEndpoint.tls} class={inputClass}>
             <option value="letsencrypt">Let's Encrypt (auto)</option>
             <option value="custom">Custom certificate</option>
+            <option value="local">Local (internal CA)</option>
             <option value="off">Off</option>
           </select>
         </div>
       </div>
+      {#if editEndpoint.tls === 'local'}
+        <div class="col-span-full bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+          <p class="text-xs text-amber-400">Browsers will show security warnings unless you install the root certificate on each device.
+            <a href="/trust" target="_blank" rel="noopener" class="underline hover:text-amber-300">Install instructions</a>
+          </p>
+        </div>
+      {/if}
       {#if editEndpoint.tls === 'custom' && editEndpoint.domain}
         <div class="bg-surface-2/50 rounded-md p-2.5 space-y-2 border border-border/30">
           <p class="text-[11px] text-text-muted">Custom certificate for <span class="font-mono text-text-primary">{editEndpoint.domain}</span></p>
