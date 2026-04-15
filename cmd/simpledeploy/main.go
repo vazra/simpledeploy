@@ -375,6 +375,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ListenAddr: cfg.ListenAddr,
 		TLSMode:    cfg.TLS.Mode,
 		TLSEmail:   cfg.TLS.Email,
+		DataDir:    cfg.DataDir,
 	}
 	caddyProxy := proxy.NewCaddyProxy(proxyCfg)
 	defer caddyProxy.Stop()
