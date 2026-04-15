@@ -104,3 +104,51 @@ func TestLoadConfigInvalidYAML(t *testing.T) {
 		t.Fatal("expected error for invalid YAML")
 	}
 }
+
+func TestValidate_ValidModes(t *testing.T) {
+	validModes := []string{"", "auto", "custom", "off", "local"}
+	for _, mode := range validModes {
+		cfg := DefaultConfig()
+		cfg.TLS.Mode = mode
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("mode %q: expected no error, got %v", mode, err)
+		}
+	}
+}
+
+func TestValidate_InvalidMode(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TLS.Mode = "invalid"
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error for mode 'invalid', got nil")
+	}
+}
+
+func TestLoad_ValidLocalMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := "tls:\n  mode: local\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if cfg.TLS.Mode != "local" {
+		t.Errorf("expected mode 'local', got %q", cfg.TLS.Mode)
+	}
+}
+
+func TestLoad_InvalidMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := "tls:\n  mode: bogus\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for invalid tls mode, got nil")
+	}
+}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -71,6 +72,15 @@ func DefaultConfig() *Config {
 	}
 }
 
+func (c *Config) Validate() error {
+	switch c.TLS.Mode {
+	case "", "auto", "custom", "off", "local":
+		return nil
+	default:
+		return fmt.Errorf("invalid tls.mode %q: must be one of auto, custom, off, local, or empty", c.TLS.Mode)
+	}
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -79,6 +89,9 @@ func Load(path string) (*Config, error) {
 
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
