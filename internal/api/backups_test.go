@@ -141,3 +141,67 @@ func TestDeleteBackupConfig(t *testing.T) {
 		t.Fatalf("status = %d, want 204", w.Code)
 	}
 }
+
+func TestBackupSummary(t *testing.T) {
+	srv, s := newTestServer(t)
+	s.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", ComposePath: "/tmp/1.yml", Status: "running"}, nil)
+	app, _ := s.GetAppBySlug("myapp")
+	cfg := &store.BackupConfig{
+		AppID:          app.ID,
+		Strategy:       "postgres",
+		Target:         "local",
+		ScheduleCron:   "0 2 * * *",
+		RetentionCount: 3,
+	}
+	s.CreateBackupConfig(cfg)
+	s.CreateBackupRun(cfg.ID)
+
+	cookie := superAdminCookie(t, srv.jwt)
+	req := httptest.NewRequest(http.MethodGet, "/api/backups/summary", nil)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Apps       []interface{} `json:"apps"`
+		RecentRuns []interface{} `json:"recent_runs"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Apps) == 0 {
+		t.Error("expected at least one app in summary")
+	}
+	if resp.RecentRuns == nil {
+		t.Error("expected recent_runs to be non-nil (even if empty)")
+	}
+}
+
+func TestTriggerBackupConfig(t *testing.T) {
+	srv, s := newTestServer(t)
+	s.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", ComposePath: "/tmp/1.yml", Status: "running"}, nil)
+	app, _ := s.GetAppBySlug("myapp")
+	cfg := &store.BackupConfig{
+		AppID:          app.ID,
+		Strategy:       "postgres",
+		Target:         "local",
+		ScheduleCron:   "0 2 * * *",
+		RetentionCount: 3,
+	}
+	s.CreateBackupConfig(cfg)
+
+	cookie := superAdminCookie(t, srv.jwt)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/backups/configs/%d/run", cfg.ID), nil)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	// no scheduler configured -> 503
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", w.Code)
+	}
+}

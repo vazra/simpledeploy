@@ -234,6 +234,12 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackup)))
 	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
 
+	// Backup dashboard & detection
+	s.mux.Handle("GET /api/backups/summary", s.authMiddleware(http.HandlerFunc(s.handleBackupSummary)))
+	s.mux.Handle("GET /api/apps/{slug}/backups/detect", s.authMiddleware(http.HandlerFunc(s.handleDetectStrategies)))
+	s.mux.Handle("POST /api/backups/configs/{id}/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackupConfig)))
+	s.mux.Handle("POST /api/backups/test-s3", s.authMiddleware(http.HandlerFunc(s.handleTestS3)))
+
 	// Docker system management
 	s.mux.Handle("GET /api/docker/info", s.authMiddleware(http.HandlerFunc(s.handleDockerInfo)))
 	s.mux.Handle("GET /api/docker/disk-usage", s.authMiddleware(http.HandlerFunc(s.handleDockerDiskUsage)))
