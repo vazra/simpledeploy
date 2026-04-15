@@ -201,6 +201,27 @@ func TestResolveRoutesEmptyAllowedIPs(t *testing.T) {
 	}
 }
 
+func TestResolveRoutesLocalTLS(t *testing.T) {
+	app := makeApp("localapp",
+		[]compose.EndpointConfig{
+			{Domain: "app.home.lan", Port: "3000", TLS: "local", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("3000", "3000")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	if routes[0].TLS != "local" {
+		t.Errorf("TLS = %q, want %q", routes[0].TLS, "local")
+	}
+}
+
 func TestResolveRoutesSkipsEmptyDomain(t *testing.T) {
 	app := makeApp("partial",
 		[]compose.EndpointConfig{
