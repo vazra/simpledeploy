@@ -41,6 +41,11 @@ export async function startServer(binPath) {
     `log_buffer_size: 100`,
     `tls:`,
     `  mode: "off"`,
+    `ratelimit:`,
+    `  requests: 10000`,
+    `  window: "60s"`,
+    `  burst: 5000`,
+    `  by: "ip"`,
   ].join('\n');
 
   writeFileSync(configPath, config);
