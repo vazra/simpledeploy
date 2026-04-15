@@ -18,8 +18,9 @@ type Proxy interface {
 // CaddyConfig holds configuration for a CaddyProxy.
 type CaddyConfig struct {
 	ListenAddr string // e.g. ":443"
-	TLSMode    string // "auto", "custom", "off"
+	TLSMode    string // "auto", "custom", "off", "local"
 	TLSEmail   string // ACME email, used when TLSMode is "auto"
+	DataDir    string // data directory for Caddy storage
 }
 
 // CaddyProxy is a Proxy backed by Caddy.
@@ -29,6 +30,7 @@ type CaddyProxy struct {
 	listenAddr string
 	tlsMode    string
 	tlsEmail   string
+	dataDir    string
 }
 
 // NewCaddyProxy creates a CaddyProxy from the given config.
@@ -37,6 +39,7 @@ func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 		listenAddr: cfg.ListenAddr,
 		tlsMode:    cfg.TLSMode,
 		tlsEmail:   cfg.TLSEmail,
+		dataDir:    cfg.DataDir,
 	}
 }
 
@@ -151,6 +154,13 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		},
 	}
 
+	if c.tlsMode == "local" && c.dataDir != "" {
+		cfg["storage"] = map[string]interface{}{
+			"module": "file_system",
+			"root":   filepath.Join(c.dataDir, "caddy"),
+		}
+	}
+
 	// Build TLS config
 	tlsCfg := map[string]interface{}{}
 	hasTLS := false
@@ -163,6 +173,21 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 						map[string]interface{}{
 							"module": "acme",
 							"email":  c.tlsEmail,
+						},
+					},
+				},
+			},
+		}
+		hasTLS = true
+	}
+
+	if c.tlsMode == "local" {
+		tlsCfg["automation"] = map[string]interface{}{
+			"policies": []interface{}{
+				map[string]interface{}{
+					"issuers": []interface{}{
+						map[string]interface{}{
+							"module": "internal",
 						},
 					},
 				},

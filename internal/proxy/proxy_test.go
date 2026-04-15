@@ -136,6 +136,64 @@ func TestBuildConfigHandlerOrder(t *testing.T) {
 	}
 }
 
+func TestBuildConfigTLSLocal(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr: ":443",
+		TLSMode:    "local",
+	})
+	cfg := parseConfig(t, p)
+	server := getServer(t, cfg)
+
+	if _, ok := server["automatic_https"]; ok {
+		t.Error("automatic_https should not be set for local TLS mode")
+	}
+
+	apps := cfg["apps"].(map[string]interface{})
+	tlsApp, ok := apps["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatal("apps.tls not set")
+	}
+	automation, ok := tlsApp["automation"].(map[string]interface{})
+	if !ok {
+		t.Fatal("tls.automation not set")
+	}
+	policies, ok := automation["policies"].([]interface{})
+	if !ok || len(policies) != 1 {
+		t.Fatalf("tls.automation.policies: got %v, want 1 entry", policies)
+	}
+	policy := policies[0].(map[string]interface{})
+	issuers, ok := policy["issuers"].([]interface{})
+	if !ok || len(issuers) != 1 {
+		t.Fatalf("policy.issuers: got %v, want 1 entry", issuers)
+	}
+	issuer := issuers[0].(map[string]interface{})
+	if issuer["module"] != "internal" {
+		t.Errorf("issuer.module: got %v, want \"internal\"", issuer["module"])
+	}
+}
+
+func TestBuildConfigTLSLocalStorage(t *testing.T) {
+	dataDir := "/tmp/testdata"
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr: ":443",
+		TLSMode:    "local",
+		DataDir:    dataDir,
+	})
+	cfg := parseConfig(t, p)
+
+	storage, ok := cfg["storage"].(map[string]interface{})
+	if !ok {
+		t.Fatal("storage not set")
+	}
+	if storage["module"] != "file_system" {
+		t.Errorf("storage.module: got %v, want \"file_system\"", storage["module"])
+	}
+	wantRoot := dataDir + "/caddy"
+	if storage["root"] != wantRoot {
+		t.Errorf("storage.root: got %v, want %q", storage["root"], wantRoot)
+	}
+}
+
 // --- MockProxy tests ---
 
 func TestMockProxySetRoutes(t *testing.T) {
