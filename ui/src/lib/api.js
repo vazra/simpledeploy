@@ -123,6 +123,7 @@ export const api = {
   putEnv: (slug, vars) => requestWithToast('PUT', `/apps/${slug}/env`, vars, 'Environment saved'),
   getComposeVersions: (slug) => request('GET', `/apps/${slug}/versions`),
   rollbackApp: (slug, versionId) => requestWithToast('POST', `/apps/${slug}/rollback`, { version_id: versionId }, 'Rolled back'),
+  deleteVersion: (slug, id) => requestWithToast('DELETE', `/apps/${slug}/versions/${id}`, null, 'Version deleted'),
   getDeployEvents: (slug) => request('GET', `/apps/${slug}/events`),
   updateDomain: (slug, domain) => requestWithToast('PUT', `/apps/${slug}/domain`, { domain }, 'Domain updated'),
   updateEndpoints: (slug, endpoints) => requestWithToast('PUT', `/apps/${slug}/endpoints`, endpoints, 'Endpoints updated'),

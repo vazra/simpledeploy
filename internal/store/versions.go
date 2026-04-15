@@ -100,6 +100,19 @@ func (s *Store) GetComposeVersion(id int64) (*ComposeVersion, error) {
 	return &v, nil
 }
 
+// DeleteComposeVersion removes a single version by ID.
+func (s *Store) DeleteComposeVersion(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM compose_versions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete compose version: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("compose version %d not found", id)
+	}
+	return nil
+}
+
 // CreateDeployEvent records an action (deploy/rollback) for an app.
 func (s *Store) CreateDeployEvent(appSlug, action string, userID *int64, detail string) error {
 	_, err := s.db.Exec(`

@@ -204,6 +204,7 @@ func (s *Server) routes() {
 	// Deploy history
 	s.mux.Handle("GET /api/apps/{slug}/versions", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListVersions))))
 	s.mux.Handle("POST /api/apps/{slug}/rollback", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRollback))))
+	s.mux.Handle("DELETE /api/apps/{slug}/versions/{id}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDeleteVersion))))
 	s.mux.Handle("GET /api/apps/{slug}/events", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListDeployEvents))))
 
 	// Webhooks
