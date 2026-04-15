@@ -56,10 +56,10 @@
     detecting = true
     const res = await api.detectStrategies(slug)
     detecting = false
-    if (res.data) {
-      strategies = res.data
+    if (res.data?.strategies) {
+      strategies = res.data.strategies
       const first = strategies.find(s => s.available)
-      if (first) selectedStrategy = first.name
+      if (first) selectedStrategy = first.type
     }
   }
 
@@ -102,17 +102,10 @@
     }
   }
 
-  function strategyLabel(name) {
-    if (name === 'postgres') return 'PostgreSQL'
-    if (name === 'volume') return 'Docker Volume'
-    return name
-  }
-
-  function strategyDescription(s) {
-    if (s.description) return s.description
-    if (s.name === 'postgres') return 'Dump and restore PostgreSQL databases'
-    if (s.name === 'volume') return 'Snapshot Docker named volumes'
-    return ''
+  function strategyLabel(type) {
+    if (type === 'postgres') return 'Database (PostgreSQL)'
+    if (type === 'volume') return 'Files & Volumes'
+    return type
   }
 
   const inputClass = 'w-full bg-input-bg border border-border/50 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50'
@@ -158,20 +151,20 @@
           <button
             type="button"
             disabled={!strategy.available}
-            onclick={() => strategy.available && (selectedStrategy = strategy.name)}
-            class="{cardClass} {selectedStrategy === strategy.name ? selectedCardClass : unselectedCardClass} {!strategy.available ? 'opacity-50 cursor-not-allowed' : ''}"
+            onclick={() => strategy.available && (selectedStrategy = strategy.type)}
+            class="{cardClass} {selectedStrategy === strategy.type ? selectedCardClass : unselectedCardClass} {!strategy.available ? 'opacity-50 cursor-not-allowed' : ''}"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="flex-1">
                 <div class="flex items-center gap-2 mb-1">
-                  <span class="text-sm font-medium text-text-primary">{strategyLabel(strategy.name)}</span>
+                  <span class="text-sm font-medium text-text-primary">{strategy.label || strategyLabel(strategy.type)}</span>
                   {#if strategy.available}
                     <Badge variant="success">Detected</Badge>
                   {/if}
                 </div>
-                <p class="text-xs text-text-muted">{strategyDescription(strategy)}</p>
-                {#if strategy.container}
-                  <p class="text-xs text-text-muted mt-1">Container: <span class="font-mono text-text-secondary">{strategy.container}</span></p>
+                <p class="text-xs text-text-muted">{strategy.description || ''}</p>
+                {#if strategy.containers?.length > 0}
+                  <p class="text-xs text-text-muted mt-1">Containers: <span class="font-mono text-text-secondary">{strategy.containers.join(', ')}</span></p>
                 {/if}
                 {#if strategy.volumes && strategy.volumes.length > 0}
                   <p class="text-xs text-text-muted mt-1">Volumes: <span class="font-mono text-text-secondary">{strategy.volumes.join(', ')}</span></p>
@@ -180,7 +173,7 @@
                   <p class="text-xs text-warning mt-1">Not available for this app</p>
                 {/if}
               </div>
-              {#if selectedStrategy === strategy.name}
+              {#if selectedStrategy === strategy.type}
                 <div class="text-accent shrink-0 mt-0.5">
                   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
