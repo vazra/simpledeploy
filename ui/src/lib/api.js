@@ -142,7 +142,11 @@ export const api = {
   deleteBackupConfig: (id) => requestWithToast('DELETE', `/backups/configs/${id}`, null, 'Backup config deleted'),
   listBackupRuns: (slug) => request('GET', `/apps/${slug}/backups/runs`),
   triggerBackup: (slug) => requestWithToast('POST', `/apps/${slug}/backups/run`, null, 'Backup triggered'),
+  triggerBackupConfig: (id) => requestWithToast('POST', `/backups/configs/${id}/run`, null, 'Backup triggered'),
   restore: (id) => requestWithToast('POST', `/backups/restore/${id}`, null, 'Restore started'),
+  backupSummary: () => request('GET', '/backups/summary'),
+  detectStrategies: (slug) => request('GET', `/apps/${slug}/backups/detect`),
+  testS3: (cfg) => request('POST', '/backups/test-s3', cfg),
 
   // Webhooks
   listWebhooks: () => request('GET', '/webhooks'),
