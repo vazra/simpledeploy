@@ -14,6 +14,10 @@
 
   const initAllowlist = app?.Labels?.['simpledeploy.access.allow'] || ''
 
+  // Compose editor mode + ref
+  let composeMode = $state('visual')
+  let configTabRef = $state(null)
+
   // Endpoint editing
   let editingEndpointIdx = $state(-1) // -1 = none, >=0 = editing that index, -2 = adding new
 
@@ -79,6 +83,7 @@
     editingEndpointIdx = -1
     savingEndpoints = false
     onAppUpdated()
+    configTabRef?.reload()
   }
 
   async function deleteEndpoint(i) {
@@ -87,6 +92,7 @@
     await api.updateEndpoints(slug, updated)
     savingEndpoints = false
     onAppUpdated()
+    configTabRef?.reload()
   }
 
   onMount(loadBackups)
@@ -241,7 +247,8 @@
     </div>
   {/snippet}
 
-  <!-- Section 1: Endpoints -->
+  <!-- Section 1: Endpoints (hidden in YAML mode, managed via compose labels there) -->
+  {#if composeMode !== 'yaml'}
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-medium text-text-primary">Endpoints</h3>
@@ -282,11 +289,12 @@
       </div>
     {/if}
   </div>
+  {/if}
 
   <!-- Section 2: Compose Configuration -->
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
     <h3 class="text-sm font-medium text-text-primary mb-4">Compose Configuration</h3>
-    <ConfigTab {slug} />
+    <ConfigTab bind:this={configTabRef} {slug} onModeChange={(m) => composeMode = m} />
   </div>
 
   <!-- Section 3: Environment Variables -->

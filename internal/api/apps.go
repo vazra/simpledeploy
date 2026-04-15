@@ -72,8 +72,16 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 
 	labels, _ := s.store.GetAppLabels(slug)
 
-	// Extract endpoints from labels
-	endpoints := extractEndpointsFromLabels(labels)
+	// Extract endpoints from compose file (includes service names)
+	var endpoints []compose.EndpointConfig
+	if app.ComposePath != "" {
+		if cfg, err := compose.ParseFile(app.ComposePath, slug); err == nil {
+			endpoints = cfg.Endpoints
+		}
+	}
+	if endpoints == nil {
+		endpoints = []compose.EndpointConfig{}
+	}
 
 	type appResponse struct {
 		store.App

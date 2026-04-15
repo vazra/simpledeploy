@@ -10,7 +10,7 @@
   import Skeleton from './Skeleton.svelte'
   import Modal from './Modal.svelte'
 
-  let { slug } = $props()
+  let { slug, onModeChange = () => {} } = $props()
 
   let mode = $state('visual')
   let originalYaml = $state('')
@@ -33,7 +33,7 @@
     return btoa(String.fromCodePoint(...new TextEncoder().encode(str)))
   }
 
-  onMount(async () => {
+  async function loadCompose() {
     const res = await api.getCompose(slug)
     if (res.error) { toasts.error('Failed to load compose'); return }
     originalYaml = normalizeYaml(res.data)
@@ -44,6 +44,14 @@
       yamlError = e.message
     }
     loading = false
+  }
+
+  export function reload() {
+    return loadCompose()
+  }
+
+  onMount(() => {
+    loadCompose()
     loadHistory()
   })
 
@@ -67,6 +75,7 @@
       }
     }
     mode = newMode
+    onModeChange(newMode)
   }
 
   async function handleSave() {
