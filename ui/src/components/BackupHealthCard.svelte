@@ -33,7 +33,7 @@
     return s
   }
 
-  const statusColor = app.last_run_status === 'success' ? 'bg-success' : app.last_run_status === 'failed' ? 'bg-danger' : 'bg-text-muted/50'
+  let statusColor = $derived(app.last_run_status === 'success' ? 'bg-success' : app.last_run_status === 'failed' ? 'bg-danger' : 'bg-text-muted/50')
 </script>
 
 <a href="#/apps/{app.app_slug}?tab=backups" class="block bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200">
