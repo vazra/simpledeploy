@@ -55,6 +55,8 @@ type Server struct {
 	dbBackupCron        *cron.Cron
 	webhookDispatcher   *alerts.WebhookDispatcher
 	startedAt           time.Time
+	tlsMode             string
+	dataDir             string
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -103,6 +105,9 @@ func (s *Server) SetWebhookDispatcher(d *alerts.WebhookDispatcher) { s.webhookDi
 // SetTrustedProxies sets the trusted proxy IPs for X-Forwarded-For parsing.
 func (s *Server) SetTrustedProxies(proxies []string) { s.trustedProxies = proxies }
 
+func (s *Server) SetTLSMode(mode string) { s.tlsMode = mode }
+func (s *Server) SetDataDir(dir string)  { s.dataDir = dir }
+
 // SetDocker sets the docker client.
 func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
 
@@ -132,6 +137,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	s.mux.HandleFunc("GET /api/setup/status", s.handleSetupStatus)
 	s.mux.HandleFunc("POST /api/setup", s.handleSetup)
+
+	// Trust page (local TLS only, unauthenticated)
+	s.mux.HandleFunc("GET /trust", s.handleTrustPage)
+	s.mux.HandleFunc("GET /api/tls/ca.crt", s.handleCACert)
 
 	// Protected routes
 	s.mux.Handle("GET /api/apps", s.authMiddleware(
