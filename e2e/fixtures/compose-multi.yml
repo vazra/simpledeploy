@@ -1,0 +1,11 @@
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8092:80"
+    labels:
+      simpledeploy.endpoints.0.domain: "multi-test.local"
+      simpledeploy.endpoints.0.port: "80"
+      simpledeploy.endpoints.0.tls: "off"
+  cache:
+    image: redis:alpine

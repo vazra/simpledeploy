@@ -1,4 +1,4 @@
-.PHONY: build build-go test clean ui-build dev api ui api-non-hmr
+.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-headed e2e-report
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -36,3 +36,13 @@ api-non-hmr: build-go
 
 clean:
 	rm -rf bin/ cmd/simpledeploy/ui_dist
+
+# E2E Testing
+e2e: build
+	cd e2e && npm ci && npx playwright install chromium && npx playwright test
+
+e2e-headed: build
+	cd e2e && npm ci && npx playwright install chromium && npx playwright test --headed
+
+e2e-report:
+	cd e2e && npx playwright show-report

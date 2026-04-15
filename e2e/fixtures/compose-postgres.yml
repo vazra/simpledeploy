@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: testpass123
+      POSTGRES_DB: testdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    labels:
+      simpledeploy.endpoints.0.port: "5432"
+      simpledeploy.endpoints.0.tls: "off"
+volumes:
+  pgdata:
