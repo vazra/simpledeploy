@@ -17,11 +17,15 @@ export const TEST_ADMIN = {
 export async function login(page, username, password) {
   const state = getState();
   await page.goto(`${state.baseURL}/#/login`);
+  // Wait for login form to finish loading (setupStatus check)
+  await page.waitForSelector('#username', { timeout: 10_000 });
   await page.locator('#username').fill(username || TEST_ADMIN.username);
   await page.locator('#password').fill(password || TEST_ADMIN.password);
+  // Wait for Sign In button (not Create Account - setupStatus must resolve)
+  await page.getByRole('button', { name: 'Sign In' }).waitFor({ timeout: 5_000 });
   await page.getByRole('button', { name: 'Sign In' }).click();
-  // SPA uses hash routing; wait for sidebar/nav to confirm dashboard loaded
-  await page.waitForSelector('aside nav, nav', { timeout: 10_000 });
+  // Wait for dashboard layout to appear
+  await page.waitForSelector('[class*="sidebar"], aside, nav a', { timeout: 15_000 });
 }
 
 export async function loginAsAdmin(page) {

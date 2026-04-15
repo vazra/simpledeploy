@@ -20,7 +20,7 @@ async function deployApp(page, appName, composeContent) {
   await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
   await dialog.getByRole('button', { name: 'Next' }).click();
   await dialog.getByRole('button', { name: 'Deploy' }).click();
-  await expect(dialog.getByText(/deployed|complete/i)).toBeVisible({ timeout: 180_000 });
+  await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
   const viewAppBtn = dialog.getByRole('button', { name: 'View App' });
   if (await viewAppBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await viewAppBtn.click();

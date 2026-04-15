@@ -75,13 +75,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.audit.Log(audit.Event{Type: "login", Username: user.Username, IP: ip, Success: true})
 	}
 
+	secure := s.tlsMode != "off"
+	sameSite := http.SameSiteStrictMode
+	if !secure {
+		sameSite = http.SameSiteLaxMode
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		Secure:   secure,
+		SameSite: sameSite,
 		MaxAge:   86400, // 24h, matches JWT expiry
 	})
 
