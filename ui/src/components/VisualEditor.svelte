@@ -571,7 +571,7 @@
 
   // ---- Input class helper ----
   function inputCls(errKey) {
-    const base = 'w-full bg-input-bg border rounded px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50'
+    const base = 'w-full bg-input-bg border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted/60 placeholder:italic focus:outline-none focus:ring-1 focus:ring-accent/50'
     return errors[errKey] ? `${base} border-danger` : `${base} border-border`
   }
 
@@ -680,9 +680,9 @@
           </div>
         {:else}
           <!-- Edit view -->
-          <div class="bg-surface-1 border border-border rounded-lg p-4 space-y-3">
-            <!-- Service header (click-to-edit name) -->
-            <div class="flex items-center justify-between">
+          <div class="bg-surface-1 border border-border rounded-lg p-4 space-y-4">
+            <!-- Service header -->
+            <div class="flex items-center justify-between pb-2 border-b border-border/30">
               {#if editingServiceName === svcName}
                 <input
                   type="text"
@@ -705,33 +705,54 @@
                   </svg>
                 </button>
               {/if}
-              <button type="button" onclick={() => toggleServiceEdit(svcName)} class="text-xs text-text-muted hover:text-text-primary transition-colors">Done</button>
+              <button type="button" onclick={() => toggleServiceEdit(svcName)} class="px-3 py-1 text-xs font-medium rounded-lg bg-accent text-surface-0 hover:bg-accent/90 transition-colors shadow-sm">Done</button>
             </div>
 
-          <!-- Image -->
-          <div>
-            <label class="block text-xs text-text-secondary mb-1">
-              Image <span class="text-danger">*</span>
-            </label>
-            <input
-              type="text"
-              value={svc.image ?? ''}
-              placeholder="nginx:alpine"
-              oninput={(e) => {
-                validateImage(svcName, e.currentTarget.value)
-                updateService(svcName, 'image', e.currentTarget.value)
-              }}
-              class={inputCls(`services.${svcName}.image`)}
-            />
-            {#if errors[`services.${svcName}.image`]}
-              <p class="text-xs text-danger mt-0.5">{errors[`services.${svcName}.image`]}</p>
-            {:else}
-              <p class="text-xs text-text-muted mt-0.5">Docker image, e.g. postgres:16, nginx:alpine</p>
-            {/if}
+          <!-- Essential: Image + Restart + Command -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="sm:col-span-2">
+              <label class="block text-xs text-text-secondary mb-1">Image <span class="text-danger">*</span></label>
+              <input
+                type="text"
+                value={svc.image ?? ''}
+                placeholder="e.g. nginx:alpine"
+                oninput={(e) => {
+                  validateImage(svcName, e.currentTarget.value)
+                  updateService(svcName, 'image', e.currentTarget.value)
+                }}
+                class={inputCls(`services.${svcName}.image`)}
+              />
+              {#if errors[`services.${svcName}.image`]}
+                <p class="text-xs text-danger mt-0.5">{errors[`services.${svcName}.image`]}</p>
+              {/if}
+            </div>
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">Restart Policy</label>
+              <select
+                value={svc.restart ?? 'unless-stopped'}
+                onchange={(e) => updateService(svcName, 'restart', e.currentTarget.value)}
+                class={inputCls(`services.${svcName}.restart`)}
+              >
+                <option value="no">no</option>
+                <option value="always">always</option>
+                <option value="unless-stopped">unless-stopped</option>
+                <option value="on-failure">on-failure</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-text-secondary mb-1">Command</label>
+              <input
+                type="text"
+                value={Array.isArray(svc.command) ? svc.command.join(' ') : (svc.command ?? '')}
+                placeholder="e.g. node server.js"
+                oninput={(e) => updateService(svcName, 'command', e.currentTarget.value)}
+                class={inputCls(`services.${svcName}.command`)}
+              />
+            </div>
           </div>
 
-          <!-- Environment Variables (enhanced with .env integration) -->
-          <div class="space-y-2">
+          <!-- Environment Variables -->
+          <div class="space-y-2 pt-2 border-t border-border/20">
             <div>
               <span class="text-xs font-medium text-text-primary">Environment Variables</span>
               <span class="text-xs text-text-muted ml-1.5">Set env vars for this service</span>
@@ -772,7 +793,7 @@
                       })
                     }
                   }}
-                  class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+                  class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted/60 placeholder:italic focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
                 />
                 <div class="flex-1 relative min-w-0 group/val">
                   {#if isRef && revealedEnvRef === `${svcName}:${i}`}
@@ -804,7 +825,7 @@
                         }
                       }}
                       onblur={() => { setTimeout(() => { if (envSuggestFor?.rowIdx === i) envSuggestFor = null }, 150) }}
-                      class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
+                      class="w-full bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted/60 placeholder:italic focus:outline-none focus:ring-1 focus:ring-accent/50"
                     />
                   {/if}
                   {#if isRef}
@@ -884,6 +905,7 @@
           </div>
 
           <!-- Volumes -->
+          <div class="pt-2 border-t border-border/20">
           <RepeatableField
             label="Volumes"
             hint="Mount host path or named volume"
@@ -898,37 +920,10 @@
               else delete s.volumes
             })}
           />
-
-          <!-- Restart Policy -->
-          <div>
-            <label class="block text-xs text-text-secondary mb-1">Restart Policy</label>
-            <select
-              value={svc.restart ?? 'unless-stopped'}
-              onchange={(e) => updateService(svcName, 'restart', e.currentTarget.value)}
-              class={inputCls(`services.${svcName}.restart`)}
-            >
-              <option value="no">no</option>
-              <option value="always">always</option>
-              <option value="unless-stopped">unless-stopped</option>
-              <option value="on-failure">on-failure</option>
-            </select>
-            <p class="text-xs text-text-muted mt-0.5">When to restart the container</p>
-          </div>
-
-          <!-- Command -->
-          <div>
-            <label class="block text-xs text-text-secondary mb-1">Command</label>
-            <input
-              type="text"
-              value={Array.isArray(svc.command) ? svc.command.join(' ') : (svc.command ?? '')}
-              placeholder="node server.js"
-              oninput={(e) => updateService(svcName, 'command', e.currentTarget.value)}
-              class={inputCls(`services.${svcName}.command`)}
-            />
-            <p class="text-xs text-text-muted mt-0.5">Override the default container command</p>
           </div>
 
           <!-- Labels (non-SD) -->
+          <div class="pt-2 border-t border-border/20">
           <RepeatableField
             label="Labels"
             hint="Custom Docker labels (simpledeploy.* labels are in Endpoint settings)"
@@ -943,6 +938,7 @@
               else delete s.labels
             })}
           />
+          </div>
 
           <!-- Advanced (nested collapsible) -->
           <div class="pt-1">
@@ -1369,13 +1365,13 @@
             type="text"
             placeholder="KEY"
             bind:value={envPickerNewKey}
-            class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+            class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm font-mono text-text-primary placeholder:text-text-muted/60 placeholder:italic focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
           />
           <input
             type="text"
             placeholder="value"
             bind:value={envPickerNewValue}
-            class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
+            class="flex-1 bg-input-bg border border-border rounded px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted/60 placeholder:italic focus:outline-none focus:ring-1 focus:ring-accent/50 min-w-0"
           />
           <button
             type="button"
