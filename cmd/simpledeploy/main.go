@@ -358,7 +358,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "WARNING: master_secret not configured. Generated random secret for this session. Set master_secret in config for persistent sessions.\n")
 	}
 	jwtMgr := auth.NewJWTManager(jwtSecret, 24*time.Hour)
-	rl := auth.NewRateLimiter(10, time.Minute)
+	rlRequests := cfg.RateLimit.Requests
+	if rlRequests <= 0 {
+		rlRequests = 200
+	}
+	rlWindow := time.Minute
+	if d, err := time.ParseDuration(cfg.RateLimit.Window); err == nil {
+		rlWindow = d
+	}
+	rl := auth.NewRateLimiter(rlRequests, rlWindow)
 	lockout := auth.NewLoginLockout(10)
 
 	dc, err := docker.NewClient()
