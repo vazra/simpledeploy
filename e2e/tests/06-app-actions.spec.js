@@ -31,19 +31,19 @@ test.describe('App Actions', () => {
 
   test('restart app', async ({ page }) => {
     const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    // If app is stopped, start it first (Start has no modal, just API call + loadApp)
-    const startBtn = page.getByRole('button', { name: 'Start' });
-    if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await startBtn.click();
-      // Poll until Restart button appears (app state takes time to propagate)
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
-        if (await page.getByRole('button', { name: /restart/i }).isVisible({ timeout: 2_000 }).catch(() => false)) break;
-        await page.reload();
-      }
+    // Use the API to ensure app is running before testing restart
+    const { apiRequest, apiLogin } = await import('../helpers/api.js');
+    await apiLogin('e2eadmin', 'E2eTestPass123!');
+    await apiRequest('POST', '/api/apps/e2e-nginx/start');
+    // Wait for Docker to start the container
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const res = await apiRequest('GET', '/api/apps/e2e-nginx');
+      if (res.ok && res.data?.status === 'running') break;
+      await new Promise(r => setTimeout(r, 2_000));
     }
-    await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 10_000 });
+    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
+    await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 15_000 });
     await page.getByRole('button', { name: /restart/i }).click();
     const dialog = page.getByRole('dialog');
     if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
