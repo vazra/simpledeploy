@@ -9,8 +9,9 @@ test.describe('Profile', () => {
   });
 
   test('profile page shows user info', async ({ page }) => {
-    await expect(page.getByText(TEST_ADMIN.username)).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(/super_admin/i)).toBeVisible();
+    // Username appears in sidebar + profile page; scope to main content
+    await expect(page.locator('main').getByText(TEST_ADMIN.username).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('main').getByText(/super_admin/i).first()).toBeVisible();
   });
 
   test('update display name', async ({ page }) => {
@@ -36,7 +37,8 @@ test.describe('Profile', () => {
     await page.waitForSelector('#username', { timeout: 5_000 });
 
     await login(page, TEST_ADMIN.username, newPassword);
-    await expect(page.getByText('Deploy App').first()).toBeVisible({ timeout: 5_000 });
+    // After login, sidebar should be visible
+    await expect(page.locator('aside')).toBeVisible({ timeout: 5_000 });
 
     await page.goto(`${state.baseURL}/#/profile`);
     await page.locator('#currentPw').fill(newPassword);

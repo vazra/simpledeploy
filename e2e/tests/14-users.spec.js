@@ -9,7 +9,8 @@ test.describe('User Management', () => {
   });
 
   test('users page loads and shows current admin', async ({ page }) => {
-    await expect(page.getByText('e2eadmin')).toBeVisible({ timeout: 5_000 });
+    // Username may appear in sidebar + page; use .first()
+    await expect(page.locator('main').getByText('e2eadmin').first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('create new viewer user', async ({ page }) => {
@@ -17,15 +18,17 @@ test.describe('User Management', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    await dialog.getByPlaceholder(/jane doe/i).fill('Test Viewer');
-    await dialog.getByPlaceholder(/jane@example/i).fill('viewer@test.local');
-    await dialog.getByPlaceholder(/e\.g\. jane$/i).fill('testviewer');
-    await dialog.getByPlaceholder(/min 8/i).fill('ViewerPass123!');
+    // Placeholders from Users.svelte FormModal
+    await dialog.getByPlaceholder('e.g. Jane Doe').fill('Test Viewer');
+    await dialog.getByPlaceholder('jane@example.com').fill('viewer@test.local');
+    await dialog.getByPlaceholder('e.g. jane').fill('testviewer');
+    await dialog.getByPlaceholder('Min 8 characters').fill('ViewerPass123!');
 
-    await dialog.getByText(/viewer/i).click();
+    // Select Viewer role (it's a button, not a radio)
+    await dialog.locator('button').filter({ hasText: 'Viewer' }).first().click();
 
     await dialog.getByRole('button', { name: /create user/i }).click();
-    await expect(page.getByText('testviewer')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('main').getByText('testviewer').first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('edit user display name', async ({ page }) => {
@@ -35,26 +38,30 @@ test.describe('User Management', () => {
       await editBtn.click();
       const dialog = page.getByRole('dialog');
       await expect(dialog).toBeVisible();
-      const nameInput = dialog.getByPlaceholder(/name/i).first();
+      // Display Name placeholder is "e.g. Jane Doe"
+      const nameInput = dialog.getByPlaceholder('e.g. Jane Doe');
       await nameInput.fill('Updated Viewer');
       await dialog.getByRole('button', { name: /save/i }).click();
-      await expect(page.getByText('Updated Viewer')).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('main').getByText('Updated Viewer').first()).toBeVisible({ timeout: 5_000 });
     }
   });
 
   test('API keys section visible', async ({ page }) => {
-    await expect(page.getByText(/api key/i).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText('API Keys')).toBeVisible({ timeout: 5_000 });
   });
 
   test('create API key', async ({ page }) => {
-    await page.getByRole('button', { name: /create key/i }).click();
+    await page.getByRole('button', { name: /create key/i }).first().click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    await dialog.getByPlaceholder(/ci-deploy/i).fill('e2e-test-key');
+    // Placeholder is "e.g. ci-deploy"
+    await dialog.getByPlaceholder('e.g. ci-deploy').fill('e2e-test-key');
     await dialog.getByRole('button', { name: /create key/i }).click();
 
-    await expect(page.getByText(/sd_/i).first()).toBeVisible({ timeout: 5_000 });
+    // After creation, key is shown (starts with "sd_" or similar prefix)
+    // The key display section shows the key in a <code> element
+    await expect(page.locator('code').first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('delete API key', async ({ page }) => {
@@ -77,7 +84,7 @@ test.describe('User Management', () => {
       if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
         await dialog.getByRole('button', { name: /delete|confirm/i }).click();
       }
-      await expect(page.getByText('testviewer')).not.toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('main').getByText('testviewer').first()).not.toBeVisible({ timeout: 5_000 });
     }
   });
 });

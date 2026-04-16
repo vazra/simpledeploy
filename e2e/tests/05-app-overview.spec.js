@@ -14,7 +14,7 @@ test.describe('App Overview', () => {
   });
 
   test('shows services list', async ({ page }) => {
-    await expect(page.getByText('web')).toBeVisible();
+    await expect(page.locator('main').getByText('web').first()).toBeVisible();
   });
 
   test('shows action buttons', async ({ page }) => {
@@ -25,8 +25,8 @@ test.describe('App Overview', () => {
   test('multi-service app shows all services', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    await expect(page.getByText('web')).toBeVisible();
-    await expect(page.getByText('cache')).toBeVisible();
+    await expect(page.locator('main').getByText('web').first()).toBeVisible();
+    await expect(page.locator('main').getByText('cache').first()).toBeVisible();
   });
 
   test('tab navigation works', async ({ page }) => {

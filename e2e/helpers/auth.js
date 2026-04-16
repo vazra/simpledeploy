@@ -24,8 +24,8 @@ export async function login(page, username, password) {
   // Wait for Sign In button (not Create Account - setupStatus must resolve)
   await page.getByRole('button', { name: 'Sign In' }).waitFor({ timeout: 5_000 });
   await page.getByRole('button', { name: 'Sign In' }).click();
-  // Wait for dashboard layout to appear
-  await page.waitForSelector('[class*="sidebar"], aside, nav a', { timeout: 15_000 });
+  // Wait for sidebar <aside> to appear (reliable post-login indicator)
+  await page.waitForSelector('aside', { timeout: 15_000 });
 }
 
 export async function loginAsAdmin(page) {

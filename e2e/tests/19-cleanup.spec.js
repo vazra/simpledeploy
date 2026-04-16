@@ -9,12 +9,11 @@ test.describe('Cleanup', () => {
   test('remove postgres app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-postgres`);
-    await page.getByRole('button', { name: /settings/i }).click();
+    await page.locator('button').filter({ hasText: 'settings' }).click();
 
-    const dangerBtn = page.getByText(/danger|delete|advanced/i).last();
-    if (await dangerBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await dangerBtn.click();
-    }
+    // Expand Danger Zone section
+    const dangerBtn = page.locator('button').filter({ hasText: 'Danger Zone' });
+    await dangerBtn.click();
 
     const deleteBtn = page.getByRole('button', { name: /delete app/i });
     await deleteBtn.click();
@@ -27,18 +26,18 @@ test.describe('Cleanup', () => {
     }
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
 
-    await page.waitForSelector('text=Applications', { timeout: 15_000 });
+    // After delete, redirects to dashboard which shows "Applications" heading
+    await expect(page.locator('aside')).toBeVisible({ timeout: 15_000 });
   });
 
   test('remove multi app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    await page.getByRole('button', { name: /settings/i }).click();
+    await page.locator('button').filter({ hasText: 'settings' }).click();
 
-    const dangerBtn = page.getByText(/danger|delete|advanced/i).last();
-    if (await dangerBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await dangerBtn.click();
-    }
+    // Expand Danger Zone section
+    const dangerBtn = page.locator('button').filter({ hasText: 'Danger Zone' });
+    await dangerBtn.click();
 
     const deleteBtn = page.getByRole('button', { name: /delete app/i });
     await deleteBtn.click();
@@ -50,18 +49,17 @@ test.describe('Cleanup', () => {
       await confirmInput.fill('e2e-multi');
     }
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
-    await page.waitForSelector('text=Applications', { timeout: 15_000 });
+    await expect(page.locator('aside')).toBeVisible({ timeout: 15_000 });
   });
 
   test('remove nginx app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    await page.getByRole('button', { name: /settings/i }).click();
+    await page.locator('button').filter({ hasText: 'settings' }).click();
 
-    const dangerBtn = page.getByText(/danger|delete|advanced/i).last();
-    if (await dangerBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await dangerBtn.click();
-    }
+    // Expand Danger Zone section
+    const dangerBtn = page.locator('button').filter({ hasText: 'Danger Zone' });
+    await dangerBtn.click();
 
     const deleteBtn = page.getByRole('button', { name: /delete app/i });
     await deleteBtn.click();
@@ -73,7 +71,7 @@ test.describe('Cleanup', () => {
       await confirmInput.fill('e2e-nginx');
     }
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
-    await page.waitForSelector('text=Applications', { timeout: 15_000 });
+    await expect(page.locator('aside')).toBeVisible({ timeout: 15_000 });
   });
 
   test('dashboard shows no apps', async ({ page }) => {

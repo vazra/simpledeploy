@@ -15,13 +15,18 @@ test.describe('Registries', () => {
   test('add registry', async ({ page }) => {
     await page.getByRole('button', { name: /add registry/i }).click();
 
-    await page.getByPlaceholder(/registry.example.com/i).fill('ghcr.io');
-    const nameInput = page.locator('input').first();
-    await nameInput.fill('GitHub CR');
-    await page.getByPlaceholder(/username/i).first().fill('testuser');
-    await page.locator('input[type="password"]').first().fill('testtoken');
+    // SlidePanel opens with role="dialog"
+    const panel = page.getByRole('dialog');
+    await expect(panel).toBeVisible({ timeout: 5_000 });
 
-    await page.getByRole('button', { name: /add registry/i }).click();
+    // Form fields in order: Name (no placeholder), URL, Username, Password
+    const inputs = panel.locator('input');
+    await inputs.nth(0).fill('GitHub CR');  // Name
+    await panel.getByPlaceholder('registry.example.com').fill('ghcr.io');  // URL
+    await inputs.nth(2).fill('testuser');  // Username
+    await inputs.nth(3).fill('testtoken');  // Password
+
+    await panel.getByRole('button', { name: /add registry/i }).click();
     await expect(page.getByText('ghcr.io')).toBeVisible({ timeout: 5_000 });
   });
 

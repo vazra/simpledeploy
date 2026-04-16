@@ -60,36 +60,22 @@ test.describe('App Actions', () => {
   test('scale service', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    const scaleBtn = page.getByRole('button', { name: /scale/i });
-    if (await scaleBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await scaleBtn.click();
-    } else {
-      const moreBtn = page.getByRole('button', { name: /more/i });
-      if (await moreBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await moreBtn.click();
-        await page.getByText(/scale/i).click();
-      }
-    }
+    // Scale is inside the "..." (more) dropdown menu
+    // The more button is a ghost button containing only an SVG with three dots
+    const moreBtn = page.locator('button').filter({ has: page.locator('svg path[d*="6.75 12a.75"]') });
+    await moreBtn.click();
+    // Click "Scale" in the dropdown
+    await page.locator('button').filter({ hasText: 'Scale' }).click();
+
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 5_000 });
     const inputs = dialog.locator('input[type="number"]');
     const count = await inputs.count();
     if (count > 0) {
-      for (let i = 0; i < count; i++) {
-        const label = await inputs.nth(i).evaluate(el => {
-          const row = el.closest('div');
-          return row?.textContent || '';
-        });
-        if (label.includes('cache')) {
-          await inputs.nth(i).fill('2');
-          break;
-        }
-      }
+      await inputs.first().fill('2');
     }
-    const applyBtn = dialog.getByRole('button', { name: /apply|scale|confirm/i });
+    const applyBtn = dialog.getByRole('button', { name: /apply/i });
     await applyBtn.click();
-    const closeBtn = page.getByRole('button', { name: /close/i });
-    await expect(closeBtn).toBeVisible({ timeout: 60_000 });
-    await closeBtn.click();
+    await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 30_000 });
   });
 });

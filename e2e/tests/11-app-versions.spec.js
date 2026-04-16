@@ -6,16 +6,20 @@ test.describe('Deploy History & Rollback', () => {
     await loginAsAdmin(page);
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    await page.getByRole('button', { name: /settings/i }).click();
+    await page.locator('button').filter({ hasText: 'settings' }).click();
   });
 
   test('shows deploy history', async ({ page }) => {
-    const historySection = page.getByText(/deploy history|versions/i).first();
-    await expect(historySection).toBeVisible({ timeout: 5_000 });
+    // Deploy History is a collapsible section with text "Deploy History (N)"
+    const historyBtn = page.locator('button').filter({ hasText: /Deploy History/i });
+    await expect(historyBtn).toBeVisible({ timeout: 5_000 });
   });
 
   test('deploy history has entries', async ({ page }) => {
-    const versionEntries = page.getByText(/v\d|version|#\d/i);
-    await expect(versionEntries.first()).toBeVisible({ timeout: 5_000 });
+    // Expand the deploy history section
+    const historyBtn = page.locator('button').filter({ hasText: /Deploy History/i });
+    await historyBtn.click();
+    // Entries display as "v1", "v2", etc.
+    await expect(page.getByText(/^v\d+$/).first()).toBeVisible({ timeout: 5_000 });
   });
 });
