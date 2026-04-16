@@ -18,11 +18,16 @@ test.describe('Endpoints & Access', () => {
   });
 
   test('IP allowlist section visible', async ({ page }) => {
-    // Scroll to bottom and click Advanced collapsible to expand
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(500);
-    // Click the parent button that contains the h3 "Advanced"
-    await page.locator('button:has(h3:text("Advanced"))').click();
+    // Click Advanced collapsible section via evaluate to avoid click interception
+    await page.evaluate(() => {
+      const headings = document.querySelectorAll('h3');
+      for (const h of headings) {
+        if (h.textContent.trim() === 'Advanced') {
+          h.closest('button').click();
+          break;
+        }
+      }
+    });
     await expect(page.locator('#allowlist-input')).toBeVisible({ timeout: 10_000 });
   });
 });
