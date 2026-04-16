@@ -15,8 +15,8 @@ test.describe('Dashboard', () => {
   });
 
   test('app cards show running status', async ({ page }) => {
-    // "Running 3" filter button confirms all apps are running
-    await expect(page.getByText('Running').first()).toBeVisible();
+    // Filter bar shows "Running N" count; app cards show "running" badges
+    await expect(page.getByText(/Running \d/)).toBeVisible();
   });
 
   test('system metrics section renders', async ({ page }) => {
