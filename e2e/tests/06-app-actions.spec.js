@@ -32,12 +32,16 @@ test.describe('App Actions', () => {
   test('restart app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    // If app is stopped, start it first (Start has no modal, just API call)
+    // If app is stopped, start it first (Start has no modal, just API call + loadApp)
     const startBtn = page.getByRole('button', { name: 'Start' });
     if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await startBtn.click();
-      // Wait for Restart button to appear (indicates app is running)
-      await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 30_000 });
+      // Poll until Restart button appears (app state takes time to propagate)
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        if (await page.getByRole('button', { name: /restart/i }).isVisible({ timeout: 2_000 }).catch(() => false)) break;
+        await page.reload();
+      }
     }
     await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /restart/i }).click();
