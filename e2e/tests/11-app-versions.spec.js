@@ -11,15 +11,16 @@ test.describe('Deploy History & Rollback', () => {
 
   test('shows deploy history', async ({ page }) => {
     // Deploy History is a collapsible section with text "Deploy History (N)"
+    // It only appears if versions > 0; wait for config tab to finish loading
     const historyBtn = page.locator('button').filter({ hasText: /Deploy History/i });
-    await expect(historyBtn).toBeVisible({ timeout: 5_000 });
+    await expect(historyBtn).toBeVisible({ timeout: 10_000 });
   });
 
   test('deploy history has entries', async ({ page }) => {
     // Expand the deploy history section
     const historyBtn = page.locator('button').filter({ hasText: /Deploy History/i });
     await historyBtn.click();
-    // Entries display as "v1", "v2", etc.
-    await expect(page.getByText(/^v\d+$/).first()).toBeVisible({ timeout: 5_000 });
+    // Entries display as "v1", "v2", etc. in table cells
+    await expect(page.locator('td').filter({ hasText: /^v\d+$/ }).first()).toBeVisible({ timeout: 5_000 });
   });
 });

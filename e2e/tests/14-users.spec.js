@@ -18,11 +18,11 @@ test.describe('User Management', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    // Placeholders from Users.svelte FormModal
-    await dialog.getByPlaceholder('e.g. Jane Doe').fill('Test Viewer');
-    await dialog.getByPlaceholder('jane@example.com').fill('viewer@test.local');
-    await dialog.getByPlaceholder('e.g. jane').fill('testviewer');
-    await dialog.getByPlaceholder('Min 8 characters').fill('ViewerPass123!');
+    // Placeholders from Users.svelte FormModal - use exact matching
+    await dialog.getByPlaceholder('e.g. Jane Doe', { exact: true }).fill('Test Viewer');
+    await dialog.getByPlaceholder('jane@example.com', { exact: true }).fill('viewer@test.local');
+    await dialog.getByPlaceholder('e.g. jane', { exact: true }).fill('testviewer');
+    await dialog.getByPlaceholder('Min 8 characters', { exact: true }).fill('ViewerPass123!');
 
     // Select Viewer role (it's a button, not a radio)
     await dialog.locator('button').filter({ hasText: 'Viewer' }).first().click();

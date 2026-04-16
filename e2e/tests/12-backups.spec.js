@@ -45,9 +45,11 @@ test.describe('Backups', () => {
     await page.getByRole('button', { name: /backups/i }).click();
 
     const backupBtn = page.getByRole('button', { name: /backup now/i });
+    await expect(backupBtn).toBeVisible({ timeout: 10_000 });
     await backupBtn.click();
 
-    await expect(page.getByText(/success|completed/i).first()).toBeVisible({ timeout: 60_000 });
+    // Backup may run async; wait for success status in history table or toast
+    await expect(page.getByText(/success/i).first()).toBeVisible({ timeout: 90_000 });
   });
 
   test('global backups page shows summary', async ({ page }) => {

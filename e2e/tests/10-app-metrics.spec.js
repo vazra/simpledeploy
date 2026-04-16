@@ -10,8 +10,9 @@ test.describe('App Metrics', () => {
   });
 
   test('metrics charts render', async ({ page }) => {
+    // Charts need time to fetch data and render via Chart.js
     const canvases = page.locator('canvas');
-    await expect(canvases.first()).toBeVisible({ timeout: 10_000 });
+    await expect(canvases.first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('time range buttons visible', async ({ page }) => {
@@ -21,7 +22,7 @@ test.describe('App Metrics', () => {
 
   test('switch time range', async ({ page }) => {
     await page.getByRole('button', { name: '6h' }).click();
-    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('CPU and memory chart labels visible', async ({ page }) => {

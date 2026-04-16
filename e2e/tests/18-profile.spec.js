@@ -33,7 +33,8 @@ test.describe('Profile', () => {
 
     const state = getState();
     await page.goto(`${state.baseURL}/#/profile`);
-    await page.getByText(/log out/i).click();
+    // Click the "Log out" button/link in profile page
+    await page.locator('button, a').filter({ hasText: /log out/i }).click();
     await page.waitForSelector('#username', { timeout: 5_000 });
 
     await login(page, TEST_ADMIN.username, newPassword);

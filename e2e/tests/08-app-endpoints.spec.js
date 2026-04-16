@@ -12,7 +12,7 @@ test.describe('Endpoints & Access', () => {
 
   test('shows current endpoints', async ({ page }) => {
     // Endpoints section header should be visible in visual mode
-    await expect(page.getByText('Endpoints')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('h3').filter({ hasText: 'Endpoints' })).toBeVisible({ timeout: 5_000 });
     // Check for endpoint domain or "No domain" fallback
     const hasDomain = await page.getByText('nginx-test.local').isVisible({ timeout: 3_000 }).catch(() => false);
     const hasNoDomain = await page.getByText('No domain').isVisible({ timeout: 1_000 }).catch(() => false);

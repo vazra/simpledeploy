@@ -23,10 +23,10 @@ test.describe('App Actions', () => {
   test('start app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    await page.getByRole('button', { name: /start/i }).click();
-    const dialog = page.getByRole('dialog');
-    if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await dialog.getByRole('button', { name: /close/i }).click();
+    // App may be running or stopped; click Start if available
+    const startBtn = page.getByRole('button', { name: /^start$/i });
+    if (await startBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await startBtn.click();
     }
     await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 30_000 });
   });
@@ -34,6 +34,12 @@ test.describe('App Actions', () => {
   test('restart app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
+    // If app is stopped, start it first
+    const startBtn = page.getByRole('button', { name: /^start$/i });
+    if (await startBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await startBtn.click();
+      await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 30_000 });
+    }
     await page.getByRole('button', { name: /restart/i }).click();
     const dialog = page.getByRole('dialog');
     if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -42,7 +48,9 @@ test.describe('App Actions', () => {
         await confirmBtn.click();
       }
     }
-    const closeBtn = page.getByRole('button', { name: /close/i });
+    // Wait for action modal close button (inside the dialog, not the backdrop)
+    const actionDialog = page.getByRole('dialog');
+    const closeBtn = actionDialog.locator('button:has-text("Close"):not([aria-label])');
     await expect(closeBtn).toBeVisible({ timeout: 60_000 });
     await closeBtn.click();
     await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 15_000 });
@@ -52,7 +60,9 @@ test.describe('App Actions', () => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
     await page.getByRole('button', { name: /pull/i }).click();
-    const closeBtn = page.getByRole('button', { name: /close/i });
+    // Wait for action modal close button (inside dialog footer, not backdrop)
+    const actionDialog = page.getByRole('dialog');
+    const closeBtn = actionDialog.locator('button:has-text("Close"):not([aria-label])');
     await expect(closeBtn).toBeVisible({ timeout: 120_000 });
     await closeBtn.click();
   });

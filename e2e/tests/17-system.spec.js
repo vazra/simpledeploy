@@ -9,7 +9,8 @@ test.describe('System Administration', () => {
   });
 
   test('system overview loads', async ({ page }) => {
-    await expect(page.getByText(/simpledeploy/i).first()).toBeVisible({ timeout: 5_000 });
+    // Section heading "SimpleDeploy" in overview tab
+    await expect(page.locator('h2').filter({ hasText: /SimpleDeploy/i }).first()).toBeVisible({ timeout: 5_000 });
     await expect(page.getByText(/uptime/i).first()).toBeVisible();
   });
 
