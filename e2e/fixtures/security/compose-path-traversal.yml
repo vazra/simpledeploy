@@ -2,4 +2,6 @@ services:
   web:
     image: nginx:alpine
     volumes:
-      - ../../etc/passwd:/etc/passwd
+      - type: bind
+        source: ../../etc/passwd
+        target: /etc/passwd
