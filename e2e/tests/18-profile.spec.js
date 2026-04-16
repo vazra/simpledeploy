@@ -50,9 +50,16 @@ test.describe('Profile', () => {
   });
 
   test('theme toggle works', async ({ page }) => {
-    const themeBtn = page.locator('button').filter({ has: page.locator('svg') }).filter({ hasText: '' });
-    const htmlEl = page.locator('html');
-    const currentClass = await htmlEl.getAttribute('class');
-    expect(currentClass !== null || currentClass === '').toBeTruthy();
+    const themeBtn = page.getByRole('button', { name: 'Toggle theme' });
+    await expect(themeBtn).toBeVisible();
+    // Get initial title (e.g., "Theme: system")
+    const titleBefore = await themeBtn.getAttribute('title');
+    // Click to cycle theme
+    await themeBtn.click();
+    // Title should change (system -> light -> dark)
+    const titleAfter = await themeBtn.getAttribute('title');
+    expect(titleAfter).not.toBe(titleBefore);
+    // Click again to restore for other tests
+    await themeBtn.click();
   });
 });

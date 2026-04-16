@@ -37,11 +37,11 @@ api-non-hmr: build-go
 clean:
 	rm -rf bin/ cmd/simpledeploy/ui_dist
 
-# E2E Testing
-e2e: build
+# E2E Testing (global-setup.js runs make build internally)
+e2e:
 	cd e2e && npm ci && npx playwright install chromium && npx playwright test
 
-e2e-headed: build
+e2e-headed:
 	cd e2e && npm ci && npx playwright install chromium && npx playwright test --headed
 
 e2e-report:

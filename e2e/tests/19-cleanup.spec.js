@@ -76,11 +76,8 @@ test.describe('Cleanup', () => {
 
   test('dashboard reflects app removals', async ({ page }) => {
     const state = getState();
-    // Verify at least some apps were removed by checking total count decreased
     await page.goto(`${state.baseURL}/#/`);
-    await page.waitForTimeout(3_000);
-    // If all deletions succeeded, we expect "Total 0" or no app cards
-    // If some failed due to docker cleanup delay, we just verify the page loads
-    await expect(page.getByText('Applications')).toBeVisible({ timeout: 5_000 });
+    // Verify dashboard loads and shows Applications section
+    await expect(page.getByText('Applications')).toBeVisible({ timeout: 10_000 });
   });
 });

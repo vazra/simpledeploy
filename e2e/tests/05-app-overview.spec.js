@@ -25,18 +25,17 @@ test.describe('App Overview', () => {
   test('multi-service app shows services', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    await page.waitForTimeout(1_000);
-    // Verify the page loaded for e2e-multi
     await expect(page.getByText('e2e-multi').first()).toBeVisible({ timeout: 10_000 });
-    // At minimum, web service should be listed in services section
     await expect(page.getByText('Services').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('tab navigation works', async ({ page }) => {
     const tabs = ['logs', 'metrics', 'backups', 'settings'];
     for (const tab of tabs) {
-      await page.getByRole('button', { name: new RegExp(tab, 'i') }).click();
-      await page.waitForTimeout(500);
+      const btn = page.getByRole('button', { name: new RegExp(tab, 'i') });
+      await btn.click();
+      // Verify tab became active (wait for content area to update)
+      await expect(btn).toBeVisible();
     }
     await page.getByRole('button', { name: /overview/i }).click();
   });

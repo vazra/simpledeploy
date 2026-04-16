@@ -13,14 +13,9 @@ test.describe('App Configuration', () => {
     await expect(page.getByText('nginx:alpine')).toBeVisible({ timeout: 5_000 });
   });
 
-  test('view and add environment variable', async ({ page }) => {
+  test('environment variables section visible', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).click();
-    const envSection = page.getByText(/environment/i).first();
-    if (await envSection.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      const addBtn = page.getByRole('button', { name: /add/i }).first();
-      if (await addBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await addBtn.click();
-      }
-    }
+    await expect(page.getByText(/environment variables/i).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole('button', { name: /add variable/i })).toBeVisible();
   });
 });

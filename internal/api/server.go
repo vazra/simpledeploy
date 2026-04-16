@@ -117,7 +117,11 @@ func (s *Server) SetUIFS(fsys fs.FS) {
 	// Pre-read index.html to serve directly for SPA fallback.
 	// Using fileServer for index.html causes a redirect loop because
 	// http.FileServer redirects /index.html to ./ which resolves to /.
-	indexHTML, _ := fs.ReadFile(fsys, "index.html")
+	indexHTML, err := fs.ReadFile(fsys, "index.html")
+	if err != nil {
+		log.Printf("WARNING: index.html not found in UI filesystem: %v", err)
+		indexHTML = []byte("<!DOCTYPE html><html><body>UI not built. Run: make build</body></html>")
+	}
 	s.mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path != "/" {

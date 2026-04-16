@@ -8,6 +8,12 @@ export default async function globalSetup() {
   const binPath = await buildBinary();
   const server = await startServer(binPath);
 
+  // Safety net: kill server if this process exits unexpectedly
+  // (e.g., global-setup crashes after spawn but before teardown runs)
+  process.on('exit', () => {
+    try { server.proc.kill('SIGTERM'); } catch {}
+  });
+
   const state = {
     pid: server.proc.pid,
     port: server.port,

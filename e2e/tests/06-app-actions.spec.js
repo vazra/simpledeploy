@@ -23,28 +23,29 @@ test.describe('App Actions', () => {
   test('start app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    // App may be running or stopped; click Start if available
-    const startBtn = page.getByRole('button', { name: /^start$/i });
-    if (await startBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await startBtn.click();
-    }
+    // App should be stopped from previous test; Start button should appear
+    await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Start' }).click();
     await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 30_000 });
   });
 
   test('restart app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    // Wait for page to load and check app state
-    await page.waitForTimeout(2_000);
     // If app is stopped, start it first so Restart button appears
     const startBtn = page.getByRole('button', { name: 'Start' });
     if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await startBtn.click();
-      // Wait for action to complete and status to change
-      await page.waitForTimeout(5_000);
+      // Wait for action modal to complete, then close it
+      const actionDialog = page.getByRole('dialog');
+      const closeBtn = actionDialog.locator('button:has-text("Close"):not([aria-label])');
+      await expect(closeBtn).toBeVisible({ timeout: 30_000 });
+      await closeBtn.click();
+      // Reload to get updated status
       await page.reload();
-      await page.waitForTimeout(2_000);
+      await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 10_000 });
     }
+    await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /restart/i }).click();
     const dialog = page.getByRole('dialog');
     if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -76,10 +77,8 @@ test.describe('App Actions', () => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
     // Scale is inside the "..." (more) dropdown menu
-    // The more button is a ghost button containing only an SVG with three dots
     const moreBtn = page.locator('button').filter({ has: page.locator('svg path[d*="6.75 12a.75"]') });
     await moreBtn.click();
-    // Click "Scale" in the dropdown
     await page.locator('button').filter({ hasText: 'Scale' }).click();
 
     const dialog = page.getByRole('dialog');

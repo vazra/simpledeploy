@@ -8,6 +8,9 @@
     "test:debug": "npx playwright test --debug",
     "report": "npx playwright show-report"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "@playwright/test": "^1.52.0"
   }
