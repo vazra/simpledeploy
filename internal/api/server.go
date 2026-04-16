@@ -244,18 +244,26 @@ func (s *Server) routes() {
 	// Backup configs
 	s.mux.Handle("GET /api/apps/{slug}/backups/configs", s.authMiddleware(http.HandlerFunc(s.handleListBackupConfigs)))
 	s.mux.Handle("POST /api/apps/{slug}/backups/configs", s.authMiddleware(http.HandlerFunc(s.handleCreateBackupConfig)))
+	s.mux.Handle("PUT /api/backups/configs/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateBackupConfig)))
 	s.mux.Handle("DELETE /api/backups/configs/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteBackupConfig)))
 
 	// Backup runs
 	s.mux.Handle("GET /api/apps/{slug}/backups/runs", s.authMiddleware(http.HandlerFunc(s.handleListBackupRuns)))
 	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackup)))
 	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
+	s.mux.Handle("GET /api/backups/runs/{id}/download", s.authMiddleware(http.HandlerFunc(s.handleDownloadBackup)))
+	s.mux.Handle("POST /api/apps/{slug}/backups/upload-restore", s.authMiddleware(http.HandlerFunc(s.handleUploadRestore)))
 
 	// Backup dashboard & detection
 	s.mux.Handle("GET /api/backups/summary", s.authMiddleware(http.HandlerFunc(s.handleBackupSummary)))
 	s.mux.Handle("GET /api/apps/{slug}/backups/detect", s.authMiddleware(http.HandlerFunc(s.handleDetectStrategies)))
 	s.mux.Handle("POST /api/backups/configs/{id}/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackupConfig)))
 	s.mux.Handle("POST /api/backups/test-s3", s.authMiddleware(http.HandlerFunc(s.handleTestS3)))
+
+	// Compose versions (extended)
+	s.mux.Handle("PUT /api/apps/{slug}/versions/{id}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateComposeVersion))))
+	s.mux.Handle("GET /api/apps/{slug}/versions/{id}/download", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDownloadComposeVersion))))
+	s.mux.Handle("POST /api/apps/{slug}/versions/{id}/restore", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRestoreComposeVersion))))
 
 	// Docker system management
 	s.mux.Handle("GET /api/docker/info", s.authMiddleware(http.HandlerFunc(s.handleDockerInfo)))
