@@ -17,11 +17,12 @@ func TestCreateBackupConfig(t *testing.T) {
 
 	cookie := superAdminCookie(t, srv.jwt)
 	body, _ := json.Marshal(map[string]interface{}{
-		"Strategy":         "postgres",
-		"Target":           "local",
-		"ScheduleCron":     "0 2 * * *",
-		"TargetConfigJSON": "",
-		"RetentionCount":   5,
+		"strategy":          "postgres",
+		"target":            "local",
+		"schedule_cron":     "0 2 * * *",
+		"target_config_json": "",
+		"retention_mode":    "count",
+		"retention_count":   5,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/myapp/backups/configs", bytes.NewReader(body))
 	req.AddCookie(cookie)
@@ -51,6 +52,7 @@ func TestListBackupConfigs(t *testing.T) {
 		Strategy:       "postgres",
 		Target:         "local",
 		ScheduleCron:   "0 2 * * *",
+		RetentionMode:  "count",
 		RetentionCount: 3,
 	})
 
@@ -80,6 +82,7 @@ func TestListBackupRuns(t *testing.T) {
 		Strategy:       "postgres",
 		Target:         "local",
 		ScheduleCron:   "0 2 * * *",
+		RetentionMode:  "count",
 		RetentionCount: 3,
 	}
 	s.CreateBackupConfig(cfg)
@@ -127,6 +130,7 @@ func TestDeleteBackupConfig(t *testing.T) {
 		Strategy:       "postgres",
 		Target:         "local",
 		ScheduleCron:   "0 2 * * *",
+		RetentionMode:  "count",
 		RetentionCount: 3,
 	}
 	s.CreateBackupConfig(cfg)
@@ -151,6 +155,7 @@ func TestBackupSummary(t *testing.T) {
 		Strategy:       "postgres",
 		Target:         "local",
 		ScheduleCron:   "0 2 * * *",
+		RetentionMode:  "count",
 		RetentionCount: 3,
 	}
 	s.CreateBackupConfig(cfg)
@@ -190,6 +195,7 @@ func TestTriggerBackupConfig(t *testing.T) {
 		Strategy:       "postgres",
 		Target:         "local",
 		ScheduleCron:   "0 2 * * *",
+		RetentionMode:  "count",
 		RetentionCount: 3,
 	}
 	s.CreateBackupConfig(cfg)

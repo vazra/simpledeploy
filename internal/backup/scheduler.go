@@ -14,7 +14,7 @@ type BackupStore interface {
 	ListBackupConfigs(appID *int64) ([]store.BackupConfig, error)
 	GetBackupConfig(id int64) (*store.BackupConfig, error)
 	CreateBackupRun(configID int64) (*store.BackupRun, error)
-	UpdateBackupRunSuccess(id int64, sizeBytes int64, filePath string) error
+	UpdateBackupRunSuccess(id int64, sizeBytes int64, filePath, checksum string) error
 	UpdateBackupRunFailed(id int64, errMsg string) error
 	ListOldBackupRuns(configID int64, keepCount int) ([]store.BackupRun, error)
 	GetAppByID(id int64) (*store.App, error)
@@ -133,7 +133,7 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	if err := s.store.UpdateBackupRunSuccess(run.ID, size, path); err != nil {
+	if err := s.store.UpdateBackupRunSuccess(run.ID, size, path, ""); err != nil {
 		return fmt.Errorf("update run success: %w", err)
 	}
 

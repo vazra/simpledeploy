@@ -321,7 +321,7 @@ func (s *Server) handleTestS3(w http.ResponseWriter, r *http.Request) {
 	testKey := ".simpledeploy-s3-test"
 	testData := []byte("simpledeploy s3 connectivity test")
 
-	_, uploadErr := target.Upload(r.Context(), testKey, bytes.NewReader(testData))
+	_, _, uploadErr := target.Upload(r.Context(), testKey, bytes.NewReader(testData))
 	if uploadErr != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": uploadErr.Error()})

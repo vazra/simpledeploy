@@ -14,19 +14,28 @@ type BackupConfig struct {
 	Target           string    `json:"target"`
 	ScheduleCron     string    `json:"schedule_cron"`
 	TargetConfigJSON string    `json:"target_config_json"`
+	RetentionMode    string    `json:"retention_mode"`
 	RetentionCount   int       `json:"retention_count"`
+	RetentionDays    *int      `json:"retention_days"`
+	VerifyUpload     bool      `json:"verify_upload"`
+	PreHooks         string    `json:"pre_hooks"`
+	PostHooks        string    `json:"post_hooks"`
+	Paths            string    `json:"paths"`
 	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type BackupRun struct {
-	ID             int64      `json:"id"`
-	BackupConfigID int64      `json:"backup_config_id"`
-	Status         string     `json:"status"`
-	SizeBytes      *int64     `json:"size_bytes"`
-	StartedAt      time.Time  `json:"started_at"`
-	FinishedAt     *time.Time `json:"finished_at"`
-	ErrorMsg       string     `json:"error_msg"`
-	FilePath       string     `json:"file_path"`
+	ID               int64      `json:"id"`
+	BackupConfigID   int64      `json:"backup_config_id"`
+	Status           string     `json:"status"`
+	SizeBytes        *int64     `json:"size_bytes"`
+	Checksum         string     `json:"checksum"`
+	FilePath         string     `json:"file_path"`
+	ComposeVersionID *int64     `json:"compose_version_id"`
+	StartedAt        time.Time  `json:"started_at"`
+	FinishedAt       *time.Time `json:"finished_at"`
+	ErrorMsg         string     `json:"error_msg"`
 }
 
 // BackupSummaryApp holds aggregated backup health for one app.
@@ -128,7 +137,8 @@ func (s *Store) ListRecentBackupRuns(limit int) ([]BackupRunWithApp, error) {
 	rows, err := s.db.Query(`
 		SELECT
 			br.id, br.backup_config_id, br.status, br.size_bytes,
-			br.started_at, br.finished_at, br.error_msg, br.file_path,
+			br.checksum, br.file_path, br.compose_version_id,
+			br.started_at, br.finished_at, br.error_msg,
 			a.name, a.slug, bc.strategy
 		FROM backup_runs br
 		JOIN backup_configs bc ON bc.id = br.backup_config_id
@@ -146,10 +156,12 @@ func (s *Store) ListRecentBackupRuns(limit int) ([]BackupRunWithApp, error) {
 		var r BackupRunWithApp
 		var sizeBytes sql.NullInt64
 		var finishedAt sql.NullTime
-		var errorMsg, filePath sql.NullString
+		var errorMsg, filePath, checksum sql.NullString
+		var composeVersionID sql.NullInt64
 		if err := rows.Scan(
 			&r.ID, &r.BackupConfigID, &r.Status, &sizeBytes,
-			&r.StartedAt, &finishedAt, &errorMsg, &filePath,
+			&checksum, &filePath, &composeVersionID,
+			&r.StartedAt, &finishedAt, &errorMsg,
 			&r.AppName, &r.AppSlug, &r.Strategy,
 		); err != nil {
 			return nil, fmt.Errorf("scan recent backup run: %w", err)
@@ -167,6 +179,13 @@ func (s *Store) ListRecentBackupRuns(limit int) ([]BackupRunWithApp, error) {
 		}
 		if filePath.Valid {
 			r.FilePath = filePath.String
+		}
+		if checksum.Valid {
+			r.Checksum = checksum.String
+		}
+		if composeVersionID.Valid {
+			v := composeVersionID.Int64
+			r.ComposeVersionID = &v
 		}
 		runs = append(runs, r)
 	}
@@ -189,30 +208,83 @@ func splitCSV(s string) []string {
 
 func (s *Store) CreateBackupConfig(cfg *BackupConfig) error {
 	err := s.db.QueryRow(`
-		INSERT INTO backup_configs (app_id, strategy, target, schedule_cron, target_config_json, retention_count)
-		VALUES (?, ?, ?, ?, ?, ?)
-		RETURNING id, created_at
-	`, cfg.AppID, cfg.Strategy, cfg.Target, cfg.ScheduleCron, cfg.TargetConfigJSON, cfg.RetentionCount).
-		Scan(&cfg.ID, &cfg.CreatedAt)
+		INSERT INTO backup_configs (app_id, strategy, target, schedule_cron, target_config_json,
+			retention_mode, retention_count, retention_days, verify_upload, pre_hooks, post_hooks, paths)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		RETURNING id, created_at, updated_at
+	`, cfg.AppID, cfg.Strategy, cfg.Target, cfg.ScheduleCron, cfg.TargetConfigJSON,
+		cfg.RetentionMode, cfg.RetentionCount, cfg.RetentionDays, cfg.VerifyUpload,
+		cfg.PreHooks, cfg.PostHooks, cfg.Paths).
+		Scan(&cfg.ID, &cfg.CreatedAt, &cfg.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create backup config: %w", err)
 	}
 	return nil
 }
 
+func (s *Store) UpdateBackupConfig(cfg *BackupConfig) error {
+	res, err := s.db.Exec(`
+		UPDATE backup_configs SET
+			strategy = ?, target = ?, schedule_cron = ?, target_config_json = ?,
+			retention_mode = ?, retention_count = ?, retention_days = ?,
+			verify_upload = ?, pre_hooks = ?, post_hooks = ?, paths = ?,
+			updated_at = datetime('now')
+		WHERE id = ?
+	`, cfg.Strategy, cfg.Target, cfg.ScheduleCron, cfg.TargetConfigJSON,
+		cfg.RetentionMode, cfg.RetentionCount, cfg.RetentionDays,
+		cfg.VerifyUpload, cfg.PreHooks, cfg.PostHooks, cfg.Paths,
+		cfg.ID)
+	if err != nil {
+		return fmt.Errorf("update backup config: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("backup config %d not found", cfg.ID)
+	}
+	return nil
+}
+
+const backupConfigCols = `id, app_id, strategy, target, schedule_cron, target_config_json,
+	retention_mode, retention_count, retention_days, verify_upload,
+	pre_hooks, post_hooks, paths, created_at, updated_at`
+
+func scanBackupConfig(row scanner) (BackupConfig, error) {
+	var c BackupConfig
+	var retentionDays sql.NullInt64
+	var verifyUpload int
+	var preHooks, postHooks, paths sql.NullString
+	if err := row.Scan(&c.ID, &c.AppID, &c.Strategy, &c.Target, &c.ScheduleCron, &c.TargetConfigJSON,
+		&c.RetentionMode, &c.RetentionCount, &retentionDays, &verifyUpload,
+		&preHooks, &postHooks, &paths, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		return BackupConfig{}, err
+	}
+	if retentionDays.Valid {
+		v := int(retentionDays.Int64)
+		c.RetentionDays = &v
+	}
+	c.VerifyUpload = verifyUpload != 0
+	if preHooks.Valid {
+		c.PreHooks = preHooks.String
+	}
+	if postHooks.Valid {
+		c.PostHooks = postHooks.String
+	}
+	if paths.Valid {
+		c.Paths = paths.String
+	}
+	return c, nil
+}
+
 func (s *Store) ListBackupConfigs(appID *int64) ([]BackupConfig, error) {
 	var rows *sql.Rows
 	var err error
 	if appID == nil {
-		rows, err = s.db.Query(`
-			SELECT id, app_id, strategy, target, schedule_cron, target_config_json, retention_count, created_at
-			FROM backup_configs ORDER BY id
-		`)
+		rows, err = s.db.Query(`SELECT ` + backupConfigCols + ` FROM backup_configs ORDER BY id`)
 	} else {
-		rows, err = s.db.Query(`
-			SELECT id, app_id, strategy, target, schedule_cron, target_config_json, retention_count, created_at
-			FROM backup_configs WHERE app_id = ? ORDER BY id
-		`, *appID)
+		rows, err = s.db.Query(`SELECT `+backupConfigCols+` FROM backup_configs WHERE app_id = ? ORDER BY id`, *appID)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("list backup configs: %w", err)
@@ -221,8 +293,8 @@ func (s *Store) ListBackupConfigs(appID *int64) ([]BackupConfig, error) {
 
 	var cfgs []BackupConfig
 	for rows.Next() {
-		var c BackupConfig
-		if err := rows.Scan(&c.ID, &c.AppID, &c.Strategy, &c.Target, &c.ScheduleCron, &c.TargetConfigJSON, &c.RetentionCount, &c.CreatedAt); err != nil {
+		c, err := scanBackupConfig(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan backup config: %w", err)
 		}
 		cfgs = append(cfgs, c)
@@ -231,11 +303,7 @@ func (s *Store) ListBackupConfigs(appID *int64) ([]BackupConfig, error) {
 }
 
 func (s *Store) GetBackupConfig(id int64) (*BackupConfig, error) {
-	var c BackupConfig
-	err := s.db.QueryRow(`
-		SELECT id, app_id, strategy, target, schedule_cron, target_config_json, retention_count, created_at
-		FROM backup_configs WHERE id = ?
-	`, id).Scan(&c.ID, &c.AppID, &c.Strategy, &c.Target, &c.ScheduleCron, &c.TargetConfigJSON, &c.RetentionCount, &c.CreatedAt)
+	c, err := scanBackupConfig(s.db.QueryRow(`SELECT `+backupConfigCols+` FROM backup_configs WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("backup config %d not found", id)
 	}
@@ -274,12 +342,12 @@ func (s *Store) CreateBackupRun(configID int64) (*BackupRun, error) {
 	return &r, nil
 }
 
-func (s *Store) UpdateBackupRunSuccess(id int64, sizeBytes int64, filePath string) error {
+func (s *Store) UpdateBackupRunSuccess(id int64, sizeBytes int64, filePath, checksum string) error {
 	res, err := s.db.Exec(`
 		UPDATE backup_runs
-		SET status = 'success', size_bytes = ?, file_path = ?, finished_at = datetime('now')
+		SET status = 'success', size_bytes = ?, file_path = ?, checksum = ?, finished_at = datetime('now')
 		WHERE id = ?
-	`, sizeBytes, filePath, id)
+	`, sizeBytes, filePath, checksum, id)
 	if err != nil {
 		return fmt.Errorf("update backup run success: %w", err)
 	}
@@ -312,9 +380,11 @@ func (s *Store) UpdateBackupRunFailed(id int64, errMsg string) error {
 	return nil
 }
 
+const backupRunCols = `id, backup_config_id, status, size_bytes, checksum, file_path, compose_version_id, started_at, finished_at, error_msg`
+
 func (s *Store) ListBackupRuns(configID int64) ([]BackupRun, error) {
 	rows, err := s.db.Query(`
-		SELECT id, backup_config_id, status, size_bytes, started_at, finished_at, error_msg, file_path
+		SELECT `+backupRunCols+`
 		FROM backup_runs WHERE backup_config_id = ? ORDER BY started_at DESC
 	`, configID)
 	if err != nil {
@@ -335,7 +405,7 @@ func (s *Store) ListBackupRuns(configID int64) ([]BackupRun, error) {
 
 func (s *Store) GetBackupRun(id int64) (*BackupRun, error) {
 	r, err := scanBackupRun(s.db.QueryRow(`
-		SELECT id, backup_config_id, status, size_bytes, started_at, finished_at, error_msg, file_path
+		SELECT `+backupRunCols+`
 		FROM backup_runs WHERE id = ?
 	`, id))
 	if err == sql.ErrNoRows {
@@ -349,7 +419,7 @@ func (s *Store) GetBackupRun(id int64) (*BackupRun, error) {
 
 func (s *Store) ListOldBackupRuns(configID int64, keepCount int) ([]BackupRun, error) {
 	rows, err := s.db.Query(`
-		SELECT id, backup_config_id, status, size_bytes, started_at, finished_at, error_msg, file_path
+		SELECT `+backupRunCols+`
 		FROM backup_runs
 		WHERE backup_config_id = ? AND status = 'success'
 		ORDER BY started_at DESC
@@ -357,6 +427,30 @@ func (s *Store) ListOldBackupRuns(configID int64, keepCount int) ([]BackupRun, e
 	`, configID, keepCount)
 	if err != nil {
 		return nil, fmt.Errorf("list old backup runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []BackupRun
+	for rows.Next() {
+		r, err := scanBackupRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan backup run: %w", err)
+		}
+		runs = append(runs, r)
+	}
+	return runs, rows.Err()
+}
+
+func (s *Store) ListOldBackupRunsByTime(configID int64, maxAgeDays int) ([]BackupRun, error) {
+	rows, err := s.db.Query(`
+		SELECT `+backupRunCols+`
+		FROM backup_runs
+		WHERE backup_config_id = ? AND status = 'success'
+		  AND started_at < datetime('now', ? || ' days')
+		ORDER BY started_at DESC
+	`, configID, fmt.Sprintf("-%d", maxAgeDays))
+	if err != nil {
+		return nil, fmt.Errorf("list old backup runs by time: %w", err)
 	}
 	defer rows.Close()
 
@@ -379,8 +473,11 @@ func scanBackupRun(row scanner) (BackupRun, error) {
 	var r BackupRun
 	var sizeBytes sql.NullInt64
 	var finishedAt sql.NullTime
-	var errorMsg, filePath sql.NullString
-	if err := row.Scan(&r.ID, &r.BackupConfigID, &r.Status, &sizeBytes, &r.StartedAt, &finishedAt, &errorMsg, &filePath); err != nil {
+	var errorMsg, filePath, checksum sql.NullString
+	var composeVersionID sql.NullInt64
+	if err := row.Scan(&r.ID, &r.BackupConfigID, &r.Status, &sizeBytes,
+		&checksum, &filePath, &composeVersionID,
+		&r.StartedAt, &finishedAt, &errorMsg); err != nil {
 		return BackupRun{}, err
 	}
 	if sizeBytes.Valid {
@@ -396,6 +493,13 @@ func scanBackupRun(row scanner) (BackupRun, error) {
 	}
 	if filePath.Valid {
 		r.FilePath = filePath.String
+	}
+	if checksum.Valid {
+		r.Checksum = checksum.String
+	}
+	if composeVersionID.Valid {
+		v := composeVersionID.Int64
+		r.ComposeVersionID = &v
 	}
 	return r, nil
 }

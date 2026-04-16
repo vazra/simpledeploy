@@ -26,6 +26,7 @@ type successArgs struct {
 	id        int64
 	sizeBytes int64
 	filePath  string
+	checksum  string
 }
 
 type failedArgs struct {
@@ -64,8 +65,8 @@ func (m *mockStore) CreateBackupRun(configID int64) (*store.BackupRun, error) {
 	return r, nil
 }
 
-func (m *mockStore) UpdateBackupRunSuccess(id int64, sizeBytes int64, filePath string) error {
-	m.successCall = &successArgs{id: id, sizeBytes: sizeBytes, filePath: filePath}
+func (m *mockStore) UpdateBackupRunSuccess(id int64, sizeBytes int64, filePath, checksum string) error {
+	m.successCall = &successArgs{id: id, sizeBytes: sizeBytes, filePath: filePath, checksum: checksum}
 	if r, ok := m.runs[id]; ok {
 		r.Status = "success"
 	}
@@ -172,6 +173,7 @@ func TestSchedulerRunBackup(t *testing.T) {
 		AppID:          10,
 		Strategy:       "mock",
 		Target:         "mock",
+		RetentionMode:  "count",
 		RetentionCount: 5,
 	}
 

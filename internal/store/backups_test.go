@@ -26,6 +26,7 @@ func makeTestBackupConfig(t *testing.T, s *Store, appID int64) *BackupConfig {
 		Target:           "s3",
 		ScheduleCron:     "0 2 * * *",
 		TargetConfigJSON: `{"bucket":"mybucket"}`,
+		RetentionMode:    "count",
 		RetentionCount:   7,
 	}
 	if err := s.CreateBackupConfig(cfg); err != nil {
@@ -38,13 +39,20 @@ func TestBackupConfigCRUD(t *testing.T) {
 	s := newTestStore(t)
 	app := makeTestApp(t, s)
 
+	days := 30
 	cfg := &BackupConfig{
 		AppID:            app.ID,
 		Strategy:         "volume",
 		Target:           "local",
 		ScheduleCron:     "0 3 * * *",
 		TargetConfigJSON: `{"path":"/backups"}`,
-		RetentionCount:   5,
+		RetentionMode:    "time",
+		RetentionCount:   0,
+		RetentionDays:    &days,
+		VerifyUpload:     true,
+		PreHooks:         "echo pre",
+		PostHooks:        "echo post",
+		Paths:            "/data,/config",
 	}
 	if err := s.CreateBackupConfig(cfg); err != nil {
 		t.Fatalf("CreateBackupConfig: %v", err)
@@ -54,6 +62,9 @@ func TestBackupConfigCRUD(t *testing.T) {
 	}
 	if cfg.CreatedAt.IsZero() {
 		t.Fatal("expected CreatedAt to be set after create")
+	}
+	if cfg.UpdatedAt.IsZero() {
+		t.Fatal("expected UpdatedAt to be set after create")
 	}
 
 	// list all
@@ -77,7 +88,7 @@ func TestBackupConfigCRUD(t *testing.T) {
 		t.Errorf("Strategy = %q, want volume", byApp[0].Strategy)
 	}
 
-	// get
+	// get and verify all new fields
 	got, err := s.GetBackupConfig(cfg.ID)
 	if err != nil {
 		t.Fatalf("GetBackupConfig: %v", err)
@@ -85,8 +96,26 @@ func TestBackupConfigCRUD(t *testing.T) {
 	if got.Target != "local" {
 		t.Errorf("Target = %q, want local", got.Target)
 	}
-	if got.RetentionCount != 5 {
-		t.Errorf("RetentionCount = %d, want 5", got.RetentionCount)
+	if got.RetentionMode != "time" {
+		t.Errorf("RetentionMode = %q, want time", got.RetentionMode)
+	}
+	if got.RetentionCount != 0 {
+		t.Errorf("RetentionCount = %d, want 0", got.RetentionCount)
+	}
+	if got.RetentionDays == nil || *got.RetentionDays != 30 {
+		t.Errorf("RetentionDays = %v, want 30", got.RetentionDays)
+	}
+	if !got.VerifyUpload {
+		t.Error("VerifyUpload = false, want true")
+	}
+	if got.PreHooks != "echo pre" {
+		t.Errorf("PreHooks = %q, want 'echo pre'", got.PreHooks)
+	}
+	if got.PostHooks != "echo post" {
+		t.Errorf("PostHooks = %q, want 'echo post'", got.PostHooks)
+	}
+	if got.Paths != "/data,/config" {
+		t.Errorf("Paths = %q, want '/data,/config'", got.Paths)
 	}
 
 	// delete
@@ -102,6 +131,45 @@ func TestBackupConfigCRUD(t *testing.T) {
 	}
 	if _, err := s.GetBackupConfig(cfg.ID); err == nil {
 		t.Fatal("expected error getting deleted config, got nil")
+	}
+}
+
+func TestUpdateBackupConfig(t *testing.T) {
+	s := newTestStore(t)
+	app := makeTestApp(t, s)
+	cfg := makeTestBackupConfig(t, s, app.ID)
+
+	// switch from count to time retention
+	days := 14
+	cfg.RetentionMode = "time"
+	cfg.RetentionCount = 0
+	cfg.RetentionDays = &days
+	cfg.VerifyUpload = true
+	cfg.PreHooks = "pg_dump check"
+
+	if err := s.UpdateBackupConfig(cfg); err != nil {
+		t.Fatalf("UpdateBackupConfig: %v", err)
+	}
+
+	got, err := s.GetBackupConfig(cfg.ID)
+	if err != nil {
+		t.Fatalf("GetBackupConfig: %v", err)
+	}
+	if got.RetentionMode != "time" {
+		t.Errorf("RetentionMode = %q, want time", got.RetentionMode)
+	}
+	if got.RetentionDays == nil || *got.RetentionDays != 14 {
+		t.Errorf("RetentionDays = %v, want 14", got.RetentionDays)
+	}
+	if !got.VerifyUpload {
+		t.Error("VerifyUpload = false, want true")
+	}
+	if got.PreHooks != "pg_dump check" {
+		t.Errorf("PreHooks = %q, want 'pg_dump check'", got.PreHooks)
+	}
+	// app_id and created_at should be unchanged
+	if got.AppID != app.ID {
+		t.Errorf("AppID changed unexpectedly")
 	}
 }
 
@@ -131,7 +199,7 @@ func TestBackupRunLifecycle(t *testing.T) {
 	}
 
 	var size int64 = 1024 * 1024
-	if err := s.UpdateBackupRunSuccess(run.ID, size, "/backups/dump.sql.gz"); err != nil {
+	if err := s.UpdateBackupRunSuccess(run.ID, size, "/backups/dump.sql.gz", "sha256:abc123"); err != nil {
 		t.Fatalf("UpdateBackupRunSuccess: %v", err)
 	}
 
@@ -150,6 +218,9 @@ func TestBackupRunLifecycle(t *testing.T) {
 	}
 	if got.FilePath != "/backups/dump.sql.gz" {
 		t.Errorf("FilePath = %q, want /backups/dump.sql.gz", got.FilePath)
+	}
+	if got.Checksum != "sha256:abc123" {
+		t.Errorf("Checksum = %q, want sha256:abc123", got.Checksum)
 	}
 	if got.FinishedAt == nil {
 		t.Fatal("expected FinishedAt to be set after success")
@@ -199,7 +270,7 @@ func TestListOldBackupRuns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateBackupRun %d: %v", i, err)
 		}
-		if err := s.UpdateBackupRunSuccess(run.ID, int64(i*100), "/backups/dump.sql.gz"); err != nil {
+		if err := s.UpdateBackupRunSuccess(run.ID, int64(i*100), "/backups/dump.sql.gz", "sha256:test"); err != nil {
 			t.Fatalf("UpdateBackupRunSuccess %d: %v", i, err)
 		}
 	}
@@ -218,6 +289,57 @@ func TestListOldBackupRuns(t *testing.T) {
 	}
 }
 
+func TestListOldBackupRunsByTime(t *testing.T) {
+	s := newTestStore(t)
+	app := makeTestApp(t, s)
+	cfg := makeTestBackupConfig(t, s, app.ID)
+
+	// create a run and mark as success
+	run, err := s.CreateBackupRun(cfg.ID)
+	if err != nil {
+		t.Fatalf("CreateBackupRun: %v", err)
+	}
+	if err := s.UpdateBackupRunSuccess(run.ID, 500, "/backups/old.sql.gz", "sha256:old"); err != nil {
+		t.Fatalf("UpdateBackupRunSuccess: %v", err)
+	}
+
+	// manually backdate the run's started_at to 10 days ago
+	_, err = s.db.Exec(`UPDATE backup_runs SET started_at = datetime('now', '-10 days') WHERE id = ?`, run.ID)
+	if err != nil {
+		t.Fatalf("backdate run: %v", err)
+	}
+
+	// create a recent run
+	run2, err := s.CreateBackupRun(cfg.ID)
+	if err != nil {
+		t.Fatalf("CreateBackupRun: %v", err)
+	}
+	if err := s.UpdateBackupRunSuccess(run2.ID, 600, "/backups/new.sql.gz", "sha256:new"); err != nil {
+		t.Fatalf("UpdateBackupRunSuccess: %v", err)
+	}
+
+	// 7-day cutoff should return the old run only
+	old, err := s.ListOldBackupRunsByTime(cfg.ID, 7)
+	if err != nil {
+		t.Fatalf("ListOldBackupRunsByTime: %v", err)
+	}
+	if len(old) != 1 {
+		t.Fatalf("len(old) = %d, want 1", len(old))
+	}
+	if old[0].ID != run.ID {
+		t.Errorf("got run ID %d, want %d", old[0].ID, run.ID)
+	}
+
+	// 30-day cutoff should return nothing (both runs within 30 days)
+	old, err = s.ListOldBackupRunsByTime(cfg.ID, 30)
+	if err != nil {
+		t.Fatalf("ListOldBackupRunsByTime(30): %v", err)
+	}
+	if len(old) != 0 {
+		t.Errorf("len(old) = %d, want 0 for 30-day cutoff", len(old))
+	}
+}
+
 func TestGetBackupSummary(t *testing.T) {
 	s := newTestStore(t)
 	app := makeTestApp(t, s)
@@ -228,7 +350,7 @@ func TestGetBackupSummary(t *testing.T) {
 		t.Fatalf("CreateBackupRun: %v", err)
 	}
 	var size int64 = 2048
-	if err := s.UpdateBackupRunSuccess(run.ID, size, "/backups/dump.sql.gz"); err != nil {
+	if err := s.UpdateBackupRunSuccess(run.ID, size, "/backups/dump.sql.gz", "sha256:sum"); err != nil {
 		t.Fatalf("UpdateBackupRunSuccess: %v", err)
 	}
 
@@ -266,7 +388,7 @@ func TestListRecentBackupRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateBackupRun: %v", err)
 	}
-	if err := s.UpdateBackupRunSuccess(run.ID, 512, "/backups/dump.sql.gz"); err != nil {
+	if err := s.UpdateBackupRunSuccess(run.ID, 512, "/backups/dump.sql.gz", "sha256:recent"); err != nil {
 		t.Fatalf("UpdateBackupRunSuccess: %v", err)
 	}
 
@@ -289,5 +411,8 @@ func TestListRecentBackupRuns(t *testing.T) {
 	}
 	if got.Status != "success" {
 		t.Errorf("Status = %q, want success", got.Status)
+	}
+	if got.Checksum != "sha256:recent" {
+		t.Errorf("Checksum = %q, want sha256:recent", got.Checksum)
 	}
 }

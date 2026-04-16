@@ -8,12 +8,15 @@ import (
 
 // ComposeVersion holds a stored snapshot of a compose file.
 type ComposeVersion struct {
-	ID        int64     `json:"id"`
-	AppID     int64     `json:"app_id"`
-	Version   int       `json:"version"`
-	Content   string    `json:"content"`
-	Hash      string    `json:"hash"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	AppID       int64     `json:"app_id"`
+	Version     int       `json:"version"`
+	Content     string    `json:"content"`
+	Hash        string    `json:"hash"`
+	Name        *string   `json:"name"`
+	Notes       *string   `json:"notes"`
+	EnvSnapshot *string   `json:"env_snapshot"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // DeployEvent records a deploy/rollback action.
@@ -63,7 +66,7 @@ func (s *Store) CreateComposeVersion(appID int64, content, hash string) error {
 // ListComposeVersions returns versions for an app ordered newest first.
 func (s *Store) ListComposeVersions(appID int64) ([]ComposeVersion, error) {
 	rows, err := s.db.Query(`
-		SELECT id, app_id, version, content, hash, created_at
+		SELECT id, app_id, version, content, hash, name, notes, env_snapshot, created_at
 		FROM compose_versions
 		WHERE app_id = ?
 		ORDER BY version DESC
@@ -76,7 +79,7 @@ func (s *Store) ListComposeVersions(appID int64) ([]ComposeVersion, error) {
 	var versions []ComposeVersion
 	for rows.Next() {
 		var v ComposeVersion
-		if err := rows.Scan(&v.ID, &v.AppID, &v.Version, &v.Content, &v.Hash, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.AppID, &v.Version, &v.Content, &v.Hash, &v.Name, &v.Notes, &v.EnvSnapshot, &v.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan compose version: %w", err)
 		}
 		versions = append(versions, v)
@@ -88,9 +91,9 @@ func (s *Store) ListComposeVersions(appID int64) ([]ComposeVersion, error) {
 func (s *Store) GetComposeVersion(id int64) (*ComposeVersion, error) {
 	var v ComposeVersion
 	err := s.db.QueryRow(`
-		SELECT id, app_id, version, content, hash, created_at
+		SELECT id, app_id, version, content, hash, name, notes, env_snapshot, created_at
 		FROM compose_versions WHERE id = ?
-	`, id).Scan(&v.ID, &v.AppID, &v.Version, &v.Content, &v.Hash, &v.CreatedAt)
+	`, id).Scan(&v.ID, &v.AppID, &v.Version, &v.Content, &v.Hash, &v.Name, &v.Notes, &v.EnvSnapshot, &v.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("compose version %d not found", id)
 	}
@@ -98,6 +101,21 @@ func (s *Store) GetComposeVersion(id int64) (*ComposeVersion, error) {
 		return nil, fmt.Errorf("get compose version: %w", err)
 	}
 	return &v, nil
+}
+
+// UpdateComposeVersion updates the name, notes, and env_snapshot for a version.
+func (s *Store) UpdateComposeVersion(id int64, name, notes, envSnapshot string) error {
+	res, err := s.db.Exec(`
+		UPDATE compose_versions SET name = ?, notes = ?, env_snapshot = ? WHERE id = ?
+	`, name, notes, envSnapshot, id)
+	if err != nil {
+		return fmt.Errorf("update compose version: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("compose version %d not found", id)
+	}
+	return nil
 }
 
 // DeleteComposeVersion removes a single version by ID.

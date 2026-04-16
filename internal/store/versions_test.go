@@ -113,6 +113,59 @@ func TestGetComposeVersion(t *testing.T) {
 	}
 }
 
+func TestUpdateComposeVersion(t *testing.T) {
+	s := openTestStore(t)
+	appID := insertTestApp(t, s, "verapp")
+
+	if err := s.CreateComposeVersion(appID, "content-v1", "hash1"); err != nil {
+		t.Fatalf("CreateComposeVersion: %v", err)
+	}
+
+	versions, err := s.ListComposeVersions(appID)
+	if err != nil {
+		t.Fatalf("ListComposeVersions: %v", err)
+	}
+	if len(versions) == 0 {
+		t.Fatal("no versions returned")
+	}
+	v := versions[0]
+
+	// name/notes/env_snapshot should be nil initially
+	if v.Name != nil {
+		t.Errorf("Name = %v, want nil", v.Name)
+	}
+	if v.Notes != nil {
+		t.Errorf("Notes = %v, want nil", v.Notes)
+	}
+	if v.EnvSnapshot != nil {
+		t.Errorf("EnvSnapshot = %v, want nil", v.EnvSnapshot)
+	}
+
+	// update
+	if err := s.UpdateComposeVersion(v.ID, "initial deploy", "first version", "FOO=bar\nBAZ=qux"); err != nil {
+		t.Fatalf("UpdateComposeVersion: %v", err)
+	}
+
+	got, err := s.GetComposeVersion(v.ID)
+	if err != nil {
+		t.Fatalf("GetComposeVersion: %v", err)
+	}
+	if got.Name == nil || *got.Name != "initial deploy" {
+		t.Errorf("Name = %v, want 'initial deploy'", got.Name)
+	}
+	if got.Notes == nil || *got.Notes != "first version" {
+		t.Errorf("Notes = %v, want 'first version'", got.Notes)
+	}
+	if got.EnvSnapshot == nil || *got.EnvSnapshot != "FOO=bar\nBAZ=qux" {
+		t.Errorf("EnvSnapshot = %v, want 'FOO=bar\\nBAZ=qux'", got.EnvSnapshot)
+	}
+
+	// not found
+	if err := s.UpdateComposeVersion(99999, "x", "y", "z"); err == nil {
+		t.Error("expected error for non-existent version")
+	}
+}
+
 func TestCreateAndListDeployEvents(t *testing.T) {
 	s := openTestStore(t)
 
