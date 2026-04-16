@@ -5,9 +5,12 @@ import (
 	"io"
 )
 
-// Target defines where backup data is stored and retrieved from.
 type Target interface {
-	Upload(ctx context.Context, filename string, data io.Reader) (int64, error)
-	Download(ctx context.Context, filename string) (io.ReadCloser, error)
-	Delete(ctx context.Context, filename string) error
+	Type() string
+	Upload(ctx context.Context, filename string, data io.Reader) (path string, size int64, err error)
+	Download(ctx context.Context, path string) (io.ReadCloser, error)
+	Delete(ctx context.Context, path string) error
+	Test(ctx context.Context) error
 }
+
+type TargetFactory func(configJSON string) (Target, error)
