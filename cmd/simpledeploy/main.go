@@ -489,14 +489,44 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return backup.NewLocalTarget(filepath.Join(cfg.DataDir, "backups")), nil
 	})
 	backupSched.RegisterTargetFactory("s3", func(configJSON string) (backup.Target, error) {
+		// Decrypt S3 config if encrypted
+		decrypted := configJSON
+		if cfg.MasterSecret != "" {
+			if plain, err := auth.Decrypt(configJSON, cfg.MasterSecret); err == nil {
+				decrypted = plain
+			}
+		}
 		var s3cfg backup.S3Config
-		json.Unmarshal([]byte(configJSON), &s3cfg)
+		json.Unmarshal([]byte(decrypted), &s3cfg)
 		return backup.NewS3Target(s3cfg)
+	})
+	backupSched.SetAlertFunc(func(appName, strategy, message, eventType string) {
+		evaluator.DispatchBackupAlert(alerts.BackupAlertEvent{
+			AppName:   appName,
+			Strategy:  strategy,
+			Message:   message,
+			EventType: eventType,
+			FiredAt:   time.Now(),
+		})
 	})
 	if err := backupSched.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "backup scheduler: %v\n", err)
 	}
 	defer backupSched.Stop()
+
+	// Missed backup checker
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				backupSched.CheckMissed()
+			}
+		}
+	}()
 
 	srv := api.NewServer(cfg.ManagementPort, db, jwtMgr, rl)
 	srv.SetBackupScheduler(backupSched)
@@ -844,8 +874,14 @@ func newBackupScheduler(cfg *config.Config, db *store.Store) *backup.Scheduler {
 		return backup.NewLocalTarget(filepath.Join(cfg.DataDir, "backups")), nil
 	})
 	sched.RegisterTargetFactory("s3", func(configJSON string) (backup.Target, error) {
+		decrypted := configJSON
+		if cfg.MasterSecret != "" {
+			if plain, err := auth.Decrypt(configJSON, cfg.MasterSecret); err == nil {
+				decrypted = plain
+			}
+		}
 		var s3cfg backup.S3Config
-		json.Unmarshal([]byte(configJSON), &s3cfg)
+		json.Unmarshal([]byte(decrypted), &s3cfg)
 		return backup.NewS3Target(s3cfg)
 	})
 	return sched
