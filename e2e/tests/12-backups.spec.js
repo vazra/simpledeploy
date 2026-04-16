@@ -10,32 +10,58 @@ test.describe('Backups', () => {
     await expect(page.getByText(/backup|configure/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
+  test('detect strategies shows postgres and volume', async ({ page }) => {
+    await loginAsAdmin(page);
+    const state = getState();
+    await page.goto(`${state.baseURL}/#/apps/e2e-postgres`);
+    await page.getByRole('button', { name: /backups/i }).click();
+
+    const configBtn = page.getByRole('button', { name: /configure backup|add config/i });
+    await configBtn.click();
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5_000 });
+
+    // Strategy detection should show PostgreSQL and Files & Volumes
+    await expect(page.getByText(/postgresql/i)).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/files.*volumes/i)).toBeVisible();
+  });
+
   test('create backup config via wizard', async ({ page }) => {
     await loginAsAdmin(page);
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-postgres`);
     await page.getByRole('button', { name: /backups/i }).click();
 
-    const addBtn = page.getByRole('button', { name: /configure|add config/i });
-    await addBtn.click();
+    const configBtn = page.getByRole('button', { name: /configure backup|add config/i });
+    await configBtn.click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible({ timeout: 5_000 });
 
-    const strategyBtn = dialog.locator('button').filter({ hasText: /postgres|database|volume/i }).first();
-    if (await strategyBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await strategyBtn.click();
+    // Step 1: Select postgres strategy (auto-detected, may already be selected)
+    const pgBtn = dialog.getByText(/postgresql/i).first();
+    if (await pgBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await pgBtn.click();
     }
     await dialog.getByRole('button', { name: /next/i }).click();
 
+    // Step 2: Select local storage (default)
     await dialog.getByText(/local storage/i).click();
     await dialog.getByRole('button', { name: /next/i }).click();
 
+    // Step 3: Schedule (accept defaults)
     await dialog.getByRole('button', { name: /next/i }).click();
 
+    // Step 4: Hooks (skip)
+    await dialog.getByRole('button', { name: /next/i }).click();
+
+    // Step 5: Retention (accept defaults)
+    await dialog.getByRole('button', { name: /next/i }).click();
+
+    // Step 6: Review and create
     await dialog.getByRole('button', { name: /create backup/i }).click();
 
-    await expect(page.getByText(/local|storage/i).first()).toBeVisible({ timeout: 10_000 });
+    // Verify config appears in the table
+    await expect(page.getByText(/local/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('trigger manual backup', async ({ page }) => {
@@ -48,11 +74,10 @@ test.describe('Backups', () => {
     await expect(backupBtn).toBeVisible({ timeout: 10_000 });
     await backupBtn.click();
 
-    // Verify backup was triggered (shows "running" or completes)
+    // Wait for backup to run, then reload to see result
     await page.waitForTimeout(3_000);
     await page.reload();
     await page.getByRole('button', { name: /backups/i }).click();
-    // The backup history should show at least one entry (running, success, or failed)
     await expect(page.getByText(/running|success|failed/i).first()).toBeVisible({ timeout: 15_000 });
   });
 
