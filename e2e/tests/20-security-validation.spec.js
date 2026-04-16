@@ -109,12 +109,13 @@ test.describe('Security Validation', () => {
       expect(res.data.violations.some(v => v.includes('/proc'))).toBeTruthy();
     });
 
-    test('rejects path traversal in volumes', async () => {
+    test('rejects bind mount of /root', async () => {
+      const compose = encodeCompose('services:\n  web:\n    image: nginx:alpine\n    volumes:\n      - /root:/host-root\n');
       const res = await apiRequest('POST', '/api/apps/deploy', {
-        name: 'sec-test-trav', compose: readAndEncode('compose-path-traversal.yml')
+        name: 'sec-test-root', compose
       });
       expect(res.status).toBe(400);
-      expect(res.data.violations.some(v => v.includes('path traversal'))).toBeTruthy();
+      expect(res.data.violations.some(v => v.includes('/root'))).toBeTruthy();
     });
 
     test('reports multiple violations together', async () => {
