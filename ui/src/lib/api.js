@@ -136,17 +136,44 @@ export const api = {
   appMetrics: (slug, range) => request('GET', `/apps/${slug}/metrics?range=${range || '1h'}`),
   appRequests: (slug, range) => request('GET', `/apps/${slug}/requests?range=${range || '1h'}`),
 
-  // Backups
+  // Backup configs
   listBackupConfigs: (slug) => request('GET', `/apps/${slug}/backups/configs`),
   createBackupConfig: (slug, cfg) => requestWithToast('POST', `/apps/${slug}/backups/configs`, cfg, 'Backup config created'),
+  updateBackupConfig: (id, cfg) => requestWithToast('PUT', `/backups/configs/${id}`, cfg, 'Backup config updated'),
   deleteBackupConfig: (id) => requestWithToast('DELETE', `/backups/configs/${id}`, null, 'Backup config deleted'),
+
+  // Backup runs
   listBackupRuns: (slug) => request('GET', `/apps/${slug}/backups/runs`),
   triggerBackup: (slug) => requestWithToast('POST', `/apps/${slug}/backups/run`, null, 'Backup triggered'),
   triggerBackupConfig: (id) => requestWithToast('POST', `/backups/configs/${id}/run`, null, 'Backup triggered'),
   restore: (id) => requestWithToast('POST', `/backups/restore/${id}`, null, 'Restore started'),
+  downloadBackupUrl: (id) => `${BASE}/backups/runs/${id}/download`,
+  uploadRestore: async (slug, formData) => {
+    try {
+      const res = await fetch(`${BASE}/apps/${slug}/backups/upload-restore`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        return { data: null, error: text || 'Upload failed' };
+      }
+      return { data: true, error: null };
+    } catch (err) {
+      return { data: null, error: err.message };
+    }
+  },
+
+  // Backup dashboard & detection
   backupSummary: () => request('GET', '/backups/summary'),
   detectStrategies: (slug) => request('GET', `/apps/${slug}/backups/detect`),
   testS3: (cfg) => request('POST', '/backups/test-s3', cfg),
+
+  // Compose versions
+  updateComposeVersion: (slug, id, data) => requestWithToast('PUT', `/apps/${slug}/versions/${id}`, data, 'Version updated'),
+  downloadComposeVersionUrl: (slug, id) => `${BASE}/apps/${slug}/versions/${id}/download`,
+  restoreComposeVersion: (slug, id) => requestWithToast('POST', `/apps/${slug}/versions/${id}/restore`, null, 'Restoring version'),
 
   // Webhooks
   listWebhooks: () => request('GET', '/webhooks'),

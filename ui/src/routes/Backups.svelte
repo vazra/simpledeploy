@@ -24,6 +24,7 @@
   const totalSuccess24h = $derived(apps.reduce((s, a) => s + (a.recent_success_count || 0), 0))
   const totalFail24h = $derived(apps.reduce((s, a) => s + (a.recent_fail_count || 0), 0))
   const totalStorage = $derived(apps.reduce((s, a) => s + (a.total_size_bytes || 0), 0))
+  const totalMissed24h = $derived(apps.reduce((s, a) => s + (a.missed_count || 0), 0))
   const filteredRuns = $derived(
     statusFilter === 'all' ? recentRuns : recentRuns.filter(r => r.status === statusFilter)
   )
@@ -91,7 +92,7 @@
     </div>
   {:else}
     <!-- Summary stats -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
       <div class="bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50">
         <div class="text-xs text-text-muted mb-1">Total Configs</div>
         <div class="text-2xl font-semibold text-text-primary">{totalConfigs}</div>
@@ -103,6 +104,10 @@
       <div class="bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50">
         <div class="text-xs text-text-muted mb-1">24h Failed</div>
         <div class="text-2xl font-semibold {totalFail24h > 0 ? 'text-danger' : 'text-text-primary'}">{totalFail24h}</div>
+      </div>
+      <div class="bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50">
+        <div class="text-xs text-text-muted mb-1">Missed (24h)</div>
+        <div class="text-2xl font-semibold {totalMissed24h > 0 ? 'text-warning' : 'text-text-primary'}">{totalMissed24h}</div>
       </div>
       <div class="bg-surface-2 rounded-xl p-4 shadow-sm border border-border/50">
         <div class="text-xs text-text-muted mb-1">Total Storage</div>

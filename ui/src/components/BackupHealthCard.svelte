@@ -1,4 +1,6 @@
 <script>
+  import Badge from './Badge.svelte'
+
   let { app } = $props()
 
   function relativeTime(ts) {
@@ -28,9 +30,23 @@
   }
 
   function strategyLabel(s) {
-    if (s === 'postgres') return 'Database'
-    if (s === 'volume') return 'Files'
-    return s
+    const labels = {
+      postgres: 'DB',
+      mysql: 'MySQL',
+      redis: 'Redis',
+      volume: 'Files',
+      sqlite: 'SQLite',
+      mongo: 'Mongo',
+    }
+    return labels[s] || s
+  }
+
+  function strategyVariant(s) {
+    if (s === 'postgres' || s === 'mysql' || s === 'mongo') return 'info'
+    if (s === 'redis') return 'warning'
+    if (s === 'volume') return 'default'
+    if (s === 'sqlite') return 'success'
+    return 'default'
   }
 
   let statusColor = $derived(app.last_run_status === 'success' ? 'bg-success' : app.last_run_status === 'failed' ? 'bg-danger' : 'bg-text-muted/50')
@@ -50,7 +66,16 @@
 
     <div>
       <div class="text-xs text-text-muted mb-0.5">Configs</div>
-      <div class="text-xs text-text-secondary">{app.config_count} · {app.strategies?.map(strategyLabel).join(', ') || 'None'}</div>
+      <div class="flex items-center gap-1.5 flex-wrap mt-0.5">
+        <span class="text-xs text-text-secondary">{app.config_count}</span>
+        {#if app.strategies?.length > 0}
+          {#each app.strategies as s}
+            <Badge variant={strategyVariant(s)}>{strategyLabel(s)}</Badge>
+          {/each}
+        {:else}
+          <span class="text-xs text-text-muted">None</span>
+        {/if}
+      </div>
     </div>
 
     <div>

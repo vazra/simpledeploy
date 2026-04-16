@@ -6,6 +6,7 @@
   import Modal from './Modal.svelte'
   import Skeleton from './Skeleton.svelte'
   import BackupWizard from './BackupWizard.svelte'
+  import { toasts } from '../lib/stores/toast.js'
 
   let { slug } = $props()
 
@@ -13,9 +14,18 @@
   let runs = $state([])
   let loading = $state(true)
   let showWizard = $state(false)
+  let editConfig = $state(null)
   let showRestoreModal = $state(null)
+  let showUploadModal = $state(false)
   let expandedError = $state(null)
+  let expandedChecksum = $state(null)
   let triggeringId = $state(null)
+
+  // Upload restore state
+  let uploadStrategy = $state('')
+  let uploadContainer = $state('')
+  let uploadFile = $state(null)
+  let uploading = $state(false)
 
   let lastRun = $derived(runs[0])
 
@@ -44,16 +54,63 @@
     await loadData()
   }
 
+  function openEditWizard(cfg) {
+    editConfig = cfg
+    showWizard = true
+  }
+
+  function openCreateWizard() {
+    editConfig = null
+    showWizard = true
+  }
+
+  function closeWizard() {
+    showWizard = false
+    editConfig = null
+  }
+
   async function confirmRestore() {
     await api.restore(showRestoreModal)
     showRestoreModal = null
     await loadData()
   }
 
+  function openUploadModal() {
+    uploadStrategy = ''
+    uploadContainer = ''
+    uploadFile = null
+    uploading = false
+    showUploadModal = true
+  }
+
+  async function submitUploadRestore() {
+    if (!uploadFile || !uploadStrategy) return
+    uploading = true
+    const formData = new FormData()
+    formData.append('file', uploadFile)
+    formData.append('strategy', uploadStrategy)
+    if (uploadContainer) formData.append('container', uploadContainer)
+    const res = await api.uploadRestore(slug, formData)
+    uploading = false
+    if (res.error) {
+      toasts.error(res.error)
+    } else {
+      toasts.success('Restore from file started')
+      showUploadModal = false
+      await loadData()
+    }
+  }
+
   function strategyLabel(s) {
-    if (s === 'postgres') return 'Database (PostgreSQL)'
-    if (s === 'volume') return 'Files & Volumes'
-    return s
+    const labels = {
+      postgres: 'Database (PostgreSQL)',
+      mysql: 'Database (MySQL)',
+      redis: 'Redis',
+      volume: 'Files & Volumes',
+      sqlite: 'SQLite Database',
+      mongo: 'Database (MongoDB)',
+    }
+    return labels[s] || s
   }
 
   function targetLabel(t, configJson) {
@@ -78,7 +135,6 @@
 
     const pad = (n) => String(n).padStart(2, '0')
 
-    // Monthly: specific day of month, any day of week
     if (dom !== '*' && dow === '*') {
       const day = parseInt(dom, 10)
       if (!isNaN(day)) {
@@ -86,7 +142,6 @@
       }
     }
 
-    // Weekly: specific days of week
     if (dow !== '*' && dom === '*') {
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
       const dayNums = dow.split(',').map(d => parseInt(d, 10))
@@ -96,12 +151,17 @@
       }
     }
 
-    // Daily: every day at specific time
     if (dow === '*' && dom === '*') {
       return `Daily at ${pad(hour)}:${pad(min)}`
     }
 
     return expr
+  }
+
+  function retentionLabel(cfg) {
+    if (cfg.retention_mode === 'days' && cfg.retention_days) return `${cfg.retention_days} days`
+    if (cfg.retention_count) return `Keep last ${cfg.retention_count}`
+    return '-'
   }
 
   function formatSize(bytes) {
@@ -134,12 +194,19 @@
     return `${days}d ago`
   }
 
+  function truncateChecksum(hash) {
+    if (!hash) return ''
+    return hash.length > 16 ? hash.slice(0, 16) + '...' : hash
+  }
+
   function statusVariant(status) {
     if (status === 'success') return 'success'
     if (status === 'failed') return 'danger'
     if (status === 'running') return 'info'
     return 'default'
   }
+
+  const strategyOptions = ['postgres', 'mysql', 'redis', 'volume', 'sqlite', 'mongo']
 </script>
 
 {#if loading}
@@ -154,7 +221,7 @@
     <p class="text-sm text-text-muted max-w-md mb-6">
       Set up your first backup to protect your data. SimpleDeploy can automatically back up your databases and file volumes on a schedule.
     </p>
-    <Button onclick={() => showWizard = true}>Configure Backup</Button>
+    <Button onclick={openCreateWizard}>Configure Backup</Button>
   </div>
 {:else}
   <div class="space-y-4">
@@ -201,7 +268,10 @@
             </div>
           </div>
         {/if}
-        <Button size="sm" onclick={() => showWizard = true}>
+        <Button variant="secondary" size="sm" onclick={openUploadModal}>
+          Restore from File
+        </Button>
+        <Button size="sm" onclick={openCreateWizard}>
           Add Config
         </Button>
       </div>
@@ -227,15 +297,13 @@
                 <td class="py-2.5 px-3 text-text-primary">{strategyLabel(cfg.strategy)}</td>
                 <td class="py-2.5 px-3 text-text-secondary">{targetLabel(cfg.target, cfg.target_config_json)}</td>
                 <td class="py-2.5 px-3 text-text-secondary">{cronLabel(cfg.schedule_cron)}</td>
-                <td class="py-2.5 px-3 text-text-secondary">
-                  {#if cfg.retention_count}
-                    Keep last {cfg.retention_count}
-                  {:else}
-                    -
-                  {/if}
-                </td>
+                <td class="py-2.5 px-3 text-text-secondary">{retentionLabel(cfg)}</td>
                 <td class="py-2.5 px-3">
-                  <Button variant="ghost" size="sm" onclick={() => deleteConfig(cfg.id)}>Delete</Button>
+                  <div class="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" onclick={() => triggerBackup(cfg.id)} loading={triggeringId === cfg.id}>Run</Button>
+                    <Button variant="ghost" size="sm" onclick={() => openEditWizard(cfg)}>Edit</Button>
+                    <Button variant="ghost" size="sm" onclick={() => deleteConfig(cfg.id)}>Delete</Button>
+                  </div>
                 </td>
               </tr>
             {/each}
@@ -256,6 +324,7 @@
                 <th class="text-left text-xs font-medium text-text-muted py-2.5 px-3">Size</th>
                 <th class="text-left text-xs font-medium text-text-muted py-2.5 px-3">Duration</th>
                 <th class="text-left text-xs font-medium text-text-muted py-2.5 px-3">Time</th>
+                <th class="text-left text-xs font-medium text-text-muted py-2.5 px-3">Checksum</th>
                 <th class="text-left text-xs font-medium text-text-muted py-2.5 px-3">Actions</th>
               </tr>
             </thead>
@@ -272,10 +341,29 @@
                       {relativeTime(run.finished_at || run.started_at)}
                     </span>
                   </td>
+                  <td class="py-2.5 px-3 text-text-muted">
+                    {#if run.checksum}
+                      <button
+                        type="button"
+                        onclick={() => expandedChecksum = expandedChecksum === run.id ? null : run.id}
+                        class="font-mono text-xs hover:text-text-primary transition-colors"
+                        title="Click to expand"
+                      >
+                        {expandedChecksum === run.id ? run.checksum : truncateChecksum(run.checksum)}
+                      </button>
+                    {:else}
+                      <span class="text-xs">-</span>
+                    {/if}
+                  </td>
                   <td class="py-2.5 px-3">
                     <div class="flex items-center gap-2">
                       {#if run.status === 'success'}
                         <Button variant="ghost" size="sm" onclick={() => showRestoreModal = run.id}>Restore</Button>
+                        <a
+                          href={api.downloadBackupUrl(run.id)}
+                          download
+                          class="px-2 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+                        >Download</a>
                       {/if}
                       {#if run.status === 'failed' && (run.error_msg || run.error)}
                         <Button
@@ -291,7 +379,7 @@
                 </tr>
                 {#if run.status === 'failed' && expandedError === run.id}
                   <tr class="border-b border-border/30">
-                    <td colspan="5" class="px-3 py-3">
+                    <td colspan="6" class="px-3 py-3">
                       <pre class="text-xs font-mono whitespace-pre-wrap break-all bg-danger/5 text-danger/80 rounded-lg p-3 max-h-40 overflow-y-auto">{run.error_msg || run.error}</pre>
                     </td>
                   </tr>
@@ -305,7 +393,7 @@
   </div>
 {/if}
 
-<BackupWizard open={showWizard} {slug} onclose={() => showWizard = false} oncreated={loadData} />
+<BackupWizard open={showWizard} {slug} {editConfig} onclose={closeWizard} oncreated={loadData} />
 
 {#if showRestoreModal}
   <Modal
@@ -314,4 +402,67 @@
     onConfirm={confirmRestore}
     onCancel={() => showRestoreModal = null}
   />
+{/if}
+
+{#if showUploadModal}
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+    <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={() => showUploadModal = false} aria-label="Close"></button>
+    <div class="relative bg-surface-2 border border-border/50 rounded-2xl shadow-2xl animate-scale-in max-w-md w-full">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-border/30">
+        <h3 class="text-lg font-semibold text-text-primary tracking-tight">Restore from File</h3>
+        <button onclick={() => showUploadModal = false} class="text-text-muted hover:text-text-primary transition-colors p-1 rounded-lg hover:bg-surface-3" aria-label="Close">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-text-secondary mb-1">
+            Strategy <span class="text-danger">*</span>
+          </label>
+          <select
+            class="w-full bg-input-bg border border-border/50 rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50"
+            bind:value={uploadStrategy}
+          >
+            <option value="">Select strategy...</option>
+            {#each strategyOptions as opt}
+              <option value={opt}>{strategyLabel(opt)}</option>
+            {/each}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-text-secondary mb-1">Container (optional)</label>
+          <input
+            type="text"
+            class="w-full bg-input-bg border border-border/50 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
+            placeholder="e.g. postgres"
+            bind:value={uploadContainer}
+          />
+          <p class="text-xs text-text-muted mt-1">Name of the service to restore into</p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-text-secondary mb-1">
+            Backup file <span class="text-danger">*</span>
+          </label>
+          <input
+            type="file"
+            class="w-full text-sm text-text-secondary file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-surface-3 file:text-text-primary hover:file:bg-surface-3/80"
+            onchange={(e) => uploadFile = e.target.files[0]}
+          />
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" size="sm" onclick={() => showUploadModal = false}>Cancel</Button>
+          <Button
+            size="sm"
+            loading={uploading}
+            disabled={!uploadStrategy || !uploadFile || uploading}
+            onclick={submitUploadRestore}
+          >
+            Restore
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
 {/if}
