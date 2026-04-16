@@ -34,11 +34,16 @@ test.describe('App Actions', () => {
   test('restart app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    // If app is stopped, start it first
-    const startBtn = page.getByRole('button', { name: /^start$/i });
-    if (await startBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    // Wait for page to load and check app state
+    await page.waitForTimeout(2_000);
+    // If app is stopped, start it first so Restart button appears
+    const startBtn = page.getByRole('button', { name: 'Start' });
+    if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await startBtn.click();
-      await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 30_000 });
+      // Wait for action to complete and status to change
+      await page.waitForTimeout(5_000);
+      await page.reload();
+      await page.waitForTimeout(2_000);
     }
     await page.getByRole('button', { name: /restart/i }).click();
     const dialog = page.getByRole('dialog');

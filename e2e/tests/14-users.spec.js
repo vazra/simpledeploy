@@ -47,7 +47,7 @@ test.describe('User Management', () => {
   });
 
   test('API keys section visible', async ({ page }) => {
-    await expect(page.getByText('API Keys')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('h3').getByText('API Keys')).toBeVisible({ timeout: 5_000 });
   });
 
   test('create API key', async ({ page }) => {

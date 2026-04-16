@@ -15,8 +15,8 @@ test.describe('Dashboard', () => {
   });
 
   test('app cards show running status', async ({ page }) => {
-    const runningBadges = page.locator('text=running');
-    await expect(runningBadges.first()).toBeVisible();
+    // Badge text "running" appears on app cards
+    await expect(page.locator('main').getByText('running').first()).toBeVisible();
   });
 
   test('system metrics section renders', async ({ page }) => {

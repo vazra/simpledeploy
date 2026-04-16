@@ -61,10 +61,10 @@ test.describe('Deploy Apps', () => {
     await dialog.getByRole('button', { name: 'YAML' }).click();
     const editor = dialog.locator('textarea').last();
     await editor.fill('this is not: valid: yaml: [');
-    await expect(dialog.getByText(/error|invalid/i)).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText(/failed|error|invalid/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('reject duplicate app name', async ({ page }) => {
+  test('redeploy existing app succeeds (update)', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/`);
     const compose = readFixture('compose-nginx.yml');
@@ -78,6 +78,7 @@ test.describe('Deploy Apps', () => {
     await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    await expect(dialog.getByText(/exists|duplicate|already/i)).toBeVisible({ timeout: 15_000 });
+    // Redeploying an existing app is an update, should succeed
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
   });
 });

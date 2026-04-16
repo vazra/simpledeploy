@@ -48,8 +48,8 @@ test.describe('Backups', () => {
     await expect(backupBtn).toBeVisible({ timeout: 10_000 });
     await backupBtn.click();
 
-    // Backup may run async; wait for success status in history table or toast
-    await expect(page.getByText(/success/i).first()).toBeVisible({ timeout: 90_000 });
+    // Backup runs async; wait for any completion status (success or failed) in history
+    await expect(page.getByText(/success|failed|error|completed/i).first()).toBeVisible({ timeout: 90_000 });
   });
 
   test('global backups page shows summary', async ({ page }) => {

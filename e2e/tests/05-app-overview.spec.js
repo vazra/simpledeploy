@@ -25,9 +25,9 @@ test.describe('App Overview', () => {
   test('multi-service app shows all services', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    // Wait for services section to load (API call)
-    await expect(page.locator('.font-mono', { hasText: 'web' }).first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('.font-mono', { hasText: 'cache' }).first()).toBeVisible({ timeout: 10_000 });
+    // Wait for services to load, then check for both service names
+    await expect(page.locator('main').getByText('web').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('main').getByText('cache').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('tab navigation works', async ({ page }) => {
