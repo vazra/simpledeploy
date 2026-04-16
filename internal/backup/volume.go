@@ -3,58 +3,91 @@ package backup
 import (
 	"context"
 	"fmt"
-	"io"
 	"os/exec"
 	"time"
+
+	"github.com/vazra/simpledeploy/internal/compose"
 )
 
-// VolumeStrategy backs up and restores a container volume via tar.
-type VolumeStrategy struct {
-	VolumePath string // path inside container, defaults to "/data"
+// VolumeStrategy backs up and restores container volumes via tar.
+type VolumeStrategy struct{}
+
+func NewVolumeStrategy() *VolumeStrategy {
+	return &VolumeStrategy{}
 }
 
-func NewVolumeStrategy(volumePath string) *VolumeStrategy {
-	if volumePath == "" {
-		volumePath = "/data"
+func (s *VolumeStrategy) Type() string { return "volume" }
+
+func (s *VolumeStrategy) Detect(cfg *compose.AppConfig) []DetectedService {
+	var results []DetectedService
+	for _, svc := range cfg.Services {
+		if matchesLabel(svc.Labels, "volume") {
+			results = append(results, DetectedService{
+				ServiceName:   svc.Name,
+				ContainerName: cfg.Name + "-" + svc.Name + "-1",
+				Label:         "volume",
+				Paths:         collectVolumePaths(svc),
+			})
+			continue
+		}
+
+		// Default: collect all volume mount targets (excluding docker.sock)
+		paths := collectVolumePaths(svc)
+		if len(paths) > 0 {
+			results = append(results, DetectedService{
+				ServiceName:   svc.Name,
+				ContainerName: cfg.Name + "-" + svc.Name + "-1",
+				Label:         "volume",
+				Paths:         paths,
+			})
+		}
 	}
-	return &VolumeStrategy{VolumePath: volumePath}
+	return results
 }
 
-func (s *VolumeStrategy) Backup(ctx context.Context, containerName string) (io.ReadCloser, string, error) {
-	filename := fmt.Sprintf("%s-%s.tar.gz", containerName, time.Now().Format("20060102-150405"))
+func collectVolumePaths(svc compose.ServiceConfig) []string {
+	var paths []string
+	for _, v := range svc.Volumes {
+		if v.Target == "/var/run/docker.sock" {
+			continue
+		}
+		if v.Target != "" {
+			paths = append(paths, v.Target)
+		}
+	}
+	return paths
+}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", containerName, "tar", "-czf", "-", "-C", s.VolumePath, ".")
+func (s *VolumeStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
+	if len(opts.Paths) == 0 {
+		return nil, fmt.Errorf("no volume paths specified")
+	}
+
+	filename := fmt.Sprintf("%s-%s.tar.gz", opts.ContainerName, time.Now().Format("20060102-150405"))
+
+	args := []string{"exec", opts.ContainerName, "tar", "-czf", "-"}
+	args = append(args, opts.Paths...)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, "", fmt.Errorf("stdout pipe: %w", err)
+		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, "", fmt.Errorf("start tar: %w", err)
+		return nil, fmt.Errorf("start tar: %w", err)
 	}
 
-	pr, pw := io.Pipe()
-
-	go func() {
-		_, copyErr := io.Copy(pw, stdout)
-		if copyErr != nil {
-			pw.CloseWithError(copyErr)
-			cmd.Wait()
-			return
-		}
-		if waitErr := cmd.Wait(); waitErr != nil {
-			pw.CloseWithError(fmt.Errorf("tar: %w", waitErr))
-			return
-		}
-		pw.Close()
-	}()
-
-	return pr, filename, nil
+	return &BackupResult{
+		Reader:   &cmdReadCloser{ReadCloser: stdout, cmd: cmd},
+		Filename: filename,
+	}, nil
 }
 
-func (s *VolumeStrategy) Restore(ctx context.Context, containerName string, data io.Reader) error {
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", containerName, "tar", "-xzf", "-", "-C", s.VolumePath)
-	cmd.Stdin = data
+func (s *VolumeStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName,
+		"tar", "-xzf", "-", "-C", "/")
+	cmd.Stdin = opts.Reader
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar restore: %w: %s", err, out)

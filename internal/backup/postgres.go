@@ -6,8 +6,32 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
+
+	"github.com/vazra/simpledeploy/internal/compose"
 )
+
+// Helper functions shared by all strategies.
+
+func matchesLabel(labels map[string]string, strategy string) bool {
+	if labels == nil {
+		return false
+	}
+	return labels["simpledeploy.backup.strategy"] == strategy
+}
+
+func matchesImageKeywords(image string, keywords []string) bool {
+	lower := strings.ToLower(image)
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+var postgresKeywords = []string{"postgres", "postgis", "timescale", "supabase"}
 
 // PostgresStrategy backs up and restores a Postgres container via pg_dump/psql.
 type PostgresStrategy struct{}
@@ -16,17 +40,38 @@ func NewPostgresStrategy() *PostgresStrategy {
 	return &PostgresStrategy{}
 }
 
-func (s *PostgresStrategy) Backup(ctx context.Context, containerName string) (io.ReadCloser, string, error) {
-	filename := fmt.Sprintf("%s-%s.sql.gz", containerName, time.Now().Format("20060102-150405"))
+func (s *PostgresStrategy) Type() string { return "postgres" }
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", containerName, "pg_dump", "-U", "postgres")
+func (s *PostgresStrategy) Detect(cfg *compose.AppConfig) []DetectedService {
+	var results []DetectedService
+	for _, svc := range cfg.Services {
+		if matchesLabel(svc.Labels, "postgres") || matchesImageKeywords(svc.Image, postgresKeywords) {
+			results = append(results, DetectedService{
+				ServiceName:   svc.Name,
+				ContainerName: cfg.Name + "-" + svc.Name + "-1",
+				Label:         "postgres",
+			})
+		}
+	}
+	return results
+}
+
+func (s *PostgresStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
+	user := opts.Credentials["POSTGRES_USER"]
+	if user == "" {
+		user = "postgres"
+	}
+
+	filename := fmt.Sprintf("%s-%s.sql.gz", opts.ContainerName, time.Now().Format("20060102-150405"))
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "pg_dump", "-U", user)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, "", fmt.Errorf("stdout pipe: %w", err)
+		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, "", fmt.Errorf("start pg_dump: %w", err)
+		return nil, fmt.Errorf("start pg_dump: %w", err)
 	}
 
 	pr, pw := io.Pipe()
@@ -47,17 +92,22 @@ func (s *PostgresStrategy) Backup(ctx context.Context, containerName string) (io
 		pw.Close()
 	}()
 
-	return pr, filename, nil
+	return &BackupResult{Reader: pr, Filename: filename}, nil
 }
 
-func (s *PostgresStrategy) Restore(ctx context.Context, containerName string, data io.Reader) error {
-	gr, err := gzip.NewReader(data)
+func (s *PostgresStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
+	user := opts.Credentials["POSTGRES_USER"]
+	if user == "" {
+		user = "postgres"
+	}
+
+	gr, err := gzip.NewReader(opts.Reader)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
 	}
 	defer gr.Close()
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", containerName, "psql", "-U", "postgres")
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "psql", "-U", user)
 	cmd.Stdin = gr
 
 	if out, err := cmd.CombinedOutput(); err != nil {

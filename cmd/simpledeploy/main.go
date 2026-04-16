@@ -480,7 +480,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	backupSched := backup.NewScheduler(db)
 	backupSched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
-	backupSched.RegisterStrategy("volume", backup.NewVolumeStrategy("/data"))
+	backupSched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
+	backupSched.RegisterStrategy("mongo", backup.NewMongoStrategy())
+	backupSched.RegisterStrategy("redis", backup.NewRedisStrategy())
+	backupSched.RegisterStrategy("sqlite", backup.NewSQLiteStrategy())
+	backupSched.RegisterStrategy("volume", backup.NewVolumeStrategy())
 	backupSched.RegisterTargetFactory("local", func(configJSON string) (backup.Target, error) {
 		return backup.NewLocalTarget(filepath.Join(cfg.DataDir, "backups")), nil
 	})
@@ -831,7 +835,11 @@ func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
 func newBackupScheduler(cfg *config.Config, db *store.Store) *backup.Scheduler {
 	sched := backup.NewScheduler(db)
 	sched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
-	sched.RegisterStrategy("volume", backup.NewVolumeStrategy("/data"))
+	sched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
+	sched.RegisterStrategy("mongo", backup.NewMongoStrategy())
+	sched.RegisterStrategy("redis", backup.NewRedisStrategy())
+	sched.RegisterStrategy("sqlite", backup.NewSQLiteStrategy())
+	sched.RegisterStrategy("volume", backup.NewVolumeStrategy())
 	sched.RegisterTargetFactory("local", func(configJSON string) (backup.Target, error) {
 		return backup.NewLocalTarget(filepath.Join(cfg.DataDir, "backups")), nil
 	})

@@ -1,51 +1,129 @@
 package backup
 
 import (
-	"regexp"
 	"testing"
-	"time"
+
+	"github.com/vazra/simpledeploy/internal/compose"
 )
 
-func TestVolumeStrategyImplementsInterface(t *testing.T) {
-	var _ Strategy = NewVolumeStrategy("/data")
-}
-
-func TestVolumeStrategyDefaultPath(t *testing.T) {
-	s := NewVolumeStrategy("")
-	if s.VolumePath != "/data" {
-		t.Errorf("expected /data, got %s", s.VolumePath)
+func TestVolumeStrategy_Type(t *testing.T) {
+	s := NewVolumeStrategy()
+	if s.Type() != "volume" {
+		t.Errorf("expected volume, got %s", s.Type())
 	}
 }
 
-func TestVolumeStrategyCustomPath(t *testing.T) {
-	s := NewVolumeStrategy("/var/lib/mysql")
-	if s.VolumePath != "/var/lib/mysql" {
-		t.Errorf("expected /var/lib/mysql, got %s", s.VolumePath)
+func TestVolumeStrategy_Detect(t *testing.T) {
+	s := NewVolumeStrategy()
+
+	tests := []struct {
+		name      string
+		cfg       *compose.AppConfig
+		wantLen   int
+		wantPaths int
+	}{
+		{
+			name: "label override",
+			cfg: &compose.AppConfig{
+				Name: "myapp",
+				Services: []compose.ServiceConfig{
+					{
+						Name:  "app",
+						Image: "myapp:latest",
+						Labels: map[string]string{
+							"simpledeploy.backup.strategy": "volume",
+						},
+						Volumes: []compose.VolumeMount{
+							{Source: "data", Target: "/data", Type: "volume"},
+						},
+					},
+				},
+			},
+			wantLen:   1,
+			wantPaths: 1,
+		},
+		{
+			name: "auto-detect from volumes",
+			cfg: &compose.AppConfig{
+				Name: "myapp",
+				Services: []compose.ServiceConfig{
+					{
+						Name:  "app",
+						Image: "myapp:latest",
+						Volumes: []compose.VolumeMount{
+							{Source: "data", Target: "/app/data", Type: "volume"},
+							{Source: "uploads", Target: "/app/uploads", Type: "volume"},
+						},
+					},
+				},
+			},
+			wantLen:   1,
+			wantPaths: 2,
+		},
+		{
+			name: "excludes docker.sock",
+			cfg: &compose.AppConfig{
+				Name: "myapp",
+				Services: []compose.ServiceConfig{
+					{
+						Name:  "app",
+						Image: "myapp:latest",
+						Volumes: []compose.VolumeMount{
+							{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock", Type: "bind"},
+							{Source: "data", Target: "/data", Type: "volume"},
+						},
+					},
+				},
+			},
+			wantLen:   1,
+			wantPaths: 1,
+		},
+		{
+			name: "no volumes - no detection",
+			cfg: &compose.AppConfig{
+				Name: "myapp",
+				Services: []compose.ServiceConfig{
+					{Name: "web", Image: "nginx:latest"},
+				},
+			},
+			wantLen: 0,
+		},
+		{
+			name: "only docker.sock - no detection",
+			cfg: &compose.AppConfig{
+				Name: "myapp",
+				Services: []compose.ServiceConfig{
+					{
+						Name:  "app",
+						Image: "myapp:latest",
+						Volumes: []compose.VolumeMount{
+							{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock", Type: "bind"},
+						},
+					},
+				},
+			},
+			wantLen: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.Detect(tt.cfg)
+			if len(got) != tt.wantLen {
+				t.Errorf("Detect() returned %d results, want %d", len(got), tt.wantLen)
+			}
+			if tt.wantLen > 0 {
+				if got[0].Label != "volume" {
+					t.Errorf("expected label volume, got %s", got[0].Label)
+				}
+				if len(got[0].Paths) != tt.wantPaths {
+					t.Errorf("expected %d paths, got %d", tt.wantPaths, len(got[0].Paths))
+				}
+			}
+		})
 	}
 }
 
-func TestVolumeStrategyFilename(t *testing.T) {
-	containerName := "myapp"
-	before := time.Now()
-	filename := volumeFilename(containerName)
-	after := time.Now()
-
-	re := regexp.MustCompile(`^myapp-(\d{8}-\d{6})\.tar\.gz$`)
-	m := re.FindStringSubmatch(filename)
-	if m == nil {
-		t.Fatalf("unexpected filename format: %s", filename)
-	}
-
-	ts, err := time.ParseInLocation("20060102-150405", m[1], time.Local)
-	if err != nil {
-		t.Fatalf("parse timestamp: %v", err)
-	}
-	if ts.Before(before.Truncate(time.Second)) || ts.After(after.Add(time.Second)) {
-		t.Errorf("timestamp %v out of range [%v, %v]", ts, before, after)
-	}
-}
-
-// volumeFilename is extracted for testability.
-func volumeFilename(containerName string) string {
-	return containerName + "-" + time.Now().Format("20060102-150405") + ".tar.gz"
+func TestVolumeStrategy_Interface(t *testing.T) {
+	var _ Strategy = NewVolumeStrategy()
 }
