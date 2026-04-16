@@ -32,18 +32,12 @@ test.describe('App Actions', () => {
   test('restart app', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    // If app is stopped, start it first so Restart button appears
+    // If app is stopped, start it first (Start has no modal, just API call)
     const startBtn = page.getByRole('button', { name: 'Start' });
     if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await startBtn.click();
-      // Wait for action modal to complete, then close it
-      const actionDialog = page.getByRole('dialog');
-      const closeBtn = actionDialog.locator('button:has-text("Close"):not([aria-label])');
-      await expect(closeBtn).toBeVisible({ timeout: 30_000 });
-      await closeBtn.click();
-      // Reload to get updated status
-      await page.reload();
-      await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 10_000 });
+      // Wait for Restart button to appear (indicates app is running)
+      await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 30_000 });
     }
     await expect(page.getByRole('button', { name: /restart/i })).toBeVisible({ timeout: 10_000 });
     await page.getByRole('button', { name: /restart/i }).click();
