@@ -44,7 +44,13 @@ Each test gets a fresh browser context (isolated cookies) but shares the server 
 | `16-docker.spec.js` | Docker info, images, networks, volumes, prune |
 | `17-system.spec.js` | System info, maintenance, audit log, logs |
 | `18-profile.spec.js` | Profile edit, password change, theme toggle |
-| `19-cleanup.spec.js` | Remove all apps, verify clean dashboard |
+| `20-security-validation.spec.js` | Compose security (privileged, host network/pid/ipc, caps, volumes), app name validation |
+| `21-user-validation.spec.js` | Duplicate username/email, short password, role guards, lockout |
+| `22-env-and-endpoints.spec.js` | Env var CRUD, endpoint management, IP access allowlist validation |
+| `23-rollback-and-restore.spec.js` | Deploy versions, rollback, backup restore |
+| `24-multi-user-isolation.spec.js` | Viewer role isolation, per-app access, API key auth |
+| `25-edge-cases.spec.js` | Audit log content, alert/webhook editing, dashboard filters, system prune |
+| `99-cleanup.spec.js` | Remove all apps, verify clean dashboard |
 
 ## Test Fixtures
 
@@ -53,6 +59,13 @@ Three compose files in `fixtures/` are deployed during tests:
 - **compose-nginx.yml** - single nginx service with endpoint labels
 - **compose-multi.yml** - nginx + redis (multi-service, scale testing)
 - **compose-postgres.yml** - postgres with volume (backup detection testing)
+
+Security fixture compose files in `fixtures/security/` are used for validation tests (never deployed):
+
+- **compose-privileged.yml**, **compose-host-network.yml**, **compose-host-pid.yml**, **compose-host-ipc.yml** - dangerous runtime options
+- **compose-dangerous-caps.yml** - SYS_ADMIN capability
+- **compose-dangerous-volumes.yml** - docker socket mount
+- **compose-path-traversal.yml** - path traversal in volume source
 
 ## Helpers
 
