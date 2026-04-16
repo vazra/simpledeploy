@@ -18,16 +18,10 @@ test.describe('Endpoints & Access', () => {
   });
 
   test('IP allowlist section visible', async ({ page }) => {
-    // Click Advanced collapsible section via evaluate to avoid click interception
-    await page.evaluate(() => {
-      const headings = document.querySelectorAll('h3');
-      for (const h of headings) {
-        if (h.textContent.trim() === 'Advanced') {
-          h.closest('button').click();
-          break;
-        }
-      }
-    });
+    // The Advanced collapsible button is at the bottom of the Settings tab
+    const advBtn = page.getByRole('button', { name: 'Advanced' });
+    await advBtn.scrollIntoViewIfNeeded();
+    await advBtn.click({ force: true });
     await expect(page.locator('#allowlist-input')).toBeVisible({ timeout: 10_000 });
   });
 });
