@@ -17,6 +17,8 @@
   let s3TestResult = $state(null)
 
   // Form state
+  let showAllStrategies = $state(false)
+  let manualContainer = $state('')
   let selectedStrategy = $state('')
   let selectedTarget = $state('local')
   let cronExpr = $state('0 2 * * *')
@@ -83,6 +85,8 @@
     customPostHook = { service: '', command: '' }
     showCustomPre = false
     showCustomPost = false
+    showAllStrategies = false
+    manualContainer = ''
     s3 = { endpoint: '', bucket: '', prefix: '', access_key: '', secret_key: '', region: 'us-east-1' }
   }
 
@@ -94,6 +98,11 @@
     retentionMode = cfg.retention_mode || 'count'
     retentionDays = cfg.retention_days || 30
     verifyUpload = cfg.verify_upload || false
+
+    if (cfg.manual_container) {
+      manualContainer = cfg.manual_container
+      showAllStrategies = true
+    }
 
     if (cfg.target === 's3' && cfg.target_config_json) {
       try {
@@ -150,7 +159,12 @@
   })
 
   function canProceed() {
-    if (step === 1) return !!selectedStrategy
+    if (step === 1) {
+      if (!selectedStrategy) return false
+      const strat = strategies.find(s => getStrategyType(s) === selectedStrategy)
+      if (showAllStrategies && strat && !strat.available) return !!manualContainer.trim()
+      return true
+    }
     if (step === 2) {
       if (selectedTarget === 'local') return true
       return !!(s3.bucket && s3.access_key && s3.secret_key)
@@ -211,6 +225,7 @@
       pre_hooks: JSON.stringify(hooks.pre),
       post_hooks: JSON.stringify(hooks.post),
       paths: selectedPaths.length > 0 ? JSON.stringify(selectedPaths) : '',
+      manual_container: manualContainer.trim() || '',
     }
 
     let res
@@ -324,11 +339,18 @@
         <p class="text-sm text-text-muted py-4 text-center">No backup strategies detected for this app.</p>
       {:else}
         {#each strategies as strategy}
+          {@const isAvailable = strategy.available || showAllStrategies}
+          {@const isSelected = selectedStrategy === getStrategyType(strategy)}
           <button
             type="button"
-            disabled={!strategy.available}
-            onclick={() => strategy.available && (selectedStrategy = getStrategyType(strategy))}
-            class="{cardClass} {selectedStrategy === getStrategyType(strategy) ? selectedCardClass : unselectedCardClass} {!strategy.available ? 'opacity-50 cursor-not-allowed' : ''}"
+            disabled={!isAvailable}
+            onclick={() => {
+              if (isAvailable) {
+                selectedStrategy = getStrategyType(strategy)
+                if (strategy.available) manualContainer = ''
+              }
+            }}
+            class="{cardClass} {isSelected ? selectedCardClass : unselectedCardClass} {!isAvailable ? 'opacity-50 cursor-not-allowed' : ''}"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="flex-1">
@@ -347,11 +369,13 @@
                 {#if strategy.volumes && strategy.volumes.length > 0}
                   <p class="text-xs text-text-muted mt-1">Volumes: <span class="font-mono text-text-secondary">{strategy.volumes.join(', ')}</span></p>
                 {/if}
-                {#if !strategy.available}
+                {#if !strategy.available && !showAllStrategies}
                   <p class="text-xs text-warning mt-1">Not available for this app</p>
+                {:else if !strategy.available && showAllStrategies}
+                  <p class="text-xs text-text-muted mt-1">Not auto-detected. Add <code class="text-xs font-mono bg-surface-3 px-1 rounded">simpledeploy.backup.strategy={getStrategyType(strategy)}</code> label to your compose service.</p>
                 {/if}
               </div>
-              {#if selectedStrategy === getStrategyType(strategy)}
+              {#if isSelected}
                 <div class="text-accent shrink-0 mt-0.5">
                   <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
@@ -361,6 +385,38 @@
             </div>
           </button>
         {/each}
+
+        <!-- Manual container input for non-detected strategies -->
+        {#if showAllStrategies && selectedStrategy}
+          {@const selectedStrat = strategies.find(s => getStrategyType(s) === selectedStrategy)}
+          {#if selectedStrat && !selectedStrat.available}
+            <div class="mt-2 p-3 bg-surface-3/30 rounded-xl border border-border/50">
+              <label class="block text-xs font-medium text-text-secondary mb-1">
+                Container name <span class="text-danger">*</span>
+              </label>
+              <input type="text" class={inputClass} placeholder="e.g. myapp-postgres-1" bind:value={manualContainer} />
+              <p class="text-xs text-text-muted mt-1">The container to run backups against, since it could not be auto-detected.</p>
+            </div>
+          {/if}
+        {/if}
+
+        <!-- Show all toggle -->
+        <button
+          type="button"
+          onclick={() => {
+            showAllStrategies = !showAllStrategies
+            if (!showAllStrategies) {
+              const strat = strategies.find(s => getStrategyType(s) === selectedStrategy)
+              if (strat && !strat.available) {
+                selectedStrategy = ''
+                manualContainer = ''
+              }
+            }
+          }}
+          class="text-xs text-text-muted hover:text-text-secondary transition-colors mt-1"
+        >
+          {showAllStrategies ? 'Show detected only' : 'Show all strategies'}
+        </button>
       {/if}
     </div>
 
@@ -683,6 +739,9 @@
           <div>
             <p class="text-xs text-text-muted mb-0.5">Backup type</p>
             <p class="text-sm font-medium text-text-primary">{strategyLabel(selectedStrategy)}</p>
+            {#if manualContainer}
+              <p class="text-xs text-text-muted mt-0.5">Container: <span class="font-mono text-text-secondary">{manualContainer}</span></p>
+            {/if}
           </div>
           <div>
             <p class="text-xs text-text-muted mb-0.5">Destination</p>
