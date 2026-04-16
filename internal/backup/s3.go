@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -52,6 +53,18 @@ func NewS3Target(cfg S3Config) (*S3Target, error) {
 	return &S3Target{cfg: cfg, client: client}, nil
 }
 
+func (t *S3Target) Type() string { return "s3" }
+
+func (t *S3Target) Test(ctx context.Context) error {
+	_, err := t.client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(t.cfg.Bucket),
+	})
+	if err != nil {
+		return fmt.Errorf("s3 head bucket %q: %w", t.cfg.Bucket, err)
+	}
+	return nil
+}
+
 func (t *S3Target) key(filename string) string {
 	if t.cfg.Prefix != "" {
 		return t.cfg.Prefix + "/" + filename
@@ -59,23 +72,24 @@ func (t *S3Target) key(filename string) string {
 	return filename
 }
 
-func (t *S3Target) Upload(ctx context.Context, filename string, data io.Reader) (int64, error) {
+func (t *S3Target) Upload(ctx context.Context, filename string, data io.Reader) (string, int64, error) {
 	cr := &countReader{r: data}
+	key := t.key(filename)
 	_, err := t.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(t.cfg.Bucket),
-		Key:    aws.String(t.key(filename)),
+		Key:    aws.String(key),
 		Body:   cr,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("s3 put: %w", err)
+		return "", 0, fmt.Errorf("s3 put: %w", err)
 	}
-	return cr.n, nil
+	return key, cr.n, nil
 }
 
-func (t *S3Target) Download(ctx context.Context, filename string) (io.ReadCloser, error) {
+func (t *S3Target) Download(ctx context.Context, path string) (io.ReadCloser, error) {
 	out, err := t.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(t.cfg.Bucket),
-		Key:    aws.String(t.key(filename)),
+		Key:    aws.String(path),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("s3 get: %w", err)
@@ -83,15 +97,28 @@ func (t *S3Target) Download(ctx context.Context, filename string) (io.ReadCloser
 	return out.Body, nil
 }
 
-func (t *S3Target) Delete(ctx context.Context, filename string) error {
+func (t *S3Target) Delete(ctx context.Context, path string) error {
 	_, err := t.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(t.cfg.Bucket),
-		Key:    aws.String(t.key(filename)),
+		Key:    aws.String(path),
 	})
 	if err != nil {
 		return fmt.Errorf("s3 delete: %w", err)
 	}
 	return nil
+}
+
+// PresignedURL returns a pre-signed GET URL valid for the given duration.
+func (t *S3Target) PresignedURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	presigner := s3.NewPresignClient(t.client)
+	req, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(t.cfg.Bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("s3 presign: %w", err)
+	}
+	return req.URL, nil
 }
 
 // countReader wraps an io.Reader and counts bytes read.

@@ -8,6 +8,13 @@ func TestS3TargetImplementsInterface(t *testing.T) {
 	var _ Target = (*S3Target)(nil)
 }
 
+func TestS3Target_Type(t *testing.T) {
+	target := &S3Target{}
+	if target.Type() != "s3" {
+		t.Errorf("Type() = %q, want %q", target.Type(), "s3")
+	}
+}
+
 func TestS3TargetNewClient(t *testing.T) {
 	cfg := S3Config{
 		Endpoint:  "http://localhost:9000",

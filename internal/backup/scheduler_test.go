@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -107,14 +108,21 @@ type mockStrategy struct {
 	err      error
 }
 
-func (s *mockStrategy) Backup(ctx context.Context, containerName string) (io.ReadCloser, string, error) {
+func (s *mockStrategy) Type() string { return "mock" }
+
+func (s *mockStrategy) Detect(cfg *compose.AppConfig) []DetectedService { return nil }
+
+func (s *mockStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
 	if s.err != nil {
-		return nil, "", s.err
+		return nil, s.err
 	}
-	return io.NopCloser(strings.NewReader(s.data)), s.filename, nil
+	return &BackupResult{
+		Reader:   io.NopCloser(strings.NewReader(s.data)),
+		Filename: s.filename,
+	}, nil
 }
 
-func (s *mockStrategy) Restore(ctx context.Context, containerName string, data io.Reader) error {
+func (s *mockStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 	return s.err
 }
 
@@ -129,13 +137,17 @@ func newMockTarget() *mockTarget {
 	return &mockTarget{uploaded: make(map[string][]byte)}
 }
 
-func (t *mockTarget) Upload(ctx context.Context, filename string, data io.Reader) (int64, error) {
+func (t *mockTarget) Type() string { return "mock" }
+
+func (t *mockTarget) Test(ctx context.Context) error { return nil }
+
+func (t *mockTarget) Upload(ctx context.Context, filename string, data io.Reader) (string, int64, error) {
 	if t.err != nil {
-		return 0, t.err
+		return "", 0, t.err
 	}
 	b, _ := io.ReadAll(data)
 	t.uploaded[filename] = b
-	return int64(len(b)), nil
+	return filename, int64(len(b)), nil
 }
 
 func (t *mockTarget) Download(ctx context.Context, filename string) (io.ReadCloser, error) {

@@ -118,22 +118,22 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	stream, filename, err := strategy.Backup(ctx, app.Name)
+	result, err := strategy.Backup(ctx, BackupOpts{ContainerName: app.Name})
 	if err != nil {
 		errMsg := fmt.Sprintf("backup: %v", err)
 		s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
-	defer stream.Close()
+	defer result.Reader.Close()
 
-	size, err := target.Upload(ctx, filename, stream)
+	path, size, err := target.Upload(ctx, result.Filename, result.Reader)
 	if err != nil {
 		errMsg := fmt.Sprintf("upload: %v", err)
 		s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	if err := s.store.UpdateBackupRunSuccess(run.ID, size, filename); err != nil {
+	if err := s.store.UpdateBackupRunSuccess(run.ID, size, path); err != nil {
 		return fmt.Errorf("update run success: %w", err)
 	}
 
@@ -192,7 +192,7 @@ func (s *Scheduler) RunRestore(ctx context.Context, runID int64) error {
 	}
 	defer data.Close()
 
-	if err := strategy.Restore(ctx, app.Name, data); err != nil {
+	if err := strategy.Restore(ctx, RestoreOpts{ContainerName: app.Name, Reader: data}); err != nil {
 		return fmt.Errorf("restore: %w", err)
 	}
 
