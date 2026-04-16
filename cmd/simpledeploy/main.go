@@ -478,7 +478,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("No users found. Create one at: POST http://localhost:%d/api/setup\n", cfg.ManagementPort)
 	}
 
-	backupSched := backup.NewScheduler(db)
+	backupSched := backup.NewScheduler(db, nil)
 	backupSched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
 	backupSched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
 	backupSched.RegisterStrategy("mongo", backup.NewMongoStrategy())
@@ -833,7 +833,7 @@ func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
 }
 
 func newBackupScheduler(cfg *config.Config, db *store.Store) *backup.Scheduler {
-	sched := backup.NewScheduler(db)
+	sched := backup.NewScheduler(db, nil)
 	sched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
 	sched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
 	sched.RegisterStrategy("mongo", backup.NewMongoStrategy())
