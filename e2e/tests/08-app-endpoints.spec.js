@@ -21,7 +21,9 @@ test.describe('Endpoints & Access', () => {
     // The Advanced collapsible button is at the bottom of the Settings tab
     const advBtn = page.getByRole('button', { name: 'Advanced' });
     await advBtn.scrollIntoViewIfNeeded();
-    await advBtn.click({ force: true });
+    await page.waitForTimeout(500);
+    await advBtn.dispatchEvent('click');
+    await page.waitForTimeout(500);
     await expect(page.locator('#allowlist-input')).toBeVisible({ timeout: 10_000 });
   });
 });
