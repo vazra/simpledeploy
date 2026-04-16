@@ -29,6 +29,25 @@ export async function apiLogin(username, password) {
   return apiRequest('POST', '/api/auth/login', { username, password });
 }
 
+export async function apiRequestWithKey(method, path, body, apiKey) {
+  const state = getState();
+  const opts = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+  };
+  if (body) {
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(`${state.baseURL}${path}`, opts);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+  return { status: res.status, data, ok: res.ok };
+}
+
 export async function waitForAppStatus(slug, status, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
