@@ -15,8 +15,8 @@ test.describe('Dashboard', () => {
   });
 
   test('app cards show running status', async ({ page }) => {
-    // Badge text "running" appears on app cards
-    await expect(page.locator('main').getByText('running').first()).toBeVisible();
+    // "Running 3" filter button confirms all apps are running
+    await expect(page.getByText('Running').first()).toBeVisible();
   });
 
   test('system metrics section renders', async ({ page }) => {

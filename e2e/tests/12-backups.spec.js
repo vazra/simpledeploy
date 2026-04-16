@@ -48,8 +48,17 @@ test.describe('Backups', () => {
     await expect(backupBtn).toBeVisible({ timeout: 10_000 });
     await backupBtn.click();
 
-    // Backup runs async; wait for any completion status (success or failed) in history
-    await expect(page.getByText(/success|failed|error|completed/i).first()).toBeVisible({ timeout: 90_000 });
+    // Backup runs async; poll by reloading until status changes from "running"
+    const deadline = Date.now() + 90_000;
+    let found = false;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(5_000);
+      await page.reload();
+      await page.getByRole('button', { name: /backups/i }).click();
+      const status = await page.getByText(/success|failed/i).first().isVisible({ timeout: 3_000 }).catch(() => false);
+      if (status) { found = true; break; }
+    }
+    expect(found).toBeTruthy();
   });
 
   test('global backups page shows summary', async ({ page }) => {

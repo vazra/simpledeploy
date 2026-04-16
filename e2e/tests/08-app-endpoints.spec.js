@@ -18,8 +18,10 @@ test.describe('Endpoints & Access', () => {
   });
 
   test('IP allowlist section visible', async ({ page }) => {
-    // Expand Advanced section
-    await page.getByText('Advanced').click();
+    // Scroll to and expand Advanced section
+    const advancedBtn = page.getByText('Advanced');
+    await advancedBtn.scrollIntoViewIfNeeded();
+    await advancedBtn.click();
     await expect(page.locator('#allowlist-input')).toBeVisible({ timeout: 5_000 });
   });
 });

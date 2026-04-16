@@ -76,8 +76,12 @@ test.describe('Cleanup', () => {
 
   test('dashboard shows no apps', async ({ page }) => {
     const state = getState();
+    // Wait for removals to propagate, then reload
+    await page.waitForTimeout(3_000);
     await page.goto(`${state.baseURL}/#/`);
-    await expect(page.getByText('e2e-nginx')).not.toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(2_000);
+    await page.reload();
+    await expect(page.getByText('e2e-nginx')).not.toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('e2e-multi')).not.toBeVisible({ timeout: 5_000 });
     await expect(page.getByText('e2e-postgres')).not.toBeVisible({ timeout: 5_000 });
   });
