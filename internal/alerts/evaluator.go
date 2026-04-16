@@ -159,6 +159,25 @@ func (e *Evaluator) buildEvent(rule store.AlertRule, value float64, status strin
 	return event
 }
 
+// DispatchBackupAlert sends a backup alert to all matching webhooks.
+func (e *Evaluator) DispatchBackupAlert(event BackupAlertEvent) {
+	rules, err := e.store.ListActiveAlertRules()
+	if err != nil {
+		return
+	}
+	alertEvent := event.ToAlertEvent()
+	for _, rule := range rules {
+		if rule.Metric != event.EventType && rule.Metric != "backup_all" {
+			continue
+		}
+		webhook, err := e.store.GetWebhook(rule.WebhookID)
+		if err != nil || webhook == nil {
+			continue
+		}
+		e.dispatcher.Send(*webhook, alertEvent)
+	}
+}
+
 func checkCondition(value float64, operator string, threshold float64) bool {
 	switch operator {
 	case ">":

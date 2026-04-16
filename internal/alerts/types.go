@@ -49,6 +49,30 @@ func formatMetricValue(metric string, value float64) string {
 	}
 }
 
+// BackupAlertEvent represents a backup-related alert.
+type BackupAlertEvent struct {
+	AppName   string
+	Strategy  string
+	Message   string
+	EventType string // "backup_failed" or "backup_missed"
+	FiredAt   time.Time
+}
+
+func (b BackupAlertEvent) ToAlertEvent() AlertEvent {
+	metricDisplay := "Backup Failed"
+	if b.EventType == "backup_missed" {
+		metricDisplay = "Backup Missed"
+	}
+	return AlertEvent{
+		AppName:      b.AppName,
+		Metric:       b.EventType,
+		MetricDisplay: metricDisplay,
+		ValueDisplay: b.Message,
+		Status:       "firing",
+		FiredAt:      b.FiredAt,
+	}
+}
+
 func EnrichEvent(event *AlertEvent) {
 	if name, ok := metricDisplayNames[event.Metric]; ok {
 		event.MetricDisplay = name
