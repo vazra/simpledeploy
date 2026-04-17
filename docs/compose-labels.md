@@ -57,15 +57,19 @@ Managed via the UI or `PUT /api/apps/{slug}/access`.
 
 | Label | Default | Description |
 |-------|---------|-------------|
-| `simpledeploy.backup.strategy` | - | `postgres` (pg_dump) or `volume` (tar+gzip) |
+| `simpledeploy.backup.strategy` | auto-detected | `postgres`, `mysql`, `mongo`, `redis`, `sqlite`, or `volume`. Auto-detection picks a strategy from image keywords; set this label to force one explicitly. |
 | `simpledeploy.backup.schedule` | - | Cron expression (5-field, e.g., `0 2 * * *`) |
 | `simpledeploy.backup.target` | - | `s3` or `local` |
 | `simpledeploy.backup.retention` | `7` | Number of backups to keep |
 
-All four labels must be set to enable backups. The backup strategy determines how data is extracted:
+Backup strategies and what they produce:
 
-- **`postgres`** - runs `pg_dump -U postgres` via docker exec, gzips output
-- **`volume`** - runs `tar -czf` on the volume mount path via docker exec
+- **`postgres`** — `pg_dump -U $POSTGRES_USER -d $POSTGRES_DB` via docker exec, gzipped. Reads user/db from container env.
+- **`mysql`** — `mysqldump --all-databases -u root -p"$MYSQL_ROOT_PASSWORD"` via docker exec, gzipped.
+- **`mongo`** — `mongodump --archive --gzip --authenticationDatabase admin -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD`. Restore uses `--drop`.
+- **`redis`** — triggers `BGSAVE`, waits for `LASTSAVE` to bump, then `docker cp` the RDB file out and gzips it.
+- **`sqlite`** — `sqlite3 <path> .backup` to produce a consistent snapshot. Requires the explicit file path in the backup config (`paths: ["/data/app.db"]`); auto-detect returns the mount dir but not the DB filename.
+- **`volume`** — `tar -czf -` on the configured paths. Good for files and as a fallback for DBs where a strategy-specific option doesn't apply. Not safe to restore over a running DB.
 
 The S3 target config (endpoint, bucket, credentials) is set via the API or UI, not compose labels.
 
@@ -94,9 +98,13 @@ Rate limit keys:
 - `header:X-API-Key` - rate limit per header value
 - `path` - rate limit per URL path
 
-When rate limited, clients receive `429 Too Many Requests` with a `Retry-After` header.
+When rate limited, clients receive `429 Too Many Requests` with a `Retry-After: 60` header.
 
 If no rate limit labels are set, the global defaults from the server config apply.
+
+**Scope is app-wide, not per-endpoint.** Rate-limit labels are extracted once per app (first-service-seen wins via the label merger in `compose/parser.go`). There is no `simpledeploy.endpoints.N.ratelimit.*` form; all endpoints on the app share a single limiter keyed on each endpoint's bare domain.
+
+**Note on `cfg.RateLimit` in server config.** The server-level `ratelimit:` block in `config.yml` governs the *management API* (login attempts, auth endpoints), not proxy traffic. Proxy 429s come exclusively from these compose labels.
 
 ## Request Tracking Labels
 

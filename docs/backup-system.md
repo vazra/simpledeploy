@@ -41,15 +41,31 @@ Strategies produce a data stream + filename. Targets move that stream to/from st
 
 ### PostgreSQL (`internal/backup/postgres.go`)
 
-Runs `docker exec <container> pg_dump -U postgres` and gzip-compresses the output. Restore decompresses and pipes to `docker exec -i <container> psql -U postgres`.
+Runs `docker exec <container> sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"'` and gzip-compresses the output. The user and database are read from the container's env at dump time, so the strategy works with the stock `postgres` image (which would otherwise dump the empty default `postgres` database). Override via `opts.Credentials["POSTGRES_USER"]`. Restore pipes the gzipped dump into `psql` using the same user/db resolution.
 
 Filename: `{containerName}-{YYYYMMDD-HHMMSS}.sql.gz`
 
 ### Volume (`internal/backup/volume.go`)
 
-Runs `docker exec <container> tar -czf - -C {volumePath} .` to archive a container directory. Restore extracts the tar back to the same path.
+Runs `docker exec <container> tar -czf - <paths...>` against the paths configured on the backup config. Tar strips leading `/` so the archive contents are relative (e.g. `var/lib/postgresql/data/...`). Restore extracts with `tar -xzf - -C /`, which recreates the absolute paths. Filename: `{containerName}-{YYYYMMDD-HHMMSS}.tar.gz`
 
-Constructor takes a `volumePath` (default `/data`). Filename: `{containerName}-{YYYYMMDD-HHMMSS}.tar.gz`
+**Caveat for running databases.** Backing up a live postgres data directory produces a crash-consistent snapshot, but a volume *restore* over the same directory is racy because pg keeps files open. For any DB-backed volume restore, either stop the service via `pre_hooks: [stop]` + `post_hooks: [start]`, or use the dedicated DB strategy (postgres/mysql/mongo/redis) that speaks the protocol.
+
+### MySQL / MariaDB (`internal/backup/mysql.go`)
+
+`docker exec <c> sh -c 'mysqldump --all-databases -u root -p"$MYSQL_ROOT_PASSWORD"'`. The root password is read from the container env at dump time (same idea as postgres), so the stock `mysql:8` / `mariadb` images work out of the box. Restore pipes the gzipped SQL into `mysql -u root -p$MYSQL_ROOT_PASSWORD`. Override via `opts.Credentials["MYSQL_ROOT_PASSWORD"]`. Filename: `{containerName}-{YYYYMMDD-HHMMSS}.sql.gz`.
+
+### MongoDB (`internal/backup/mongo.go`)
+
+`docker exec <c> sh -c 'mongodump --archive --gzip --authenticationDatabase admin -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD"'`. Credentials are read from the container env. Restore uses `mongorestore --drop` so it overwrites existing collections. Override via `opts.Credentials["MONGO_INITDB_ROOT_USERNAME"]` / `["MONGO_INITDB_ROOT_PASSWORD"]`. Filename: `{containerName}-{YYYYMMDD-HHMMSS}.archive.gz`.
+
+### Redis (`internal/backup/redis.go`)
+
+Captures the pre-BGSAVE `LASTSAVE` timestamp, triggers `BGSAVE`, polls until the timestamp changes, then `docker cp`s `/data/dump.rdb` out and gzips it. Restore stops the container, `docker cp`s the decompressed rdb back into `/data/`, and restarts. Filename: `{containerName}-{YYYYMMDD-HHMMSS}.rdb.gz`.
+
+### SQLite (`internal/backup/sqlite.go`)
+
+Detected via the `simpledeploy.backup.strategy=sqlite` label on a service. `Backup()` runs `docker exec <c> sqlite3 <path> .backup /tmp/...` using the explicit path from the backup config (`paths: ["/data/app.db"]`). The Detect method returns the mounted volume directory but not the DB filename — configs must specify the concrete `.db` file path. Filename: `{containerName}-{YYYYMMDD-HHMMSS}.db.gz`.
 
 ## Targets
 
@@ -72,7 +88,7 @@ type S3Config struct {
 }
 ```
 
-Uses AWS SDK v2. Enables path-style addressing when a custom endpoint is set (for S3-compatible services).
+Uses AWS SDK v2 with the `feature/s3/manager` Uploader for `PutObject`. The manager handles non-seekable readers (strategies stream through a `gzip.Writer` piped from `pg_dump`/`mysqldump`/`tar` stdout, which are not seekable — the plain `PutObject` would fail trying to compute a payload hash). Path-style addressing is enabled when a custom `Endpoint` is set so MinIO, DigitalOcean Spaces, and Backblaze B2 all work.
 
 ## Scheduler (`internal/backup/scheduler.go`)
 
@@ -194,21 +210,31 @@ Visual cron builder with 4 modes: daily (time picker), weekly (day chips + time)
 
 ## Adding a New Strategy
 
-1. Create `internal/backup/mystrategy.go`:
+1. Create `internal/backup/mystrategy.go`, implementing the `Strategy` interface:
 ```go
 type MyStrategy struct{}
 
 func NewMyStrategy() *MyStrategy { return &MyStrategy{} }
 
-func (s *MyStrategy) Backup(ctx context.Context, containerName string) (io.ReadCloser, string, error) {
-    // exec into container, produce data stream
-    filename := fmt.Sprintf("%s-%s.ext", containerName, time.Now().Format("20060102-150405"))
-    return stream, filename, nil
+func (s *MyStrategy) Type() string { return "mystrategy" }
+
+func (s *MyStrategy) Detect(cfg *compose.AppConfig) []DetectedService {
+    // Inspect compose services for image keywords or a
+    // `simpledeploy.backup.strategy=mystrategy` label.
+    // IMPORTANT: ContainerName must be `<project>-<service>-1` where project is
+    // `cfg.Name` (the scheduler passes "simpledeploy-<app.Slug>" as cfg.Name,
+    // so the returned name will match the real docker compose container).
+    return []DetectedService{{ServiceName: "...", ContainerName: cfg.Name+"-...-1"}}
 }
 
-func (s *MyStrategy) Restore(ctx context.Context, containerName string, data io.Reader) error {
-    // exec into container, apply data
-    return nil
+func (s *MyStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
+    // Read credentials from opts.Credentials, OR read env from inside the
+    // container via `docker exec ... sh -c '... $ENV_VAR ...'`.
+    // Return an io.ReadCloser that streams the backup bytes + a filename.
+}
+
+func (s *MyStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
+    // Pipe opts.Reader into the restore process.
 }
 ```
 
@@ -217,11 +243,17 @@ func (s *MyStrategy) Restore(ctx context.Context, containerName string, data io.
 sched.RegisterStrategy("mystrategy", backup.NewMyStrategy())
 ```
 
-3. Add to migration (ALTER or new migration) to allow the new strategy name in the CHECK constraint.
+3. Add to migration 015 CHECK constraint (or a new migration) to allow the new strategy name.
 
-4. Update the detect endpoint in `internal/api/backups.go` (`handleDetectStrategies`) to detect containers for the new strategy.
+4. Update UI wizard labels in `ui/src/components/BackupWizard.svelte` (`strategyLabel` map + icons).
 
-5. Update the UI wizard step 1 labels and descriptions.
+### Credential sourcing pattern
+
+Strategies that need DB credentials have two sources in priority order:
+1. `opts.Credentials["KEY"]` — explicitly set by the caller (future-proofing for when the scheduler inspects container env)
+2. Container env via `docker exec ... sh -c '... $ENV_VAR ...'` — works out of the box with official images (`postgres`, `mysql:8`, `mongo:7`)
+
+The scheduler currently does NOT populate `opts.Credentials` from container inspection. All strategies must work with the container-env fallback.
 
 ## Adding a New Target
 
@@ -246,13 +278,9 @@ Separate from app backups. Lives in `internal/store/db_backup.go` and `internal/
 
 ## Known Limitations
 
-- **No edit for configs**: must delete and recreate to change schedule/target/retention
-- **Volume strategy hardcodes `/data`**: the volume path is set at startup, not per-config
-- **No backup download**: app backups can't be downloaded via UI (only DB backups can)
-- **No backup verification**: no checksum or integrity check after upload
-- **Single postgres user**: pg_dump always uses `-U postgres`
-- **Trigger backup uses first config**: the per-app trigger (`POST /apps/{slug}/backups/run`) only runs the first config; use config-specific trigger instead
-- **No notification on failure**: failed backups are only visible in the UI, no webhook/alert integration
+- **Trigger backup uses first config**: the per-app trigger (`POST /apps/{slug}/backups/run`) only runs the first config; use config-specific trigger (`POST /backups/configs/{id}/run`) to pick a specific one
+- **Volume restore over running DB is racy**: use DB-native strategy (postgres/mysql/mongo/redis) or stop/start hooks around the volume restore
+- **Let's Encrypt backup target**: none; S3 and local only. For any other object storage, implement a new `Target`
 
 ## File Index
 

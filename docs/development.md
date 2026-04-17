@@ -83,11 +83,26 @@ If `*.localhost` domains don't resolve, add to `/etc/hosts`:
 go test ./...                              # all tests
 go test ./internal/api/ -v                 # specific package
 go test ./internal/store/ -run TestUpsert  # specific test
+make e2e                                   # full Playwright suite (~10-15 min)
 ```
 
 - Docker tests skip when Docker is unavailable
 - Store tests use temp DB files
 - API tests use httptest + real store
+- E2E tests build the binary, run a real server + real containers, and verify end-to-end flows. See `e2e/README.md` for a list of gotchas (container naming, Node fetch+Host header quirk, pg_dump -d, etc.) before writing new functional tests.
+
+## Backend conventions worth knowing
+
+- **Compose project name** is `simpledeploy-<app.Slug>`. Containers are `simpledeploy-<slug>-<service>-<replica>`. Backup strategies, detection, and any code calling `docker exec` must account for this prefix.
+- **`store.App` has no JSON tags.** Responses from `/api/apps/:slug` serialize as `Name`, `Slug`, `Status`, etc. (PascalCase). Either add tags or handle both cases on the client.
+- **Async deploys return 202.** `handleDeploy` spawns a goroutine with `context.Background()`. Anything that triggers reconciliation from a request handler should do the same — `r.Context()` is cancelled when the response is sent.
+- **Local backup target stores only the filename** in `run.file_path`. Resolve against `<data_dir>/backups/` when reading.
+- **`superAdminMiddleware`** wraps destructive system endpoints (vacuum, prune, audit-clear, audit-config write). Add it to any new endpoint that mutates system-wide state.
+- **Backup strategy credentials** come from the container env at exec time via `docker exec ... sh -c '...'` reading `$POSTGRES_DB`, `$MYSQL_ROOT_PASSWORD`, `$MONGO_INITDB_ROOT_*`, etc. The scheduler does NOT populate `opts.Credentials` from container inspection — don't rely on it. See `docs/backup-system.md` "Credential sourcing pattern".
+- **Proxy handlers must strip port from `r.Host`** before looking up by domain. Caddy's `r.Host` includes the listen port (e.g. `example.com:8080` with curl `--resolve`), but the `RateLimiters` / `IPAccessRules` registries are keyed on bare domain. `net.SplitHostPort` before looking up.
+- **`Deployer.Deploy` takes variadic `RegistryAuth`**. If any registry auth is passed, the deploy invokes `docker --config <tmpDir> compose up` with a generated `config.json`. `reconciler.deployApp` calls `resolveRegistries(cfg)` and threads the result through, so apps with `simpledeploy.registries` labels can pull private images on initial deploy (not just on `pull`).
+- **S3 uploads use `manager.Uploader`**, not `PutObject`. The backup pipeline streams through pipes that aren't seekable, and `PutObject` needs a seekable body to compute SHA-256. Match this pattern if you add a new S3-based target.
+- **Redis BGSAVE readiness**: read `LASTSAVE` *before* triggering `BGSAVE`. If you read after, a fast save (empty DB) may already have bumped the timestamp, and the poll loop will never observe a change.
 
 ## Project Layout
 
