@@ -107,8 +107,9 @@ Every compose file is parsed and validated before deployment. The following dire
 ### Encryption at Rest
 
 - Registry credentials (username/password) are encrypted with **AES-256-GCM**
-- Encryption keys are derived from `master_secret` using **PBKDF2** (100,000 iterations, SHA-256)
-- Each encryption operation uses a random nonce
+- Encryption keys are derived from `master_secret` using **PBKDF2** (100,000 iterations, SHA-256) with a random 16-byte salt per encryption
+- Each encryption operation uses a random nonce and random salt
+- Decryption is backwards compatible with the legacy fixed-salt format
 
 ### Database Security
 
@@ -142,18 +143,23 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
 Strict-Transport-Security: max-age=63072000; includeSubDomains  (when TLS active)
 ```
 
+### Request Size Limits
+
+All non-GET requests are limited to 1MB body size to prevent memory exhaustion from oversized payloads.
+
 ### WebSocket Security
 
-WebSocket endpoints (`/api/apps/{slug}/logs`, `/api/apps/{slug}/deploy-logs`) validate the `Origin` header against the request `Host`. Cross-origin WebSocket connections are rejected to prevent Cross-Site WebSocket Hijacking.
+WebSocket endpoints (`/api/apps/{slug}/logs`, `/api/apps/{slug}/deploy-logs`) validate the `Origin` header against the request `Host`. Cross-origin WebSocket connections are rejected to prevent Cross-Site WebSocket Hijacking. Idle connections are closed after 5 minutes.
 
 ### Webhook Security
 
 Outbound webhooks (for alerts) are protected against SSRF:
 
-- Only `http://` and `https://` schemes are allowed
+- Only `http://` and `https://` schemes are allowed (validated at create and update time)
 - DNS resolution is checked before sending
 - Requests to loopback, private, link-local, and cloud metadata IPs (169.254.169.254) are blocked
 - Dangerous headers (`Host`, `Content-Length`, `Transfer-Encoding`) cannot be overridden via webhook config
+- Header values containing `\r` or `\n` are silently rejected to prevent header injection
 
 ### Trusted Proxies
 
@@ -259,9 +265,17 @@ Copy the output into your config:
 master_secret: "a1b2c3d4e5f6..."
 ```
 
+### Backup Security Enhancements
+
+- Database credentials for backup scripts (MySQL, PostgreSQL, MongoDB) are passed via Docker environment variables, never embedded in shell scripts
+- Backup download paths are validated to prevent path traversal
+- Error messages from backup operations are truncated to prevent credential leakage in logs
+- Certificate upload requires valid PEM format and DNS-safe domain names
+
 ## Breaking Changes on Upgrade
 
 If upgrading from an older version:
 
 - **API keys must be re-created.** Key hashing changed from SHA-256 to HMAC-SHA256. Existing keys in the database will not match.
-- **Registry credentials must be re-added.** Key derivation changed from SHA-256 to PBKDF2. Existing encrypted credentials cannot be decrypted.
+- **Registry credentials are auto-migrated.** New encryption uses random per-encryption salt (PBKDF2). Existing credentials encrypted with the fixed salt are automatically decrypted and re-encrypted on first access.
+- **`master_secret` is now required.** The server will refuse to start without it. Previously it would fall back to a default.

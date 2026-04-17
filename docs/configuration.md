@@ -70,7 +70,7 @@ registries:
 | `domain` | string | - | Management UI domain |
 | `tls.mode` | string | `auto` | TLS mode: `auto`, `custom`, `off`, `local` |
 | `tls.email` | string | - | ACME email (required for auto TLS) |
-| `master_secret` | string | - | Encryption/signing key |
+| `master_secret` | string | **required** | Encryption/signing key |
 | `metrics.tiers` | list | see above | Metrics rollup tiers |
 | `ratelimit.requests` | int | `200` | Default requests per window |
 | `ratelimit.window` | string | `60s` | Rate limit time window |
