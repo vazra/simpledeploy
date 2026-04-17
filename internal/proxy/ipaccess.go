@@ -109,7 +109,11 @@ func (h *IPAccessHandler) Provision(_ caddy.Context) error { return nil }
 func (h *IPAccessHandler) Validate() error                 { return nil }
 
 func (h *IPAccessHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	if !IPAccessRules.Allowed(r.Host, r) {
+	host := r.Host
+	if h2, _, err := net.SplitHostPort(host); err == nil && h2 != "" {
+		host = h2
+	}
+	if !IPAccessRules.Allowed(host, r) {
 		http.NotFound(w, r)
 		return nil
 	}

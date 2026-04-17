@@ -283,13 +283,13 @@ func (s *Server) routes() {
 	// System management
 	s.mux.Handle("GET /api/system/info", s.authMiddleware(http.HandlerFunc(s.handleSystemInfo)))
 	s.mux.Handle("GET /api/system/storage-breakdown", s.authMiddleware(http.HandlerFunc(s.handleStorageBreakdown)))
-	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(http.HandlerFunc(s.handlePruneMetrics)))
-	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(http.HandlerFunc(s.handlePruneRequestMetrics)))
-	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(http.HandlerFunc(s.handleVacuumDB)))
+	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePruneMetrics))))
+	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePruneRequestMetrics))))
+	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleVacuumDB))))
 	s.mux.Handle("GET /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleAuditLog)))
-	s.mux.Handle("DELETE /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleClearAuditLog)))
+	s.mux.Handle("DELETE /api/system/audit-log", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleClearAuditLog))))
 	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleGetAuditConfig)))
-	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleUpdateAuditConfig)))
+	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleUpdateAuditConfig))))
 
 	// System logs
 	s.mux.Handle("GET /api/system/process-logs", s.authMiddleware(http.HandlerFunc(s.handleSystemLogs)))

@@ -19,7 +19,7 @@ type mockDeployer struct {
 	calls []string
 }
 
-func (m *mockDeployer) Deploy(_ context.Context, app *compose.AppConfig) deployer.DeployResult {
+func (m *mockDeployer) Deploy(_ context.Context, app *compose.AppConfig, _ ...deployer.RegistryAuth) deployer.DeployResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Deploy:"+app.Name)

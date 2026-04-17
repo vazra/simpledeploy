@@ -126,7 +126,14 @@ func (h *RateLimitHandler) Provision(_ caddy.Context) error { return nil }
 func (h *RateLimitHandler) Validate() error                 { return nil }
 
 func (h *RateLimitHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	if !RateLimiters.Allow(r.Host, r) {
+	// RateLimiters are keyed by bare domain (Route.Domain). The Host header
+	// may include a port (e.g. "example.com:8080" for curl --resolve or when
+	// Caddy listens on a non-standard port), so strip it before lookup.
+	host := r.Host
+	if h2, _, err := net.SplitHostPort(host); err == nil && h2 != "" {
+		host = h2
+	}
+	if !RateLimiters.Allow(host, r) {
 		w.Header().Set("Retry-After", "60")
 		w.WriteHeader(http.StatusTooManyRequests)
 		return nil

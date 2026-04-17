@@ -51,7 +51,7 @@ func (d *Deployer) runCmd(ctx context.Context, dl *DeployLog, name string, args 
 	return d.runner.Run(ctx, name, args...)
 }
 
-func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) DeployResult {
+func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...RegistryAuth) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
 	dl := d.Tracker.TrackWithLog(app.Name, cancel)
 
@@ -62,6 +62,16 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig) DeployRes
 		"-p", project,
 		"up", "-d",
 		"--remove-orphans",
+	}
+	// Prepend --config <tmpDir> so `docker compose up` picks up registry auth.
+	if len(auths) > 0 {
+		tmpDir, err := writeDockerConfig(auths)
+		if err != nil {
+			d.Tracker.DoneWithLog(app.Name, "deploy_failed")
+			return DeployResult{Err: fmt.Errorf("write docker config: %w", err)}
+		}
+		defer os.RemoveAll(tmpDir)
+		args = append([]string{"--config", tmpDir}, args...)
 	}
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)

@@ -469,7 +469,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	dispatcher := alerts.NewWebhookDispatcher()
+	var dispatcher *alerts.WebhookDispatcher
+	if os.Getenv("SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS") == "1" {
+		dispatcher = alerts.NewWebhookDispatcherAllowPrivate()
+	} else {
+		dispatcher = alerts.NewWebhookDispatcher()
+	}
 	evaluator := alerts.NewEvaluator(db, db, db, dispatcher)
 	go evaluator.Run(ctx, 30*time.Second)
 

@@ -97,3 +97,20 @@ func (s *Server) appAccessMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// superAdminMiddleware requires the caller to have role "super_admin".
+// Use for destructive system-wide operations (vacuum, prune, audit clear).
+func (s *Server) superAdminMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := GetAuthUser(r)
+		if user == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if user.Role != "super_admin" {
+			http.Error(w, "forbidden: super_admin required", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

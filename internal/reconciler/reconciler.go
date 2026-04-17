@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ import (
 
 // AppDeployer is the interface the reconciler uses to deploy and remove apps.
 type AppDeployer interface {
-	Deploy(ctx context.Context, app *compose.AppConfig) deployer.DeployResult
+	Deploy(ctx context.Context, app *compose.AppConfig, auths ...deployer.RegistryAuth) deployer.DeployResult
 	Teardown(ctx context.Context, projectName string) error
 	Restart(ctx context.Context, app *compose.AppConfig) deployer.DeployResult
 	Stop(ctx context.Context, projectName string) error
@@ -361,7 +362,13 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 
 // deployApp calls deployer.Deploy then upserts the app in the store with labels.
 func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.AppConfig) error {
-	result := r.deployer.Deploy(ctx, cfg)
+	auths, authErr := r.resolveRegistries(cfg)
+	if authErr != nil {
+		// Non-fatal: log and continue without auth (compose may still succeed
+		// for public images, and the error message surfaces to the deploy event).
+		log.Printf("[reconciler] resolve registries for %s: %v", slug, authErr)
+	}
+	result := r.deployer.Deploy(ctx, cfg, auths...)
 
 	labels := make(map[string]string)
 	for _, svc := range cfg.Services {
