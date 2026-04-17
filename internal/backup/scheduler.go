@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -199,8 +200,18 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	// Build pipeline
 	pipe := NewPipeline(strategy, target, hookRunner)
 
+	containerName := app.Name
+	if cfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Name); err == nil {
+		if detected := strategy.Detect(cfg); len(detected) > 0 {
+			containerName = detected[0].ContainerName
+			if len(paths) == 0 && len(detected[0].Paths) > 0 {
+				paths = detected[0].Paths
+			}
+		}
+	}
+
 	opts := BackupOpts{
-		ContainerName: app.Name,
+		ContainerName: containerName,
 		Paths:         paths,
 	}
 
@@ -265,9 +276,20 @@ func (s *Scheduler) RunRestore(ctx context.Context, runID int64) error {
 
 	pipe := NewPipeline(strategy, target, hookRunner)
 
+	containerName := app.Name
+	paths := parsePaths(cfg.Paths)
+	if composeCfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Name); err == nil {
+		if detected := strategy.Detect(composeCfg); len(detected) > 0 {
+			containerName = detected[0].ContainerName
+			if len(paths) == 0 && len(detected[0].Paths) > 0 {
+				paths = detected[0].Paths
+			}
+		}
+	}
+
 	opts := RestoreOpts{
-		ContainerName: app.Name,
-		Paths:         parsePaths(cfg.Paths),
+		ContainerName: containerName,
+		Paths:         paths,
 	}
 
 	return pipe.RunRestore(ctx, opts, run.FilePath, run.Checksum, preHooks, postHooks)

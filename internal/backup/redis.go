@@ -42,14 +42,22 @@ func (s *RedisStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRes
 	container := opts.ContainerName
 	filename := fmt.Sprintf("%s-%s.rdb.gz", container, time.Now().Format("20060102-150405"))
 
+	// Capture the pre-BGSAVE LASTSAVE timestamp first. If we read it after
+	// BGSAVE, a fast save (e.g. an empty DB) may already have bumped the
+	// timestamp and the poll loop would never observe a change.
+	initial, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "LASTSAVE").Output()
+	if err != nil {
+		return nil, fmt.Errorf("redis LASTSAVE (initial): %w", err)
+	}
+	initialTS := strings.TrimSpace(string(initial))
+
 	// Trigger BGSAVE
 	out, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "BGSAVE").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("redis BGSAVE: %w: %s", err, out)
 	}
 
-	// Wait for BGSAVE to complete (poll LASTSAVE)
-	if err := s.waitForSave(ctx, container); err != nil {
+	if err := s.waitForSaveSince(ctx, container, initialTS); err != nil {
 		return nil, err
 	}
 
@@ -85,27 +93,19 @@ func (s *RedisStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRes
 	return &BackupResult{Reader: pr, Filename: filename}, nil
 }
 
-func (s *RedisStrategy) waitForSave(ctx context.Context, container string) error {
-	// Get initial LASTSAVE value
-	initial, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "LASTSAVE").Output()
-	if err != nil {
-		return fmt.Errorf("redis LASTSAVE: %w", err)
-	}
-	initialTS := strings.TrimSpace(string(initial))
-
+func (s *RedisStrategy) waitForSaveSince(ctx context.Context, container, initialTS string) error {
 	for i := 0; i < 30; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Second):
-		}
-
 		current, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "LASTSAVE").Output()
 		if err != nil {
 			return fmt.Errorf("redis LASTSAVE: %w", err)
 		}
 		if strings.TrimSpace(string(current)) != initialTS {
 			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
 		}
 	}
 	return fmt.Errorf("redis BGSAVE did not complete within 30s")

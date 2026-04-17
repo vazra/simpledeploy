@@ -57,14 +57,24 @@ func (s *PostgresStrategy) Detect(cfg *compose.AppConfig) []DetectedService {
 }
 
 func (s *PostgresStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
-	user := opts.Credentials["POSTGRES_USER"]
-	if user == "" {
-		user = "postgres"
-	}
-
 	filename := fmt.Sprintf("%s-%s.sql.gz", opts.ContainerName, time.Now().Format("20060102-150405"))
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "pg_dump", "-U", user)
+	// Resolve the Postgres user + database from the container environment.
+	// Falls back to POSTGRES_USER=postgres and POSTGRES_DB=$POSTGRES_USER to
+	// match upstream postgres image defaults. Using the container env lets us
+	// back up the right database without the caller knowing the credentials.
+	script := `set -e
+user="${POSTGRES_USER:-postgres}"
+db="${POSTGRES_DB:-$user}"
+exec pg_dump -U "$user" -d "$db"`
+	if u := opts.Credentials["POSTGRES_USER"]; u != "" {
+		script = fmt.Sprintf(`set -e
+user=%q
+db=${POSTGRES_DB:-$user}
+exec pg_dump -U "$user" -d "$db"`, u)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "sh", "-c", script)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -96,18 +106,24 @@ func (s *PostgresStrategy) Backup(ctx context.Context, opts BackupOpts) (*Backup
 }
 
 func (s *PostgresStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
-	user := opts.Credentials["POSTGRES_USER"]
-	if user == "" {
-		user = "postgres"
-	}
-
 	gr, err := gzip.NewReader(opts.Reader)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
 	}
 	defer gr.Close()
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "psql", "-U", user)
+	script := `set -e
+user="${POSTGRES_USER:-postgres}"
+db="${POSTGRES_DB:-$user}"
+exec psql -U "$user" -d "$db"`
+	if u := opts.Credentials["POSTGRES_USER"]; u != "" {
+		script = fmt.Sprintf(`set -e
+user=%q
+db=${POSTGRES_DB:-$user}
+exec psql -U "$user" -d "$db"`, u)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "sh", "-c", script)
 	cmd.Stdin = gr
 
 	if out, err := cmd.CombinedOutput(); err != nil {

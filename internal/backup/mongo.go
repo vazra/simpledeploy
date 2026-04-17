@@ -55,15 +55,22 @@ func (s *MongoStrategy) Detect(cfg *compose.AppConfig) []DetectedService {
 func (s *MongoStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
 	filename := fmt.Sprintf("%s-%s.archive.gz", opts.ContainerName, time.Now().Format("20060102-150405"))
 
-	args := []string{"exec", opts.ContainerName, "mongodump", "--archive", "--gzip"}
+	// Read root credentials from container env at dump time; caller can
+	// override via opts.Credentials.
+	script := `set -e
+u="${MONGO_INITDB_ROOT_USERNAME:-}"
+p="${MONGO_INITDB_ROOT_PASSWORD:-}"
+if [ -n "$u" ] && [ -n "$p" ]; then
+  exec mongodump --archive --gzip --authenticationDatabase admin -u "$u" -p "$p"
+else
+  exec mongodump --archive --gzip
+fi`
 	if u := opts.Credentials["MONGO_INITDB_ROOT_USERNAME"]; u != "" {
-		args = append(args, "-u", u)
-	}
-	if p := opts.Credentials["MONGO_INITDB_ROOT_PASSWORD"]; p != "" {
-		args = append(args, "-p", p)
+		p := opts.Credentials["MONGO_INITDB_ROOT_PASSWORD"]
+		script = fmt.Sprintf(`exec mongodump --archive --gzip --authenticationDatabase admin -u %q -p %q`, u, p)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "sh", "-c", script)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -80,15 +87,20 @@ func (s *MongoStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRes
 }
 
 func (s *MongoStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
-	args := []string{"exec", "-i", opts.ContainerName, "mongorestore", "--archive", "--gzip"}
+	script := `set -e
+u="${MONGO_INITDB_ROOT_USERNAME:-}"
+p="${MONGO_INITDB_ROOT_PASSWORD:-}"
+if [ -n "$u" ] && [ -n "$p" ]; then
+  exec mongorestore --archive --gzip --drop --authenticationDatabase admin -u "$u" -p "$p"
+else
+  exec mongorestore --archive --gzip --drop
+fi`
 	if u := opts.Credentials["MONGO_INITDB_ROOT_USERNAME"]; u != "" {
-		args = append(args, "-u", u)
-	}
-	if p := opts.Credentials["MONGO_INITDB_ROOT_PASSWORD"]; p != "" {
-		args = append(args, "-p", p)
+		p := opts.Credentials["MONGO_INITDB_ROOT_PASSWORD"]
+		script = fmt.Sprintf(`exec mongorestore --archive --gzip --drop --authenticationDatabase admin -u %q -p %q`, u, p)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "sh", "-c", script)
 	cmd.Stdin = opts.Reader
 
 	if out, err := cmd.CombinedOutput(); err != nil {

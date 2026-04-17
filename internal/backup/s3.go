@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -73,9 +74,13 @@ func (t *S3Target) key(filename string) string {
 }
 
 func (t *S3Target) Upload(ctx context.Context, filename string, data io.Reader) (string, int64, error) {
+	// Use the manager Uploader so we can stream a non-seekable reader
+	// (pg_dump/tar stdout piped through a gzip writer is not seekable,
+	// which PutObject's SHA-256 computation requires).
 	cr := &countReader{r: data}
 	key := t.key(filename)
-	_, err := t.client.PutObject(ctx, &s3.PutObjectInput{
+	uploader := manager.NewUploader(t.client)
+	_, err := uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(t.cfg.Bucket),
 		Key:    aws.String(key),
 		Body:   cr,

@@ -285,7 +285,7 @@ func (s *Server) handleDetectStrategies(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cfg, parseErr := compose.ParseFile(app.ComposePath, app.Name)
+	cfg, parseErr := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Name)
 	if parseErr != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -374,7 +374,7 @@ func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "backup run not found", http.StatusNotFound)
 		return
 	}
-	if run.Status != "ok" {
+	if run.Status != "success" {
 		http.Error(w, "backup run not successful", http.StatusBadRequest)
 		return
 	}
@@ -389,8 +389,13 @@ func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
 
 	switch cfg.Target {
 	case "local":
-		// Stream file directly
-		f, err := os.Open(run.FilePath)
+		// run.FilePath is stored as just the filename (relative to the local
+		// target's backup dir). Resolve against dataDir/backups.
+		absPath := run.FilePath
+		if !filepath.IsAbs(absPath) {
+			absPath = filepath.Join(s.dataDir, "backups", run.FilePath)
+		}
+		f, err := os.Open(absPath)
 		if err != nil {
 			httpError(w, fmt.Errorf("open backup file: %w", err), http.StatusInternalServerError)
 			return

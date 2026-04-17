@@ -37,15 +37,22 @@ func (s *MySQLStrategy) Detect(cfg *compose.AppConfig) []DetectedService {
 }
 
 func (s *MySQLStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
-	password := opts.Credentials["MYSQL_ROOT_PASSWORD"]
 	filename := fmt.Sprintf("%s-%s.sql.gz", opts.ContainerName, time.Now().Format("20060102-150405"))
 
-	args := []string{"exec", opts.ContainerName, "mysqldump", "--all-databases", "-u", "root"}
-	if password != "" {
-		args = append(args, "-p"+password)
+	// Read MYSQL_ROOT_PASSWORD from the container env at dump time, falling
+	// back to opts.Credentials if the caller supplied one explicitly.
+	script := `set -e
+pw="${MYSQL_ROOT_PASSWORD:-}"
+if [ -n "$pw" ]; then
+  exec mysqldump --all-databases -u root -p"$pw"
+else
+  exec mysqldump --all-databases -u root
+fi`
+	if pw := opts.Credentials["MYSQL_ROOT_PASSWORD"]; pw != "" {
+		script = fmt.Sprintf(`exec mysqldump --all-databases -u root -p%q`, pw)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "sh", "-c", script)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -77,20 +84,24 @@ func (s *MySQLStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRes
 }
 
 func (s *MySQLStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
-	password := opts.Credentials["MYSQL_ROOT_PASSWORD"]
-
 	gr, err := gzip.NewReader(opts.Reader)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
 	}
 	defer gr.Close()
 
-	args := []string{"exec", "-i", opts.ContainerName, "mysql", "-u", "root"}
-	if password != "" {
-		args = append(args, "-p"+password)
+	script := `set -e
+pw="${MYSQL_ROOT_PASSWORD:-}"
+if [ -n "$pw" ]; then
+  exec mysql -u root -p"$pw"
+else
+  exec mysql -u root
+fi`
+	if pw := opts.Credentials["MYSQL_ROOT_PASSWORD"]; pw != "" {
+		script = fmt.Sprintf(`exec mysql -u root -p%q`, pw)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "sh", "-c", script)
 	cmd.Stdin = gr
 
 	if out, err := cmd.CombinedOutput(); err != nil {
