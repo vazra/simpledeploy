@@ -82,6 +82,9 @@ func TestNewFailsWhenComposeUnavailable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from New when compose unavailable")
 	}
+	if !strings.Contains(err.Error(), "docker compose not available") {
+		t.Errorf("expected 'docker compose not available' in error, got: %v", err)
+	}
 }
 
 func TestRestartCallsForceRecreate(t *testing.T) {
