@@ -17,11 +17,13 @@ export default async function globalSetup() {
   const state = {
     pid: server.proc.pid,
     port: server.port,
+    proxyPort: server.proxyPort,
     dataDir: server.dataDir,
     appsDir: server.appsDir,
     configPath: server.configPath,
     logPath: server.logPath,
     baseURL: server.baseURL,
+    proxyURL: server.proxyURL,
   };
   writeFileSync(STATE_FILE, JSON.stringify(state));
 

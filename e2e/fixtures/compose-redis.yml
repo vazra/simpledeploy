@@ -1,0 +1,12 @@
+services:
+  db:
+    image: redis:7-alpine
+    ports:
+      - "8096:6379"
+    volumes:
+      - redisdata:/data
+    labels:
+      simpledeploy.endpoints.0.port: "6379"
+      simpledeploy.endpoints.0.tls: "off"
+volumes:
+  redisdata:

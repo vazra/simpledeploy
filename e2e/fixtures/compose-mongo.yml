@@ -1,0 +1,15 @@
+services:
+  db:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: testrootpass123
+    ports:
+      - "8095:27017"
+    volumes:
+      - mongodata:/data/db
+    labels:
+      simpledeploy.endpoints.0.port: "27017"
+      simpledeploy.endpoints.0.tls: "off"
+volumes:
+  mongodata:

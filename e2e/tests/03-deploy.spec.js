@@ -2,6 +2,15 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { loginAsAdmin, getState } from '../helpers/auth.js';
+import {
+  findServiceContainer,
+  containerRunning,
+  containerImage,
+  dockerInspect,
+  listAppContainers,
+  dockerExec,
+} from '../helpers/docker.js';
+import { fetchViaProxy } from '../helpers/proxy.js';
 
 const FIXTURES = join(import.meta.dirname, '..', 'fixtures');
 
@@ -80,5 +89,48 @@ test.describe('Deploy Apps', () => {
     await dialog.getByRole('button', { name: 'Deploy' }).click();
     // Redeploying an existing app is an update, should succeed
     await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
+  });
+});
+
+test.describe.configure({ mode: 'serial' });
+test.describe('Deploy - Functional', () => {
+  test('nginx container is running with correct image and labels', async () => {
+    const name = findServiceContainer('e2e-nginx', 'web');
+    expect(name, 'expected to find e2e-nginx web container').toBeTruthy();
+    expect(containerRunning(name)).toBe(true);
+    const img = containerImage(name);
+    expect(img.startsWith('nginx:')).toBe(true);
+    const info = dockerInspect(name);
+    expect(info.Config.Labels['com.docker.compose.project']).toBe('simpledeploy-e2e-nginx');
+    expect(info.Config.Labels['com.docker.compose.service']).toBe('web');
+  });
+
+  test('proxy routes HTTP traffic for nginx-test.local', async () => {
+    const res = await fetchViaProxy('nginx-test.local', '/');
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Welcome to nginx');
+
+    const missing = await fetchViaProxy('nonexistent.local', '/');
+    const missingBody = await missing.text();
+    // Caddy returns 200 with empty body when no route matches; ensure no nginx content.
+    expect(missingBody).not.toContain('Welcome to nginx');
+  });
+
+  test('multi-service deploy runs both services and routes traffic', async () => {
+    const containers = listAppContainers('e2e-multi');
+    expect(containers.length).toBe(2);
+    for (const c of containers) {
+      expect(containerRunning(c)).toBe(true);
+    }
+    const res = await fetchViaProxy('multi-test.local', '/');
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('Welcome to nginx');
+
+    const redis = containers.find((n) => n.includes('cache')) || findServiceContainer('e2e-multi', 'cache');
+    expect(redis, 'expected to find redis/cache container').toBeTruthy();
+    const out = dockerExec(redis, 'redis-cli PING').trim();
+    expect(out).toBe('PONG');
   });
 });

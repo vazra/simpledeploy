@@ -25,27 +25,42 @@ export async function buildBinary() {
   return bin;
 }
 
-export async function startServer(binPath) {
+// getBinaryPath returns the expected binary path without rebuilding.
+// Use this in tests that need an isolated server after global-setup has built the binary.
+export function getBinaryPath() {
+  return join(ROOT, 'bin', 'simpledeploy');
+}
+
+export async function startServer(binPath, overrides = {}) {
   const port = await getAvailablePort();
-  const dataDir = mkdtempSync(join(tmpdir(), 'sd-e2e-data-'));
-  const appsDir = mkdtempSync(join(tmpdir(), 'sd-e2e-apps-'));
+  const proxyPort = overrides.proxyPort || await getAvailablePort();
+  const dataDir = overrides.dataDir || mkdtempSync(join(tmpdir(), 'sd-e2e-data-'));
+  const appsDir = overrides.appsDir || mkdtempSync(join(tmpdir(), 'sd-e2e-apps-'));
   const configPath = join(dataDir, 'config.yml');
   const logPath = join(dataDir, 'server.log');
+  const tlsMode = overrides.tlsMode || 'off';
+  // ratelimit override only affects the auth/API rate limiter (cfg.RateLimit).
+  // Per-app proxy rate limits come from compose labels (simpledeploy.ratelimit.*).
+  const rl = overrides.ratelimit || {};
+  const rlRequests = rl.requests ?? 10000;
+  const rlWindow = rl.window ?? '60s';
+  const rlBurst = rl.burst ?? 5000;
+  const rlBy = rl.by ?? 'ip';
 
   const config = [
     `data_dir: "${dataDir}"`,
     `apps_dir: "${appsDir}"`,
-    `listen_addr: ":0"`,
+    `listen_addr: ":${proxyPort}"`,
     `management_port: ${port}`,
     `master_secret: "e2e-test-secret-key-32bytes!!"`,
     `log_buffer_size: 100`,
     `tls:`,
-    `  mode: "off"`,
+    `  mode: "${tlsMode}"`,
     `ratelimit:`,
-    `  requests: 10000`,
-    `  window: "60s"`,
-    `  burst: 5000`,
-    `  by: "ip"`,
+    `  requests: ${rlRequests}`,
+    `  window: "${rlWindow}"`,
+    `  burst: ${rlBurst}`,
+    `  by: "${rlBy}"`,
   ].join('\n');
 
   writeFileSync(configPath, config);
@@ -58,7 +73,7 @@ export async function startServer(binPath) {
   const proc = spawn(binPath, ['serve', '--config', configPath], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: { ...process.env, SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS: '1' },
   });
 
   proc.stdout.pipe(logStream);
@@ -74,8 +89,8 @@ export async function startServer(binPath) {
     try {
       const res = await fetch(`${baseURL}/api/health`);
       if (res.ok) {
-        console.log(`[e2e] Server healthy at ${baseURL}`);
-        return { proc, port, dataDir, appsDir, configPath, logPath, baseURL };
+        console.log(`[e2e] Server healthy at ${baseURL} (proxy :${proxyPort})`);
+        return { proc, port, proxyPort, dataDir, appsDir, configPath, logPath, baseURL, proxyURL: `http://localhost:${proxyPort}` };
       }
     } catch {}
     await new Promise((r) => setTimeout(r, 300));

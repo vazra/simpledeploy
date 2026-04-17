@@ -1,0 +1,17 @@
+services:
+  db:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: testrootpass123
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass123
+    ports:
+      - "8094:3306"
+    volumes:
+      - mysqldata:/var/lib/mysql
+    labels:
+      simpledeploy.endpoints.0.port: "3306"
+      simpledeploy.endpoints.0.tls: "off"
+volumes:
+  mysqldata:
