@@ -3,9 +3,11 @@
 ## Prerequisites
 
 - Linux VPS (Ubuntu 22.04+ recommended)
-- Docker installed and running
+- Docker Engine with Docker Compose plugin installed and running
 - Domain pointing to the server (for automatic TLS)
 - Ports 80 and 443 open (for Let's Encrypt and HTTPS)
+
+> SimpleDeploy requires Docker and Docker Compose. If either is missing, the server will exit with an error and a link to the install guide: https://docs.docker.com/engine/install/
 
 ## Installation
 
