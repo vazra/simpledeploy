@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
   import Button from '../components/Button.svelte'
@@ -27,7 +28,7 @@
     return { text: 'Weak', color: 'bg-orange-500', width: '40%' }
   })
 
-  $effect(() => {
+  onMount(() => {
     api.setupStatus().then(res => {
       setupMode = res.data?.needs_setup === true
     }).finally(() => { checking = false })

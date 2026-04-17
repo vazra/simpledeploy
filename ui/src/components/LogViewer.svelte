@@ -28,8 +28,8 @@
     if (ws) ws.close()
     lines = []
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    let url = `${proto}//${window.location.host}/api/apps/${slug}/logs?follow=true&tail=200`
-    if (selectedService) url += `&service=${selectedService}`
+    let url = `${proto}//${window.location.host}/api/apps/${encodeURIComponent(slug)}/logs?follow=true&tail=200`
+    if (selectedService) url += `&service=${encodeURIComponent(selectedService)}`
 
     ws = new WebSocket(url)
     ws.onmessage = (event) => {

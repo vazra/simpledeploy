@@ -5,6 +5,7 @@
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
   import { toasts } from '../lib/stores/toast.js'
+  import { formatBytes } from '../lib/format.js'
 
   let activeTab = $state('overview')
   let loading = $state(false)
@@ -43,14 +44,6 @@
 
   const tiers = ['raw', '1m', '5m', '1h', '1d']
   const tierLabels = { raw: 'Raw', '1m': '1 min', '5m': '5 min', '1h': '1 hour', '1d': '1 day' }
-
-  function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  }
 
   onMount(() => {
     Promise.all([loadInfo(), loadBreakdown()])

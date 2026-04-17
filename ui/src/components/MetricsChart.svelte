@@ -131,10 +131,28 @@
   let currentTheme = 'dark'
   let mounted = false
 
+  function updateChart() {
+    if (!mounted || !canvas) return
+    if (!chart) {
+      createChart(currentTheme)
+      return
+    }
+    chart.data.datasets = buildDatasets()
+    chart.options.scales.x.grid.color = getGridColor(currentTheme)
+    chart.options.scales.x.ticks.color = getTickColor(currentTheme)
+    chart.options.scales.y.grid.color = getGridColor(currentTheme)
+    chart.options.scales.y.ticks.color = getTickColor(currentTheme)
+    if (chart.options.plugins.legend) {
+      chart.options.plugins.legend.labels.color = getTickColor(currentTheme)
+    }
+    chart.update('none')
+  }
+
   onMount(() => {
     mounted = true
     const unsub = effectiveTheme.subscribe((t) => {
       currentTheme = t
+      updateChart()
     })
     return () => {
       unsub()
@@ -144,7 +162,7 @@
 
   $effect(() => {
     if (mounted && canvas && (data || datasets)) {
-      createChart(currentTheme)
+      updateChart()
     }
   })
 </script>

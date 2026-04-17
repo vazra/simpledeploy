@@ -12,6 +12,7 @@
   import { api } from '../lib/api.js'
   import { appTemplates } from '../lib/appTemplates.js'
   import { connection } from '../lib/stores/connection.svelte.js'
+  import { formatBytes, formatTime, formatDate, timeAgo } from '../lib/format.js'
 
   const featuredIds = ['nginx-static', 'gitea-postgres', 'uptime-kuma', 'vaultwarden', 'n8n-postgres', 'minio']
 
@@ -142,24 +143,6 @@
     )
   }
 
-  function formatBytes(bytes) {
-    if (!bytes) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i]
-  }
-
-  function formatTime(ts) {
-    if (!ts) return ''
-    const d = new Date(ts)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
-
-  function formatDate(ts) {
-    if (!ts) return ''
-    return new Date(ts).toLocaleString()
-  }
 
   let runningCount = $derived(apps.filter((a) => a.Status === 'running' || a.Status === 'degraded').length)
   let stoppedCount = $derived(apps.filter((a) => a.Status !== 'running' && a.Status !== 'degraded').length)
@@ -198,14 +181,6 @@
     return metric ? alertFormatValue(metric, h.value) : h.value?.toFixed(1) ?? '-'
   }
 
-  function timeAgo(ts) {
-    if (!ts) return '-'
-    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-    if (diff < 60) return 'just now'
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-    return `${Math.floor(diff / 86400)}d ago`
-  }
 
   let recentBackups = $derived.by(() => {
     const all = []
@@ -311,15 +286,15 @@
 
         <!-- App Summary -->
         <div class="flex gap-2 mb-4">
-          <button onclick={() => filterStatus = 'all'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'all' ? 'border-accent/50' : ''}">
+          <button onclick={() => filterStatus = 'all'} aria-pressed={filterStatus === 'all'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'all' ? 'border-accent/50' : ''}">
             <span class="text-text-muted">Total</span>
             <span class="font-semibold text-text-primary">{apps.length}</span>
           </button>
-          <button onclick={() => filterStatus = filterStatus === 'running' ? 'all' : 'running'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'running' ? 'border-accent/50' : ''}">
+          <button onclick={() => filterStatus = filterStatus === 'running' ? 'all' : 'running'} aria-pressed={filterStatus === 'running'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'running' ? 'border-accent/50' : ''}">
             <span class="text-text-muted">Running</span>
             <span class="font-semibold text-success">{runningCount}</span>
           </button>
-          <button onclick={() => filterStatus = filterStatus === 'stopped' ? 'all' : 'stopped'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'stopped' ? 'border-accent/50' : ''}">
+          <button onclick={() => filterStatus = filterStatus === 'stopped' ? 'all' : 'stopped'} aria-pressed={filterStatus === 'stopped'} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-2 border border-border/50 text-sm cursor-pointer transition-colors hover:border-border {filterStatus === 'stopped' ? 'border-accent/50' : ''}">
             <span class="text-text-muted">Stopped</span>
             <span class="font-semibold {stoppedCount > 0 ? 'text-danger' : 'text-text-secondary'}">{stoppedCount}</span>
           </button>

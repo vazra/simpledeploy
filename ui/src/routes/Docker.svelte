@@ -6,6 +6,7 @@
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
   import { toasts } from '../lib/stores/toast.js'
+  import { formatBytes } from '../lib/format.js'
 
   let activeTab = $state('cleanup')
   let loading = $state(false)
@@ -28,13 +29,6 @@
   let networkToDelete = $state(null)
   let volumeToDelete = $state(null)
   let pruneVolumesConfirm = $state(false)
-
-  function formatBytes(bytes) {
-    if (bytes == null || bytes === 0) return '0 B'
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    const i = Math.floor(Math.log(bytes) / Math.log(1024))
-    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i]
-  }
 
   function formatDate(ts) {
     if (!ts) return ''

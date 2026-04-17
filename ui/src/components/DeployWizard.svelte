@@ -165,7 +165,7 @@
   }
 
   // Check if compose has at least one service with an image
-  let hasServices = $derived(() => {
+  let hasServices = $derived.by(() => {
     const svcs = compose?.services || {}
     return Object.values(svcs).some(s => s.image?.trim())
   })

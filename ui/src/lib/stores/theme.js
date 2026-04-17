@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 
 const STORAGE_KEY = 'simpledeploy-theme'
 
@@ -36,9 +36,7 @@ themePreference.subscribe((pref) => {
 
 if (typeof window !== 'undefined') {
   window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
-    let current
-    themePreference.subscribe((v) => (current = v))()
-    if (current === 'system') {
+    if (get(themePreference) === 'system') {
       const effective = getEffectiveTheme('system')
       effectiveTheme.set(effective)
       applyTheme(effective)

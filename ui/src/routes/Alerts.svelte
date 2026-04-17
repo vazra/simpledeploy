@@ -7,6 +7,7 @@
   import Modal from '../components/Modal.svelte'
   import FormModal from '../components/FormModal.svelte'
   import { api } from '../lib/api.js'
+  import { timeAgo } from '../lib/format.js'
 
   let webhooks = $state([])
   let rules = $state([])
@@ -176,16 +177,6 @@
     return '= ' + parts.join(', ')
   }
 
-  function timeAgo(dateStr) {
-    if (!dateStr) return '-'
-    const now = Date.now()
-    const then = new Date(dateStr).getTime()
-    const diff = Math.floor((now - then) / 1000)
-    if (diff < 60) return 'just now'
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-    return `${Math.floor(diff / 86400)}d ago`
-  }
 
   onMount(loadAll)
 

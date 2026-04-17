@@ -2,42 +2,7 @@ import { toasts } from './stores/toast.js'
 
 const BASE = '/api'
 
-async function requestText(method, path, body = null) {
-  const opts = {
-    method,
-    headers: {},
-    credentials: 'include',
-  }
-  if (body) {
-    opts.headers['Content-Type'] = 'application/json'
-    opts.body = JSON.stringify(body)
-  }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30000)
-  opts.signal = controller.signal
-  try {
-    const res = await fetch(BASE + path, opts)
-    clearTimeout(timeout)
-    if (res.status === 401) {
-      if (!window.location.hash.includes('login')) {
-        window.location.hash = '#/login'
-      }
-      return { data: null, error: 'Unauthorized' }
-    }
-    if (!res.ok) {
-      const text = await res.text()
-      return { data: null, error: text || `HTTP ${res.status}` }
-    }
-    const data = await res.text()
-    return { data, error: null }
-  } catch (err) {
-    clearTimeout(timeout)
-    const msg = err.name === 'AbortError' ? 'Request timed out' : err.message
-    return { data: null, error: msg }
-  }
-}
-
-async function request(method, path, body = null) {
+async function baseRequest(method, path, body, responseMode) {
   const opts = {
     method,
     headers: {},
@@ -64,14 +29,27 @@ async function request(method, path, body = null) {
       const error = text || `HTTP ${res.status}`
       return { data: null, error, status: res.status }
     }
-    const ct = res.headers.get('content-type')
-    const data = ct && ct.includes('application/json') ? await res.json() : null
+    let data
+    if (responseMode === 'text') {
+      data = await res.text()
+    } else {
+      const ct = res.headers.get('content-type')
+      data = ct && ct.includes('application/json') ? await res.json() : null
+    }
     return { data, error: null, status: res.status }
   } catch (err) {
     clearTimeout(timeout)
     const msg = err.name === 'AbortError' ? 'Request timed out' : err.message
     return { data: null, error: msg }
   }
+}
+
+function request(method, path, body = null) {
+  return baseRequest(method, path, body, 'json')
+}
+
+function requestText(method, path, body = null) {
+  return baseRequest(method, path, body, 'text')
 }
 
 async function requestWithToast(method, path, body, successMsg) {

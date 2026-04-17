@@ -1,5 +1,6 @@
 <script>
   import Badge from './Badge.svelte'
+  import { formatBytesShort } from '../lib/format.js'
 
   let { app, metrics = null } = $props()
 
@@ -8,14 +9,6 @@
     degraded: 'warning',
     stopped: 'default',
     error: 'danger'
-  }
-
-  function formatBytes(bytes) {
-    if (!bytes) return '0'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return (bytes / Math.pow(k, i)).toFixed(0) + ' ' + sizes[i]
   }
 </script>
 
@@ -46,7 +39,7 @@
         <div class="h-1.5 bg-surface-3/50 rounded-full overflow-hidden">
           <div class="h-full bg-success rounded-full" style="width: {Math.min(metrics.memPct || 0, 100)}%"></div>
         </div>
-        <div class="text-xs text-text-secondary mt-0.5">{metrics.memPct?.toFixed(1) || 0}%{#if metrics.memLimit} · {formatBytes(metrics.memBytes)} / {formatBytes(metrics.memLimit)}{/if}</div>
+        <div class="text-xs text-text-secondary mt-0.5">{metrics.memPct?.toFixed(1) || 0}%{#if metrics.memLimit} · {formatBytesShort(metrics.memBytes)} / {formatBytesShort(metrics.memLimit)}{/if}</div>
       </div>
     </div>
   {/if}

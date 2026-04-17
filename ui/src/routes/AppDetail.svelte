@@ -13,6 +13,7 @@
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
   import { connection } from '../lib/stores/connection.svelte.js'
+  import { formatBytes } from '../lib/format.js'
 
   let { params } = $props()
   let slug = $derived(params.slug)
@@ -168,14 +169,6 @@
   }
 
   // --- Metrics ---
-  function formatBytes(bytes) {
-    if (!bytes) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i]
-  }
-
   const containerColors = ['#60a5fa', '#34d399', '#fbbf24', '#a78bfa', '#fb923c', '#f87171', '#2dd4bf', '#e879f9']
 
   function buildContainerDatasets(containers, extract, baseColor) {
