@@ -173,6 +173,47 @@ func TestRemoveAppEndpoint(t *testing.T) {
 	}
 }
 
+func TestDeployConflictExistingApp(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	// Insert an app into the store so it already exists
+	srv.store.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", Status: "running"}, nil)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("services:\n  web:\n    image: nginx\n"))
+	body, _ := json.Marshal(map[string]string{"name": "myapp", "compose": encoded})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/deploy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeployForceOverwriteExistingApp(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	srv.store.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", Status: "running"}, nil)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("services:\n  web:\n    image: nginx\n"))
+	body, _ := json.Marshal(map[string]any{"name": "myapp", "compose": encoded, "force": true})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/deploy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestDeployEndpointInvalidBase64(t *testing.T) {
 	srv, _ := newDeployTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)

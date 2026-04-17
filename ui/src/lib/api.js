@@ -62,11 +62,11 @@ async function request(method, path, body = null) {
     if (!res.ok) {
       const text = await res.text()
       const error = text || `HTTP ${res.status}`
-      return { data: null, error }
+      return { data: null, error, status: res.status }
     }
     const ct = res.headers.get('content-type')
     const data = ct && ct.includes('application/json') ? await res.json() : null
-    return { data, error: null }
+    return { data, error: null, status: res.status }
   } catch (err) {
     clearTimeout(timeout)
     const msg = err.name === 'AbortError' ? 'Request timed out' : err.message
@@ -109,7 +109,7 @@ export const api = {
   listApps: () => request('GET', '/apps'),
   getApp: (slug) => request('GET', `/apps/${slug}`),
   removeApp: (slug) => requestWithToast('DELETE', `/apps/${slug}`, null, 'App removed'),
-  deploy: (name, compose) => request('POST', '/apps/deploy', { name, compose }),
+  deploy: (name, compose, force = false) => request('POST', '/apps/deploy', { name, compose, force }),
   getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
   restartApp: (slug) => request('POST', `/apps/${slug}/restart`),

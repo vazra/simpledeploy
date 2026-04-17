@@ -185,8 +185,9 @@
   let currentAction = $state('')
   let deployWs = $state(null)
   let logContainer = $state(null)
+  let confirmOverwrite = $state(false)
 
-  async function startDeploy() {
+  async function startDeploy(force = false) {
     step = 3
     deployStatus = 'deploying'
     deployLines = []
@@ -198,7 +199,15 @@
     }
 
     const encoded = encodeBase64(composeText)
-    const res = await api.deploy(appName.trim(), encoded)
+    const res = await api.deploy(appName.trim(), encoded, force)
+
+    if (res.status === 409) {
+      // App already exists, ask for confirmation
+      deployStatus = 'deploying'
+      step = 2
+      confirmOverwrite = true
+      return
+    }
 
     if (res.error) {
       deployStatus = 'failed'
@@ -508,8 +517,8 @@
     {#if step < 3}
       <div class="flex justify-between px-6 py-4 border-t border-border/50 shrink-0">
         {#if step === 2}
-          <Button variant="secondary" size="sm" onclick={() => step = 1}>Back</Button>
-          <Button size="sm" onclick={startDeploy}>Deploy</Button>
+          <Button variant="secondary" size="sm" onclick={() => { step = 1; confirmOverwrite = false }}>Back</Button>
+          <Button size="sm" onclick={() => startDeploy(false)}>Deploy</Button>
         {:else}
           <div></div>
           <Button size="sm" disabled={!canProceed} onclick={enterStep2}>Next</Button>
@@ -518,6 +527,21 @@
     {/if}
   </div>
 </div>
+{/if}
+
+<!-- Overwrite confirmation -->
+{#if confirmOverwrite}
+  <div class="fixed inset-0 z-50 flex items-center justify-center">
+    <button class="absolute inset-0 bg-black/40" onclick={() => confirmOverwrite = false} aria-label="Cancel"></button>
+    <div class="relative bg-surface-2 border border-border/50 rounded-xl p-6 max-w-sm shadow-2xl">
+      <p class="text-sm text-text-primary mb-1 font-medium">App already exists</p>
+      <p class="text-xs text-text-muted mb-4">"{appName}" is already deployed. This will update the existing app with your new configuration.</p>
+      <div class="flex gap-2 justify-end">
+        <Button size="sm" variant="secondary" onclick={() => confirmOverwrite = false}>Cancel</Button>
+        <Button size="sm" variant="danger" onclick={() => { confirmOverwrite = false; startDeploy(true) }}>Redeploy</Button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 <!-- Close confirmation during deploy -->

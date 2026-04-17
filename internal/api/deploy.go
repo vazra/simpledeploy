@@ -44,6 +44,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name    string `json:"name"`
 		Compose string `json:"compose"`
+		Force   bool   `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -56,6 +57,18 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if !validAppName.MatchString(body.Name) {
 		http.Error(w, "invalid app name: must match [a-zA-Z0-9][a-zA-Z0-9._-]{0,62}", http.StatusBadRequest)
 		return
+	}
+
+	// Check if app already exists
+	if !body.Force && s.store != nil {
+		if _, err := s.store.GetAppBySlug(body.Name); err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("app %q already exists", body.Name),
+			})
+			return
+		}
 	}
 
 	composeData, err := base64.StdEncoding.DecodeString(body.Compose)
