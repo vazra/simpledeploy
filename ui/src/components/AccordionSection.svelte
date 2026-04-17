@@ -2,7 +2,7 @@
   let { title, expanded = false, children } = $props()
 </script>
 
-<div class="bg-surface-2 border border-border rounded-lg overflow-hidden">
+<div class="bg-surface-2 border border-border rounded-lg">
   <button
     type="button"
     class="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface-3/50 transition-colors"
