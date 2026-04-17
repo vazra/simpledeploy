@@ -274,6 +274,31 @@ func (s *Store) HasAppAccess(userID int64, appSlug string) (bool, error) {
 	return count > 0, nil
 }
 
+// HasAppAccessByID returns true if the user has access to the app (by id).
+// super_admins always return true.
+func (s *Store) HasAppAccessByID(userID int64, appID int64) (bool, error) {
+	var role string
+	err := s.db.QueryRow(`SELECT role FROM users WHERE id = ?`, userID).Scan(&role)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("get user role: %w", err)
+	}
+	if role == "super_admin" {
+		return true, nil
+	}
+
+	var count int
+	err = s.db.QueryRow(`
+		SELECT COUNT(*) FROM user_app_access WHERE user_id = ? AND app_id = ?
+	`, userID, appID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check app access by id: %w", err)
+	}
+	return count > 0, nil
+}
+
 // EmailTaken returns true if the email is already used by another user.
 func (s *Store) EmailTaken(email string, excludeID int64) (bool, error) {
 	var count int

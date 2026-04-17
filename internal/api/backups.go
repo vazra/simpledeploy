@@ -95,6 +95,9 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 		http.Error(w, "backup config not found", http.StatusNotFound)
 		return
 	}
+	if !s.checkAppAccessByID(w, r, existing.AppID) {
+		return
+	}
 
 	var cfg store.BackupConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
@@ -138,6 +141,15 @@ func (s *Server) handleDeleteBackupConfig(w http.ResponseWriter, r *http.Request
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	existing, err := s.store.GetBackupConfig(id)
+	if err != nil {
+		http.Error(w, "backup config not found", http.StatusNotFound)
+		return
+	}
+	if !s.checkAppAccessByID(w, r, existing.AppID) {
 		return
 	}
 
@@ -237,6 +249,20 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	run, err := s.store.GetBackupRun(runID)
+	if err != nil {
+		http.Error(w, "backup run not found", http.StatusNotFound)
+		return
+	}
+	cfg, err := s.store.GetBackupConfig(run.BackupConfigID)
+	if err != nil {
+		http.Error(w, "backup config not found", http.StatusNotFound)
+		return
+	}
+	if !s.checkAppAccessByID(w, r, cfg.AppID) {
+		return
+	}
+
 	go func() {
 		if err := s.backupScheduler.RunRestore(context.Background(), runID); err != nil {
 			log.Printf("[api] restore run %d: %v", runID, err)
@@ -317,8 +343,12 @@ func (s *Server) handleTriggerBackupConfig(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if _, err := s.store.GetBackupConfig(cfgID); err != nil {
+	cfg, err := s.store.GetBackupConfig(cfgID)
+	if err != nil {
 		http.Error(w, "backup config not found", http.StatusNotFound)
+		return
+	}
+	if !s.checkAppAccessByID(w, r, cfg.AppID) {
 		return
 	}
 
@@ -384,6 +414,9 @@ func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "backup config not found", http.StatusNotFound)
 		return
 	}
+	if !s.checkAppAccessByID(w, r, cfg.AppID) {
+		return
+	}
 
 	filename := filepath.Base(run.FilePath)
 
@@ -409,7 +442,9 @@ func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
 		defer f.Close()
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 		w.Header().Set("Content-Type", "application/octet-stream")
-		io.Copy(w, f)
+		if _, err := io.Copy(w, f); err != nil {
+			log.Printf("[api] download backup run %d: %v", runID, err)
+		}
 
 	case "s3":
 		// Decrypt S3 config and generate pre-signed URL

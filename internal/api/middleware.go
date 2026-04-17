@@ -98,6 +98,25 @@ func (s *Server) appAccessMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// checkAppAccessByID verifies the authenticated user has access to appID.
+// Writes 401/403 to w on failure and returns false.
+func (s *Server) checkAppAccessByID(w http.ResponseWriter, r *http.Request, appID int64) bool {
+	user := GetAuthUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	if user.Role == "super_admin" {
+		return true
+	}
+	ok, _ := s.store.HasAppAccessByID(user.ID, appID)
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return false
+	}
+	return true
+}
+
 // superAdminMiddleware requires the caller to have role "super_admin".
 // Use for destructive system-wide operations (vacuum, prune, audit clear).
 func (s *Server) superAdminMiddleware(next http.Handler) http.Handler {
