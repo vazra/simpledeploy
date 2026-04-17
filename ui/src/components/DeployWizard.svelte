@@ -4,12 +4,44 @@
   import Button from './Button.svelte'
   import YamlEditor from './YamlEditor.svelte'
   import VisualEditor from './VisualEditor.svelte'
+  import TemplatePicker from './TemplatePicker.svelte'
+  import { appTemplates, categories, applyVars, suggestName } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
 
-  let { open = false, onclose = () => {}, onComplete = () => {} } = $props()
+  let { open = false, onclose = () => {}, onComplete = () => {}, initialTemplateId = null } = $props()
 
-  let step = $state(1)
-  const steps = ['Configure', 'Review', 'Deploy']
+  let step = $state(0)
+  const steps = ['Template', 'Configure', 'Review', 'Deploy']
+
+  let existingAppNames = $state([])
+
+  // Fetch existing app names when wizard opens (for suggestName dedup).
+  $effect(() => {
+    if (open && existingAppNames.length === 0) {
+      api.listApps().then((res) => {
+        if (!res.error && Array.isArray(res.data)) {
+          existingAppNames = res.data.map((a) => a.name).filter(Boolean)
+        }
+      }).catch(() => { /* fail silently */ })
+    }
+  })
+
+  function handleTemplateApply({ template, vars }) {
+    const resolved = applyVars(template.compose, vars)
+    compose = resolved
+    composeText = yaml.dump(resolved, { lineWidth: -1 })
+    appName = suggestName(template.nameSuggestion, existingAppNames)
+    nameError = ''
+    editorMode = 'visual'
+    scheduleValidation(composeText)
+    step = 1
+  }
+
+  function handleBlank() {
+    compose = { services: { web: { image: '' } } }
+    composeText = ''
+    step = 1
+  }
 
   // Step 1 state
   let appName = $state('')
@@ -142,6 +174,9 @@
     appName.trim() && !nameError && composeValid && !Object.keys(visualErrors).length
   )
 
+  // Warn if unsubstituted template placeholders remain.
+  let hasStrayTokens = $derived(/\{\{\s*\w+\s*\}\}/.test(composeText))
+
   // Step 2: build review summary from compose object
   let reviewServices = $derived.by(() => {
     if (!compose?.services) return []
@@ -251,7 +286,7 @@
   })
 
   function resetWizard() {
-    step = 1
+    step = 0
     appName = ''
     editorMode = 'visual'
     compose = { services: { web: { image: '' } } }
@@ -263,6 +298,7 @@
     deployStatus = 'deploying'
     deployLines = []
     currentAction = ''
+    existingAppNames = []
   }
 
   let confirmClose = $state(false)
@@ -294,9 +330,8 @@
         <!-- Step indicator -->
         <div class="flex items-center gap-1.5">
           {#each steps as label, i}
-            {@const num = i + 1}
-            {@const active = step === num}
-            {@const done = step > num}
+            {@const active = step === i}
+            {@const done = step > i}
             {#if i > 0}
               <div class="w-6 h-px {done ? 'bg-accent' : 'bg-border/50'}"></div>
             {/if}
@@ -306,7 +341,7 @@
                 {#if done}
                   <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
                 {:else}
-                  {num}
+                  {i + 1}
                 {/if}
               </div>
               <span class="text-xs {active ? 'text-text-primary font-medium' : 'text-text-muted'}">{label}</span>
@@ -323,7 +358,15 @@
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto px-6 py-5">
-      {#if step === 1}
+      {#if step === 0}
+        <TemplatePicker
+          templates={appTemplates}
+          {categories}
+          {initialTemplateId}
+          onapply={handleTemplateApply}
+          onblank={handleBlank}
+        />
+      {:else if step === 1}
         <div class="max-w-3xl mx-auto flex flex-col gap-5">
           <!-- App Name -->
           <div>
@@ -361,6 +404,13 @@
                 >YAML</button>
               </div>
             </div>
+
+            {#if hasStrayTokens}
+              <div class="flex items-start gap-1.5 text-xs text-warning mb-2 bg-warning/10 border border-warning/20 rounded-md px-2.5 py-1.5">
+                <svg class="w-3.5 h-3.5 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                <span>Template placeholders still present — values were not substituted. Fix before deploying.</span>
+              </div>
+            {/if}
 
             <!-- Validation status -->
             {#if validating}
@@ -514,13 +564,13 @@
     </div>
 
     <!-- Footer -->
-    {#if step < 3}
+    {#if step === 1 || step === 2}
       <div class="flex justify-between px-6 py-4 border-t border-border/50 shrink-0">
         {#if step === 2}
           <Button variant="secondary" size="sm" onclick={() => { step = 1; confirmOverwrite = false }}>Back</Button>
           <Button size="sm" onclick={() => startDeploy(false)}>Deploy</Button>
         {:else}
-          <div></div>
+          <Button variant="secondary" size="sm" onclick={() => step = 0}>Back</Button>
           <Button size="sm" disabled={!canProceed} onclick={enterStep2}>Next</Button>
         {/if}
       </div>

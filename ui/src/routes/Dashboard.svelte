@@ -8,8 +8,12 @@
   import Badge from '../components/Badge.svelte'
   import Button from '../components/Button.svelte'
   import DeployWizard from '../components/DeployWizard.svelte'
+  import QuickDeployStrip from '../components/QuickDeployStrip.svelte'
   import { api } from '../lib/api.js'
+  import { appTemplates } from '../lib/appTemplates.js'
   import { connection } from '../lib/stores/connection.svelte.js'
+
+  const featuredIds = ['nginx-static', 'gitea-postgres', 'uptime-kuma', 'vaultwarden', 'n8n-postgres', 'minio']
 
   let apps = $state([])
   let cpuHistory = $state([])
@@ -35,6 +39,7 @@
 
   // Deploy form
   let showDeployPanel = $state(false)
+  let quickTemplateId = $state(null)
 
   const unsubReconnect = connection.onReconnect(() => loadDashboard())
   onMount(loadDashboard)
@@ -341,6 +346,13 @@
             <p class="text-text-primary font-medium mb-1">No apps deployed yet</p>
             <p class="text-sm text-text-muted mb-4">Deploy your first app to get started</p>
             <Button size="sm" onclick={() => showDeployPanel = true}>Deploy App</Button>
+            <div class="mt-8 text-left">
+              <QuickDeployStrip
+                templates={appTemplates}
+                {featuredIds}
+                onselect={(id) => { quickTemplateId = id; showDeployPanel = true }}
+              />
+            </div>
           </div>
         {:else}
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -462,5 +474,10 @@
     </div>
   {/if}
 
-  <DeployWizard open={showDeployPanel} onclose={() => showDeployPanel = false} onComplete={() => { showDeployPanel = false; loadDashboard() }} />
+  <DeployWizard
+    open={showDeployPanel}
+    initialTemplateId={quickTemplateId}
+    onclose={() => { showDeployPanel = false; quickTemplateId = null }}
+    onComplete={() => { showDeployPanel = false; quickTemplateId = null; loadDashboard() }}
+  />
 </Layout>

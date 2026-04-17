@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
@@ -20,7 +22,9 @@
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "jsdom": "^25.0.1",
     "svelte": "^5.55.2",
-    "vite": "^8.0.7"
+    "vite": "^8.0.7",
+    "vitest": "^2.1.0"
   }
 }
