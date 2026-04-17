@@ -390,7 +390,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	dep, err := deployer.New(&deployer.ExecRunner{})
 	if err != nil {
-		return fmt.Errorf("init deployer: %w", err)
+		return fmt.Errorf("simpledeploy requires Docker and Docker Compose.\nInstall Docker Engine: https://docs.docker.com/engine/install/\n\n%w", err)
 	}
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg)
 
@@ -600,7 +600,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	dep, err := deployer.New(&deployer.ExecRunner{})
 	if err != nil {
-		return fmt.Errorf("init deployer: %w", err)
+		return fmt.Errorf("simpledeploy requires Docker and Docker Compose.\nInstall Docker Engine: https://docs.docker.com/engine/install/\n\n%w", err)
 	}
 	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg)
 	ctx := cmd.Context()
@@ -672,7 +672,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 	dep, err := deployer.New(&deployer.ExecRunner{})
 	if err != nil {
-		return fmt.Errorf("init deployer: %w", err)
+		return fmt.Errorf("simpledeploy requires Docker and Docker Compose.\nInstall Docker Engine: https://docs.docker.com/engine/install/\n\n%w", err)
 	}
 	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg)
 
