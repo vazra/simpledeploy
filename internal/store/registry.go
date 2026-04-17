@@ -85,7 +85,10 @@ func (s *Store) UpdateRegistry(id, name, url, usernameEnc, passwordEnc string) e
 	if err != nil {
 		return fmt.Errorf("update registry: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("registry not found: %s", id)
 	}
@@ -97,7 +100,10 @@ func (s *Store) DeleteRegistry(id string) error {
 	if err != nil {
 		return fmt.Errorf("delete registry: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("registry not found: %s", id)
 	}

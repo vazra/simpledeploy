@@ -39,7 +39,9 @@ func LoadClientConfig() (*ClientConfig, error) {
 		return nil, err
 	}
 	var cfg ClientConfig
-	yaml.Unmarshal(data, &cfg)
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
 	if cfg.Contexts == nil {
 		cfg.Contexts = make(map[string]Context)
 	}

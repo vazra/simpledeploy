@@ -37,6 +37,9 @@ func RunStreaming(ctx context.Context, dl *DeployLog, name string, args ...strin
 				dl.Send(OutputLine{Line: line, Stream: "stdout"})
 			}
 		}
+		if err := s.Err(); err != nil && dl != nil {
+			dl.Send(OutputLine{Line: "stdout read error: " + err.Error(), Stream: "stderr"})
+		}
 		done <- struct{}{}
 	}()
 
@@ -48,6 +51,9 @@ func RunStreaming(ctx context.Context, dl *DeployLog, name string, args ...strin
 			if dl != nil {
 				dl.Send(OutputLine{Line: line, Stream: "stderr"})
 			}
+		}
+		if err := s.Err(); err != nil && dl != nil {
+			dl.Send(OutputLine{Line: "stderr read error: " + err.Error(), Stream: "stderr"})
 		}
 		done <- struct{}{}
 	}()

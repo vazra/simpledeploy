@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/proxy"
@@ -60,7 +61,9 @@ func (w *RequestMetricsWriter) Run(ctx context.Context, flushInterval time.Durat
 				MaxLatency: b.maxLat,
 			})
 		}
-		_ = w.store.InsertRequestMetrics(pts)
+		if err := w.store.InsertRequestMetrics(pts); err != nil {
+			log.Printf("[metrics] insert request stats: %v", err)
+		}
 		buckets = make(map[int64]*pending)
 	}
 

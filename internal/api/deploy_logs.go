@@ -16,6 +16,12 @@ func (s *Server) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+		return nil
+	})
+
 	// Wait up to 3s for deploy to start (race between async POST and WS connect)
 	var ch <-chan deployer.OutputLine
 	var unsub func()

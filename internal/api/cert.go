@@ -2,12 +2,16 @@ package api
 
 import (
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var validDomain = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.*-]*$`)
 
 type certRequest struct {
 	Cert string `json:"cert"`
@@ -24,8 +28,8 @@ func (s *Server) handleUploadCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if domain == "" {
-		http.Error(w, "domain is required", http.StatusBadRequest)
+	if domain == "" || !validDomain.MatchString(domain) {
+		http.Error(w, "invalid domain", http.StatusBadRequest)
 		return
 	}
 
@@ -39,13 +43,12 @@ func (s *Server) handleUploadCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate PEM-ish content
-	if !strings.Contains(req.Cert, "BEGIN CERTIFICATE") {
-		http.Error(w, "cert does not appear to be PEM encoded", http.StatusBadRequest)
+	if block, _ := pem.Decode([]byte(req.Cert)); block == nil || block.Type != "CERTIFICATE" {
+		http.Error(w, "cert is not valid PEM", http.StatusBadRequest)
 		return
 	}
-	if !strings.Contains(req.Key, "BEGIN") {
-		http.Error(w, "key does not appear to be PEM encoded", http.StatusBadRequest)
+	if block, _ := pem.Decode([]byte(req.Key)); block == nil || !strings.Contains(block.Type, "KEY") {
+		http.Error(w, "key is not valid PEM", http.StatusBadRequest)
 		return
 	}
 
@@ -81,8 +84,8 @@ func (s *Server) handleDeleteCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if domain == "" {
-		http.Error(w, "domain is required", http.StatusBadRequest)
+	if domain == "" || !validDomain.MatchString(domain) {
+		http.Error(w, "invalid domain", http.StatusBadRequest)
 		return
 	}
 

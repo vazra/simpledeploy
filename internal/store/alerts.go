@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -257,11 +258,12 @@ func (s *Store) UpdateAlertRule(r *AlertRule) error {
 	if n == 0 {
 		return fmt.Errorf("alert rule %d not found", r.ID)
 	}
-	// update snapshot on active (unresolved) history entries
-	_, _ = s.db.Exec(`
+	if _, err := s.db.Exec(`
 		UPDATE alert_history SET metric=?, app_slug=?, operator=?, threshold=?
 		WHERE rule_id=? AND resolved_at IS NULL
-	`, r.Metric, r.AppSlug, r.Operator, r.Threshold, r.ID)
+	`, r.Metric, r.AppSlug, r.Operator, r.Threshold, r.ID); err != nil {
+		log.Printf("[store] update alert history snapshot: %v", err)
+	}
 	return nil
 }
 

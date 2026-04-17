@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
@@ -66,6 +67,12 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+		return nil
+	})
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()

@@ -109,6 +109,7 @@ func TestValidate_ValidModes(t *testing.T) {
 	validModes := []string{"", "auto", "custom", "off", "local"}
 	for _, mode := range validModes {
 		cfg := DefaultConfig()
+		cfg.MasterSecret = "test-secret"
 		cfg.TLS.Mode = mode
 		if err := cfg.Validate(); err != nil {
 			t.Errorf("mode %q: expected no error, got %v", mode, err)
@@ -118,6 +119,7 @@ func TestValidate_ValidModes(t *testing.T) {
 
 func TestValidate_InvalidMode(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.MasterSecret = "test-secret"
 	cfg.TLS.Mode = "invalid"
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for mode 'invalid', got nil")
@@ -127,7 +129,7 @@ func TestValidate_InvalidMode(t *testing.T) {
 func TestLoad_ValidLocalMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	content := "tls:\n  mode: local\n"
+	content := "tls:\n  mode: local\nmaster_secret: test-secret\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}

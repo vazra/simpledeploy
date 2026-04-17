@@ -111,7 +111,10 @@ func (s *Store) UpdateComposeVersion(id int64, name, notes, envSnapshot string) 
 	if err != nil {
 		return fmt.Errorf("update compose version: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("compose version %d not found", id)
 	}
@@ -124,7 +127,10 @@ func (s *Store) DeleteComposeVersion(id int64) error {
 	if err != nil {
 		return fmt.Errorf("delete compose version: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
 	if n == 0 {
 		return fmt.Errorf("compose version %d not found", id)
 	}

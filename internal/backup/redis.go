@@ -132,9 +132,10 @@ func (s *RedisStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 	cmd.Stdin = gr
 
 	if out, err := cmd.CombinedOutput(); err != nil {
-		// Try to restart even if cp fails
-		exec.CommandContext(ctx, "docker", "start", container).Run()
-		return fmt.Errorf("docker cp restore: %w: %s", err, out)
+		if restartOut, restartErr := exec.CommandContext(ctx, "docker", "start", container).CombinedOutput(); restartErr != nil {
+			return fmt.Errorf("docker cp restore: %w: %s (restart also failed: %s)", err, truncateOutput(out), truncateOutput(restartOut))
+		}
+		return fmt.Errorf("docker cp restore: %w: %s", err, truncateOutput(out))
 	}
 
 	// Start the container back

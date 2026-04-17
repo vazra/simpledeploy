@@ -40,20 +40,20 @@ ui/                   Svelte SPA (Vite build)
 
 ## Key Patterns
 
-- **SQLite with WAL mode.** Single writer, `SetMaxOpenConns(1)`. Migrations embedded via `go:embed`.
+- **SQLite with WAL mode.** `SetMaxOpenConns(4)` for concurrent reads. Migrations embedded via `go:embed`.
 - **Interfaces for testing.** `docker.Client` interface with `MockClient`. Strategy/Target interfaces for backups. Store interfaces in metrics/alerts to avoid import cycles.
 - **Buffered channels.** Metrics and request stats flow through channels with batch writers.
 - **Caddy JSON config.** No Caddyfile. Config built programmatically in `proxy.buildConfig()`, loaded via `caddy.Load()`.
 - **Custom Caddy modules.** `simpledeploy_metrics` and `simpledeploy_ratelimit` registered via `init()` in proxy package.
 - **Compose labels.** All app config via `simpledeploy.*` labels in docker-compose.yml.
 - **CommandRunner interface.** Deployer shells out to `docker compose` CLI via `CommandRunner` with `MockRunner` for tests.
-- **AES-256-GCM encryption.** Registry credentials encrypted with `master_secret` via `auth.Encrypt`/`auth.Decrypt`.
+- **AES-256-GCM encryption.** Registry credentials encrypted with `master_secret` via `auth.Encrypt`/`auth.Decrypt`. Uses random salt per encryption with PBKDF2 key derivation (backwards compatible with legacy fixed-salt format).
 - **Log ring buffer.** Process stdout/stderr captured via `os.Pipe` into `logbuf.Buffer`, streamed to UI via WebSocket. Size configurable via `log_buffer_size` (default 500).
 - **DB backup via VACUUM INTO.** WAL-safe consistent snapshots. Compact mode strips metrics/request_stats before download.
 
 ## Database
 
-SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 11 migrations:
+SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 16 migrations:
 
 1. apps table
 2. app_labels
@@ -66,6 +66,11 @@ SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations
 9. compose_versions, deploy_events (deploy safety)
 10. registries (private registry auth)
 11. db_backup_config, db_backup_runs (system DB backup)
+12. user profile (display_name, email)
+13. metrics v2
+14. alert history rule snapshot columns
+15. backups v2
+16. indexes (alert_history, backup_runs)
 
 ## Testing
 

@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"regexp"
 	"sync"
 
 	caddy "github.com/caddyserver/caddy/v2"
@@ -43,8 +45,16 @@ func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 	}
 }
 
+var validDomainRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.*-]*$`)
+
 // SetRoutes stores routes, configures rate limiters, and reloads Caddy config.
 func (c *CaddyProxy) SetRoutes(routes []Route) error {
+	for _, r := range routes {
+		if !validDomainRe.MatchString(r.Domain) {
+			return fmt.Errorf("invalid domain %q", r.Domain)
+		}
+	}
+
 	c.mu.Lock()
 	c.routes = routes
 	c.mu.Unlock()

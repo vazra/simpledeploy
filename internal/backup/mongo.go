@@ -65,12 +65,15 @@ if [ -n "$u" ] && [ -n "$p" ]; then
 else
   exec mongodump --archive --gzip
 fi`
+	var envArgs []string
 	if u := opts.Credentials["MONGO_INITDB_ROOT_USERNAME"]; u != "" {
 		p := opts.Credentials["MONGO_INITDB_ROOT_PASSWORD"]
-		script = fmt.Sprintf(`exec mongodump --archive --gzip --authenticationDatabase admin -u %q -p %q`, u, p)
+		envArgs = []string{"-e", "MONGO_INITDB_ROOT_USERNAME=" + u, "-e", "MONGO_INITDB_ROOT_PASSWORD=" + p}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "sh", "-c", script)
+	args := append([]string{"exec"}, envArgs...)
+	args = append(args, opts.ContainerName, "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -95,16 +98,19 @@ if [ -n "$u" ] && [ -n "$p" ]; then
 else
   exec mongorestore --archive --gzip --drop
 fi`
+	var envArgs []string
 	if u := opts.Credentials["MONGO_INITDB_ROOT_USERNAME"]; u != "" {
 		p := opts.Credentials["MONGO_INITDB_ROOT_PASSWORD"]
-		script = fmt.Sprintf(`exec mongorestore --archive --gzip --drop --authenticationDatabase admin -u %q -p %q`, u, p)
+		envArgs = []string{"-e", "MONGO_INITDB_ROOT_USERNAME=" + u, "-e", "MONGO_INITDB_ROOT_PASSWORD=" + p}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "sh", "-c", script)
+	args := append([]string{"exec", "-i"}, envArgs...)
+	args = append(args, opts.ContainerName, "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin = opts.Reader
 
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mongorestore: %w: %s", err, out)
+		return fmt.Errorf("mongorestore: %w: %s", err, truncateOutput(out))
 	}
 	return nil
 }

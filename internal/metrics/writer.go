@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"log"
 	"time"
 )
 
@@ -30,7 +31,9 @@ func (w *Writer) Run(ctx context.Context, flushInterval time.Duration) {
 		if len(buf) == 0 {
 			return
 		}
-		_ = w.store.InsertMetrics(buf)
+		if err := w.store.InsertMetrics(buf); err != nil {
+			log.Printf("[metrics] insert: %v", err)
+		}
 		buf = buf[:0]
 	}
 

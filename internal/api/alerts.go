@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -40,6 +41,10 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" || req.Type == "" || req.URL == "" {
 		http.Error(w, "name, type and url required", http.StatusBadRequest)
+		return
+	}
+	if u, err := url.Parse(req.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		http.Error(w, "url must use http or https scheme", http.StatusBadRequest)
 		return
 	}
 	wh := &store.Webhook{
@@ -91,6 +96,10 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" || req.Type == "" || req.URL == "" {
 		http.Error(w, "name, type and url required", http.StatusBadRequest)
+		return
+	}
+	if u, err := url.Parse(req.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		http.Error(w, "url must use http or https scheme", http.StatusBadRequest)
 		return
 	}
 	wh := &store.Webhook{

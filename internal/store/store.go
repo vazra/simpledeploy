@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -28,6 +29,8 @@ func Open(path string) (*Store, error) {
 	// WAL mode allows concurrent readers with a single writer.
 	// Multiple conns let API reads proceed while reconciler writes.
 	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()

@@ -242,21 +242,21 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/alerts/history", s.authMiddleware(http.HandlerFunc(s.handleClearAlertHistory)))
 
 	// Backup configs
-	s.mux.Handle("GET /api/apps/{slug}/backups/configs", s.authMiddleware(http.HandlerFunc(s.handleListBackupConfigs)))
-	s.mux.Handle("POST /api/apps/{slug}/backups/configs", s.authMiddleware(http.HandlerFunc(s.handleCreateBackupConfig)))
+	s.mux.Handle("GET /api/apps/{slug}/backups/configs", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListBackupConfigs))))
+	s.mux.Handle("POST /api/apps/{slug}/backups/configs", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleCreateBackupConfig))))
 	s.mux.Handle("PUT /api/backups/configs/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateBackupConfig)))
 	s.mux.Handle("DELETE /api/backups/configs/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteBackupConfig)))
 
 	// Backup runs
-	s.mux.Handle("GET /api/apps/{slug}/backups/runs", s.authMiddleware(http.HandlerFunc(s.handleListBackupRuns)))
-	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackup)))
+	s.mux.Handle("GET /api/apps/{slug}/backups/runs", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListBackupRuns))))
+	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleTriggerBackup))))
 	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
 	s.mux.Handle("GET /api/backups/runs/{id}/download", s.authMiddleware(http.HandlerFunc(s.handleDownloadBackup)))
-	s.mux.Handle("POST /api/apps/{slug}/backups/upload-restore", s.authMiddleware(http.HandlerFunc(s.handleUploadRestore)))
+	s.mux.Handle("POST /api/apps/{slug}/backups/upload-restore", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUploadRestore))))
 
 	// Backup dashboard & detection
 	s.mux.Handle("GET /api/backups/summary", s.authMiddleware(http.HandlerFunc(s.handleBackupSummary)))
-	s.mux.Handle("GET /api/apps/{slug}/backups/detect", s.authMiddleware(http.HandlerFunc(s.handleDetectStrategies)))
+	s.mux.Handle("GET /api/apps/{slug}/backups/detect", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDetectStrategies))))
 	s.mux.Handle("POST /api/backups/configs/{id}/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackupConfig)))
 	s.mux.Handle("POST /api/backups/test-s3", s.authMiddleware(http.HandlerFunc(s.handleTestS3)))
 
@@ -314,7 +314,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Handler() http.Handler {
-	return securityHeaders(s.mux)
+	return securityHeaders(maxBodySize(s.mux))
+}
+
+// maxBodySize limits request body to 1MB for non-GET requests.
+func maxBodySize(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // securityHeaders adds standard security headers to all responses.

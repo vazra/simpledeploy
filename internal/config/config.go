@@ -75,10 +75,16 @@ func DefaultConfig() *Config {
 func (c *Config) Validate() error {
 	switch c.TLS.Mode {
 	case "", "auto", "custom", "off", "local":
-		return nil
 	default:
 		return fmt.Errorf("invalid tls.mode %q: must be one of auto, custom, off, local, or empty", c.TLS.Mode)
 	}
+	if c.MasterSecret == "" {
+		return fmt.Errorf("master_secret is required")
+	}
+	if c.ManagementPort != 0 && (c.ManagementPort < 1 || c.ManagementPort > 65535) {
+		return fmt.Errorf("management_port must be 1-65535")
+	}
+	return nil
 }
 
 func Load(path string) (*Config, error) {

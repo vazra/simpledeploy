@@ -41,8 +41,15 @@ func ResolveRoutes(app *compose.AppConfig) ([]Route, error) {
 	// Parse app-level rate limit and access control once
 	var rl *RateLimitConfig
 	if app.RateLimit.Requests != "" {
-		requests, _ := strconv.Atoi(app.RateLimit.Requests)
-		window, _ := time.ParseDuration(app.RateLimit.Window)
+		requests, err := strconv.Atoi(app.RateLimit.Requests)
+		if err != nil {
+			log.Printf("[proxy] invalid ratelimit.requests %q for %s: %v", app.RateLimit.Requests, app.Name, err)
+		}
+		window, err := time.ParseDuration(app.RateLimit.Window)
+		if err != nil {
+			log.Printf("[proxy] invalid ratelimit.window %q for %s: %v, defaulting to 1m", app.RateLimit.Window, app.Name, err)
+			window = time.Minute
+		}
 		burst, _ := strconv.Atoi(app.RateLimit.Burst)
 		by := app.RateLimit.By
 		if by == "" {

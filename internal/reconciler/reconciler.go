@@ -83,7 +83,10 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		existing, exists := currentMap[slug]
 		needsDeploy := !exists
 		if exists {
-			hash, _ := hashFile(cfg.ComposePath)
+			hash, hashErr := hashFile(cfg.ComposePath)
+			if hashErr != nil {
+				log.Printf("[reconciler] hash %s: %v", cfg.ComposePath, hashErr)
+			}
 			needsDeploy = hash != "" && hash != existing.ComposeHash
 		}
 		if !needsDeploy {
@@ -381,7 +384,10 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		}
 	}
 
-	hash, _ := hashFile(cfg.ComposePath)
+	hash, hashErr := hashFile(cfg.ComposePath)
+	if hashErr != nil {
+		log.Printf("[reconciler] hash %s: %v", cfg.ComposePath, hashErr)
+	}
 	status := "running"
 	action := "deploy"
 	if result.Err != nil {

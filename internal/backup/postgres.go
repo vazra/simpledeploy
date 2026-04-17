@@ -14,6 +14,13 @@ import (
 
 // Helper functions shared by all strategies.
 
+func truncateOutput(b []byte) []byte {
+	if len(b) > 500 {
+		return b[:500]
+	}
+	return b
+}
+
 func matchesLabel(labels map[string]string, strategy string) bool {
 	if labels == nil {
 		return false
@@ -67,14 +74,14 @@ func (s *PostgresStrategy) Backup(ctx context.Context, opts BackupOpts) (*Backup
 user="${POSTGRES_USER:-postgres}"
 db="${POSTGRES_DB:-$user}"
 exec pg_dump -U "$user" -d "$db"`
+	var envArgs []string
 	if u := opts.Credentials["POSTGRES_USER"]; u != "" {
-		script = fmt.Sprintf(`set -e
-user=%q
-db=${POSTGRES_DB:-$user}
-exec pg_dump -U "$user" -d "$db"`, u)
+		envArgs = []string{"-e", "POSTGRES_USER=" + u}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "sh", "-c", script)
+	args := append([]string{"exec"}, envArgs...)
+	args = append(args, opts.ContainerName, "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -116,18 +123,18 @@ func (s *PostgresStrategy) Restore(ctx context.Context, opts RestoreOpts) error 
 user="${POSTGRES_USER:-postgres}"
 db="${POSTGRES_DB:-$user}"
 exec psql -U "$user" -d "$db"`
+	var envArgs []string
 	if u := opts.Credentials["POSTGRES_USER"]; u != "" {
-		script = fmt.Sprintf(`set -e
-user=%q
-db=${POSTGRES_DB:-$user}
-exec psql -U "$user" -d "$db"`, u)
+		envArgs = []string{"-e", "POSTGRES_USER=" + u}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "sh", "-c", script)
+	args := append([]string{"exec", "-i"}, envArgs...)
+	args = append(args, opts.ContainerName, "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin = gr
 
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("psql: %w: %s", err, out)
+		return fmt.Errorf("psql: %w: %s", err, truncateOutput(out))
 	}
 	return nil
 }

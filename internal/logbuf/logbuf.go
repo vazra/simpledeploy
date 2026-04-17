@@ -104,7 +104,6 @@ func (b *Buffer) Unsubscribe(ch chan Entry) {
 	b.mu.Lock()
 	delete(b.subs, ch)
 	b.mu.Unlock()
-	close(ch)
 }
 
 func (b *Buffer) MaxSize() int {

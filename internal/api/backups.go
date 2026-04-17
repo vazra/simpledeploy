@@ -395,6 +395,12 @@ func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
 		if !filepath.IsAbs(absPath) {
 			absPath = filepath.Join(s.dataDir, "backups", run.FilePath)
 		}
+		absPath = filepath.Clean(absPath)
+		backupsRoot := filepath.Clean(filepath.Join(s.dataDir, "backups"))
+		if !strings.HasPrefix(absPath, backupsRoot+string(filepath.Separator)) && absPath != backupsRoot {
+			http.Error(w, "invalid backup path", http.StatusForbidden)
+			return
+		}
 		f, err := os.Open(absPath)
 		if err != nil {
 			httpError(w, fmt.Errorf("open backup file: %w", err), http.StatusInternalServerError)

@@ -730,7 +730,7 @@ func TestEditRuleAfterFired(t *testing.T) {
 		t.Fatalf("update status = %d; body: %s", w.Code, w.Body.String())
 	}
 
-	// old alert history should still have old threshold (snapshot)
+	// unresolved alert history entries get updated to new rule values
 	hist, err := st.ListAlertHistory(&rule.ID, 10)
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -738,8 +738,8 @@ func TestEditRuleAfterFired(t *testing.T) {
 	if len(hist) < 1 {
 		t.Fatal("expected at least 1 history entry")
 	}
-	if hist[0].Threshold != 80.0 {
-		t.Errorf("old alert threshold = %v, want 80 (snapshot preserved)", hist[0].Threshold)
+	if hist[0].Threshold != 95.0 {
+		t.Errorf("unresolved alert threshold = %v, want 95 (updated to new rule)", hist[0].Threshold)
 	}
 
 	// fire new alert with new rule values
@@ -760,8 +760,8 @@ func TestEditRuleAfterFired(t *testing.T) {
 	}
 	// find entries by value to avoid ordering ambiguity
 	for _, h := range hist {
-		if h.Value == 85.0 && h.Threshold != 80.0 {
-			t.Errorf("old alert (value=85) threshold = %v, want 80 (snapshot)", h.Threshold)
+		if h.Value == 85.0 && h.Threshold != 95.0 {
+			t.Errorf("old alert (value=85) threshold = %v, want 95 (updated to new rule)", h.Threshold)
 		}
 		if h.Value == 97.0 && h.Threshold != 95.0 {
 			t.Errorf("new alert (value=97) threshold = %v, want 95", h.Threshold)

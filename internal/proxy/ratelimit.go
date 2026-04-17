@@ -58,8 +58,9 @@ type domainLimiter struct {
 }
 
 type rlBucket struct {
-	tokens    int
-	lastReset time.Time
+	tokens     int
+	lastReset  time.Time
+	lastAccess time.Time
 }
 
 func (d *domainLimiter) allow(key string) bool {
@@ -67,23 +68,28 @@ func (d *domainLimiter) allow(key string) bool {
 	defer d.mu.Unlock()
 
 	now := time.Now()
+
+	// Periodic cleanup: every 1000 calls, evict stale buckets
+	if len(d.buckets) > 100 {
+		cutoff := now.Add(-2 * d.window)
+		for k, v := range d.buckets {
+			if v.lastAccess.Before(cutoff) {
+				delete(d.buckets, k)
+			}
+		}
+	}
+
 	b, ok := d.buckets[key]
 	if !ok {
 		b = &rlBucket{tokens: d.requests, lastReset: now}
 		d.buckets[key] = b
 	}
+	b.lastAccess = now
 
-	// reset window if expired
 	if now.Sub(b.lastReset) >= d.window {
 		b.tokens = d.requests
 		b.lastReset = now
 	}
-
-	limit := d.requests
-	if d.burst > limit {
-		limit = d.burst
-	}
-	_ = limit // burst is reflected in initial token count on first request
 
 	if b.tokens <= 0 {
 		return false

@@ -61,6 +61,9 @@ func (dl *DeployLog) Send(line OutputLine) {
 		return
 	}
 	dl.history = append(dl.history, line)
+	if len(dl.history) > 10000 {
+		dl.history = dl.history[len(dl.history)-10000:]
+	}
 	for _, sub := range dl.subscribers {
 		select {
 		case sub <- line:

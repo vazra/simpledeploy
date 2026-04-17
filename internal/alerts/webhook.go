@@ -112,6 +112,9 @@ func (d *WebhookDispatcher) Send(webhook store.Webhook, event AlertEvent) error 
 			if blockedWebhookHeaders[strings.ToLower(k)] {
 				continue
 			}
+			if strings.ContainsAny(v, "\r\n") {
+				continue
+			}
 			req.Header.Set(k, v)
 		}
 	}

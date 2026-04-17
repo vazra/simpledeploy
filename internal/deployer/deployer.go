@@ -53,6 +53,7 @@ func (d *Deployer) runCmd(ctx context.Context, dl *DeployLog, name string, args 
 
 func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...RegistryAuth) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	dl := d.Tracker.TrackWithLog(app.Name, cancel)
 
 	project := "simpledeploy-" + app.Name
@@ -102,6 +103,7 @@ func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
 
 func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	dl := d.Tracker.TrackWithLog(app.Name, cancel)
 
 	project := "simpledeploy-" + app.Name
@@ -147,6 +149,7 @@ func (d *Deployer) Start(ctx context.Context, projectName string) error {
 
 func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	dl := d.Tracker.TrackWithLog(app.Name, cancel)
 
 	project := "simpledeploy-" + app.Name

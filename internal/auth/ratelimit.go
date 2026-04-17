@@ -32,6 +32,17 @@ func (rl *RateLimiter) Allow(key string) bool {
 	defer rl.mu.Unlock()
 
 	now := time.Now()
+
+	// Periodic cleanup of stale buckets
+	if len(rl.buckets) > 100 {
+		cutoff := now.Add(-2 * rl.window)
+		for k, v := range rl.buckets {
+			if v.lastReset.Before(cutoff) {
+				delete(rl.buckets, k)
+			}
+		}
+	}
+
 	b, exists := rl.buckets[key]
 	if !exists || now.Sub(b.lastReset) >= rl.window {
 		rl.buckets[key] = &bucket{tokens: rl.limit - 1, lastReset: now}

@@ -89,7 +89,10 @@ func (c *Client) Restore(runID int64) error {
 func (c *Client) do(method, path string, body interface{}) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
-		data, _ := json.Marshal(body)
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal body: %w", err)
+		}
 		bodyReader = bytes.NewReader(data)
 	}
 

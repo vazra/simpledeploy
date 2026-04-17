@@ -48,11 +48,14 @@ if [ -n "$pw" ]; then
 else
   exec mysqldump --all-databases -u root
 fi`
+	var envArgs []string
 	if pw := opts.Credentials["MYSQL_ROOT_PASSWORD"]; pw != "" {
-		script = fmt.Sprintf(`exec mysqldump --all-databases -u root -p%q`, pw)
+		envArgs = []string{"-e", "MYSQL_ROOT_PASSWORD=" + pw}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", opts.ContainerName, "sh", "-c", script)
+	args := append([]string{"exec"}, envArgs...)
+	args = append(args, opts.ContainerName, "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -97,15 +100,18 @@ if [ -n "$pw" ]; then
 else
   exec mysql -u root
 fi`
+	var envArgs []string
 	if pw := opts.Credentials["MYSQL_ROOT_PASSWORD"]; pw != "" {
-		script = fmt.Sprintf(`exec mysql -u root -p%q`, pw)
+		envArgs = []string{"-e", "MYSQL_ROOT_PASSWORD=" + pw}
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName, "sh", "-c", script)
+	args := append([]string{"exec", "-i"}, envArgs...)
+	args = append(args, opts.ContainerName, "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin = gr
 
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("mysql restore: %w: %s", err, out)
+		return fmt.Errorf("mysql restore: %w: %s", err, truncateOutput(out))
 	}
 	return nil
 }
