@@ -1,4 +1,7 @@
-# Development Guide
+---
+title: Development setup
+description: Local development environment for SimpleDeploy, covering prerequisites, dev config, sample apps, make targets, and backend conventions.
+---
 
 ## Prerequisites
 
@@ -95,10 +98,10 @@ make e2e                                   # full Playwright suite (~10-15 min)
 
 - **Compose project name** is `simpledeploy-<app.Slug>`. Containers are `simpledeploy-<slug>-<service>-<replica>`. Backup strategies, detection, and any code calling `docker exec` must account for this prefix.
 - **`store.App` has no JSON tags.** Responses from `/api/apps/:slug` serialize as `Name`, `Slug`, `Status`, etc. (PascalCase). Either add tags or handle both cases on the client.
-- **Async deploys return 202.** `handleDeploy` spawns a goroutine with `context.Background()`. Anything that triggers reconciliation from a request handler should do the same — `r.Context()` is cancelled when the response is sent.
+- **Async deploys return 202.** `handleDeploy` spawns a goroutine with `context.Background()`. Anything that triggers reconciliation from a request handler should do the same. `r.Context()` is cancelled when the response is sent.
 - **Local backup target stores only the filename** in `run.file_path`. Resolve against `<data_dir>/backups/` when reading.
 - **`superAdminMiddleware`** wraps destructive system endpoints (vacuum, prune, audit-clear, audit-config write). Add it to any new endpoint that mutates system-wide state.
-- **Backup strategy credentials** come from the container env at exec time via `docker exec ... sh -c '...'` reading `$POSTGRES_DB`, `$MYSQL_ROOT_PASSWORD`, `$MONGO_INITDB_ROOT_*`, etc. The scheduler does NOT populate `opts.Credentials` from container inspection — don't rely on it. See `docs/backup-system.md` "Credential sourcing pattern".
+- **Backup strategy credentials** come from the container env at exec time via `docker exec ... sh -c '...'` reading `$POSTGRES_DB`, `$MYSQL_ROOT_PASSWORD`, `$MONGO_INITDB_ROOT_*`, etc. The scheduler does NOT populate `opts.Credentials` from container inspection. Don't rely on it. See `docs/backup-system.md` "Credential sourcing pattern".
 - **Proxy handlers must strip port from `r.Host`** before looking up by domain. Caddy's `r.Host` includes the listen port (e.g. `example.com:8080` with curl `--resolve`), but the `RateLimiters` / `IPAccessRules` registries are keyed on bare domain. `net.SplitHostPort` before looking up.
 - **`Deployer.Deploy` takes variadic `RegistryAuth`**. If any registry auth is passed, the deploy invokes `docker --config <tmpDir> compose up` with a generated `config.json`. `reconciler.deployApp` calls `resolveRegistries(cfg)` and threads the result through, so apps with `simpledeploy.registries` labels can pull private images on initial deploy (not just on `pull`).
 - **S3 uploads use `manager.Uploader`**, not `PutObject`. The backup pipeline streams through pipes that aren't seekable, and `PutObject` needs a seekable body to compute SHA-256. Match this pattern if you add a new S3-based target.

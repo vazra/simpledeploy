@@ -1,4 +1,7 @@
-# API Reference
+---
+title: REST API
+description: Management API endpoints served on the configured management_port, covering apps, metrics, backups, alerts, users, and registries.
+---
 
 Management API served on the configured `management_port` (default: 8443).
 

@@ -1,4 +1,7 @@
-# Compose Labels Reference
+---
+title: Compose labels
+description: Reference for simpledeploy.* labels on Docker Compose services covering routing, access, backups, alerts, rate limiting, and registries.
+---
 
 SimpleDeploy reads `simpledeploy.*` labels from your Docker Compose services to configure routing, access control, backups, alerts, and rate limiting.
 
@@ -43,15 +46,11 @@ If `simpledeploy.port` is not set, SimpleDeploy uses the first port mapping it f
 
 ## Access Control Labels
 
+See [IP access control](/guides/access-control/) for the full guide.
+
 | Label | Default | Description |
 |-------|---------|-------------|
 | `simpledeploy.access.allow` | - (all traffic allowed) | Comma-separated IPs and/or CIDRs |
-
-When set, only requests from matching IPs reach the app. Non-matching requests receive `404 Not Found`. Supports both individual IPs (`203.0.113.5`) and CIDR ranges (`10.0.0.0/8`).
-
-When absent or empty, all traffic is allowed (no restriction).
-
-Managed via the UI or `PUT /api/apps/{slug}/access`.
 
 ## Backup Labels
 
@@ -64,12 +63,12 @@ Managed via the UI or `PUT /api/apps/{slug}/access`.
 
 Backup strategies and what they produce:
 
-- **`postgres`** — `pg_dump -U $POSTGRES_USER -d $POSTGRES_DB` via docker exec, gzipped. Reads user/db from container env.
-- **`mysql`** — `mysqldump --all-databases -u root -p"$MYSQL_ROOT_PASSWORD"` via docker exec, gzipped.
-- **`mongo`** — `mongodump --archive --gzip --authenticationDatabase admin -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD`. Restore uses `--drop`.
-- **`redis`** — triggers `BGSAVE`, waits for `LASTSAVE` to bump, then `docker cp` the RDB file out and gzips it.
-- **`sqlite`** — `sqlite3 <path> .backup` to produce a consistent snapshot. Requires the explicit file path in the backup config (`paths: ["/data/app.db"]`); auto-detect returns the mount dir but not the DB filename.
-- **`volume`** — `tar -czf -` on the configured paths. Good for files and as a fallback for DBs where a strategy-specific option doesn't apply. Not safe to restore over a running DB.
+- **`postgres`**: `pg_dump -U $POSTGRES_USER -d $POSTGRES_DB` via docker exec, gzipped. Reads user/db from container env.
+- **`mysql`**: `mysqldump --all-databases -u root -p"$MYSQL_ROOT_PASSWORD"` via docker exec, gzipped.
+- **`mongo`**: `mongodump --archive --gzip --authenticationDatabase admin -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD`. Restore uses `--drop`.
+- **`redis`**: triggers `BGSAVE`, waits for `LASTSAVE` to bump, then `docker cp` the RDB file out and gzips it.
+- **`sqlite`**: `sqlite3 <path> .backup` to produce a consistent snapshot. Requires the explicit file path in the backup config (`paths: ["/data/app.db"]`); auto-detect returns the mount dir but not the DB filename.
+- **`volume`**: `tar -czf -` on the configured paths. Good for files and as a fallback for DBs where a strategy-specific option doesn't apply. Not safe to restore over a running DB.
 
 The S3 target config (endpoint, bucket, credentials) is set via the API or UI, not compose labels.
 
@@ -86,25 +85,14 @@ These labels configure default alert rules auto-created when the app is deployed
 
 ## Rate Limiting Labels
 
+See [Rate limiting](/guides/rate-limiting/) for the full guide, including key types and caveats.
+
 | Label | Default | Description |
 |-------|---------|-------------|
 | `simpledeploy.ratelimit.requests` | global default (200) | Max requests per window |
 | `simpledeploy.ratelimit.window` | global default (60s) | Time window |
 | `simpledeploy.ratelimit.burst` | global default (50) | Burst allowance above limit |
 | `simpledeploy.ratelimit.by` | global default (ip) | Rate limit key |
-
-Rate limit keys:
-- `ip` - rate limit per client IP
-- `header:X-API-Key` - rate limit per header value
-- `path` - rate limit per URL path
-
-When rate limited, clients receive `429 Too Many Requests` with a `Retry-After: 60` header.
-
-If no rate limit labels are set, the global defaults from the server config apply.
-
-**Scope is app-wide, not per-endpoint.** Rate-limit labels are extracted once per app (first-service-seen wins via the label merger in `compose/parser.go`). There is no `simpledeploy.endpoints.N.ratelimit.*` form; all endpoints on the app share a single limiter keyed on each endpoint's bare domain.
-
-**Note on `cfg.RateLimit` in server config.** The server-level `ratelimit:` block in `config.yml` governs the *management API* (login attempts, auth endpoints), not proxy traffic. Proxy 429s come exclusively from these compose labels.
 
 ## Request Tracking Labels
 

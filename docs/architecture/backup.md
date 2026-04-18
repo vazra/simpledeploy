@@ -1,4 +1,7 @@
-# Backup System
+---
+title: Backup architecture
+description: Internal architecture of the backup module: strategy and target interfaces, scheduler, schema, detection, and extension points.
+---
 
 Developer guide for SimpleDeploy's backup module. Covers architecture, data flow, extension points, and known limitations.
 

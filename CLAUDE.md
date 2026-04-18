@@ -189,3 +189,10 @@ Use Conventional Commits: `type(scope): description`
 Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`
 
 Scopes: `api`, `cli`, `ui`, or omit if not scoped.
+
+## Documentation
+
+- User-facing docs source: `docs/` (markdown, with Starlight frontmatter)
+- Site source: `docs-site/` (Astro Starlight)
+- Site builds via `.github/workflows/docs.yml` and ships to GitHub Pages
+- Add new doc pages under `docs/<section>/`. The site's sidebar is in `docs-site/astro.config.mjs`.

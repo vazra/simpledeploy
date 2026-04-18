@@ -1,4 +1,7 @@
-# SimpleDeploy Security Audit
+---
+title: Security audit
+description: Findings from the 2026-04-10 full-codebase security audit, including fixes applied and accepted risks.
+---
 
 **Date:** 2026-04-10
 **Auditor:** Security Review (Automated)

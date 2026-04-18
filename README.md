@@ -126,11 +126,16 @@ CI runs lint, tests, and build on every PR. E2E tests run on push to `main`. See
 
 ## Documentation
 
-- [Deployment Guide](docs/deployment.md)
-- [Configuration Reference](docs/configuration.md)
-- [CLI Reference](docs/cli.md)
-- [API Reference](docs/api.md)
-- [Compose Labels](docs/compose-labels.md)
+Full docs: https://vazra.github.io/simpledeploy
+
+- [Start Here](https://vazra.github.io/simpledeploy/concepts/overview/)
+- [Install](https://vazra.github.io/simpledeploy/install/macos/)
+- [Guides](https://vazra.github.io/simpledeploy/guides/first-deploy/)
+- [Reference](https://vazra.github.io/simpledeploy/reference/configuration/)
+- [Operations](https://vazra.github.io/simpledeploy/operations/security-hardening/)
+- [Contributing](https://vazra.github.io/simpledeploy/contributing/setup/)
+
+Markdown source lives in [`docs/`](docs/).
 
 ## Architecture
 

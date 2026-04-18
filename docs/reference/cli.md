@@ -1,4 +1,7 @@
-# CLI Reference
+---
+title: CLI
+description: Command-line reference for the simpledeploy binary, covering server, app management, remote, backup, user, and registry commands.
+---
 
 All commands use the `--config` flag for server config (default: `/etc/simpledeploy/config.yaml`). Remote commands use the active context from `~/.simpledeploy/config.yaml`.
 
@@ -86,52 +89,7 @@ simpledeploy logs myapp --follow=false --tail 50 --service db
 
 ## Remote Client Commands
 
-### `simpledeploy context`
-
-Manage remote server connections.
-
-```bash
-# Add a context
-simpledeploy context add production --url https://manage.example.com --api-key sd_...
-
-# Switch context
-simpledeploy context use staging
-
-# List contexts (* = active)
-simpledeploy context list
-```
-
-### `simpledeploy pull`
-
-Export remote app config to local files.
-
-```bash
-simpledeploy pull --app myapp -o ./
-simpledeploy pull --all -o ./apps/
-```
-
-Downloads compose files from the remote server.
-
-### `simpledeploy diff`
-
-Compare local config vs remote state.
-
-```bash
-simpledeploy diff --app myapp
-simpledeploy diff -d ./apps/
-```
-
-Shows line-by-line differences between local compose files and remote.
-
-### `simpledeploy sync`
-
-Sync a local directory to the remote server.
-
-```bash
-simpledeploy sync -d ./apps/
-```
-
-Deploys new/changed apps and removes apps not present locally.
+See [Remote management](/guides/remote-management/) for `context`, `pull`, `diff`, and `sync` usage.
 
 ## Backup Commands
 

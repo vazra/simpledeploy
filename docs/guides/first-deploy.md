@@ -1,4 +1,7 @@
-# Deployment Guide
+---
+title: First deploy
+description: End-to-end walk-through for installing SimpleDeploy on a VPS, configuring it, creating an admin, and deploying your first compose app.
+---
 
 ## Prerequisites
 
@@ -11,47 +14,14 @@
 
 ## Installation
 
-### macOS (Homebrew)
+Pick your platform:
 
-```bash
-brew install vazra/tap/simpledeploy
-```
+- [macOS (Homebrew)](/install/macos/)
+- [Ubuntu / Debian (APT)](/install/ubuntu/)
+- [Generic Linux (binary)](/install/linux/)
+- [From source](/install/from-source/)
 
-### Ubuntu/Debian (APT)
-
-```bash
-# Add GPG key
-curl -fsSL https://vazra.github.io/apt-repo/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/vazra.gpg
-
-# Add repository
-echo "deb [signed-by=/usr/share/keyrings/vazra.gpg arch=$(dpkg --print-architecture)] https://vazra.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/vazra.list
-
-# Install
-sudo apt update && sudo apt install simpledeploy
-```
-
-Updates arrive via `apt update && apt upgrade`.
-
-### Linux (manual download)
-
-```bash
-# Download latest release (replace amd64 with arm64 if needed)
-curl -L https://github.com/vazra/simpledeploy/releases/latest/download/simpledeploy_linux_amd64.tar.gz | tar xz
-sudo mv simpledeploy /usr/local/bin/
-```
-
-### Build from Source
-
-```bash
-git clone https://github.com/vazra/simpledeploy.git
-cd simpledeploy
-make build
-sudo cp bin/simpledeploy /usr/local/bin/
-```
-
-Requires Go 1.22+ and Node.js 18+.
-
-### Verify Installation
+Verify:
 
 ```bash
 simpledeploy version
@@ -227,57 +197,17 @@ The app will be:
 - Backed up daily at 2 AM (7 backups retained)
 - Monitored with default alerts (CPU > 80%, memory > 90%)
 
-## Backup Configuration
+## Backup configuration
 
-### Local Backups
+See [Backups overview](/guides/backups/overview/) for local and S3 setup.
 
-No extra config needed. Backups stored at `{data_dir}/backups/`.
+## Alert configuration
 
-### S3 Backups
+See [Alert rules](/guides/alerts/rules/) and [Webhooks](/guides/alerts/webhooks/).
 
-Configure via the API or UI. The S3 target config:
+## Behind a load balancer
 
-```json
-{
-  "endpoint": "s3.amazonaws.com",
-  "bucket": "my-backups",
-  "prefix": "simpledeploy/",
-  "access_key": "AKIA...",
-  "secret_key": "...",
-  "region": "us-east-1"
-}
-```
-
-Works with AWS S3, MinIO, Cloudflare R2, and any S3-compatible storage.
-
-## Alert Configuration
-
-### Add Webhook
-
-Via API:
-```bash
-curl -X POST https://manage.yourdomain.com/api/webhooks \
-  -H "Authorization: Bearer sd_..." \
-  -H "Content-Type: application/json" \
-  -d '{"name":"slack","type":"slack","url":"https://hooks.slack.com/services/..."}'
-```
-
-### Add Alert Rule
-
-```bash
-curl -X POST https://manage.yourdomain.com/api/alerts/rules \
-  -H "Authorization: Bearer sd_..." \
-  -H "Content-Type: application/json" \
-  -d '{"app_id":1,"metric":"cpu_pct","operator":">","threshold":80,"duration_sec":300,"webhook_id":1,"enabled":true}'
-```
-
-## Running Behind a Load Balancer
-
-If running behind Cloudflare, nginx, or another proxy:
-
-1. Set `tls.mode: "off"` in config
-2. Set `listen_addr: ":80"` (or whatever port the LB forwards to)
-3. The LB handles TLS termination
+See [Behind a load balancer](/guides/load-balancer/).
 
 ## Monitoring
 

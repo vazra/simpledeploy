@@ -1,4 +1,7 @@
-# Security Guide
+---
+title: Security hardening
+description: Defense-in-depth controls across auth, deployment, data storage, and network layers, plus operational best practices.
+---
 
 SimpleDeploy includes defense-in-depth security across authentication, deployment, data storage, and network layers. This document covers what's protected, how to configure it, and operational best practices.
 
