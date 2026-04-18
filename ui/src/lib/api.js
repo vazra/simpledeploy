@@ -241,4 +241,8 @@ export const api = {
   systemBackupConfig: () => request('GET', '/system/backup/config'),
   systemSetBackupConfig: (cfg) => request('POST', '/system/backup/config', cfg),
   systemBackupRuns: () => request('GET', '/system/backup/runs'),
+
+  // Public host (used by template quick-test mode)
+  getPublicHost: () => request('GET', '/system/public-host'),
+  setPublicHost: (host) => requestWithToast('PUT', '/system/public-host', { public_host: host }, 'Default host saved'),
 }

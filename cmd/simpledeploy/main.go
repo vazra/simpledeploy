@@ -543,6 +543,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetMasterSecret(cfg.MasterSecret)
 	srv.SetBuildInfo(version, commit, date)
 	srv.SetDBPath(dbPath)
+	srv.SetConfig(cfg, cfgFile)
 	srv.SetTLSMode(cfg.TLS.Mode)
 	srv.SetDataDir(cfg.DataDir)
 	srv.SetWebhookDispatcher(dispatcher)

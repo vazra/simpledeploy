@@ -4,11 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -479,6 +482,69 @@ func (s *Server) handleSetDBBackupConfig(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+var hostnameRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
+
+func isValidPublicHost(h string) bool {
+	if h == "" {
+		return true
+	}
+	if len(h) > 253 {
+		return false
+	}
+	if net.ParseIP(h) != nil {
+		return true
+	}
+	return hostnameRegex.MatchString(h)
+}
+
+func (s *Server) handleGetPublicHost(w http.ResponseWriter, r *http.Request) {
+	var host string
+	if s.cfg != nil {
+		host = s.cfg.PublicHost
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"public_host": host})
+}
+
+func (s *Server) handleSetPublicHost(w http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil || s.cfgPath == "" {
+		http.Error(w, "config not available", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		PublicHost string `json:"public_host"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	host := strings.TrimSpace(body.PublicHost)
+	if !isValidPublicHost(host) {
+		http.Error(w, "invalid public_host: must be a hostname or IP", http.StatusBadRequest)
+		return
+	}
+
+	prev := s.cfg.PublicHost
+	s.cfg.PublicHost = host
+	if err := s.cfg.SaveAtomic(s.cfgPath); err != nil {
+		s.cfg.PublicHost = prev
+		httpError(w, fmt.Errorf("save config: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	if s.audit != nil {
+		caller := GetAuthUser(r)
+		var uname string
+		if caller != nil {
+			uname = caller.Username
+		}
+		s.audit.Log(audit.Event{Type: "public_host_updated", Username: uname, Detail: host, Success: true})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"public_host": host})
 }
 
 func (s *Server) handleListDBBackupRuns(w http.ResponseWriter, r *http.Request) {

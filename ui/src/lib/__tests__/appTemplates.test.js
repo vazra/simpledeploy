@@ -7,7 +7,117 @@ import {
   generateSecret,
   validateVars,
   suggestName,
+  applyAccessMode,
+  countEndpoints,
+  computeQuickTestDomain,
+  isValidHost,
 } from '../appTemplates.js';
+
+function singleEndpointCompose() {
+  return {
+    services: {
+      web: {
+        image: 'nginx',
+        labels: {
+          'simpledeploy.endpoints.0.domain': '{{domain}}',
+          'simpledeploy.endpoints.0.port': '80',
+          'simpledeploy.endpoints.0.tls': 'letsencrypt',
+          'simpledeploy.alert.cpu': '80',
+        },
+      },
+    },
+  };
+}
+
+function multiEndpointCompose() {
+  return {
+    services: {
+      a: {
+        image: 'img-a',
+        labels: {
+          'simpledeploy.endpoints.0.domain': '{{d1}}',
+          'simpledeploy.endpoints.0.port': '8080',
+          'simpledeploy.endpoints.0.tls': 'letsencrypt',
+        },
+      },
+      b: {
+        image: 'img-b',
+        labels: {
+          'simpledeploy.endpoints.0.domain': '{{d2}}',
+          'simpledeploy.endpoints.0.port': '9000',
+          'simpledeploy.endpoints.0.tls': 'letsencrypt',
+          'simpledeploy.endpoints.1.domain': '{{d3}}',
+          'simpledeploy.endpoints.1.port': '9001',
+          'simpledeploy.endpoints.1.tls': 'letsencrypt',
+        },
+      },
+    },
+  };
+}
+
+describe('countEndpoints', () => {
+  it('counts single endpoint', () => {
+    expect(countEndpoints(singleEndpointCompose())).toBe(1);
+  });
+  it('counts multi endpoints across services', () => {
+    expect(countEndpoints(multiEndpointCompose())).toBe(3);
+  });
+  it('returns 0 for missing services', () => {
+    expect(countEndpoints({})).toBe(0);
+  });
+});
+
+describe('applyAccessMode', () => {
+  it('custom preserves tls=letsencrypt', () => {
+    const c = singleEndpointCompose();
+    const out = applyAccessMode(c, 'custom');
+    expect(out.services.web.labels['simpledeploy.endpoints.0.tls']).toBe('letsencrypt');
+  });
+
+  it('quick-test rewrites all tls labels to local', () => {
+    const c = multiEndpointCompose();
+    const out = applyAccessMode(c, 'quick-test');
+    expect(out.services.a.labels['simpledeploy.endpoints.0.tls']).toBe('local');
+    expect(out.services.b.labels['simpledeploy.endpoints.0.tls']).toBe('local');
+    expect(out.services.b.labels['simpledeploy.endpoints.1.tls']).toBe('local');
+    expect(c.services.a.labels['simpledeploy.endpoints.0.tls']).toBe('letsencrypt');
+  });
+
+  it('port-only strips endpoint labels and adds ports', () => {
+    const c = singleEndpointCompose();
+    const out = applyAccessMode(c, 'port-only');
+    const labels = out.services.web.labels;
+    for (const k of Object.keys(labels)) {
+      expect(k.startsWith('simpledeploy.endpoints.')).toBe(false);
+    }
+    expect(labels['simpledeploy.alert.cpu']).toBe('80');
+    expect(out.services.web.ports).toEqual(['0:80']);
+  });
+});
+
+describe('computeQuickTestDomain', () => {
+  it('formats slug.host.sslip.io', () => {
+    expect(computeQuickTestDomain('my-app', '1.2.3.4')).toBe('my-app.1.2.3.4.sslip.io');
+  });
+});
+
+describe('isValidHost', () => {
+  it('accepts IPv4', () => {
+    expect(isValidHost('192.168.1.1')).toBe(true);
+    expect(isValidHost('0.0.0.0')).toBe(true);
+  });
+  it('accepts hostnames', () => {
+    expect(isValidHost('example.com')).toBe(true);
+    expect(isValidHost('my-server')).toBe(true);
+  });
+  it('rejects invalid', () => {
+    expect(isValidHost('')).toBe(false);
+    expect(isValidHost('.example.com')).toBe(false);
+    expect(isValidHost('example.com.')).toBe(false);
+    expect(isValidHost('bad host')).toBe(false);
+    expect(isValidHost('999.999.999.999')).toBe(false);
+  });
+});
 
 describe('applyVars', () => {
   it('substitutes top-level string tokens', () => {

@@ -22,6 +22,14 @@ The fastest way to deploy if you already have the dashboard open.
 
    If you just want a quick start or an example to learn from, click **Browse templates** below the two options to pick a preconfigured app or service template.
 
+   Templates ask you to pick an **Access mode** before continuing:
+
+   - **Quick test** (default): SimpleDeploy auto-generates a `<slug>.<server-ip>.sslip.io` domain and issues a self-signed cert via Caddy's internal CA. No DNS setup needed. Browsers will warn about the certificate until you install the root cert from the [Trust page](/trust). Best for trying a template in minutes on a homelab, LAN, or VPS without public DNS.
+   - **Custom domain**: You supply a real public domain and point its DNS at the server. TLS is provisioned automatically via Let's Encrypt. Best for production.
+   - **Port only**: Skips the Caddy proxy entirely. Docker picks a random host port; you reach the app at `http://<server>:<port>`. Disabled for multi-endpoint templates. Best for SSH-tunnel or LAN-only testing.
+
+   The sslip.io host used by Quick test is stored server-side as `public_host`. Click **Save as default** next to the host field to persist it so every future Quick test deploy reuses it.
+
 4. Give the app a **name** (becomes its slug in URLs and CLI). Lowercase letters, digits, dashes.
 
 5. Click **Deploy**. SimpleDeploy:

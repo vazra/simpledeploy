@@ -18,6 +18,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
+	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -57,6 +58,8 @@ type Server struct {
 	startedAt           time.Time
 	tlsMode             string
 	dataDir             string
+	cfg                 *config.Config
+	cfgPath             string
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -107,6 +110,13 @@ func (s *Server) SetTrustedProxies(proxies []string) { s.trustedProxies = proxie
 
 func (s *Server) SetTLSMode(mode string) { s.tlsMode = mode }
 func (s *Server) SetDataDir(dir string)  { s.dataDir = dir }
+
+// SetConfig sets the active config and the path it was loaded from, enabling
+// system settings endpoints to persist changes back to disk.
+func (s *Server) SetConfig(cfg *config.Config, path string) {
+	s.cfg = cfg
+	s.cfgPath = path
+}
 
 // SetDocker sets the docker client.
 func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
@@ -290,6 +300,10 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/system/audit-log", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleClearAuditLog))))
 	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleGetAuditConfig)))
 	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleUpdateAuditConfig))))
+
+	// Public host (sslip.io quick-domain helper)
+	s.mux.Handle("GET /api/system/public-host", s.authMiddleware(http.HandlerFunc(s.handleGetPublicHost)))
+	s.mux.Handle("PUT /api/system/public-host", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleSetPublicHost))))
 
 	// System logs
 	s.mux.Handle("GET /api/system/process-logs", s.authMiddleware(http.HandlerFunc(s.handleSystemLogs)))

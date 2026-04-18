@@ -81,6 +81,10 @@ test.describe('Deploy every template (E2E_TEMPLATES=1)', () => {
 
       await dialog.getByRole('button', { name: `Use template ${tpl.name}` }).click();
 
+      // Switch to Custom domain mode so the `domain` vars render as plain inputs
+      // (default Quick test mode hides them behind an sslip.io helper).
+      await dialog.getByRole('button', { name: /^custom domain$/i }).click();
+
       // Expand advanced/secrets so any required hidden vars are reachable.
       const hasHidden = (tpl.variables || []).some((v) => v.hidden);
       if (hasHidden) {

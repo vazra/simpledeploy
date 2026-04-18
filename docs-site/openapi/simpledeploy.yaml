@@ -1432,6 +1432,41 @@ paths:
           content:
             application/json:
               schema: { type: object, additionalProperties: true }
+  /system/public-host:
+    get:
+      tags: [system]
+      summary: Get the configured public_host (for template sslip.io Quick test)
+      responses:
+        '200':
+          description: Current public_host value (empty string if unset).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  public_host: { type: string }
+    put:
+      tags: [system]
+      summary: Update public_host (super_admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                public_host: { type: string }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  public_host: { type: string }
+        '400': { description: Invalid hostname or IP. }
+        '403': { description: Requires super_admin. }
   /system/storage-breakdown:
     get:
       tags: [system]

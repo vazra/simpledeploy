@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +21,7 @@ type Config struct {
 	Registries     []string        `yaml:"registries"`
 	TrustedProxies []string        `yaml:"trusted_proxies"`
 	LogBufferSize  int             `yaml:"log_buffer_size"`
+	PublicHost     string          `yaml:"public_host"`
 }
 
 type TLSConfig struct {
@@ -105,4 +107,32 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) Marshal() ([]byte, error) {
 	return yaml.Marshal(c)
+}
+
+// SaveAtomic writes the config to path atomically (temp file + rename).
+func (c *Config) SaveAtomic(path string) error {
+	data, err := c.Marshal()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0644); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }

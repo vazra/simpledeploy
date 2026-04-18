@@ -28,6 +28,11 @@ management_port: 8443
 # Management domain (for TLS cert)
 domain: manage.example.com
 
+# Public hostname or IP used to build sslip.io auto-domains for template
+# "Quick test" deploys. Optional. Editable at runtime via the dashboard
+# (Save as default) or PUT /api/system/public-host.
+public_host: ""
+
 # TLS configuration
 tls:
   mode: auto          # auto (Let's Encrypt) | custom | off
@@ -71,6 +76,7 @@ registries:
 | `listen_addr` | string | `:443` | Reverse proxy listen address |
 | `management_port` | int | `8443` | Management API port |
 | `domain` | string | - | Management UI domain |
+| `public_host` | string | `""` | Server hostname/IP used for sslip.io auto-domains in template Quick test mode. Editable at runtime. |
 | `tls.mode` | string | `auto` | TLS mode: `auto`, `custom`, `off`, `local` |
 | `tls.email` | string | - | ACME email (required for auto TLS) |
 | `master_secret` | string | **required** | Encryption/signing key |

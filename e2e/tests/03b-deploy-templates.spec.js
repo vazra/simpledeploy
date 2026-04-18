@@ -35,7 +35,8 @@ test.describe('Deploy via Templates', () => {
     await dialog.getByRole('button', { name: /^browse templates$/i }).click();
     await dialog.getByRole('button', { name: /use template nginx static/i }).click();
 
-    // Vars form: fill Domain.
+    // Vars form: switch to Custom domain mode (default is Quick test via sslip.io).
+    await dialog.getByRole('button', { name: /^custom domain$/i }).click();
     const domainInput = dialog.locator('#tpl-var-domain');
     await expect(domainInput).toBeVisible();
     await domainInput.fill('e2e-nginx-tpl.localhost');
@@ -86,6 +87,7 @@ test.describe('Deploy via Templates', () => {
     await dialog.getByRole('button', { name: /^browse templates$/i }).click();
     await dialog.getByRole('button', { name: /use template node api \+ postgres/i }).click();
 
+    await dialog.getByRole('button', { name: /^custom domain$/i }).click();
     const domainInput = dialog.locator('#tpl-var-domain');
     await expect(domainInput).toBeVisible();
     await domainInput.fill('e2e-node-tpl.localhost');

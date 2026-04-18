@@ -64,6 +64,84 @@ export function applyVars(node, vars) {
   return node;
 }
 
+// --------------------------- access modes -----------------------------
+
+export const ACCESS_MODES = ['quick-test', 'custom', 'port-only'];
+export const DEFAULT_ACCESS_MODE = 'quick-test';
+
+// Count endpoint labels across all services.
+export function countEndpoints(compose) {
+  if (!compose?.services) return 0;
+  let n = 0;
+  for (const svc of Object.values(compose.services)) {
+    for (const k of Object.keys(svc?.labels || {})) {
+      if (/^simpledeploy\.endpoints\.\d+\.domain$/.test(k)) n++;
+    }
+  }
+  return n;
+}
+
+// Validates hostname or IPv4 dotted quad.
+export function isValidHost(s) {
+  if (!s || typeof s !== 'string') return false;
+  if (s.length < 1 || s.length > 253) return false;
+  if (s.startsWith('.') || s.endsWith('.') || s.startsWith('-') || s.endsWith('-')) return false;
+  // IPv4
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const m = s.match(ipv4);
+  if (m) {
+    return m.slice(1).every((p) => {
+      const n = Number(p);
+      return n >= 0 && n <= 255 && String(n) === p;
+    });
+  }
+  // Hostname
+  return /^[a-zA-Z0-9.-]+$/.test(s);
+}
+
+export function computeQuickTestDomain(slug, host) {
+  return `${slug}.${host}.sslip.io`;
+}
+
+// Transform compose according to access mode.
+// opts = { host, slug } (only used by quick-test indirectly; port-only uses labels).
+export function applyAccessMode(compose, mode, _opts) {
+  if (mode === 'custom' || !mode) return compose;
+  const next = JSON.parse(JSON.stringify(compose));
+  if (mode === 'quick-test') {
+    for (const svc of Object.values(next.services || {})) {
+      if (!svc.labels) continue;
+      for (const k of Object.keys(svc.labels)) {
+        if (/^simpledeploy\.endpoints\.\d+\.tls$/.test(k)) {
+          svc.labels[k] = 'local';
+        }
+      }
+    }
+    return next;
+  }
+  if (mode === 'port-only') {
+    for (const svc of Object.values(next.services || {})) {
+      if (!svc.labels) continue;
+      // Find the port from endpoint 0 before stripping.
+      let port = null;
+      for (const [k, v] of Object.entries(svc.labels)) {
+        if (k === 'simpledeploy.endpoints.0.port') port = v;
+      }
+      // Strip endpoint labels.
+      const hadEndpoint = Object.keys(svc.labels).some((k) => /^simpledeploy\.endpoints\.\d+\./.test(k));
+      for (const k of Object.keys(svc.labels)) {
+        if (/^simpledeploy\.endpoints\.\d+\./.test(k)) delete svc.labels[k];
+      }
+      if (hadEndpoint && port) {
+        if (!Array.isArray(svc.ports)) svc.ports = [];
+        svc.ports.push(`0:${port}`);
+      }
+    }
+    return next;
+  }
+  return next;
+}
+
 // Returns {} if valid; else {key: 'error msg'} per failing field.
 export function validateVars(variables, values) {
   const errors = {};

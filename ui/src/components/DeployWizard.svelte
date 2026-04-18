@@ -5,7 +5,7 @@
   import YamlEditor from './YamlEditor.svelte'
   import VisualEditor from './VisualEditor.svelte'
   import TemplatePicker from './TemplatePicker.svelte'
-  import { appTemplates, categories, applyVars, suggestName } from '../lib/appTemplates.js'
+  import { appTemplates, categories, applyVars, applyAccessMode, suggestName } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
 
   let { open = false, onclose = () => {}, onComplete = () => {}, initialTemplateId = null } = $props()
@@ -29,8 +29,9 @@
     }
   })
 
-  function handleTemplateApply({ template, vars }) {
-    const resolved = applyVars(template.compose, vars)
+  function handleTemplateApply({ template, vars, accessMode, quickHost }) {
+    let resolved = applyVars(template.compose, vars)
+    resolved = applyAccessMode(resolved, accessMode, { host: quickHost, slug: template.nameSuggestion })
     compose = resolved
     composeText = yaml.dump(resolved, { lineWidth: -1 })
     appName = suggestName(template.nameSuggestion, existingAppNames)

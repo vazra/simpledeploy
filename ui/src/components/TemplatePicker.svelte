@@ -1,5 +1,6 @@
 <script>
-  import { generateSecret, validateVars } from '../lib/appTemplates.js'
+  import { generateSecret, validateVars, countEndpoints, computeQuickTestDomain, isValidHost, DEFAULT_ACCESS_MODE } from '../lib/appTemplates.js'
+  import { api } from '../lib/api.js'
 
   let {
     templates = [],
@@ -23,6 +24,21 @@
   let revealed = $state({}) // keys to show secret in plain text
   let copiedKey = $state(null)
 
+  // Access mode state
+  let accessMode = $state(DEFAULT_ACCESS_MODE)
+  let quickHost = $state('')
+  let loadedHost = $state('')
+  let savingHost = $state(false)
+  let publicHostLoaded = $state(false)
+
+  let endpointCount = $derived(selected ? countEndpoints(selected.compose) : 0)
+  let portOnlyAvailable = $derived(endpointCount === 1)
+  let quickDomain = $derived(
+    selected ? computeQuickTestDomain(selected.nameSuggestion, quickHost || 'localhost') : ''
+  )
+  let hostValid = $derived(isValidHost(quickHost))
+  let hostChanged = $derived(quickHost !== loadedHost)
+
   // If initialTemplateId given, jump straight to vars form (only once)
   let jumped = $state(false)
   $effect(() => {
@@ -39,11 +55,43 @@
   let copyTimer = null
   $effect(() => () => clearTimeout(copyTimer))
 
+  async function loadPublicHost() {
+    if (publicHostLoaded) return
+    try {
+      const res = await api.getPublicHost()
+      const h = res?.data?.public_host || ''
+      if (h) {
+        loadedHost = h
+        quickHost = h
+      } else {
+        loadedHost = ''
+        if (typeof window !== 'undefined') quickHost = window.location.hostname || ''
+      }
+    } catch {
+      if (typeof window !== 'undefined') quickHost = window.location.hostname || ''
+    }
+    publicHostLoaded = true
+  }
+
+  async function saveDefaultHost() {
+    if (!isValidHost(quickHost) || savingHost) return
+    savingHost = true
+    try {
+      const res = await api.setPublicHost(quickHost)
+      if (!res.error) loadedHost = quickHost
+    } finally {
+      savingHost = false
+    }
+  }
+
   function openTemplate(template) {
     selected = template
     values = {}
     errors = {}
     revealed = {}
+    accessMode = DEFAULT_ACCESS_MODE
+    // If template is multi-endpoint, port-only isn't available; default stays quick-test.
+    loadPublicHost()
     // Prefill defaults and auto-generate secrets
     for (const v of template.variables || []) {
       if (v.default != null) {
@@ -83,6 +131,13 @@
   }
 
   function handleBlur(v) {
+    // Domain vars are validated differently based on access mode.
+    if (v.type === 'domain' && accessMode !== 'custom') {
+      const next = { ...errors }
+      delete next[v.key]
+      errors = next
+      return
+    }
     const errs = validateVars(selected.variables, values)
     if (errs[v.key]) {
       errors = { ...errors, [v.key]: errs[v.key] }
@@ -135,11 +190,28 @@
         merged[v.key] = v.default
       }
     }
+
+    // Inject domain values based on access mode.
+    const domainVars = (selected.variables || []).filter((v) => v.type === 'domain')
+    if (accessMode === 'quick-test') {
+      const d = computeQuickTestDomain(selected.nameSuggestion, quickHost)
+      for (const v of domainVars) merged[v.key] = d
+    } else if (accessMode === 'port-only') {
+      for (const v of domainVars) merged[v.key] = 'localhost' // placeholder; labels stripped anyway
+    }
+
+    // Validate, but skip domain checks when not in custom mode.
     const errs = validateVars(selected.variables, merged)
+    if (accessMode !== 'custom') {
+      for (const v of domainVars) delete errs[v.key]
+    }
+    if (accessMode === 'quick-test' && !isValidHost(quickHost)) {
+      errs.__quickHost = 'Enter a valid host or IP'
+    }
     errors = errs
     if (Object.keys(errs).length > 0) return
     values = merged
-    onapply({ template: selected, vars: merged })
+    onapply({ template: selected, vars: merged, accessMode, quickHost })
   }
 
   let hasErrors = $derived(Object.keys(errors).length > 0)
@@ -251,6 +323,90 @@
       </div>
     </div>
 
+    <!-- Access mode selector -->
+    <div class="flex flex-col gap-2">
+      <label class="block text-sm font-medium text-text-primary">How should this be accessible?</label>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <button
+          type="button"
+          onclick={() => (accessMode = 'quick-test')}
+          class="text-left px-3 py-2 rounded-lg border text-sm transition-colors
+            {accessMode === 'quick-test' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+        >
+          <div class="font-medium">Quick test</div>
+          <div class="text-xs text-text-muted mt-0.5">Auto domain via sslip.io. No DNS setup.</div>
+        </button>
+        <button
+          type="button"
+          onclick={() => (accessMode = 'custom')}
+          class="text-left px-3 py-2 rounded-lg border text-sm transition-colors
+            {accessMode === 'custom' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+        >
+          <div class="font-medium">Custom domain</div>
+          <div class="text-xs text-text-muted mt-0.5">Your own domain with Let's Encrypt TLS.</div>
+        </button>
+        <button
+          type="button"
+          disabled={!portOnlyAvailable}
+          onclick={() => portOnlyAvailable && (accessMode = 'port-only')}
+          class="text-left px-3 py-2 rounded-lg border text-sm transition-colors
+            {accessMode === 'port-only' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}
+            {!portOnlyAvailable ? 'opacity-50 cursor-not-allowed' : ''}"
+          title={!portOnlyAvailable ? 'Not available for multi-endpoint templates.' : ''}
+        >
+          <div class="font-medium">Port only</div>
+          <div class="text-xs text-text-muted mt-0.5">
+            {portOnlyAvailable ? 'Bypass proxy. Random host port.' : 'Not available for multi-endpoint templates.'}
+          </div>
+        </button>
+      </div>
+
+      {#if accessMode === 'quick-test'}
+        <div class="bg-surface-3/40 border border-border/30 rounded-lg px-3 py-3 flex flex-col gap-2">
+          <div>
+            <label class="block text-xs text-text-muted mb-1">Domain (auto)</label>
+            <input
+              type="text"
+              readonly
+              value={quickDomain}
+              class="w-full px-3 py-2 bg-input-bg/50 border border-border/30 rounded-lg text-sm text-text-primary font-mono"
+            />
+          </div>
+          <div>
+            <label class="block text-xs text-text-muted mb-1">Host (server IP or hostname)</label>
+            <div class="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={quickHost}
+                oninput={(e) => (quickHost = e.currentTarget.value)}
+                placeholder="e.g. 203.0.113.10"
+                class="flex-1 px-3 py-2 bg-input-bg border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30
+                  {hostValid ? 'border-border/50' : 'border-danger/50'}"
+              />
+              <button
+                type="button"
+                onclick={saveDefaultHost}
+                disabled={!hostValid || !hostChanged || savingHost}
+                class="px-3 py-2 text-xs font-medium rounded-lg border border-border/50 text-text-muted hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >{savingHost ? 'Saving...' : 'Save as default'}</button>
+            </div>
+            {#if !hostValid}
+              <p class="text-xs text-danger mt-1">Enter a valid host or IP.</p>
+            {/if}
+          </div>
+          <p class="text-xs text-text-muted">
+            Browsers will warn about the self-signed certificate. Install the root certificate from the
+            <a href="#/trust" class="text-accent hover:underline">Trust page</a>
+            to remove the warning.
+          </p>
+        </div>
+      {:else if accessMode === 'port-only'}
+        <p class="text-xs text-text-muted bg-surface-3/40 border border-border/30 rounded-lg px-3 py-2">
+          Accessible at http://&lt;server&gt;:&lt;assigned-port&gt; after deploy. The port will appear on the app overview.
+        </p>
+      {/if}
+    </div>
+
     <!-- Primary variables -->
     {#if primaryVars.length > 0}
       <div class="flex flex-col gap-4">
@@ -292,6 +448,9 @@
 {/if}
 
 {#snippet fieldRow(v)}
+  {#if v.type === 'domain' && accessMode !== 'custom'}
+    <!-- Domain vars are handled by the access-mode selector; render nothing. -->
+  {:else}
   <div>
     <label class="block text-sm font-medium text-text-primary mb-1.5" for="tpl-var-{v.key}">
       {v.label || v.key}
@@ -432,4 +591,5 @@
       <p class="text-xs text-danger mt-1">{errors[v.key]}</p>
     {/if}
   </div>
+  {/if}
 {/snippet}
