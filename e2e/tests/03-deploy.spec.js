@@ -104,7 +104,10 @@ test.describe('Deploy - Functional', () => {
     expect(name, 'expected to find e2e-nginx web container').toBeTruthy();
     expect(containerRunning(name)).toBe(true);
     const img = containerImage(name);
-    expect(img.startsWith('nginx:')).toBe(true);
+    // Tolerate the GHCR image mirror (E2E_USE_MIRROR=1 rewrites image
+    // refs server-side), so match on the trailing repo:tag instead of
+    // anchoring at the start.
+    expect(img).toMatch(/(^|\/)nginx:/);
     const info = dockerInspect(name);
     expect(info.Config.Labels['com.docker.compose.project']).toBe('simpledeploy-e2e-nginx');
     expect(info.Config.Labels['com.docker.compose.service']).toBe('web');

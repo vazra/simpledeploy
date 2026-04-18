@@ -30,7 +30,11 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [['html', { open: 'never' }], ['list']],
-  timeout: 120_000,
+  // 240s covers the worst case: multi-service deploy where docker compose
+  // pull has to fetch multiple images (the mirror is fast but not free).
+  // Deploys expect `Deployed` for up to 180s, so the test timeout must be
+  // strictly larger or it masks the real wait.
+  timeout: 240_000,
   expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${process.env.SIMPLEDEPLOY_PORT || 8500}`,
