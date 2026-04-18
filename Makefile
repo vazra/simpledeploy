@@ -1,4 +1,4 @@
-.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates
+.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates hooks-install
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -36,6 +36,12 @@ api-non-hmr: build-go
 
 clean:
 	rm -rf bin/ cmd/simpledeploy/ui_dist
+
+# Install git hooks (pre-push runs vet, build, short tests).
+# Bypass hooks with `git push --no-verify` or `SIMPLEDEPLOY_SKIP_HOOKS=1 git push`.
+hooks-install:
+	git config core.hooksPath .githooks
+	@echo "git hooks installed (.githooks)"
 
 # E2E Testing (global-setup.js runs make build internally)
 e2e:

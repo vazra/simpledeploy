@@ -16,6 +16,7 @@ make e2e-headed # E2E with visible browser window
 make e2e-report # open last E2E HTML report
 make e2e-templates # deploy every app template (on-demand, ~30-60 min)
 make clean      # Remove build artifacts
+make hooks-install # Install git pre-push hook (vet + build + short tests + vitest)
 ```
 
 ## Project Structure
