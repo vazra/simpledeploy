@@ -1,7 +1,7 @@
 // E2E: DeployWizard template flow.
 // Exercises step 0 (Template grid), variable rendering, auto-generated secrets,
 // Apply -> step 1 pre-fill, and full end-to-end deploy through the template path.
-// Also covers the "Start with a blank compose file" regression path.
+// Also covers the "Build it yourself" (blank compose) regression path.
 //
 // Runs AFTER 03-deploy.spec.js and BEFORE 04-dashboard.spec.js so the dashboard
 // tests still see e2e-nginx / e2e-multi / e2e-postgres. The template-deployed
@@ -32,6 +32,7 @@ test.describe('Deploy via Templates', () => {
     await expect(dialog).toBeVisible();
 
     // Step 0: click the Nginx Static card (button aria-label "Use template Nginx Static Site").
+    await dialog.getByRole('button', { name: /^browse templates$/i }).click();
     await dialog.getByRole('button', { name: /use template nginx static/i }).click();
 
     // Vars form: fill Domain.
@@ -82,6 +83,7 @@ test.describe('Deploy via Templates', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
+    await dialog.getByRole('button', { name: /^browse templates$/i }).click();
     await dialog.getByRole('button', { name: /use template node api \+ postgres/i }).click();
 
     const domainInput = dialog.locator('#tpl-var-domain');
@@ -144,7 +146,7 @@ test.describe('Deploy via Templates', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    await dialog.getByRole('button', { name: /start with a blank compose/i }).click();
+    await dialog.getByRole('button', { name: /build it yourself/i }).click();
 
     await dialog.getByPlaceholder('my-app').fill(slug);
 

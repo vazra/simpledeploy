@@ -23,7 +23,7 @@ test.describe('Service templates - UI validation', () => {
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: /start with a blank compose/i }).click();
+    await dialog.getByRole('button', { name: /build it yourself/i }).click();
     return dialog;
   }
 
@@ -36,6 +36,8 @@ test.describe('Service templates - UI validation', () => {
       // concatenation of its icon emoji and the template name, so partial
       // match on name suffices.
       await dialog.getByRole('button', { name: 'Add Service' }).click();
+      // Expand the "Quick start from a template" disclosure before picking.
+      await dialog.getByText(/quick start from a template/i).click();
       await dialog.getByRole('button', { name: tpl.name }).first().click();
 
       // Switch to YAML and verify the template's image made it in (blank

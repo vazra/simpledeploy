@@ -22,8 +22,8 @@ async function deployApp(page, appName, composeContent) {
   await page.getByRole('button', { name: 'Deploy App' }).first().click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
-  // Wizard opens on step 0 (Template). Click "Start blank" to reach step 1.
-  await dialog.getByRole('button', { name: /start with a blank compose/i }).click();
+  // Wizard opens on step 0 (Start chooser). Pick "Build it yourself" -> step 1 visual blank.
+  await dialog.getByRole('button', { name: /build it yourself/i }).click();
   await dialog.getByPlaceholder('my-app').fill(appName);
   await dialog.getByRole('button', { name: 'YAML' }).click();
   const editor = dialog.locator('textarea').last();
@@ -68,7 +68,7 @@ test.describe('Deploy Apps', () => {
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: /start with a blank compose/i }).click();
+    await dialog.getByRole('button', { name: /build it yourself/i }).click();
     await dialog.getByPlaceholder('my-app').fill('bad-app');
     await dialog.getByRole('button', { name: 'YAML' }).click();
     const editor = dialog.locator('textarea').last();
@@ -83,7 +83,7 @@ test.describe('Deploy Apps', () => {
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: /start with a blank compose/i }).click();
+    await dialog.getByRole('button', { name: /build it yourself/i }).click();
     await dialog.getByPlaceholder('my-app').fill('e2e-nginx');
     await dialog.getByRole('button', { name: 'YAML' }).click();
     const editor = dialog.locator('textarea').last();

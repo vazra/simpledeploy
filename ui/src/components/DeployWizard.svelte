@@ -11,7 +11,10 @@
   let { open = false, onclose = () => {}, onComplete = () => {}, initialTemplateId = null } = $props()
 
   let step = $state(0)
-  const steps = ['Template', 'Configure', 'Review', 'Deploy']
+  const steps = ['Start', 'Configure', 'Review', 'Deploy']
+
+  // Step 0 view: 'chooser' shows the three start options, 'templates' drops into the picker.
+  let startView = $state('chooser')
 
   let existingAppNames = $state([])
 
@@ -40,7 +43,30 @@
   function handleBlank() {
     compose = { services: { web: { image: '' } } }
     composeText = ''
+    editorMode = 'visual'
     step = 1
+  }
+
+  function handleStartUpload() {
+    document.getElementById('wizard-start-upload')?.click()
+  }
+
+  function handleStartUploadFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = reader.result
+      composeText = text
+      try {
+        compose = yaml.load(text) || { services: {} }
+      } catch { compose = { services: {} } }
+      editorMode = 'yaml'
+      scheduleValidation(text)
+      step = 1
+    }
+    reader.readAsText(file)
+    e.target.value = ''
   }
 
   // Step 1 state
@@ -287,6 +313,7 @@
 
   function resetWizard() {
     step = 0
+    startView = 'chooser'
     appName = ''
     editorMode = 'visual'
     compose = { services: { web: { image: '' } } }
@@ -359,13 +386,82 @@
     <!-- Content -->
     <div class="flex-1 overflow-y-auto px-6 py-5">
       {#if step === 0}
-        <TemplatePicker
-          templates={appTemplates}
-          {categories}
-          {initialTemplateId}
-          onapply={handleTemplateApply}
-          onblank={handleBlank}
-        />
+        {#if startView === 'chooser' && !initialTemplateId}
+          <div class="max-w-3xl mx-auto flex flex-col gap-6">
+            <div class="text-center">
+              <h4 class="text-base font-semibold text-text-primary">How would you like to start?</h4>
+              <p class="text-xs text-text-muted mt-1">Choose an option below. You can switch between visual and YAML anytime.</p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onclick={handleStartUpload}
+                class="text-left bg-surface-3/50 border border-border/30 rounded-lg px-5 py-4 hover:border-accent/50 transition-colors flex flex-col gap-2"
+              >
+                <div class="flex items-center gap-2">
+                  <svg class="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12" />
+                  </svg>
+                  <span class="text-sm font-semibold text-text-primary">Upload docker-compose file</span>
+                </div>
+                <p class="text-xs text-text-muted">I already have a <span class="font-mono">docker-compose.yml</span>. Upload and deploy it.</p>
+              </button>
+
+              <button
+                type="button"
+                onclick={handleBlank}
+                class="text-left bg-surface-3/50 border border-border/30 rounded-lg px-5 py-4 hover:border-accent/50 transition-colors flex flex-col gap-2"
+              >
+                <div class="flex items-center gap-2">
+                  <svg class="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span class="text-sm font-semibold text-text-primary">Build it yourself</span>
+                </div>
+                <p class="text-xs text-text-muted">Use the visual builder to add services, ports, env vars, and volumes step by step.</p>
+              </button>
+            </div>
+
+            <input
+              id="wizard-start-upload"
+              type="file"
+              accept=".yml,.yaml"
+              onchange={handleStartUploadFile}
+              class="hidden"
+            />
+
+            <div class="border-t border-border/30 pt-4 text-center">
+              <p class="text-xs text-text-muted mb-2">Not sure where to begin? Browse ready-made templates to learn example configs or quickly try something out.</p>
+              <button
+                type="button"
+                onclick={() => startView = 'templates'}
+                class="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
+              >
+                Browse templates
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+              </button>
+            </div>
+          </div>
+        {:else}
+          {#if !initialTemplateId}
+            <button
+              type="button"
+              onclick={() => startView = 'chooser'}
+              class="inline-flex items-center gap-1 text-xs text-text-muted hover:text-text-primary mb-3"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+              Back
+            </button>
+          {/if}
+          <TemplatePicker
+            templates={appTemplates}
+            {categories}
+            {initialTemplateId}
+            onapply={handleTemplateApply}
+            onblank={handleBlank}
+          />
+        {/if}
       {:else if step === 1}
         <div class="max-w-3xl mx-auto flex flex-col gap-5">
           <!-- App Name -->

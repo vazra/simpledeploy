@@ -1573,17 +1573,39 @@
           Add Service
         </button>
         {#if showTemplatesPicker}
-          <div class="absolute left-0 right-0 top-full mt-1 bg-surface-2 border border-border/50 rounded-xl shadow-xl z-20 p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-            {#each serviceTemplates as tpl}
-              <button
-                type="button"
-                onclick={() => addService(tpl)}
-                class="flex flex-col items-center gap-1 px-3 py-2.5 rounded-lg hover:bg-surface-hover transition-colors text-center"
-              >
-                <span class="text-lg">{tpl.icon}</span>
-                <span class="text-xs font-medium text-text-primary">{tpl.name}</span>
-              </button>
-            {/each}
+          <div class="absolute left-0 right-0 top-full mt-1 bg-surface-2 border border-border/50 rounded-xl shadow-xl z-20 p-3 flex flex-col gap-3">
+            <button
+              type="button"
+              onclick={() => addService()}
+              class="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border/40 hover:border-accent/50 hover:bg-surface-hover transition-colors text-left"
+            >
+              <svg class="w-5 h-5 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              <div class="flex flex-col">
+                <span class="text-sm font-semibold text-text-primary">Blank service</span>
+                <span class="text-xs text-text-muted">Configure image, ports, env vars, and volumes yourself.</span>
+              </div>
+            </button>
+
+            <details class="border-t border-border/30 pt-2">
+              <summary class="cursor-pointer text-xs font-medium text-text-muted hover:text-text-primary select-none px-1 py-1">
+                Quick start from a template
+              </summary>
+              <p class="text-[11px] text-text-muted px-1 mt-1 mb-2">Preconfigured services to learn from or try quickly. Review before deploying.</p>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {#each serviceTemplates as tpl}
+                  <button
+                    type="button"
+                    onclick={() => addService(tpl)}
+                    class="flex flex-col items-center gap-1 px-3 py-2.5 rounded-lg hover:bg-surface-hover transition-colors text-center"
+                  >
+                    <span class="text-lg">{tpl.icon}</span>
+                    <span class="text-xs font-medium text-text-primary">{tpl.name}</span>
+                  </button>
+                {/each}
+              </div>
+            </details>
           </div>
         {/if}
       </div>
