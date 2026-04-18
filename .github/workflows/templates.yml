@@ -35,7 +35,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # Route template pulls through our GHCR mirror to avoid Docker Hub
+      # pull rate limits. The mirror-images workflow populates GHCR on
+      # the same triggers as this one; bootstrap with `gh workflow run
+      # mirror-images.yml` before first use or after a long gap.
       - run: make e2e-templates
+        env:
+          E2E_USE_MIRROR: '1'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
