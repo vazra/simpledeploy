@@ -11,9 +11,21 @@ const LITE_SKIP = [
   '**/slow-*.spec.js',
 ];
 
+// Template deploy-all matrix. Expensive (pulls ~20 images across
+// multi-service stacks). Never runs under lite or full; only when
+// E2E_TEMPLATES=1 (e.g. templates changed). See `make e2e-templates`.
+const TEMPLATES_SPEC = '**/templates-deploy-all.spec.js';
+const TEMPLATES_ONLY = process.env.E2E_TEMPLATES === '1';
+
 export default defineConfig({
   testDir: './tests',
-  testIgnore: process.env.E2E_LITE === '1' ? LITE_SKIP : undefined,
+  // In templates-only mode, restrict to admin setup + the deploy-all spec.
+  testMatch: TEMPLATES_ONLY
+    ? ['**/01-setup.spec.js', TEMPLATES_SPEC]
+    : undefined,
+  testIgnore: TEMPLATES_ONLY
+    ? undefined
+    : [TEMPLATES_SPEC, ...(process.env.E2E_LITE === '1' ? LITE_SKIP : [])],
   fullyParallel: false,
   workers: 1,
   retries: 0,

@@ -1,4 +1,4 @@
-.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-headed e2e-report
+.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -52,3 +52,9 @@ e2e-headed:
 
 e2e-report:
 	cd e2e && npx playwright show-report
+
+# Deploy every app template end-to-end. Excluded from e2e/e2e-lite; run
+# this only when templates change (or via the templates-validate GH
+# workflow). Pulls ~20 images, can take 30+ min depending on network.
+e2e-templates:
+	cd e2e && npm ci && npx playwright install chromium && E2E_TEMPLATES=1 npx playwright test

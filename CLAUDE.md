@@ -14,6 +14,7 @@ make e2e        # E2E browser tests, full suite (~20 min)
 make e2e-lite   # E2E without slow specs (DB/S3/webhooks/registry) (~6-8 min)
 make e2e-headed # E2E with visible browser window
 make e2e-report # open last E2E HTML report
+make e2e-templates # deploy every app template (on-demand, ~30-60 min)
 make clean      # Remove build artifacts
 ```
 
@@ -98,7 +99,10 @@ make e2e          # full E2E suite, ~20 min
 make e2e-lite     # skips slow specs (13b, 27, 28, 29b), ~6-8 min
 make e2e-headed   # full suite with visible browser
 make e2e-report   # open HTML report from last run
+make e2e-templates # deploy every app template end-to-end (on-demand)
 ```
+
+**Template validation:** `00-template-images.spec.js` runs in every mode and validates every image in `appTemplates.js`/`serviceTemplates.js` resolves via `docker manifest inspect`. `templates-deploy-all.spec.js` runs only under `E2E_TEMPLATES=1` (via `make e2e-templates` or the `templates.yml` GitHub workflow, which triggers on changes to template files) and deploys every app template end-to-end.
 
 **Requirements:** Docker daemon running, Go toolchain, Node.js. Full suite ~20 min, lite ~6-8 min.
 

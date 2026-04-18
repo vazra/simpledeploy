@@ -3,7 +3,7 @@ title: E2E tests
 description: How the Playwright suite is wired and how to add new specs.
 ---
 
-The E2E suite under `e2e/` builds the binary, starts a real server with Docker, deploys actual compose apps, and exercises every UI flow. Run with `make e2e` (about 2.5 minutes).
+The E2E suite under `e2e/` builds the binary, starts a real server with Docker, deploys actual compose apps, and exercises every UI flow. Run with `make e2e` (~20 min) or `make e2e-lite` (~6-8 min, skips slow specs).
 
 ## Layout
 
@@ -52,9 +52,20 @@ e2e/
 ## Running locally
 
 ```bash
-make e2e          # headless
-make e2e-headed   # visible browser
-make e2e-report   # open HTML report from last run
+make e2e           # full suite, headless (~20 min)
+make e2e-lite      # skip slow specs (~6-8 min)
+make e2e-headed    # full suite, visible browser
+make e2e-report    # open HTML report from last run
+make e2e-templates # deploy every app template end-to-end (on-demand)
 ```
 
 Requires Docker daemon, Go, Node.js.
+
+## Template validation
+
+Two layers guard the built-in app and service templates:
+
+- **`00-template-images.spec.js`** (runs in `e2e` and `e2e-lite`): imports `appTemplates.js` and `serviceTemplates.js`, collects every `image:` reference, and runs `docker manifest inspect` on each in parallel. Fails fast when a tag is typo'd, yanked, or private. Takes ~10-30s.
+- **`templates-deploy-all.spec.js`** (only runs under `make e2e-templates` / `E2E_TEMPLATES=1`): deploys every app template through the UI wizard, asserts the "Deployed" pill, then deletes the app via API. Expensive (pulls ~20 multi-service stacks), so it is excluded from both `e2e` and `e2e-lite`. The `.github/workflows/templates.yml` workflow triggers it automatically when `appTemplates.js`, `serviceTemplates.js`, or either template spec changes, so it runs once per template-edit PR.
+
+When adding or editing a template, bias toward running `make e2e-templates` locally before opening the PR; the CI workflow runs it too but locally you get faster feedback.
