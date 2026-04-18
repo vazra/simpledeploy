@@ -9,7 +9,9 @@ export default defineConfig({
     port: 5710,
     proxy: {
       '/api': { target: 'http://localhost:8500', ws: true },
-      '/ws': { target: 'ws://localhost:8500', ws: true }
+      '/ws': { target: 'ws://localhost:8500', ws: true },
+      '/trust': { target: 'http://localhost:8500' },
+      '/tls': { target: 'http://localhost:8500' }
     }
   }
 })

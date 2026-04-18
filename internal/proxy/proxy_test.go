@@ -226,6 +226,57 @@ func TestBuildConfigMixedLocalAndOff(t *testing.T) {
 	}
 }
 
+func TestBuildConfigHTTPListenerRedirects(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr:     ":443",
+		HTTPListenAddr: ":80",
+		TLSMode:        "local",
+	})
+	cfg := parseConfig(t, p)
+	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+
+	httpSrv, ok := servers["proxy_http"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected proxy_http server when http_listen_addr set")
+	}
+	listen := httpSrv["listen"].([]interface{})
+	if len(listen) != 1 || listen[0].(string) != ":80" {
+		t.Errorf("proxy_http listen = %v, want [:80]", listen)
+	}
+	routes := httpSrv["routes"].([]interface{})
+	if len(routes) != 1 {
+		t.Fatalf("proxy_http routes: got %d, want 1", len(routes))
+	}
+	handle := routes[0].(map[string]interface{})["handle"].([]interface{})
+	sr := handle[0].(map[string]interface{})
+	if sr["handler"] != "static_response" {
+		t.Errorf("handler = %v, want static_response", sr["handler"])
+	}
+	loc := sr["headers"].(map[string]interface{})["Location"].([]interface{})
+	if loc[0].(string) != "https://{http.request.host}{http.request.uri}" {
+		t.Errorf("Location = %v", loc)
+	}
+
+	mainSrv := servers["proxy"].(map[string]interface{})
+	autoHTTPS := mainSrv["automatic_https"].(map[string]interface{})
+	if autoHTTPS["disable_redirects"] != true {
+		t.Error("main server should have automatic_https.disable_redirects=true")
+	}
+}
+
+func TestBuildConfigHTTPListenerIgnoredWhenTLSOff(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr:     ":80",
+		HTTPListenAddr: ":8080",
+		TLSMode:        "off",
+	})
+	cfg := parseConfig(t, p)
+	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	if _, ok := servers["proxy_http"]; ok {
+		t.Error("proxy_http server should not be added when tls mode is off")
+	}
+}
+
 // --- MockProxy tests ---
 
 func TestMockProxySetRoutes(t *testing.T) {

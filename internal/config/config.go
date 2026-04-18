@@ -12,6 +12,7 @@ type Config struct {
 	DataDir        string          `yaml:"data_dir"`
 	AppsDir        string          `yaml:"apps_dir"`
 	ListenAddr     string          `yaml:"listen_addr"`
+	HTTPListenAddr string          `yaml:"http_listen_addr"`
 	ManagementPort int             `yaml:"management_port"`
 	Domain         string          `yaml:"domain"`
 	TLS            TLSConfig       `yaml:"tls"`

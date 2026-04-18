@@ -11,6 +11,7 @@ import {
   countEndpoints,
   computeQuickTestDomain,
   isValidHost,
+  isValidIPv4,
 } from '../appTemplates.js';
 
 function singleEndpointCompose() {
@@ -116,6 +117,19 @@ describe('isValidHost', () => {
     expect(isValidHost('example.com.')).toBe(false);
     expect(isValidHost('bad host')).toBe(false);
     expect(isValidHost('999.999.999.999')).toBe(false);
+  });
+});
+
+describe('isValidIPv4', () => {
+  it('accepts IPv4', () => {
+    expect(isValidIPv4('127.0.0.1')).toBe(true);
+    expect(isValidIPv4('203.0.113.10')).toBe(true);
+  });
+  it('rejects hostnames and junk', () => {
+    expect(isValidIPv4('localhost')).toBe(false);
+    expect(isValidIPv4('example.com')).toBe(false);
+    expect(isValidIPv4('')).toBe(false);
+    expect(isValidIPv4('999.0.0.1')).toBe(false);
   });
 });
 

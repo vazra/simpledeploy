@@ -71,12 +71,14 @@ const trustPageHTML = `<!DOCTYPE html>
     <div class="steps">
       <ol>
         <li>Download the certificate file above</li>
-        <li>Double-click <code>simpledeploy-ca.crt</code> to open Keychain Access</li>
-        <li>It will be added to the <strong>login</strong> keychain</li>
-        <li>Find the certificate (search "SimpleDeploy"), double-click it</li>
-        <li>Expand <strong>Trust</strong>, set "When using this certificate" to <strong>Always Trust</strong></li>
-        <li>Close and enter your password to confirm</li>
+        <li>Double-click <code>simpledeploy-ca.crt</code>. The "Add Certificates" dialog appears</li>
+        <li>In the <strong>Keychain</strong> dropdown, pick <strong>login</strong> (or <strong>System</strong> for all users). <strong>Do not pick iCloud</strong>: it rejects root CAs and returns error <code>-25294</code></li>
+        <li>Click <strong>Add</strong>, enter your password if prompted</li>
+        <li>Open Keychain Access, find the cert (search "SimpleDeploy" or "Caddy Local Authority"), double-click it</li>
+        <li>Expand <strong>Trust</strong>, set "When using this certificate" to <strong>Always Trust</strong>, close, enter your password</li>
+        <li>Restart your browser</li>
       </ol>
+      <p style="margin-top: 0.75rem; font-size: 0.85rem; color: #8b949e;"><strong>If the GUI still fails with <code>-25294</code>:</strong> run <code>sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/simpledeploy-ca.crt</code> in Terminal. To remove later: <code>sudo security delete-certificate -c "Caddy Local Authority" /Library/Keychains/System.keychain</code></p>
     </div>
   </details>
 

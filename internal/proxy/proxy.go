@@ -19,29 +19,32 @@ type Proxy interface {
 
 // CaddyConfig holds configuration for a CaddyProxy.
 type CaddyConfig struct {
-	ListenAddr string // e.g. ":443"
-	TLSMode    string // "auto", "custom", "off", "local"
-	TLSEmail   string // ACME email, used when TLSMode is "auto"
-	DataDir    string // data directory for Caddy storage
+	ListenAddr     string // e.g. ":443"
+	HTTPListenAddr string // optional HTTP listener for plain-HTTP to HTTPS redirect, e.g. ":80"
+	TLSMode        string // "auto", "custom", "off", "local"
+	TLSEmail       string // ACME email, used when TLSMode is "auto"
+	DataDir        string // data directory for Caddy storage
 }
 
 // CaddyProxy is a Proxy backed by Caddy.
 type CaddyProxy struct {
-	mu         sync.Mutex
-	routes     []Route
-	listenAddr string
-	tlsMode    string
-	tlsEmail   string
-	dataDir    string
+	mu             sync.Mutex
+	routes         []Route
+	listenAddr     string
+	httpListenAddr string
+	tlsMode        string
+	tlsEmail       string
+	dataDir        string
 }
 
 // NewCaddyProxy creates a CaddyProxy from the given config.
 func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 	return &CaddyProxy{
-		listenAddr: cfg.ListenAddr,
-		tlsMode:    cfg.TLSMode,
-		tlsEmail:   cfg.TLSEmail,
-		dataDir:    cfg.DataDir,
+		listenAddr:     cfg.ListenAddr,
+		httpListenAddr: cfg.HTTPListenAddr,
+		tlsMode:        cfg.TLSMode,
+		tlsEmail:       cfg.TLSEmail,
+		dataDir:        cfg.DataDir,
 	}
 }
 
@@ -151,15 +154,45 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		}
 	}
 
+	servers := map[string]interface{}{
+		"proxy": server,
+	}
+
+	// Optional HTTP listener that 308-redirects every request to HTTPS. Only
+	// meaningful when the main server serves TLS.
+	if c.httpListenAddr != "" && c.tlsMode != "off" {
+		// Disable Caddy's implicit :80 redirect so it doesn't race with ours.
+		server["automatic_https"] = map[string]interface{}{
+			"disable_redirects": true,
+		}
+		servers["proxy_http"] = map[string]interface{}{
+			"listen": []string{c.httpListenAddr},
+			"routes": []interface{}{
+				map[string]interface{}{
+					"handle": []interface{}{
+						map[string]interface{}{
+							"handler":     "static_response",
+							"status_code": 308,
+							"headers": map[string]interface{}{
+								"Location": []string{"https://{http.request.host}{http.request.uri}"},
+							},
+						},
+					},
+				},
+			},
+			"automatic_https": map[string]interface{}{
+				"disable": true,
+			},
+		}
+	}
+
 	cfg := map[string]interface{}{
 		"admin": map[string]interface{}{
 			"disabled": true,
 		},
 		"apps": map[string]interface{}{
 			"http": map[string]interface{}{
-				"servers": map[string]interface{}{
-					"proxy": server,
-				},
+				"servers": servers,
 			},
 		},
 	}

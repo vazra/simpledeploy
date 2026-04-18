@@ -6,6 +6,7 @@
   import Button from './Button.svelte'
   import Badge from './Badge.svelte'
   import Modal from './Modal.svelte'
+  import { computeQuickTestDomain, isValidIPv4 } from '../lib/appTemplates.js'
 
   let { slug, app, services = [], onAppUpdated } = $props()
 
@@ -38,14 +39,49 @@
   let editEndpoint = $state({ domain: '', port: '', tls: 'letsencrypt', service: '' })
   let savingEndpoints = $state(false)
 
+  // Quick test mode for endpoint form (sslip.io + tls=local)
+  let endpointMode = $state('custom') // 'custom' | 'quick-test'
+  let quickHost = $state('')
+  let quickSlug = $derived(slug || 'app')
+  let quickDomain = $derived(computeQuickTestDomain(quickSlug, quickHost || '127.0.0.1'))
+
+  async function loadQuickHost() {
+    try {
+      const res = await api.getPublicHost()
+      const h = res?.data?.public_host || ''
+      if (h && isValidIPv4(h)) {
+        quickHost = h
+        return
+      }
+    } catch {}
+    if (typeof window !== 'undefined') {
+      const h = window.location.hostname || ''
+      quickHost = isValidIPv4(h) ? h : '127.0.0.1'
+    } else {
+      quickHost = '127.0.0.1'
+    }
+  }
+
+  function applyQuickTest() {
+    editEndpoint = { ...editEndpoint, domain: quickDomain, tls: 'local' }
+  }
+
+  function setEndpointMode(m) {
+    endpointMode = m
+    if (m === 'quick-test') applyQuickTest()
+  }
+
   function startEditEndpoint(i) {
     const ep = endpoints[i]
     editEndpoint = { ...ep }
+    endpointMode = 'custom'
     editingEndpointIdx = i
   }
 
   function startAddEndpoint() {
     editEndpoint = { domain: '', port: '', tls: 'letsencrypt', service: serviceNames[0] || '' }
+    endpointMode = 'custom'
+    loadQuickHost()
     editingEndpointIdx = -2
   }
 
@@ -115,10 +151,40 @@
   <!-- Endpoint edit form snippet -->
   {#snippet endpointForm(saveLabel)}
     <div class="bg-surface-1 rounded-lg p-3 border border-accent/30 space-y-2">
+      {#if editingEndpointIdx === -2}
+        <div class="flex items-center gap-1 text-[11px]">
+          <span class="text-text-muted mr-1">Mode:</span>
+          <button type="button" onclick={() => setEndpointMode('custom')}
+            class="px-2 py-0.5 rounded {endpointMode === 'custom' ? 'bg-accent/20 text-text-primary' : 'text-text-muted hover:text-text-primary'}"
+          >Custom</button>
+          <button type="button" onclick={() => setEndpointMode('quick-test')}
+            class="px-2 py-0.5 rounded {endpointMode === 'quick-test' ? 'bg-accent/20 text-text-primary' : 'text-text-muted hover:text-text-primary'}"
+          >Quick test (sslip.io)</button>
+        </div>
+      {/if}
+      {#if endpointMode === 'quick-test' && editingEndpointIdx === -2}
+        <div class="bg-surface-2/50 rounded-md p-2 border border-border/30 space-y-1.5">
+          <div class="flex items-center gap-2">
+            <label class="text-[11px] text-text-muted shrink-0">Server IP</label>
+            <input type="text" value={quickHost}
+              oninput={(e) => { quickHost = e.currentTarget.value; if (isValidIPv4(quickHost)) applyQuickTest() }}
+              placeholder="127.0.0.1"
+              class="flex-1 bg-input-bg border border-border/50 rounded px-2 py-1 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50"
+            />
+          </div>
+          <p class="text-[11px] text-text-muted">
+            Domain: <span class="font-mono text-text-primary">{quickDomain}</span>. TLS: local (self-signed).
+            <a href="/trust" target="_blank" rel="noopener" class="underline hover:text-text-primary">Install root cert</a>
+            to avoid browser warnings.
+          </p>
+        </div>
+      {/if}
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div>
           <label class="block text-[11px] text-text-muted mb-0.5">Domain</label>
-          <input type="text" bind:value={editEndpoint.domain} placeholder="myapp.example.com" class={inputClass} />
+          <input type="text" bind:value={editEndpoint.domain} placeholder="myapp.example.com"
+            readonly={endpointMode === 'quick-test'}
+            class="{inputClass} {endpointMode === 'quick-test' ? 'opacity-75' : ''}" />
         </div>
         <div>
           <label class="block text-[11px] text-text-muted mb-0.5">Service</label>
@@ -179,9 +245,12 @@
           </div>
         </div>
       {/if}
-      <div class="flex items-center justify-end gap-2 pt-1">
-        <Button variant="ghost" size="sm" onclick={cancelEndpointEdit}>Cancel</Button>
-        <Button size="sm" onclick={saveEndpoint} loading={savingEndpoints}>{saveLabel}</Button>
+      <div class="flex items-center justify-between gap-2 pt-1">
+        <p class="text-[11px] text-text-muted">Saving re-applies routes automatically. No manual redeploy needed.</p>
+        <div class="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onclick={cancelEndpointEdit}>Cancel</Button>
+          <Button size="sm" onclick={saveEndpoint} loading={savingEndpoints}>{saveLabel}</Button>
+        </div>
       </div>
     </div>
   {/snippet}

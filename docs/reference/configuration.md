@@ -19,8 +19,12 @@ data_dir: /var/lib/simpledeploy
 # Directory watched for app compose files (each subdirectory = one app)
 apps_dir: /etc/simpledeploy/apps
 
-# Caddy reverse proxy listen address
+# Caddy reverse proxy listen address (HTTPS when TLS is enabled)
 listen_addr: ":443"
+
+# Optional HTTP listener. When set and TLS is enabled, every request to this
+# port is 308-redirected to https://. Leave empty to disable.
+http_listen_addr: ":80"
 
 # Management API + dashboard port
 management_port: 8443
@@ -73,7 +77,8 @@ registries:
 |-------|------|---------|-------------|
 | `data_dir` | string | `/var/lib/simpledeploy` | Database and backup storage |
 | `apps_dir` | string | `/etc/simpledeploy/apps` | Watched directory for compose files |
-| `listen_addr` | string | `:443` | Reverse proxy listen address |
+| `listen_addr` | string | `:443` | Reverse proxy listen address (HTTPS) |
+| `http_listen_addr` | string | `""` | Optional plain-HTTP listener that 308-redirects to HTTPS. Ignored when `tls.mode: off`. |
 | `management_port` | int | `8443` | Management API port |
 | `domain` | string | - | Management UI domain |
 | `public_host` | string | `""` | Server hostname/IP used for sslip.io auto-domains in template Quick test mode. Editable at runtime. |

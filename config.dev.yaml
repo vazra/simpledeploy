@@ -1,8 +1,9 @@
 data_dir: /tmp/simpledeploy-dev
 apps_dir: ./dev/apps
-listen_addr: ":9500"
+listen_addr: ":443"
+http_listen_addr: ":80"
 management_port: 8500
 domain: localhost
 tls:
-  mode: "off"
-master_secret: "dev-secret-do-not-use-in-production"
+  mode: "local"
+master_secret: "de  v-secret-do-not-use-in-production"

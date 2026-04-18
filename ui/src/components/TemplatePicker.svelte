@@ -407,7 +407,7 @@
           </div>
           <p class="text-xs text-text-muted">
             After deploy, open <span class="font-mono">https://{quickDomain}</span>. If your proxy listens on a non-standard port, append <span class="font-mono">:&lt;port&gt;</span>. Browsers will warn about the self-signed certificate; install the root certificate from the
-            <a href="#/trust" class="text-accent hover:underline">Trust page</a>
+            <a href="/trust" target="_blank" rel="noopener" class="text-accent hover:underline">Trust page</a>
             to remove the warning.
           </p>
         </div>
