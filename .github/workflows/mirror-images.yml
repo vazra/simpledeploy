@@ -87,8 +87,21 @@ jobs:
               echo "::endgroup::"
               continue
             fi
-            if skopeo copy --all --retry-times 3 \
-                "docker://${img}" "docker://${dst}"; then
+            # Outer retry wrapping skopeo's own --retry-times: the inner retry
+            # handles transient pull failures (rate limits, network blips); the
+            # outer handles GHCR push-side failures (permission_denied on blob
+            # upload that usually clears on a second attempt).
+            ok=0
+            for attempt in 1 2 3; do
+              if skopeo copy --all --retry-times 3 \
+                  "docker://${img}" "docker://${dst}"; then
+                ok=1
+                break
+              fi
+              echo "copy attempt ${attempt} failed; sleeping before retry"
+              sleep $((attempt * 5))
+            done
+            if [ "$ok" = 1 ]; then
               copied=$((copied+1))
             else
               echo "::error::failed to copy $img"

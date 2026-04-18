@@ -563,7 +563,7 @@ export const appTemplates = [
     compose: {
       services: {
         code: {
-          image: 'codercom/code-server:4.96',
+          image: 'codercom/code-server:4.116.0',
           restart: 'unless-stopped',
           environment: {
             PASSWORD: '{{password}}',
@@ -612,7 +612,7 @@ export const appTemplates = [
     compose: {
       services: {
         kuma: {
-          image: 'louislam/uptime-kuma:1.23',
+          image: 'louislam/uptime-kuma:1',
           restart: 'unless-stopped',
           volumes: ['kuma-data:/app/data'],
           deploy: limits('0.25', '128M'),
@@ -973,7 +973,7 @@ export const appTemplates = [
     compose: {
       services: {
         n8n: {
-          image: 'n8nio/n8n:1.70',
+          image: 'n8nio/n8n:2.17.2',
           restart: 'unless-stopped',
           environment: {
             DB_TYPE: 'postgresdb',
@@ -1370,7 +1370,7 @@ export const appTemplates = [
     compose: {
       services: {
         poste: {
-          image: 'analogic/poste.io:2.4',
+          image: 'analogic/poste.io:2',
           restart: 'unless-stopped',
           hostname: '{{domain}}',
           environment: {
@@ -1451,7 +1451,7 @@ export const appTemplates = [
     compose: {
       services: {
         server: {
-          image: 'woodpeckerci/woodpecker-server:v2.7',
+          image: 'woodpeckerci/woodpecker-server:v3',
           restart: 'unless-stopped',
           environment: {
             WOODPECKER_OPEN: 'false',
@@ -1481,7 +1481,7 @@ export const appTemplates = [
           },
         },
         agent: {
-          image: 'woodpeckerci/woodpecker-agent:v2.7',
+          image: 'woodpeckerci/woodpecker-agent:v3',
           restart: 'unless-stopped',
           command: 'agent',
           environment: {
@@ -1516,7 +1516,7 @@ export const appTemplates = [
     compose: {
       services: {
         webhook: {
-          image: 'tarampampam/webhook-tester:2.5',
+          image: 'tarampampam/webhook-tester:2.3',
           restart: 'unless-stopped',
           command: 'serve --port 8080',
           deploy: limits('0.25', '128M'),
