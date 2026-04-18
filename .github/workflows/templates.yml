@@ -35,6 +35,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # Authenticate the docker daemon to GHCR so deploy-time `docker
+      # compose pull` can fetch mirrored (private-by-default) packages.
+      - name: Log in to GHCR for mirror pulls
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       # Route template pulls through our GHCR mirror to avoid Docker Hub
       # pull rate limits. The mirror-images workflow populates GHCR on
       # the same triggers as this one; bootstrap with `gh workflow run

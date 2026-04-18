@@ -86,6 +86,13 @@ The same env var works for any local `./bin/simpledeploy serve` session: set `SI
 
 First run only: `gh workflow run mirror-images.yml` after the workflow is merged. Subsequent runs are automatic and incremental (tags that already exist on GHCR are skipped).
 
+### Authenticating docker for mirror pulls
+
+GHCR packages are **private by default**. Both CI workflows (`ci.yml`, `templates.yml`) run `docker login ghcr.io` with `GITHUB_TOKEN` before the test step. For local mirror use, either:
+
+- `docker login ghcr.io` once with a PAT that has `read:packages`, or
+- Open each `ghcr.io/<owner>/simpledeploy-mirror/...` package in the GitHub UI and set visibility to **Public** (one-time per package).
+
 ## Template validation
 
 Two layers guard the built-in app and service templates:
