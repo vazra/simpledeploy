@@ -74,16 +74,18 @@ Add `SIMPLEDEPLOY_DEV_MODE: "1"` to the `environment` block so `docker-dev` is d
 
 Tooltip via `title=` with fuller detail (e.g. `"Running inside Docker Desktop container"`). Rendered only when `deployment_label` is present (backward-safe).
 
+StatusBar click target stays as-is (whole bar links to `#/docker`); the mode span is a plain child. Nesting a separate link would require invalid HTML. Users reach the Deployment card via the existing System nav; the footer badge is informational.
+
 ### 5. UI — System → Overview tab
 
 **New "Deployment" card** inserted above the existing "SimpleDeploy" card. Content is mode-specific via `{#if mode === 'x'}` blocks:
 
-- **Native:** icon + label, upgrade hint (`apt upgrade simpledeploy` OR binary swap reference), process log hint (`journalctl -u simpledeploy -f`). No resource caveat.
+- **Native:** icon + label, upgrade hint showing both `apt upgrade simpledeploy` (apt install) and manual binary swap (generic install) side-by-side, process log hint (`journalctl -u simpledeploy -f`). No resource caveat. No install-method detection (too brittle; showing both is simpler and always correct).
 - **Docker (linux host):** icon + label, "Running in a Docker container with host networking." Resource caveat: "Values reflect container cgroup, not host." Upgrade: `cd /etc/simpledeploy && docker compose pull && docker compose up -d`. Log hint: `docker compose logs -f simpledeploy`. Backup destination note.
 - **Docker Desktop:** same as Docker but caveat says "…Docker VM, not your Mac/Windows host." Otherwise identical content.
 - **Docker Dev:** same as Desktop but labeled "Contributor dev container" and points upgrade to `make dev-docker`.
 
-Code blocks are click-to-copy (matches existing endpoints-tab behavior).
+Code blocks are click-to-copy, reusing whatever copy helper already exists in the codebase (search `ui/src/lib` for a copy util; if none, a 3-line `navigator.clipboard.writeText` + transient "Copied" toast is fine).
 
 **Resources card:** when `mode !== 'native'`, append a small footnote under the grid: `"Values reflect container view, not host."` (Desktop: `"…Docker VM, not host."`). No structural change.
 
