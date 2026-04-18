@@ -15,6 +15,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -292,7 +293,11 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 	}
 
 	composePath := filepath.Join(r.appsDir, slug, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte(ver.Content), 0644); err != nil {
+	composeData := []byte(ver.Content)
+	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
+		composeData = mirror.RewriteCompose(composeData, prefix)
+	}
+	if err := os.WriteFile(composePath, composeData, 0644); err != nil {
 		return fmt.Errorf("write compose: %w", err)
 	}
 

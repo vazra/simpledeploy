@@ -17,6 +17,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -672,8 +673,12 @@ func (s *Server) handleRestoreComposeVersion(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Write compose content to file
-	if err := os.WriteFile(app.ComposePath, []byte(ver.Content), 0644); err != nil {
+	// Write compose content to file, applying optional image mirror.
+	composeData := []byte(ver.Content)
+	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
+		composeData = mirror.RewriteCompose(composeData, prefix)
+	}
+	if err := os.WriteFile(app.ComposePath, composeData, 0644); err != nil {
 		httpError(w, fmt.Errorf("write compose: %w", err), http.StatusInternalServerError)
 		return
 	}

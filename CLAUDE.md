@@ -53,6 +53,7 @@ ui/                   Svelte SPA (Vite build)
 - **AES-256-GCM encryption.** Registry credentials encrypted with `master_secret` via `auth.Encrypt`/`auth.Decrypt`. Uses random salt per encryption with PBKDF2 key derivation (backwards compatible with legacy fixed-salt format).
 - **Log ring buffer.** Process stdout/stderr captured via `os.Pipe` into `logbuf.Buffer`, streamed to UI via WebSocket. Size configurable via `log_buffer_size` (default 500).
 - **DB backup via VACUUM INTO.** WAL-safe consistent snapshots. Compact mode strips metrics/request_stats before download.
+- **Image mirror.** When `SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX` env var is set (e.g. `ghcr.io/vazra/simpledeploy-mirror/`), the server rewrites docker.io-bound image refs in compose files at deploy/rollback/restore time. Used by E2E (`make e2e-mirror`) to avoid Docker Hub pull rate limits, but also usable for local dev. Mirror is populated by `.github/workflows/mirror-images.yml`, which runs on changes to template JS files or e2e fixtures. See `internal/mirror/`.
 
 ## Database
 
@@ -96,11 +97,14 @@ go test ./internal/store/ -run TestUpsert  # specific test
 Full browser-based test suite that builds the binary, starts a real server with Docker, deploys actual compose apps, and exercises every UI flow.
 
 ```bash
-make e2e          # full E2E suite, ~20 min
-make e2e-lite     # skips slow specs (13b, 27, 28, 29b), ~6-8 min
-make e2e-headed   # full suite with visible browser
-make e2e-report   # open HTML report from last run
-make e2e-templates # deploy every app template end-to-end (on-demand)
+make e2e               # full E2E suite, ~20 min
+make e2e-lite          # skips slow specs (13b, 27, 28, 29b), ~6-8 min
+make e2e-mirror        # full suite via GHCR image mirror (no Docker Hub rate limits)
+make e2e-lite-mirror   # lite suite via GHCR image mirror
+make e2e-headed        # full suite with visible browser
+make e2e-report        # open HTML report from last run
+make e2e-templates     # deploy every app template end-to-end (on-demand)
+make mirror-images-list # print the image set the mirror workflow pushes
 ```
 
 **Template validation:** `00-template-images.spec.js` runs in every mode and validates every image in `appTemplates.js`/`serviceTemplates.js` resolves via `docker manifest inspect`. `templates-deploy-all.spec.js` runs only under `E2E_TEMPLATES=1` (via `make e2e-templates` or the `templates.yml` GitHub workflow, which triggers on changes to template files) and deploys every app template end-to-end.

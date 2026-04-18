@@ -1,4 +1,4 @@
-.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates hooks-install
+.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates e2e-mirror e2e-lite-mirror hooks-install mirror-images-list
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -64,3 +64,16 @@ e2e-report:
 # workflow). Pulls ~20 images, can take 30+ min depending on network.
 e2e-templates:
 	cd e2e && npm ci && npx playwright install chromium && E2E_TEMPLATES=1 npx playwright test
+
+# E2E with GHCR image mirror (no Docker Hub rate limits). Set
+# SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX to override the default
+# ghcr.io/vazra/simpledeploy-mirror/.
+e2e-mirror:
+	cd e2e && npm ci && npx playwright install chromium && E2E_USE_MIRROR=1 npx playwright test
+
+e2e-lite-mirror:
+	cd e2e && npm ci && npx playwright install chromium && E2E_LITE=1 E2E_USE_MIRROR=1 npx playwright test
+
+# Print the image list the mirror workflow will push to GHCR.
+mirror-images-list:
+	@node e2e/scripts/list-mirror-images.mjs

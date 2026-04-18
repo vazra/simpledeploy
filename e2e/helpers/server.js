@@ -70,10 +70,18 @@ export async function startServer(binPath, overrides = {}) {
   console.log(`[e2e] Apps dir: ${appsDir}`);
 
   const logStream = createWriteStream(logPath);
+  // Optional GHCR mirror for template/fixture images. Avoids Docker Hub
+  // pull rate limits on shared CI tokens and local dev. Off unless
+  // E2E_USE_MIRROR=1 is set in the environment.
+  const mirrorEnv = {};
+  if (process.env.E2E_USE_MIRROR === '1') {
+    mirrorEnv.SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX =
+      process.env.SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX || 'ghcr.io/vazra/simpledeploy-mirror/';
+  }
   const proc = spawn(binPath, ['serve', '--config', configPath], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS: '1' },
+    env: { ...process.env, SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS: '1', ...mirrorEnv },
   });
 
   proc.stdout.pipe(logStream);

@@ -13,6 +13,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -75,6 +76,13 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "invalid base64 compose data", http.StatusBadRequest)
 		return
+	}
+
+	// Optional image mirror: when SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX is set
+	// (E2E/CI or dev), rewrite docker.io-bound image refs to the mirror
+	// before the compose file is persisted.
+	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
+		composeData = mirror.RewriteCompose(composeData, prefix)
 	}
 
 	appDir := filepath.Join(s.appsDir, body.Name)

@@ -52,14 +52,39 @@ e2e/
 ## Running locally
 
 ```bash
-make e2e           # full suite, headless (~20 min)
-make e2e-lite      # skip slow specs (~6-8 min)
-make e2e-headed    # full suite, visible browser
-make e2e-report    # open HTML report from last run
-make e2e-templates # deploy every app template end-to-end (on-demand)
+make e2e              # full suite, headless (~20 min)
+make e2e-lite         # skip slow specs (~6-8 min)
+make e2e-mirror       # full suite via GHCR mirror (no Docker Hub limits)
+make e2e-lite-mirror  # lite via GHCR mirror
+make e2e-headed       # full suite, visible browser
+make e2e-report       # open HTML report from last run
+make e2e-templates    # deploy every app template end-to-end (on-demand)
 ```
 
 Requires Docker daemon, Go, Node.js.
+
+## Avoiding Docker Hub rate limits
+
+Deploying the full template/fixture matrix pulls ~45 images from Docker Hub. Anonymous Hub accounts are capped at 100 pulls per 6h per IP; authenticated free accounts at 200; CI on shared IPs hits the anonymous cap fast. The suite offers an opt-in mirror mode so every pull goes to GHCR instead.
+
+### How it works
+
+- `.github/workflows/mirror-images.yml` mirrors every image listed by `node e2e/scripts/list-mirror-images.mjs` into `ghcr.io/<owner>/simpledeploy-mirror/...` via `skopeo copy --all` (multi-arch). Triggered on changes to `ui/src/lib/{app,service}Templates.js` or `e2e/fixtures/**`, and on manual dispatch.
+- At deploy time, `internal/mirror.RewriteCompose` rewrites docker.io-bound image refs in the compose YAML to `<SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX><path>` before the file is persisted. Covers initial deploy, rollback, and restore.
+- `e2e/helpers/server.js` sets `SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX=ghcr.io/vazra/simpledeploy-mirror/` when `E2E_USE_MIRROR=1`; override the prefix by exporting a different `SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX` in your shell.
+
+### Using it
+
+```bash
+E2E_USE_MIRROR=1 make e2e       # or: make e2e-mirror
+make mirror-images-list         # print the image set the workflow pushes
+```
+
+The same env var works for any local `./bin/simpledeploy serve` session: set `SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX` and deploys route through GHCR. Leave it unset in production so users get upstream images.
+
+### Bootstrapping the mirror
+
+First run only: `gh workflow run mirror-images.yml` after the workflow is merged. Subsequent runs are automatic and incremental (tags that already exist on GHCR are skipped).
 
 ## Template validation
 
