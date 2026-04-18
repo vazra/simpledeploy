@@ -11,9 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - run: make ui-build
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest
@@ -22,16 +26,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - run: make ui-build
       - run: go test -race ./...
 
   test-ui:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
       - run: cd ui && npm ci && npm test
@@ -40,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
       - uses: actions/setup-go@v5
@@ -54,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
       - uses: actions/setup-go@v5
