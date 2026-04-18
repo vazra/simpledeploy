@@ -72,19 +72,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # Authenticate the docker daemon to GHCR so deploy-time `docker
-      # compose pull` can fetch mirrored (private-by-default) packages.
-      - name: Log in to GHCR for mirror pulls
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ACTOR: ${{ github.actor }}
-        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-      # Pull template/fixture images via the GHCR mirror to avoid
-      # Docker Hub pull rate limits on shared CI runners. Populated by
-      # .github/workflows/mirror-images.yml.
+      # E2E on CI pulls from Docker Hub directly. The GHCR mirror is
+      # available via `make e2e-mirror` locally or via the Templates
+      # workflow, but using it on the main CI runner has produced slow
+      # (5-6 min/deploy) pulls that exceed test timeouts. Leave off
+      # until we pin down the cause.
       - run: make e2e
-        env:
-          E2E_USE_MIRROR: '1'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
