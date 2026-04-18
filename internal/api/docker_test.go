@@ -87,11 +87,12 @@ func TestDockerEndpoints_NoDockerClient(t *testing.T) {
 				srv.handleDockerVolumes(w, req)
 			default:
 				// DELETE endpoints
-				if ep.path == "/api/docker/images/sha256:abc123" {
+				switch ep.path {
+				case "/api/docker/images/sha256:abc123":
 					srv.handleDockerImageRemove(w, req)
-				} else if ep.path == "/api/docker/networks/net1" {
+				case "/api/docker/networks/net1":
 					srv.handleDockerNetworkRemove(w, req)
-				} else if ep.path == "/api/docker/volumes/vol1" {
+				case "/api/docker/volumes/vol1":
 					srv.handleDockerVolumeRemove(w, req)
 				}
 			}

@@ -10,7 +10,6 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
-	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/vazra/simpledeploy/internal/docker"
@@ -179,14 +178,14 @@ func (c *Collector) CollectContainers(ctx context.Context) ([]MetricPoint, error
 	return points, nil
 }
 
-func (c *Collector) collectContainer(ctx context.Context, ctr dockercontainer.Summary, collectTs int64) (MetricPoint, error) {
+func (c *Collector) collectContainer(ctx context.Context, ctr container.Summary, collectTs int64) (MetricPoint, error) {
 	resp, err := c.docker.ContainerStats(ctx, ctr.ID)
 	if err != nil {
 		return MetricPoint{}, fmt.Errorf("ContainerStats: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var stats dockercontainer.StatsResponse
+	var stats container.StatsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
 		return MetricPoint{}, fmt.Errorf("decode stats: %w", err)
 	}
