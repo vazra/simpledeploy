@@ -107,6 +107,22 @@ make e2e-templates     # deploy every app template end-to-end (on-demand)
 make mirror-images-list # print the image set the mirror workflow pushes
 ```
 
+**During local development: run only the related specs, not the full suite.** Specs build state sequentially, so you usually need `01-setup.spec.js` (creates admin) plus the spec(s) you care about. Add `03-deploy.spec.js` if your target depends on deployed apps. The full suite runs remotely in GitHub Actions; locally it is too slow for iteration.
+
+```bash
+cd e2e
+# Minimal chain for a system-page change:
+npx playwright test 01-setup.spec.js 17-system.spec.js --reporter=list
+
+# Change that needs deployed apps (e.g. app-details, metrics):
+npx playwright test 01-setup.spec.js 03-deploy.spec.js 10-app-metrics.spec.js --reporter=list
+
+# Filter by test name within selected specs:
+npx playwright test 01-setup.spec.js 17-system.spec.js -g "deployment badge" --reporter=list
+```
+
+Rule of thumb: only fall back to `make e2e-lite` when you cannot identify the minimal dependency chain, or right before opening a PR.
+
 **Template validation:** `00-template-images.spec.js` runs in every mode and validates every image in `appTemplates.js`/`serviceTemplates.js` resolves via `docker manifest inspect`. `templates-deploy-all.spec.js` runs only under `E2E_TEMPLATES=1` (via `make e2e-templates` or the `templates.yml` GitHub workflow, which triggers on changes to template files) and deploys every app template end-to-end.
 
 **Requirements:** Docker daemon running, Go toolchain, Node.js. Full suite ~20 min, lite ~6-8 min.
