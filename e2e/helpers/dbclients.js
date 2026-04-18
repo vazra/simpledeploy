@@ -36,11 +36,23 @@ function runArgv(container, argv, stdinBuf) {
 
 // mysqlExec runs SQL against a MySQL container as root.
 // Use `db` = '' or null for statements that don't need a database.
+// Retries on ERROR 2002 (socket not ready) which can occur briefly during
+// the initial container init when mysqld restarts.
 export function mysqlExec(container, password, db, sql) {
   const argv = ['exec', container, 'mysql', '-u', 'root', `-p${password}`, '-N', '-B'];
   if (db) argv.push(db);
   argv.push('-e', sql);
-  return runArgv(container, argv);
+  const maxAttempts = 5;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return runArgv(container, argv);
+    } catch (e) {
+      const msg = String(e.message || '');
+      const transient = msg.includes('ERROR 2002') || msg.includes('MySQL server has gone away');
+      if (!transient || i === maxAttempts - 1) throw e;
+      execFileSync('sleep', ['2']);
+    }
+  }
 }
 
 // mongoEval runs a JS snippet via mongosh using root auth.

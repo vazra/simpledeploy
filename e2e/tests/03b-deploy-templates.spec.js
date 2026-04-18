@@ -117,10 +117,11 @@ test.describe('Deploy via Templates', () => {
 
     await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
 
-    // Next -> Deploy.
+    // Next -> Deploy. Node API + Postgres template pulls large images, so
+    // allow up to 280s (well under the 300s test-level timeout).
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 280_000 });
 
     // Navigate to the app's Backups tab and confirm it renders.
     await dialog.getByRole('button', { name: 'View App' }).click();
