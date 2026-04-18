@@ -19,6 +19,16 @@ test.describe('System Administration', () => {
     await expect(page.getByText(/uptime/i).first()).toBeVisible();
   });
 
+  test('shows Native deployment badge in StatusBar and Deployment card on overview', async ({ page }) => {
+    // beforeEach already navigated to /#/system and logged in
+    await expect(page.locator('a[href="#/docker"]').getByText('Native', { exact: true })).toBeVisible({ timeout: 5_000 });
+
+    const main = page.locator('main');
+    await expect(main.getByRole('heading', { name: 'Deployment', exact: true })).toBeVisible({ timeout: 5_000 });
+    await expect(main.getByText('Native Binary', { exact: true })).toBeVisible();
+    await expect(main.getByText(/Values reflect/)).toHaveCount(0);
+  });
+
   test('shows database info', async ({ page }) => {
     await expect(page.getByText(/database|sqlite/i).first()).toBeVisible({ timeout: 5_000 });
   });
