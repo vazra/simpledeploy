@@ -41,6 +41,12 @@ clean:
 e2e:
 	cd e2e && npm ci && npx playwright install chromium && npx playwright test
 
+# Lite E2E: skips slow specs (DB strategies, S3 backup, webhook formats,
+# private registry). ~6-8 min vs ~20+ min for full suite. Good for local
+# dev loop; CI should still run full e2e.
+e2e-lite:
+	cd e2e && npm ci && npx playwright install chromium && E2E_LITE=1 npx playwright test
+
 e2e-headed:
 	cd e2e && npm ci && npx playwright install chromium && npx playwright test --headed
 

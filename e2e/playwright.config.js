@@ -1,7 +1,18 @@
 import { defineConfig } from '@playwright/test';
 
+// Slow specs skipped when E2E_LITE=1. Each pulls large images, spawns
+// auxiliary containers (MinIO, DB engines, local registry), or waits on
+// long timing windows (webhook delivery). Trims ~15 min from the suite.
+const LITE_SKIP = [
+  '**/13b-webhook-formats.spec.js',
+  '**/27-backup-s3.spec.js',
+  '**/28-db-strategies.spec.js',
+  '**/29b-private-registry.spec.js',
+];
+
 export default defineConfig({
   testDir: './tests',
+  testIgnore: process.env.E2E_LITE === '1' ? LITE_SKIP : undefined,
   fullyParallel: false,
   workers: 1,
   retries: 0,

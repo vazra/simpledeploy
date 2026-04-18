@@ -10,7 +10,8 @@ Single Go binary for deploying Docker Compose apps with built-in reverse proxy (
 make build      # UI + Go (requires Node.js + Go)
 make build-go   # Go only (skips UI, needs ui_dist/ to exist)
 make test       # Go unit/integration tests
-make e2e        # E2E browser tests (builds + starts server + Playwright)
+make e2e        # E2E browser tests, full suite (~20 min)
+make e2e-lite   # E2E without slow specs (DB/S3/webhooks/registry) (~6-8 min)
 make e2e-headed # E2E with visible browser window
 make e2e-report # open last E2E HTML report
 make clean      # Remove build artifacts
@@ -93,12 +94,15 @@ go test ./internal/store/ -run TestUpsert  # specific test
 Full browser-based test suite that builds the binary, starts a real server with Docker, deploys actual compose apps, and exercises every UI flow.
 
 ```bash
-make e2e          # build + run all E2E tests (headless)
-make e2e-headed   # same but with visible browser
+make e2e          # full E2E suite, ~20 min
+make e2e-lite     # skips slow specs (13b, 27, 28, 29b), ~6-8 min
+make e2e-headed   # full suite with visible browser
 make e2e-report   # open HTML report from last run
 ```
 
-**Requirements:** Docker daemon running, Go toolchain, Node.js. Runs ~2.5 minutes.
+**Requirements:** Docker daemon running, Go toolchain, Node.js. Full suite ~20 min, lite ~6-8 min.
+
+`e2e-lite` sets `E2E_LITE=1`, which makes `playwright.config.js` apply `testIgnore` to skip the heaviest specs: DB strategy matrix (MySQL/Mongo/Redis/SQLite), S3 backup roundtrip, webhook delivery timing, and private registry deploy. Good for fast local iteration; CI should keep running the full suite.
 
 **Structure:**
 ```
