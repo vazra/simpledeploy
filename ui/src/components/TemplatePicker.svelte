@@ -1,5 +1,5 @@
 <script>
-  import { generateSecret, validateVars, countEndpoints, computeQuickTestDomain, isValidHost, DEFAULT_ACCESS_MODE } from '../lib/appTemplates.js'
+  import { generateSecret, validateVars, countEndpoints, computeQuickTestDomain, isValidIPv4, DEFAULT_ACCESS_MODE } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
 
   let {
@@ -36,7 +36,7 @@
   let quickDomain = $derived(
     selected ? computeQuickTestDomain(selected.nameSuggestion, quickHost || 'localhost') : ''
   )
-  let hostValid = $derived(isValidHost(quickHost))
+  let hostValid = $derived(isValidIPv4(quickHost))
   let hostChanged = $derived(quickHost !== loadedHost)
 
   // If initialTemplateId given, jump straight to vars form (only once)
@@ -55,26 +55,34 @@
   let copyTimer = null
   $effect(() => () => clearTimeout(copyTimer))
 
+  function defaultBrowserIP() {
+    if (typeof window === 'undefined') return '127.0.0.1'
+    const h = window.location.hostname || ''
+    // sslip.io requires an IP. If the browser is on a hostname (e.g. "localhost"
+    // or a real domain), fall back to 127.0.0.1 so the sslip.io name resolves.
+    return isValidIPv4(h) ? h : '127.0.0.1'
+  }
+
   async function loadPublicHost() {
     if (publicHostLoaded) return
     try {
       const res = await api.getPublicHost()
       const h = res?.data?.public_host || ''
-      if (h) {
+      if (h && isValidIPv4(h)) {
         loadedHost = h
         quickHost = h
       } else {
         loadedHost = ''
-        if (typeof window !== 'undefined') quickHost = window.location.hostname || ''
+        quickHost = defaultBrowserIP()
       }
     } catch {
-      if (typeof window !== 'undefined') quickHost = window.location.hostname || ''
+      quickHost = defaultBrowserIP()
     }
     publicHostLoaded = true
   }
 
   async function saveDefaultHost() {
-    if (!isValidHost(quickHost) || savingHost) return
+    if (!isValidIPv4(quickHost) || savingHost) return
     savingHost = true
     try {
       const res = await api.setPublicHost(quickHost)
@@ -205,8 +213,8 @@
     if (accessMode !== 'custom') {
       for (const v of domainVars) delete errs[v.key]
     }
-    if (accessMode === 'quick-test' && !isValidHost(quickHost)) {
-      errs.__quickHost = 'Enter a valid host or IP'
+    if (accessMode === 'quick-test' && !isValidIPv4(quickHost)) {
+      errs.__quickHost = 'Enter the server IP (e.g. 127.0.0.1)'
     }
     errors = errs
     if (Object.keys(errs).length > 0) return
@@ -329,6 +337,7 @@
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <button
           type="button"
+          aria-label="Quick test"
           onclick={() => (accessMode = 'quick-test')}
           class="text-left px-3 py-2 rounded-lg border text-sm transition-colors
             {accessMode === 'quick-test' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
@@ -338,6 +347,7 @@
         </button>
         <button
           type="button"
+          aria-label="Custom domain"
           onclick={() => (accessMode = 'custom')}
           class="text-left px-3 py-2 rounded-lg border text-sm transition-colors
             {accessMode === 'custom' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
@@ -347,6 +357,7 @@
         </button>
         <button
           type="button"
+          aria-label="Port only"
           disabled={!portOnlyAvailable}
           onclick={() => portOnlyAvailable && (accessMode = 'port-only')}
           class="text-left px-3 py-2 rounded-lg border text-sm transition-colors
@@ -373,13 +384,13 @@
             />
           </div>
           <div>
-            <label class="block text-xs text-text-muted mb-1">Host (server IP or hostname)</label>
+            <label class="block text-xs text-text-muted mb-1">Server IP (IPv4 required by sslip.io)</label>
             <div class="flex items-center gap-1.5">
               <input
                 type="text"
                 value={quickHost}
                 oninput={(e) => (quickHost = e.currentTarget.value)}
-                placeholder="e.g. 203.0.113.10"
+                placeholder="e.g. 203.0.113.10 or 127.0.0.1 for local"
                 class="flex-1 px-3 py-2 bg-input-bg border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30
                   {hostValid ? 'border-border/50' : 'border-danger/50'}"
               />
@@ -391,11 +402,11 @@
               >{savingHost ? 'Saving...' : 'Save as default'}</button>
             </div>
             {#if !hostValid}
-              <p class="text-xs text-danger mt-1">Enter a valid host or IP.</p>
+              <p class="text-xs text-danger mt-1">Enter a valid IPv4 address (sslip.io needs an IP, not a hostname).</p>
             {/if}
           </div>
           <p class="text-xs text-text-muted">
-            Browsers will warn about the self-signed certificate. Install the root certificate from the
+            After deploy, open <span class="font-mono">https://{quickDomain}</span>. If your proxy listens on a non-standard port, append <span class="font-mono">:&lt;port&gt;</span>. Browsers will warn about the self-signed certificate; install the root certificate from the
             <a href="#/trust" class="text-accent hover:underline">Trust page</a>
             to remove the warning.
           </p>
