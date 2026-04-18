@@ -10,9 +10,10 @@ Caddy runs in-process as a library. There is no Caddyfile. All config is JSON, b
 ## Lifecycle
 
 1. `NewCaddyProxy(cfg)` allocates the proxy struct (no Caddy started yet).
-2. The reconciler calls `SetRoutes(routes)` after every reconcile pass.
-3. `SetRoutes` validates every domain against `^[a-zA-Z0-9][a-zA-Z0-9.*-]*$`, registers any per-domain rate-limit and IP-allowlist configs into the package-level registries, then calls `reload()`.
-4. `reload()` runs `buildConfig()` to produce the full JSON, marshals it, and calls `caddy.Load(data, true)`. Caddy hot-reloads in-place; in-flight requests complete on the old config, new requests use the new one.
+2. The reconciler calls `ResolveRoutes(app, resolver)` for each app and collects the routes. The resolver (`DockerResolver` in [/internal/proxy/resolver.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/resolver.go)) answers `<service>:<port>` upstreams by looking up the running container's IP on the `simpledeploy-public` network via Docker API; host-port-backed endpoints skip the resolver entirely and resolve to `localhost:<host_port>`.
+3. The reconciler calls `SetRoutes(routes)` with the assembled table.
+4. `SetRoutes` validates every domain against `^[a-zA-Z0-9][a-zA-Z0-9.*-]*$`, registers any per-domain rate-limit and IP-allowlist configs into the package-level registries, then calls `reload()`.
+5. `reload()` runs `buildConfig()` to produce the full JSON, marshals it, and calls `caddy.Load(data, true)`. Caddy hot-reloads in-place; in-flight requests complete on the old config, new requests use the new one.
 
 `Stop()` calls `caddy.Stop()`. The admin endpoint is always disabled (`admin.disabled: true`); the only way to change config is via this code path.
 

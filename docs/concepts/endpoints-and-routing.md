@@ -32,12 +32,17 @@ Two endpoints, both pointing at the same service, served on two different domain
 
 ## Upstream resolution
 
-For each endpoint, [/internal/proxy/route.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/route.go) (`resolveEndpointUpstream`) picks where Caddy proxies to:
+For each endpoint, [/internal/proxy/route.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/route.go) (`resolveEndpointUpstream`) picks where Caddy proxies to, in this order:
 
 1. If the target service publishes a host port matching `endpoint.port`, the upstream is `localhost:<host_port>`.
-2. Otherwise the upstream is the Docker network address `<service>:<port>`.
+2. Otherwise, the resolver looks up the service's container IP on the `simpledeploy-public` network via the Docker API and uses `<container_ip>:<port>`. Every endpoint-bearing service is auto-attached to this network by the compose mutation step during deploy, so Caddy can reach it whether SimpleDeploy runs natively on Linux (bridge IPs are host-routable) or inside a container on the same network.
+3. As a last-ditch fallback when the Docker API lookup fails (daemon down, container not yet attached), the upstream is the Docker DNS name `<service>:<port>`. Only works when Caddy and the target share a network.
 
-Most apps only need to declare a container port. Letting Docker pick the host port is fine; the router uses Docker DNS for the in-network case.
+You do not need to publish a host port to make an endpoint reachable. Host ports still work and, when present, take precedence (step 1).
+
+<Aside type="caution">
+On macOS and Windows with Docker Desktop, container bridge IPs are not routable from the host. A native `./bin/simpledeploy` on macOS cannot reach step 2. Either publish a host port, or run SimpleDeploy itself in a container (see `make dev-docker`).
+</Aside>
 
 ## TLS modes
 

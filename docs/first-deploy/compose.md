@@ -35,6 +35,10 @@ Three labels do the work:
 
 Drop the file in `/etc/simpledeploy/apps/whoami/`, the reconciler picks it up within a few seconds.
 
+<Aside type="note">
+`ports:` above lets Docker pick a host port and Caddy routes to `localhost:<host_port>`. You can also omit `ports:` entirely; SimpleDeploy auto-attaches endpoint services to a shared `simpledeploy-public` network and reaches the container by IP. See [Endpoints and routing](/concepts/endpoints-and-routing/#upstream-resolution).
+</Aside>
+
 ## Multi-service app
 
 Apps with a database, a worker, and a web tier all live in one compose file. Place routing labels on the public service. Place backup labels on the database service.
