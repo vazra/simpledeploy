@@ -1,4 +1,4 @@
-.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates e2e-mirror e2e-lite-mirror hooks-install mirror-images-list docker-build dev-docker dev-docker-down
+.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates e2e-mirror e2e-lite-mirror hooks-install mirror-images-list docker-build dev-docker dev-docker-down dev-docker-rebuild
 
 DEV_GOARCH := $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 
@@ -54,6 +54,11 @@ dev-docker:
 dev-docker-down:
 	docker compose -f deploy/docker-compose.dev.yml down
 	rm -f simpledeploy
+
+dev-docker-rebuild:
+	GOOS=linux GOARCH=$(DEV_GOARCH) CGO_ENABLED=0 \
+	  go build -ldflags="$(LDFLAGS)" -o simpledeploy ./cmd/simpledeploy
+	docker compose -f deploy/docker-compose.dev.yml restart simpledeploy
 
 clean:
 	rm -rf bin/ cmd/simpledeploy/ui_dist

@@ -11,18 +11,27 @@ description: Local development environment for SimpleDeploy, covering prerequisi
 
 ## Quick Start
 
-```bash
-# Terminal 1: Go backend
-make ui-build   # first time only, builds UI embed
-make dev
+**Recommended for local dev (hot reload):**
 
-# Terminal 2: Svelte UI (hot reload)
-make dev-ui
+```bash
+make dev
 ```
 
-- Management UI: http://localhost:5173 (Vite dev server, proxies API to backend)
-- Management API: http://localhost:8443
+This runs both backend (Go, auto-reload via air) and frontend (Svelte, HMR via Vite) in one command.
+
+- Management UI: http://localhost:5173 (Vite, proxies to backend)
+- Management API: http://localhost:8080
 - Caddy proxy: http://localhost:8080
+
+**If you need to develop in a Docker container** (e.g., testing Docker networking on Docker Desktop):
+
+```bash
+make dev-docker          # Start in Docker
+make dev-docker-rebuild  # Rebuild + restart on code changes
+make dev-docker-down     # Stop
+```
+
+Access at https://localhost:8500/ (no hot reload in this mode).
 
 ## Dev Config
 
@@ -69,15 +78,34 @@ If `*.localhost` domains don't resolve, add to `/etc/hosts`:
 
 ## Make Targets
 
+### Development
+
 | Target | Description |
 |--------|-------------|
-| `make dev` | Build + run Go backend with dev config |
-| `make dev-ui` | Svelte dev server with hot reload |
-| `make dev-server` | Same as `make dev` |
+| `make dev` | Go backend + UI (both with hot reload) |
+| `make api` | Go backend only (air auto-reload) |
+| `make ui` | Svelte UI dev server only (Vite HMR) |
 | `make build` | Full build (UI + Go) |
 | `make build-go` | Go only (requires ui_dist/) |
 | `make ui-build` | Build Svelte UI |
+
+### Docker-based Development (for Docker Desktop)
+
+| Target | Description |
+|--------|-------------|
+| `make dev-docker` | Build + run simpledeploy in Docker (~docker compose up) |
+| `make dev-docker-rebuild` | Rebuild binary + restart Docker container |
+| `make dev-docker-down` | Stop and clean up Docker container |
+
+Use `make dev-docker` when you need the binary in a container (e.g., testing networking features on Docker Desktop). Note: no hot reload in Docker mode; use `make dev` for faster local iteration.
+
+### Testing
+
+| Target | Description |
+|--------|-------------|
 | `make test` | Run all Go tests |
+| `make e2e` | Full Playwright suite (~20 min) |
+| `make e2e-lite` | Playwright suite without slow specs (~6-8 min) |
 | `make clean` | Remove build artifacts |
 
 ## Testing
