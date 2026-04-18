@@ -1,0 +1,114 @@
+---
+title: SimpleDeploy
+description: Deploy any Docker Compose app to a VPS in minutes. HTTPS, backups, metrics, alerts. One binary, no Kubernetes.
+template: splash
+hero:
+  tagline: Deploy any Docker Compose app to a VPS in minutes. HTTPS, backups, metrics, alerts. One binary, no Kubernetes.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: 5-Minute Quickstart
+      link: /start/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/vazra/simpledeploy
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, Steps, Tabs, TabItem, LinkCard } from "@astrojs/starlight/components";
+
+## Why SimpleDeploy
+
+<CardGrid stagger>
+  <Card title="One Binary" icon="rocket">
+    Single Go binary. No runtime, no Kubernetes, no agent to babysit. Drop it on a VPS and go.
+  </Card>
+  <Card title="Automatic HTTPS" icon="approve-check">
+    Embedded Caddy handles Let's Encrypt, custom certs, and routing. Zero config for the happy path.
+  </Card>
+  <Card title="Built-in Backups" icon="seti:db">
+    Postgres, MySQL, Mongo, Redis, SQLite, volumes. Local or S3. Schedules and retention included.
+  </Card>
+  <Card title="Metrics + Alerts" icon="bars">
+    Per-service CPU, memory, request rates, latency, errors. Webhook alerts on rules you define.
+  </Card>
+  <Card title="Remote CLI" icon="laptop">
+    kubectl-style contexts. Pull, diff, apply compose files against any server you have a key for.
+  </Card>
+</CardGrid>
+
+## How it works
+
+<Steps>
+
+1. **Install the binary on your server.**
+
+   ```bash
+   curl -fsSL https://github.com/vazra/simpledeploy/releases/latest/download/install.sh | sh
+   ```
+
+2. **Add `simpledeploy.*` labels to your `docker-compose.yml`.**
+
+   ```yaml
+   services:
+     web:
+       image: nginx:alpine
+       labels:
+         simpledeploy.app: my-site
+         simpledeploy.endpoints: "my-site.example.com -> 80"
+   ```
+
+3. **Apply.**
+
+   ```bash
+   simpledeploy apply ./docker-compose.yml
+   ```
+
+</Steps>
+
+## How it compares
+
+| Dimension              | SimpleDeploy | Dokku | CapRover | Coolify | Bare docker compose |
+| ---------------------- | :----------: | :---: | :------: | :-----: | :-----------------: |
+| Single binary          |      Yes     |   No  |    No    |    No   |         n/a         |
+| Embedded TLS proxy     |      Yes     |  Yes  |    Yes   |   Yes   |          No         |
+| Built-in backups       |      Yes     |   No  |    No    |   Yes   |          No         |
+| Web UI                 |      Yes     |   No  |    Yes   |   Yes   |          No         |
+| Multi-user + RBAC      |      Yes     |   No  |    No    | Partial |          No         |
+| Requires Docker Swarm  |      No      |   No  |    Yes   |    No   |          No         |
+
+Comparisons are based on stable releases at time of writing. See each project's docs for current state.
+
+## Install
+
+<Tabs syncKey="install">
+  <TabItem label="macOS (Homebrew)">
+    ```bash
+    brew install vazra/tap/simpledeploy
+    ```
+  </TabItem>
+  <TabItem label="Ubuntu / Debian (apt)">
+    ```bash
+    curl -fsSL https://pkg.simpledeploy.dev/apt/setup.sh | sudo sh
+    sudo apt install simpledeploy
+    ```
+  </TabItem>
+  <TabItem label="Linux binary (curl)">
+    ```bash
+    curl -fsSL https://github.com/vazra/simpledeploy/releases/latest/download/install.sh | sh
+    ```
+  </TabItem>
+</Tabs>
+
+<CardGrid>
+  <LinkCard title="Read the Quickstart" href="/start/quickstart/" />
+  <LinkCard title="Browse the CLI Reference" href="/reference/cli/" />
+  <LinkCard title="See the Compose Labels" href="/reference/compose-labels/" />
+  <LinkCard title="Contribute on GitHub" href="https://github.com/vazra/simpledeploy" />
+</CardGrid>
+
+---
+
+SimpleDeploy is open source. Code is [MIT licensed](https://github.com/vazra/simpledeploy/blob/main/LICENSE); docs are [CC-BY-4.0](/license/). Report security issues via the [security policy](https://github.com/vazra/simpledeploy/security).

@@ -1,0 +1,1860 @@
+openapi: 3.1.0
+info:
+  title: SimpleDeploy REST API
+  version: 1.2.0
+  summary: Single-binary Docker Compose deployer with proxy, backups, alerts, and metrics.
+  description: |
+    The SimpleDeploy HTTP API drives the dashboard UI and exposes every operation
+    available in the CLI. All endpoints are mounted under the `/api` prefix.
+
+    ## Authentication
+
+    There are two ways to call the API:
+
+    - **Session cookie** (`session`): set by `POST /auth/login` for browser clients.
+      The cookie carries a JWT and is `HttpOnly`, `SameSite=Strict` (or `Lax` when
+      TLS is off).
+    - **API key bearer** (`Authorization: Bearer sd_...`): create at
+      `POST /apikeys`. API keys belong to a user and inherit that user's role and
+      per-app access grants.
+
+    Most endpoints accept either auth method. A handful of dashboard-only routes
+    require a real session.
+
+    ## App scope
+
+    Every app-scoped path is gated by an "app access" middleware. Super admins
+    and admins can reach any app. Regular users only see apps explicitly granted
+    to them via `POST /users/{id}/access`.
+
+    ## Errors
+
+    Errors are returned as `text/plain` with a one-line, generic message and the
+    appropriate HTTP status. The detailed reason is logged server-side, never
+    returned to the client. Treat any non-2xx status as a failure.
+  license:
+    name: MIT
+    identifier: MIT
+    url: https://github.com/vazra/simpledeploy/blob/main/LICENSE
+  contact:
+    name: SimpleDeploy on GitHub
+    url: https://github.com/vazra/simpledeploy
+servers:
+  - url: https://your-server.example/api
+    description: Replace with your server URL.
+
+tags:
+  - name: auth
+    description: Login, logout, first-time setup, health.
+  - name: apps
+    description: List, inspect, deploy, validate, and remove compose apps.
+  - name: app-actions
+    description: Lifecycle actions (start, stop, restart, pull, scale, cancel) and config (env, services, compose).
+  - name: endpoints
+    description: HTTPS endpoints, custom certs, and IP allowlists per app.
+  - name: deploy-history
+    description: Compose version history, rollback, restore, download.
+  - name: users
+    description: User CRUD and per-app access grants (super admin).
+  - name: profile
+    description: Current user profile and password.
+  - name: apikeys
+    description: Personal API keys for the current user.
+  - name: metrics
+    description: System and per-app CPU, memory, network, request stats.
+  - name: logs
+    description: Container logs and deploy logs (WebSocket, see WebSocket reference).
+  - name: backups
+    description: App backup configs, runs, restores, S3/local targets, summary.
+  - name: webhooks
+    description: Outgoing webhook endpoints for alerts and events.
+  - name: alerts
+    description: Alert rules and history.
+  - name: registries
+    description: Private container registry credentials.
+  - name: docker
+    description: Host Docker info, images, networks, volumes, prune.
+  - name: system
+    description: Host info, audit log, vacuum, prune, process logs, DB backup.
+  - name: tls
+    description: Local CA certificate distribution.
+
+security:
+  - sessionAuth: []
+  - apiKeyAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [auth]
+      summary: Liveness probe
+      description: Always returns 200 with a constant body. Safe for load balancers.
+      security: []
+      responses:
+        '200':
+          description: Server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /setup/status:
+    get:
+      tags: [auth]
+      summary: Whether first-time setup is required
+      description: 'Returns `needs_setup: true` until the first super admin account exists.'
+      security: []
+      responses:
+        '200':
+          description: Setup status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  needs_setup: { type: boolean }
+  /setup:
+    post:
+      tags: [auth]
+      summary: Create the initial super admin
+      description: Allowed only when no users exist. Returns 409 once set up.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, minLength: 8 }
+                display_name: { type: string }
+                email: { type: string, format: email }
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  role: { type: string, example: super_admin }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Log in with username and password
+      description: |
+        Validates credentials and sets the `session` cookie. Subject to per-IP
+        rate limiting and per-user/per-IP lockout.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Login succeeded; `session` cookie set.
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: HttpOnly session cookie.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  role: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Clear the session cookie
+      responses:
+        '200':
+          description: Cookie cleared.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /tls/ca.crt:
+    get:
+      tags: [tls]
+      summary: Download the local CA certificate
+      description: |
+        Returns the SimpleDeploy local CA certificate in PEM format when the
+        server is running with self-signed TLS. Used by the Trust page so users
+        can install the CA on their device.
+      security: []
+      responses:
+        '200':
+          description: PEM-encoded certificate.
+          content:
+            application/x-x509-ca-cert:
+              schema: { type: string, format: binary }
+            application/x-pem-file:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /apps:
+    get:
+      tags: [apps]
+      summary: List all apps the caller can see
+      responses:
+        '200':
+          description: Apps array (filtered by per-user access).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/App' }
+
+  /apps/{slug}:
+    parameters:
+      - $ref: '#/components/parameters/AppSlug'
+    get:
+      tags: [apps]
+      summary: Get one app with labels and endpoints
+      responses:
+        '200':
+          description: App detail.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [apps]
+      summary: Remove an app
+      description: Stops containers and deletes the app directory.
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /apps/deploy:
+    post:
+      tags: [apps]
+      summary: Create or update an app from a docker-compose.yml
+      description: |
+        Writes the compose file under the apps directory and triggers a deploy.
+        Use `validate-compose` first to catch label or syntax errors.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, compose]
+              properties:
+                name: { type: string, description: 'App name (becomes the slug).' }
+                compose: { type: string, description: 'Full docker-compose.yml content.' }
+                env: { type: string, description: 'Optional .env file content.' }
+      responses:
+        '202':
+          description: Deploy accepted; watch progress via the deploy logs WebSocket.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  status: { type: string, example: deploying }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /apps/validate-compose:
+    post:
+      tags: [apps]
+      summary: Validate compose YAML and labels without deploying
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [compose]
+              properties:
+                compose: { type: string }
+      responses:
+        '200':
+          description: Validation result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  errors:
+                    type: array
+                    items: { type: string }
+                  warnings:
+                    type: array
+                    items: { type: string }
+
+  /apps/{slug}/restart:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [app-actions]
+      summary: Restart all services for an app
+      responses:
+        '202': { description: Restart accepted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /apps/{slug}/stop:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [app-actions]
+      summary: Stop all services for an app
+      responses:
+        '202': { description: Stop accepted. }
+  /apps/{slug}/start:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [app-actions]
+      summary: Start (after stop) all services for an app
+      responses:
+        '202': { description: Start accepted. }
+  /apps/{slug}/pull:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [app-actions]
+      summary: Pull latest images then redeploy
+      responses:
+        '202': { description: Pull accepted. }
+  /apps/{slug}/scale:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [app-actions]
+      summary: Scale a service up or down
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service, replicas]
+              properties:
+                service: { type: string }
+                replicas: { type: integer, minimum: 0 }
+      responses:
+        '202': { description: Scale accepted. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /apps/{slug}/cancel:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [app-actions]
+      summary: Cancel an in-flight deploy
+      responses:
+        '200':
+          description: Cancellation requested.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /apps/{slug}/services:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [app-actions]
+      summary: List running containers for an app
+      responses:
+        '200':
+          description: Service status.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Service' }
+  /apps/{slug}/env:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [app-actions]
+      summary: Get the .env file for an app
+      responses:
+        '200':
+          description: Env content.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  env: { type: string }
+    put:
+      tags: [app-actions]
+      summary: Replace the .env file for an app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [env]
+              properties:
+                env: { type: string }
+      responses:
+        '200':
+          description: Env saved (does not redeploy).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /apps/{slug}/compose:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [app-actions]
+      summary: Get the docker-compose.yml for an app
+      responses:
+        '200':
+          description: Compose YAML.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  compose: { type: string }
+
+  /apps/{slug}/endpoints:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    put:
+      tags: [endpoints]
+      summary: Replace the list of HTTPS endpoints for an app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoints]
+              properties:
+                endpoints:
+                  type: array
+                  items: { $ref: '#/components/schemas/Endpoint' }
+      responses:
+        '200':
+          description: Endpoints saved and proxy reconfigured.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /apps/{slug}/access:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    put:
+      tags: [endpoints]
+      summary: Update IP access list and rate limits for an app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                allow:
+                  type: array
+                  items: { type: string }
+                  description: CIDRs allowed to reach the app.
+                deny:
+                  type: array
+                  items: { type: string }
+                rate_limit:
+                  type: object
+                  properties:
+                    requests_per_minute: { type: integer }
+                    burst: { type: integer }
+      responses:
+        '200':
+          description: Access rules saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /apps/{slug}/certs/{domain}:
+    parameters:
+      - $ref: '#/components/parameters/AppSlug'
+      - in: path
+        name: domain
+        required: true
+        schema: { type: string }
+    put:
+      tags: [endpoints]
+      summary: Upload a custom TLS certificate for a domain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cert, key]
+              properties:
+                cert: { type: string, description: 'PEM certificate chain.' }
+                key: { type: string, description: 'PEM private key.' }
+      responses:
+        '200':
+          description: Certificate stored.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    delete:
+      tags: [endpoints]
+      summary: Remove a custom TLS certificate
+      responses:
+        '200':
+          description: Certificate removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /apps/{slug}/versions:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [deploy-history]
+      summary: List compose versions for an app (newest first)
+      responses:
+        '200':
+          description: Version list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeployVersion' }
+  /apps/{slug}/rollback:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [deploy-history]
+      summary: Roll back to a previous compose version
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version_id]
+              properties:
+                version_id: { type: integer, format: int64 }
+      responses:
+        '202':
+          description: Rollback accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /apps/{slug}/versions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/AppSlug'
+      - $ref: '#/components/parameters/IdParam'
+    put:
+      tags: [deploy-history]
+      summary: Edit metadata (name, notes, env snapshot) for a version
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                notes: { type: string }
+                env_snapshot: { type: string }
+      responses:
+        '200':
+          description: Updated version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeployVersion' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [deploy-history]
+      summary: Delete a stored compose version
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /apps/{slug}/versions/{id}/download:
+    parameters:
+      - $ref: '#/components/parameters/AppSlug'
+      - $ref: '#/components/parameters/IdParam'
+    get:
+      tags: [deploy-history]
+      summary: Download the compose YAML for a version
+      responses:
+        '200':
+          description: Raw compose file.
+          content:
+            text/yaml:
+              schema: { type: string }
+  /apps/{slug}/versions/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/AppSlug'
+      - $ref: '#/components/parameters/IdParam'
+    post:
+      tags: [deploy-history]
+      summary: Replace the live compose with a stored version and redeploy
+      responses:
+        '202':
+          description: Restore accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: restoring }
+  /apps/{slug}/events:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [deploy-history]
+      summary: List deploy events for an app
+      responses:
+        '200':
+          description: Events array.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeployEvent' }
+
+  /users:
+    get:
+      tags: [users]
+      summary: List all users (super admin or admin)
+      responses:
+        '200':
+          description: Users.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [users]
+      summary: Create a user (super admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username: { type: string }
+                password: { type: string, minLength: 8 }
+                role:
+                  type: string
+                  enum: [super_admin, admin, user]
+                display_name: { type: string }
+                email: { type: string, format: email }
+      responses:
+        '201':
+          description: Created user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /users/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    put:
+      tags: [users]
+      summary: Update a user (super admin)
+      description: Pass `current_password` to authorise password resets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                email: { type: string, format: email }
+                role: { type: string }
+                password: { type: string, minLength: 8 }
+                current_password: { type: string }
+      responses:
+        '200':
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+    delete:
+      tags: [users]
+      summary: Delete a user (super admin)
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /users/{id}/access:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    post:
+      tags: [users]
+      summary: Grant a user access to an app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [app_slug]
+              properties:
+                app_slug: { type: string }
+      responses:
+        '200':
+          description: Granted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /users/{id}/access/{slug}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+      - $ref: '#/components/parameters/AppSlug'
+    delete:
+      tags: [users]
+      summary: Revoke a user's access to an app
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /me:
+    get:
+      tags: [profile]
+      summary: Get the current user's profile
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+    put:
+      tags: [profile]
+      summary: Update the current user's display name and email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /me/password:
+    put:
+      tags: [profile]
+      summary: Change the current user's password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Password changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /apikeys:
+    get:
+      tags: [apikeys]
+      summary: List the current user's API keys
+      responses:
+        '200':
+          description: Keys (without secrets).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApiKey' }
+    post:
+      tags: [apikeys]
+      summary: Create a new API key (returned ONCE, store it now)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '201':
+          description: Created. The plaintext `key` is only returned here.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiKey'
+                  - type: object
+                    properties:
+                      key: { type: string, example: 'sd_xxx' }
+  /apikeys/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    delete:
+      tags: [apikeys]
+      summary: Revoke an API key
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /metrics/system:
+    get:
+      tags: [metrics]
+      summary: Host CPU, memory, and disk metrics
+      parameters:
+        - $ref: '#/components/parameters/SinceParam'
+      responses:
+        '200':
+          description: Metric points.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MetricsPoint' }
+  /apps/{slug}/metrics:
+    parameters:
+      - $ref: '#/components/parameters/AppSlug'
+      - $ref: '#/components/parameters/SinceParam'
+    get:
+      tags: [metrics]
+      summary: Per-app container metrics
+      responses:
+        '200':
+          description: Metric points.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MetricsPoint' }
+  /apps/{slug}/requests:
+    parameters:
+      - $ref: '#/components/parameters/AppSlug'
+      - $ref: '#/components/parameters/SinceParam'
+    get:
+      tags: [metrics]
+      summary: HTTP request stats for an app's endpoints
+      responses:
+        '200':
+          description: Request stat rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RequestStat' }
+
+  /apps/{slug}/deploy-logs:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [logs]
+      summary: WebSocket stream of deploy progress
+      description: |
+        Upgrades to a WebSocket. Server pushes JSON frames as `docker compose`
+        runs. See the WebSocket reference for the message shape.
+      responses:
+        '101': { description: Switching protocols. }
+  /apps/{slug}/logs:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [logs]
+      summary: WebSocket stream of container logs
+      description: |
+        Upgrades to a WebSocket. Server pushes JSON frames per stdout/stderr line
+        for the app's services. See the WebSocket reference.
+      responses:
+        '101': { description: Switching protocols. }
+
+  /apps/{slug}/backups/configs:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [backups]
+      summary: List backup configs for an app
+      responses:
+        '200':
+          description: Configs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BackupConfig' }
+    post:
+      tags: [backups]
+      summary: Create a backup config for an app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BackupConfig' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupConfig' }
+  /backups/configs/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    put:
+      tags: [backups]
+      summary: Update a backup config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BackupConfig' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BackupConfig' }
+    delete:
+      tags: [backups]
+      summary: Delete a backup config
+      responses:
+        '204': { description: Deleted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /apps/{slug}/backups/runs:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [backups]
+      summary: List backup runs across all configs for an app
+      responses:
+        '200':
+          description: Runs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BackupRun' }
+  /apps/{slug}/backups/run:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [backups]
+      summary: Trigger a backup for every config of this app
+      responses:
+        '202': { description: Backup accepted. }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /backups/restore/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    post:
+      tags: [backups]
+      summary: Restore from a stored backup run
+      responses:
+        '202': { description: Restore accepted. }
+  /backups/runs/{id}/download:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    get:
+      tags: [backups]
+      summary: Download a backup file (local target) or redirect to S3
+      responses:
+        '200':
+          description: Backup bytes (local target).
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '307':
+          description: Pre-signed S3 URL redirect.
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /apps/{slug}/backups/upload-restore:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    post:
+      tags: [backups]
+      summary: Upload a backup file and restore it
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, strategy]
+              properties:
+                file: { type: string, format: binary }
+                strategy: { type: string, description: 'Strategy id (e.g. postgres, mysql, volume).' }
+                container: { type: string, description: 'Optional target container name.' }
+      responses:
+        '202': { description: Restore accepted. }
+  /backups/summary:
+    get:
+      tags: [backups]
+      summary: Cross-app backup summary for the dashboard
+      responses:
+        '200':
+          description: Summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  apps:
+                    type: array
+                    items: { type: object }
+                  recent_runs:
+                    type: array
+                    items: { type: object }
+  /apps/{slug}/backups/detect:
+    parameters: [{ $ref: '#/components/parameters/AppSlug' }]
+    get:
+      tags: [backups]
+      summary: Detect candidate backup strategies from an app's compose file
+      responses:
+        '200':
+          description: Detection results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  strategies:
+                    type: array
+                    items: { type: object }
+  /backups/configs/{id}/run:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    post:
+      tags: [backups]
+      summary: Trigger a single backup config now
+      responses:
+        '202': { description: Backup accepted. }
+  /backups/test-s3:
+    post:
+      tags: [backups]
+      summary: Test an S3 target by uploading and deleting a probe object
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bucket: { type: string }
+                region: { type: string }
+                endpoint: { type: string }
+                access_key_id: { type: string }
+                secret_access_key: { type: string }
+                prefix: { type: string }
+                use_path_style: { type: boolean }
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  error: { type: string }
+
+  /webhooks:
+    get:
+      tags: [webhooks]
+      summary: List webhook destinations
+      responses:
+        '200':
+          description: Webhooks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Webhook' }
+    post:
+      tags: [webhooks]
+      summary: Create a webhook destination
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Webhook' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+  /webhooks/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    put:
+      tags: [webhooks]
+      summary: Update a webhook destination
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Webhook' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Webhook' }
+    delete:
+      tags: [webhooks]
+      summary: Delete a webhook destination
+      responses:
+        '204': { description: Deleted. }
+  /webhooks/test:
+    post:
+      tags: [webhooks]
+      summary: Send a test event to a webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                kind: { type: string, description: 'generic, slack, or discord' }
+                secret: { type: string }
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  status: { type: integer }
+                  error: { type: string }
+
+  /alerts/rules:
+    get:
+      tags: [alerts]
+      summary: List alert rules
+      responses:
+        '200':
+          description: Rules.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AlertRule' }
+    post:
+      tags: [alerts]
+      summary: Create an alert rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRule' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRule' }
+  /alerts/rules/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    put:
+      tags: [alerts]
+      summary: Update an alert rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRule' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRule' }
+    delete:
+      tags: [alerts]
+      summary: Delete an alert rule
+      responses:
+        '204': { description: Deleted. }
+
+  /alerts/history:
+    get:
+      tags: [alerts]
+      summary: List recent alert events
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: Events.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+    delete:
+      tags: [alerts]
+      summary: Clear alert history
+      responses:
+        '200':
+          description: Cleared.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /registries:
+    get:
+      tags: [registries]
+      summary: List private container registries
+      responses:
+        '200':
+          description: Registries (credentials masked).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Registry' }
+    post:
+      tags: [registries]
+      summary: Add a private registry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Registry' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Registry' }
+  /registries/{id}:
+    parameters: [{ $ref: '#/components/parameters/IdParam' }]
+    put:
+      tags: [registries]
+      summary: Update a registry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Registry' }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Registry' }
+    delete:
+      tags: [registries]
+      summary: Delete a registry
+      responses:
+        '204': { description: Deleted. }
+
+  /docker/info:
+    get:
+      tags: [docker]
+      summary: Docker daemon info
+      responses:
+        '200':
+          description: Info object.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /docker/disk-usage:
+    get:
+      tags: [docker]
+      summary: Docker disk usage breakdown
+      responses:
+        '200':
+          description: Disk usage.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /docker/images:
+    get:
+      tags: [docker]
+      summary: List local images
+      responses:
+        '200':
+          description: Images.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+  /docker/images/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [docker]
+      summary: Remove an image by id or repo:tag
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /docker/networks:
+    get:
+      tags: [docker]
+      summary: List Docker networks
+      responses:
+        '200':
+          description: Networks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+  /docker/networks/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [docker]
+      summary: Remove a network
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /docker/volumes:
+    get:
+      tags: [docker]
+      summary: List Docker volumes
+      responses:
+        '200':
+          description: Volumes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+  /docker/volumes/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [docker]
+      summary: Remove a Docker volume
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /docker/prune/containers:
+    post:
+      tags: [docker]
+      summary: Prune stopped containers
+      responses:
+        '200':
+          description: Prune result.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /docker/prune/images:
+    post:
+      tags: [docker]
+      summary: Prune unused images
+      responses:
+        '200':
+          description: Prune result.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /docker/prune/volumes:
+    post:
+      tags: [docker]
+      summary: Prune unused volumes
+      responses:
+        '200':
+          description: Prune result.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /docker/prune/build-cache:
+    post:
+      tags: [docker]
+      summary: Prune builder cache
+      responses:
+        '200':
+          description: Prune result.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /docker/prune/all:
+    post:
+      tags: [docker]
+      summary: Run every Docker prune at once
+      responses:
+        '200':
+          description: Prune result.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /system/info:
+    get:
+      tags: [system]
+      summary: Server build info, uptime, host facts
+      responses:
+        '200':
+          description: System info.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /system/storage-breakdown:
+    get:
+      tags: [system]
+      summary: Disk usage of the data directory
+      responses:
+        '200':
+          description: Breakdown.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /system/audit-log:
+    get:
+      tags: [system]
+      summary: Read audit events
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: Events.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditEvent' }
+    delete:
+      tags: [system]
+      summary: Clear audit log (super admin)
+      responses:
+        '200':
+          description: Cleared.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /system/audit-config:
+    get:
+      tags: [system]
+      summary: Get audit log retention config
+      responses:
+        '200':
+          description: Audit config.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+    put:
+      tags: [system]
+      summary: Update audit log retention (super admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /system/process-logs:
+    get:
+      tags: [system]
+      summary: Tail of the server process log buffer
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 500 }
+      responses:
+        '200':
+          description: Recent log lines.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+  /system/process-logs/stream:
+    get:
+      tags: [system]
+      summary: WebSocket live stream of server process logs
+      description: Upgrades to a WebSocket. See the WebSocket reference.
+      responses:
+        '101': { description: Switching protocols. }
+  /system/prune/metrics:
+    post:
+      tags: [system]
+      summary: Delete old metric points (super admin)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                older_than_days: { type: integer }
+      responses:
+        '200':
+          description: Pruned.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /system/prune/request-stats:
+    post:
+      tags: [system]
+      summary: Delete old request stats (super admin)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                older_than_days: { type: integer }
+      responses:
+        '200':
+          description: Pruned.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /system/vacuum:
+    post:
+      tags: [system]
+      summary: Run SQLite VACUUM (super admin)
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /system/backup/download:
+    post:
+      tags: [system]
+      summary: Stream a one-shot SQLite backup
+      description: |
+        Runs `VACUUM INTO` to a temporary file then streams it. When `compact=true`,
+        metrics and request stats tables are stripped before download.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                compact: { type: boolean, default: false }
+      responses:
+        '200':
+          description: SQLite database bytes.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+  /system/backup/config:
+    get:
+      tags: [system]
+      summary: Get the scheduled DB backup config
+      responses:
+        '200':
+          description: Config.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+    post:
+      tags: [system]
+      summary: Set the scheduled DB backup config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                schedule: { type: string, description: 'Cron expression.' }
+                destination: { type: string, description: 'Filesystem path.' }
+                compact: { type: boolean }
+                retention: { type: integer }
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+  /system/backup/runs:
+    get:
+      tags: [system]
+      summary: List recent scheduled DB backup runs
+      responses:
+        '200':
+          description: Runs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Session cookie set by `POST /auth/login`. Carries a JWT.
+    apiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: 'sd_<token>'
+      description: Personal API key. Created via `POST /apikeys`.
+  parameters:
+    AppSlug:
+      in: path
+      name: slug
+      required: true
+      schema: { type: string }
+      description: App slug (lowercase, dash-separated).
+    IdParam:
+      in: path
+      name: id
+      required: true
+      schema: { type: integer, format: int64 }
+    SinceParam:
+      in: query
+      name: since
+      required: false
+      schema: { type: string }
+      description: 'ISO-8601 timestamp or duration like 1h, 24h, 7d.'
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        text/plain:
+          schema: { type: string }
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        text/plain:
+          schema: { type: string }
+    Forbidden:
+      description: Authenticated but not allowed.
+      content:
+        text/plain:
+          schema: { type: string }
+    NotFound:
+      description: Resource not found.
+      content:
+        text/plain:
+          schema: { type: string }
+    Conflict:
+      description: State conflict.
+      content:
+        text/plain:
+          schema: { type: string }
+    TooManyRequests:
+      description: Rate limited or locked out.
+      content:
+        text/plain:
+          schema: { type: string }
+  schemas:
+    StatusOk:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+    App:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        slug: { type: string }
+        compose_path: { type: string }
+        status: { type: string, example: running }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AppDetail:
+      allOf:
+        - $ref: '#/components/schemas/App'
+        - type: object
+          properties:
+            deploying: { type: boolean }
+            Labels:
+              type: object
+              additionalProperties: { type: string }
+            endpoints:
+              type: array
+              items: { $ref: '#/components/schemas/Endpoint' }
+    Service:
+      type: object
+      properties:
+        name: { type: string }
+        image: { type: string }
+        state: { type: string, example: running }
+        status: { type: string }
+        ports:
+          type: array
+          items: { type: string }
+        replicas: { type: integer }
+    Endpoint:
+      type: object
+      properties:
+        domain: { type: string }
+        port: { type: string }
+        tls: { type: string, description: 'auto, off, internal, or path to a stored cert.' }
+        service: { type: string }
+    BackupConfig:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        app_id: { type: integer, format: int64 }
+        name: { type: string }
+        strategy: { type: string, example: postgres }
+        strategy_config_json: { type: string }
+        target: { type: string, example: s3 }
+        target_config_json: { type: string }
+        schedule_cron: { type: string }
+        retention_count: { type: integer }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+    BackupRun:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        backup_config_id: { type: integer, format: int64 }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        status: { type: string, example: success }
+        size_bytes: { type: integer, format: int64 }
+        file_path: { type: string }
+        error: { type: string }
+    AlertRule:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        scope: { type: string, description: 'system, app, or webhook' }
+        target: { type: string, description: 'App slug or "*".' }
+        metric: { type: string }
+        operator: { type: string, enum: ['>', '<', '>=', '<=', '==', '!='] }
+        threshold: { type: number }
+        duration_seconds: { type: integer }
+        webhook_ids:
+          type: array
+          items: { type: integer, format: int64 }
+        enabled: { type: boolean }
+    Webhook:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        url: { type: string, format: uri }
+        kind: { type: string, description: 'generic, slack, or discord' }
+        secret: { type: string }
+        enabled: { type: boolean }
+    User:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        role: { type: string, enum: [super_admin, admin, user] }
+        display_name: { type: string }
+        email: { type: string, format: email }
+        created_at: { type: string, format: date-time }
+    ApiKey:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+    Registry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        registry: { type: string, example: ghcr.io }
+        username: { type: string }
+        password: { type: string, description: 'Write-only; never returned.' }
+        created_at: { type: string, format: date-time }
+    MetricsPoint:
+      type: object
+      properties:
+        ts: { type: string, format: date-time }
+        cpu_percent: { type: number }
+        memory_bytes: { type: integer, format: int64 }
+        memory_limit: { type: integer, format: int64 }
+        rx_bytes: { type: integer, format: int64 }
+        tx_bytes: { type: integer, format: int64 }
+    RequestStat:
+      type: object
+      properties:
+        ts: { type: string, format: date-time }
+        path: { type: string }
+        method: { type: string }
+        status: { type: integer }
+        count: { type: integer, format: int64 }
+        latency_ms_p50: { type: number }
+        latency_ms_p95: { type: number }
+        latency_ms_p99: { type: number }
+    AuditEvent:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        ts: { type: string, format: date-time }
+        type: { type: string }
+        username: { type: string }
+        ip: { type: string }
+        detail: { type: string }
+        success: { type: boolean }
+    DeployVersion:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        app_id: { type: integer, format: int64 }
+        version: { type: integer }
+        name: { type: string }
+        notes: { type: string }
+        content: { type: string, description: 'Compose YAML at the time of deploy.' }
+        env_snapshot: { type: string }
+        created_at: { type: string, format: date-time }
+    DeployEvent:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        app_id: { type: integer, format: int64 }
+        version_id: { type: integer, format: int64 }
+        action: { type: string, example: deploy }
+        status: { type: string, example: ok }
+        message: { type: string }
+        created_at: { type: string, format: date-time }

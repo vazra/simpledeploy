@@ -1,0 +1,16 @@
+---
+title: Compose label builder
+description: Build a docker-compose.yml with SimpleDeploy labels by clicking through options.
+---
+
+import ComposePlayground from "../../../components/ComposePlayground.svelte";
+
+Pick options on the left. The generated `docker-compose.yml` updates live on the right. Copy it, save as `docker-compose.yml`, and `simpledeploy apply` it.
+
+<ComposePlayground client:load />
+
+## What's next
+
+- See the full [compose labels reference](/reference/compose-labels/) for every key.
+- Walk through [your first deploy](/first-deploy/compose/) to learn the surrounding setup.
+- Read the [routing and TLS guide](/guides/tls/) for HTTPS modes.

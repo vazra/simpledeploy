@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="32" height="32" role="img" aria-label="SimpleDeploy">
+  <defs>
+    <linearGradient id="sd-g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#sd-g)">
+    <path d="M24 4l18 9v3l-18 9-18-9v-3z"/>
+    <path opacity="0.75" d="M6 22l18 9 18-9v3l-18 9-18-9z"/>
+    <path opacity="0.55" d="M6 31l18 9 18-9v3l-18 9-18-9z"/>
+  </g>
+</svg>
