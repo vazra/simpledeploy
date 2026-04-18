@@ -732,6 +732,9 @@
                   placeholder="/var/backups/simpledeploy"
                   class="w-full px-3 py-1.5 text-sm bg-surface-1 border border-border/50 rounded-lg text-text-primary focus:outline-none focus:border-accent font-mono"
                 />
+                {#if info?.simpledeploy?.deployment_mode && info.simpledeploy.deployment_mode !== 'native'}
+                  <span class="text-xs text-text-muted mt-1 block">Must be a path inside a mounted volume. <span class="font-mono">/var/lib/simpledeploy</span> is already mounted in the standard docker-compose.</span>
+                {/if}
               </div>
               <div>
                 <label class="block text-xs font-medium text-text-secondary mb-1">Retention Count</label>
@@ -867,6 +870,12 @@
         <div>
           <h2 class="text-base font-medium text-text-primary">Process Logs</h2>
           <p class="text-xs text-text-secondary mt-1">SimpleDeploy application logs from the current session.</p>
+          {#if info?.simpledeploy?.deployment_mode && info.simpledeploy.deployment_mode !== 'native'}
+            <p class="text-xs text-text-muted mt-1">
+              Also available on the host:
+              <button type="button" onclick={() => copyCmd('docker compose logs -f simpledeploy')} class="font-mono underline decoration-dotted hover:text-text-primary" title="Click to copy">docker compose logs -f simpledeploy</button>
+            </p>
+          {/if}
         </div>
         <div class="flex items-center gap-2">
           <label class="flex items-center gap-2 text-xs text-text-secondary">
