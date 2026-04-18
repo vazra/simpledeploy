@@ -16,4 +16,18 @@ screenshots/
 docs-site/node_modules
 docs-site/dist
 docs-site/.astro
-docs-site/src/content/docs/synced/
+
+# Content synced from /docs at build time. Authored under /docs only.
+# Site-only paths (index, blog, community, license, playground, changelog) are tracked.
+docs-site/src/content/docs/architecture/
+docs-site/src/content/docs/concepts/
+docs-site/src/content/docs/contributing/
+docs-site/src/content/docs/first-deploy/
+docs-site/src/content/docs/guides/
+docs-site/src/content/docs/install/
+docs-site/src/content/docs/integrations/
+docs-site/src/content/docs/operations/
+docs-site/src/content/docs/reference/
+docs-site/src/content/docs/start/
+docs-site/src/content/docs/faq.md
+docs-site/src/content/docs/README.md
