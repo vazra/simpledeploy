@@ -18,11 +18,12 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make ui-build
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           # golangci-lint v2 is required because go.mod targets go1.26
           # and the last v1 release (v1.64.8) was built with go1.24.
-          # Config file (.golangci.yml) is in v2 schema.
+          # The v6 action doesn't understand v2 version strings; keep the
+          # action version in sync with the CLI version.
           version: v2.11.4
 
   test:
