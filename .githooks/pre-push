@@ -9,6 +9,19 @@ fi
 echo "[pre-push] go vet"
 go vet ./...
 
+# golangci-lint mirrors CI's check. Use the repo's .golangci.yml; if the
+# binary isn't installed locally, skip with a note (don't block pushes on
+# first-time contributors). Skippable via SIMPLEDEPLOY_SKIP_LINT=1 when
+# iterating fast.
+if [ -z "$SIMPLEDEPLOY_SKIP_LINT" ]; then
+  if command -v golangci-lint >/dev/null 2>&1; then
+    echo "[pre-push] golangci-lint"
+    golangci-lint run ./...
+  else
+    echo "[pre-push] golangci-lint not installed - skipping (install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8)"
+  fi
+fi
+
 echo "[pre-push] go build"
 go build ./...
 
@@ -18,8 +31,13 @@ go test -short ./...
 if [ -d ui/node_modules ]; then
   echo "[pre-push] ui vitest"
   (cd ui && npm test --silent)
+  # UI build doubles as a lint/type check: the Svelte + Vite compiler
+  # fails on undefined exports, missing imports, and a11y violations.
+  # Catches regressions like a missing named export before CI.
+  echo "[pre-push] ui build"
+  (cd ui && npm run build --silent >/dev/null)
 else
-  echo "[pre-push] ui vitest skipped (run 'cd ui && npm install' to enable)"
+  echo "[pre-push] ui checks skipped (run 'cd ui && npm install' to enable)"
 fi
 
 echo "[pre-push] ok"

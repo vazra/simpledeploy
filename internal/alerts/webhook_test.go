@@ -29,8 +29,7 @@ func makeEvent() AlertEvent {
 func renderTemplate(t *testing.T, tmplStr string, event AlertEvent) string {
 	t.Helper()
 	d := NewWebhookDispatcherAllowPrivate()
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		w.Header().Set("X-Body", string(body))
 		w.WriteHeader(http.StatusOK)

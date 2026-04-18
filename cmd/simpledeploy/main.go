@@ -306,7 +306,7 @@ func scanAndTee(r *os.File, orig *os.File, buf *logbuf.Buffer) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Fprintln(orig, line)
-		buf.Write([]byte(line))
+		_, _ = buf.Write([]byte(line))
 	}
 }
 
@@ -380,13 +380,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	proxyCfg := proxy.CaddyConfig{
-		ListenAddr: cfg.ListenAddr,
-		TLSMode:    cfg.TLS.Mode,
-		TLSEmail:   cfg.TLS.Email,
-		DataDir:    cfg.DataDir,
+		ListenAddr:     cfg.ListenAddr,
+		HTTPListenAddr: cfg.HTTPListenAddr,
+		TLSMode:        cfg.TLS.Mode,
+		TLSEmail:       cfg.TLS.Email,
+		DataDir:        cfg.DataDir,
 	}
 	caddyProxy := proxy.NewCaddyProxy(proxyCfg)
-	defer caddyProxy.Stop()
+	defer func() { _ = caddyProxy.Stop() }()
 
 	dep, err := deployer.New(&deployer.ExecRunner{})
 	if err != nil {

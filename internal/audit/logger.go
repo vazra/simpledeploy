@@ -45,7 +45,7 @@ func (l *Logger) Log(e Event) {
 	if err == nil {
 		data = append(data, '\n')
 		l.mu.Lock()
-		l.writer.Write(data)
+		_, _ = l.writer.Write(data)
 		l.entries[l.pos] = e
 		l.pos++
 		if l.pos >= l.maxSize {

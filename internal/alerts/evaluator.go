@@ -174,7 +174,7 @@ func (e *Evaluator) DispatchBackupAlert(event BackupAlertEvent) {
 		if err != nil || webhook == nil {
 			continue
 		}
-		e.dispatcher.Send(*webhook, alertEvent)
+		_ = e.dispatcher.Send(*webhook, alertEvent)
 	}
 }
 

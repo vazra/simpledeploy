@@ -20,7 +20,9 @@ jobs:
       - run: make ui-build
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned: .golangci.yml uses the v1 schema. Bump both together
+          # when migrating to v2.
+          version: v1.64.8
 
   test:
     runs-on: ubuntu-latest

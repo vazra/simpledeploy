@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -117,20 +116,4 @@ func (s *SQLiteStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 	}
 
 	return nil
-}
-
-// sqlitePaths extracts explicit paths from the backup.paths label, if set.
-func sqlitePaths(labels map[string]string) []string {
-	raw := labels["simpledeploy.backup.paths"]
-	if raw == "" {
-		return nil
-	}
-	var paths []string
-	for _, p := range strings.Split(raw, ",") {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			paths = append(paths, p)
-		}
-	}
-	return paths
 }

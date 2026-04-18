@@ -185,11 +185,6 @@ func ExtractLabels(labels map[string]string) LabelConfig {
 // extractEndpoints scans labels for simpledeploy.endpoints.N.{domain,port,tls}
 // and returns EndpointConfigs sorted by index, with Service set to serviceName.
 func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig {
-	type epData struct {
-		index int
-		ep    EndpointConfig
-	}
-
 	byIndex := map[int]*EndpointConfig{}
 	for k, v := range labels {
 		m := endpointLabelRe.FindStringSubmatch(k)

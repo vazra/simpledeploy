@@ -161,28 +161,28 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	strategy, ok := s.strategies[cfg.Strategy]
 	if !ok {
 		errMsg := fmt.Sprintf("unknown strategy: %s", cfg.Strategy)
-		s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	factory, ok := s.targets[cfg.Target]
 	if !ok {
 		errMsg := fmt.Sprintf("unknown target: %s", cfg.Target)
-		s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	target, err := factory(cfg.TargetConfigJSON)
 	if err != nil {
 		errMsg := fmt.Sprintf("create target: %v", err)
-		s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	app, err := s.store.GetAppByID(cfg.AppID)
 	if err != nil {
 		errMsg := fmt.Sprintf("get app: %v", err)
-		s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
@@ -218,7 +218,7 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	result, err := pipe.RunBackup(ctx, opts, preHooks, postHooks)
 	if err != nil {
 		errMsg := err.Error()
-		s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		s.sendAlert(app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
 		return fmt.Errorf("pipeline: %w", err)
 	}

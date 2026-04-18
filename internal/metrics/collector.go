@@ -116,7 +116,7 @@ func (c *Collector) syncStatus(ctx context.Context) {
 			want = "running"
 		}
 		if app.Status != want {
-			c.statusSyncer.UpdateAppStatus(app.Slug, want)
+			_ = c.statusSyncer.UpdateAppStatus(app.Slug, want)
 		}
 	}
 }

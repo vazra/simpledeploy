@@ -55,7 +55,7 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.reconciler != nil {
-		go s.reconciler.Reconcile(r.Context())
+		go func() { _ = s.reconciler.Reconcile(r.Context()) }()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
