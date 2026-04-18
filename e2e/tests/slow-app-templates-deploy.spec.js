@@ -45,6 +45,7 @@ test.describe('App templates - slow deploy', () => {
       await page.getByRole('button', { name: 'Deploy App' }).first().click();
       const dialog = page.getByRole('dialog');
       await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: /^browse templates$/i }).click();
 
       await dialog.getByRole('button', { name: new RegExp(`use template .+`, 'i') }).first().waitFor();
       // Templates display by name; find the card for this template id by

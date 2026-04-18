@@ -1059,7 +1059,7 @@ export const appTemplates = [
     compose: {
       services: {
         vaultwarden: {
-          image: 'vaultwarden/server:1.32',
+          image: 'vaultwarden/server:1.35.7',
           restart: 'unless-stopped',
           environment: {
             DOMAIN: 'https://{{domain}}',
