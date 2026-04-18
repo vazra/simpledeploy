@@ -16,8 +16,9 @@ COPY simpledeploy /usr/local/bin/simpledeploy
 RUN mkdir -p /etc/simpledeploy /var/lib/simpledeploy
 
 EXPOSE 80 443 8443
+ENV SIMPLEDEPLOY_HEALTH_PORT=8443
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD curl -fsSk https://localhost:8443/api/health || exit 1
+  CMD curl -fsS http://localhost:${SIMPLEDEPLOY_HEALTH_PORT}/api/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/simpledeploy"]
 CMD ["serve", "--config", "/etc/simpledeploy/config.yaml"]
