@@ -91,7 +91,8 @@ test.describe('Deploy Apps', () => {
     await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    // Redeploying an existing app is an update, should succeed
+    // App already exists -> confirmation dialog; click Redeploy to overwrite.
+    await page.getByRole('button', { name: 'Redeploy' }).click();
     await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
   });
 });

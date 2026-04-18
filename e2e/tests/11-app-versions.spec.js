@@ -63,6 +63,7 @@ test.describe('Versions - Functional', () => {
     const deployRes = await apiRequest('POST', '/api/apps/deploy', {
       name: 'e2e-nginx',
       compose: b64,
+      force: true,
     });
     expect(deployRes.status).toBe(202);
 
