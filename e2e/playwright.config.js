@@ -8,6 +8,7 @@ const LITE_SKIP = [
   '**/27-backup-s3.spec.js',
   '**/28-db-strategies.spec.js',
   '**/29b-private-registry.spec.js',
+  '**/slow-*.spec.js',
 ];
 
 export default defineConfig({
