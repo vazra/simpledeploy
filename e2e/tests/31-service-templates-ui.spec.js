@@ -32,9 +32,11 @@ test.describe('Service templates - UI validation', () => {
       const dialog = await openBlankWizard(page);
 
       // Wizard opens in visual mode by default; open the service templates
-      // picker and pick this template.
+      // picker and pick this template. The button's accessible name is the
+      // concatenation of its icon emoji and the template name, so partial
+      // match on name suffices.
       await dialog.getByRole('button', { name: 'Add Service' }).click();
-      await dialog.getByRole('button', { name: tpl.name, exact: true }).first().click();
+      await dialog.getByRole('button', { name: tpl.name }).first().click();
 
       // Switch to YAML and verify the template's image made it in (blank
       // template renders no image, so only assert when one is configured).

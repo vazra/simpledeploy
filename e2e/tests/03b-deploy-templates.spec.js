@@ -73,8 +73,9 @@ test.describe('Deploy via Templates', () => {
   });
 
   test('deploy via Node API + Postgres template propagates backup label', async ({ page }) => {
-    // Deploy pulls node:20-alpine + postgres:16-alpine; extend beyond default 120s.
-    test.setTimeout(300_000);
+    // Deploy pulls node:20-alpine + postgres:16-alpine; on slow networks
+    // this can exceed 5 min end-to-end, so we give it a generous budget.
+    test.setTimeout(600_000);
     const slug = 'e2e-node-tpl';
 
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
@@ -117,11 +118,11 @@ test.describe('Deploy via Templates', () => {
 
     await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
 
-    // Next -> Deploy. Node API + Postgres template pulls large images, so
-    // allow up to 280s (well under the 300s test-level timeout).
+    // Next -> Deploy. Node API + Postgres template pulls large images;
+    // allow up to 480s under the 600s test-level timeout.
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 280_000 });
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 480_000 });
 
     // Navigate to the app's Backups tab and confirm it renders.
     await dialog.getByRole('button', { name: 'View App' }).click();
