@@ -99,6 +99,18 @@ export function isValidHost(s) {
   return /^[a-zA-Z0-9.-]+$/.test(s);
 }
 
+// sslip.io resolves names like <anything>.<ip>.sslip.io to <ip>. Hostnames
+// (e.g. "localhost") are not supported reliably, so Quick test requires IPv4.
+export function isValidIPv4(s) {
+  if (!s || typeof s !== 'string') return false;
+  const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  return m.slice(1).every((p) => {
+    const n = Number(p);
+    return n >= 0 && n <= 255 && String(n) === p;
+  });
+}
+
 export function computeQuickTestDomain(slug, host) {
   return `${slug}.${host}.sslip.io`;
 }
