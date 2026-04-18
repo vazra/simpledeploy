@@ -11,14 +11,16 @@ The fastest way to deploy if you already have the dashboard open.
 
 1. **Log in** at `https://manage.example.com/`.
 
-2. From the dashboard, click **Add Service** in the top right.
+2. From the dashboard, click **Deploy App** in the top right.
 
    ![Login screen](/screenshots/login-dark.png)
 
-3. The deploy wizard opens. You can either:
+3. The deploy wizard opens on a **Start** chooser with two primary options:
 
-   - **Paste** the YAML directly into the editor, or
-   - **Upload** a `docker-compose.yml` from disk.
+   - **Upload docker-compose file**: pick a `docker-compose.yml` from disk.
+   - **Build it yourself**: open the visual builder and add services, ports, env vars, and volumes step by step. You can switch to a raw YAML editor at any time.
+
+   If you just want a quick start or an example to learn from, click **Browse templates** below the two options to pick a preconfigured app or service template.
 
 4. Give the app a **name** (becomes its slug in URLs and CLI). Lowercase letters, digits, dashes.
 
