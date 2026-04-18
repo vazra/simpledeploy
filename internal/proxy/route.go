@@ -26,6 +26,14 @@ func upstreamHost() string {
 	return "localhost"
 }
 
+// UpstreamResolver resolves a compose service+port to a concrete upstream
+// host string. Implementations may use Docker API lookups to map a service
+// name to a container IP on the shared network. A nil resolver disables
+// container-IP resolution and callers fall through to DNS.
+type UpstreamResolver interface {
+	ContainerIP(project, service, network string) (string, error)
+}
+
 // Route holds routing config for a deployed app.
 type Route struct {
 	AppSlug    string
@@ -47,7 +55,10 @@ type RateLimitConfig struct {
 
 // ResolveRoutes derives Routes from an AppConfig (one per endpoint).
 // Returns empty slice if no endpoints are defined (no error).
-func ResolveRoutes(app *compose.AppConfig) ([]Route, error) {
+// If resolver is non-nil, endpoints without a published host port try to
+// resolve to <container-ip>:<port> via Docker API and fall back to DNS on
+// failure or empty result.
+func ResolveRoutes(app *compose.AppConfig, resolver UpstreamResolver) ([]Route, error) {
 	if len(app.Endpoints) == 0 {
 		return nil, nil
 	}
@@ -109,7 +120,7 @@ func ResolveRoutes(app *compose.AppConfig) ([]Route, error) {
 			continue
 		}
 
-		upstream, err := resolveEndpointUpstream(app, ep)
+		upstream, err := resolveEndpointUpstream(app, ep, resolver)
 		if err != nil {
 			log.Printf("[proxy] skip endpoint %s for %s: %v", ep.Domain, app.Name, err)
 			continue
@@ -137,8 +148,9 @@ func ResolveRoutes(app *compose.AppConfig) ([]Route, error) {
 
 // resolveEndpointUpstream finds the upstream address for an endpoint.
 // Looks for a host port mapping matching endpoint.Port in endpoint.Service.
-// If no host port mapping exists, uses the Docker network address (service:port).
-func resolveEndpointUpstream(app *compose.AppConfig, ep compose.EndpointConfig) (string, error) {
+// If no host port mapping exists, tries container-IP resolution via resolver
+// (when non-nil) and falls back to the Docker DNS string (<service>:<port>).
+func resolveEndpointUpstream(app *compose.AppConfig, ep compose.EndpointConfig, resolver UpstreamResolver) (string, error) {
 	for _, svc := range app.Services {
 		if svc.Name != ep.Service {
 			continue
@@ -148,13 +160,13 @@ func resolveEndpointUpstream(app *compose.AppConfig, ep compose.EndpointConfig) 
 				if pm.Host != "" {
 					return upstreamHost() + ":" + pm.Host, nil
 				}
-				// No host mapping, use Docker network
-				return fmt.Sprintf("%s:%s", ep.Service, ep.Port), nil
+				// No host mapping, use container-IP resolution then DNS.
+				return containerOrDNS(app, ep, resolver), nil
 			}
 		}
-		// Port not in mappings, use Docker network address
+		// Port not in mappings, use container-IP resolution then DNS.
 		if ep.Port != "" {
-			return fmt.Sprintf("%s:%s", ep.Service, ep.Port), nil
+			return containerOrDNS(app, ep, resolver), nil
 		}
 		// No port specified, use first mapping
 		for _, pm := range svc.Ports {
@@ -164,9 +176,22 @@ func resolveEndpointUpstream(app *compose.AppConfig, ep compose.EndpointConfig) 
 		}
 		return "", fmt.Errorf("service %q has no port mappings", ep.Service)
 	}
-	// Service not found in parsed services, use Docker network
+	// Service not found in parsed services, use container-IP resolution then DNS.
 	if ep.Port != "" {
-		return fmt.Sprintf("%s:%s", ep.Service, ep.Port), nil
+		return containerOrDNS(app, ep, resolver), nil
 	}
 	return "", fmt.Errorf("service %q not found and no port specified", ep.Service)
+}
+
+// containerOrDNS attempts a Docker API container-IP lookup; if the resolver
+// returns a non-empty IP, the upstream is <ip>:<port> (bypassing the localhost
+// rewrite since IPs are already routable). Otherwise falls back to the Docker
+// DNS string <service>:<port>.
+func containerOrDNS(app *compose.AppConfig, ep compose.EndpointConfig, resolver UpstreamResolver) string {
+	if resolver != nil {
+		if ip, err := resolver.ContainerIP("simpledeploy-"+app.Name, ep.Service, "simpledeploy-public"); err == nil && ip != "" {
+			return ip + ":" + ep.Port
+		}
+	}
+	return fmt.Sprintf("%s:%s", ep.Service, ep.Port)
 }

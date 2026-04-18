@@ -1,10 +1,20 @@
 package proxy
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
+
+type fakeResolver struct {
+	ip  string
+	err error
+}
+
+func (f *fakeResolver) ContainerIP(_, _, _ string) (string, error) {
+	return f.ip, f.err
+}
 
 func makeApp(name string, endpoints []compose.EndpointConfig, services []compose.ServiceConfig) *compose.AppConfig {
 	return &compose.AppConfig{
@@ -32,7 +42,7 @@ func TestResolveRoutesBasic(t *testing.T) {
 			{Name: "web", Ports: ports("3000", "8080")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +68,7 @@ func TestResolveRoutesNoEndpoints(t *testing.T) {
 	app := makeApp("myapp", nil, []compose.ServiceConfig{
 		{Name: "web", Ports: ports("3000", "8080")},
 	})
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,7 +88,7 @@ func TestResolveRoutesMultiEndpoint(t *testing.T) {
 			{Name: "api", Ports: ports("4000", "8080")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +121,7 @@ func TestResolveRoutesTLSDefault(t *testing.T) {
 			{Name: "web", Ports: ports("8000", "80")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -133,7 +143,7 @@ func TestResolveRoutesDockerNetwork(t *testing.T) {
 			{Name: "web", Ports: ports("5000", "5000")}, // different port, no match
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +167,7 @@ func TestResolveRoutesWithAllowedIPs(t *testing.T) {
 	)
 	app.AccessAllow = "10.0.0.0/8, 192.168.1.5, bad-entry, 172.16.0.0/12"
 
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +199,7 @@ func TestResolveRoutesEmptyAllowedIPs(t *testing.T) {
 			{Name: "web", Ports: ports("5000", "80")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,7 +220,7 @@ func TestResolveRoutesLocalTLS(t *testing.T) {
 			{Name: "web", Ports: ports("3000", "3000")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -233,7 +243,7 @@ func TestResolveEndpointUpstreamDefault(t *testing.T) {
 			{Name: "web", Ports: ports("3000", "8080")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -256,7 +266,7 @@ func TestResolveEndpointUpstreamRewrite(t *testing.T) {
 			{Name: "web", Ports: ports("3000", "8080")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -276,7 +286,7 @@ func TestResolveEndpointUpstreamRewrite(t *testing.T) {
 			{Name: "web", Ports: ports("5000", "5000")}, // no match for 3000
 		},
 	)
-	routes2, err := ResolveRoutes(app2)
+	routes2, err := ResolveRoutes(app2, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,7 +310,7 @@ func TestResolveEndpointUpstreamRewriteFirstMapping(t *testing.T) {
 			{Name: "web", Ports: ports("4242", "80")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -322,7 +332,7 @@ func TestResolveRoutesSkipsEmptyDomain(t *testing.T) {
 			{Name: "web", Ports: ports("3000", "3000")},
 		},
 	)
-	routes, err := ResolveRoutes(app)
+	routes, err := ResolveRoutes(app, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -331,5 +341,106 @@ func TestResolveRoutesSkipsEmptyDomain(t *testing.T) {
 	}
 	if routes[0].Domain != "real.example.com" {
 		t.Errorf("Domain: got %q, want %q", routes[0].Domain, "real.example.com")
+	}
+}
+
+func TestResolveRoutesResolverIP(t *testing.T) {
+	// Resolver returns a container IP; upstream is ip:port, bypassing rewrite.
+	t.Setenv("SIMPLEDEPLOY_UPSTREAM_HOST", "")
+	app := makeApp("web",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web"}, // no ports -> DNS fallback path
+		},
+	)
+	res := &fakeResolver{ip: "10.0.0.5"}
+	routes, err := ResolveRoutes(app, res)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes)=%d, want 1", len(routes))
+	}
+	if routes[0].Upstream != "10.0.0.5:80" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "10.0.0.5:80")
+	}
+}
+
+func TestResolveRoutesResolverEmptyFallsBackToDNS(t *testing.T) {
+	app := makeApp("web",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web"},
+		},
+	)
+	res := &fakeResolver{ip: ""}
+	routes, err := ResolveRoutes(app, res)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].Upstream != "web:80" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "web:80")
+	}
+}
+
+func TestResolveRoutesResolverErrorFallsBackToDNS(t *testing.T) {
+	app := makeApp("web",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web"},
+		},
+	)
+	res := &fakeResolver{err: errors.New("docker down")}
+	routes, err := ResolveRoutes(app, res)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].Upstream != "web:80" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "web:80")
+	}
+}
+
+func TestResolveRoutesResolverIPNotRewrittenByUpstreamHost(t *testing.T) {
+	// Even with SIMPLEDEPLOY_UPSTREAM_HOST set, IP-based upstreams are untouched.
+	t.Setenv("SIMPLEDEPLOY_UPSTREAM_HOST", "host.docker.internal")
+	app := makeApp("web",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web"},
+		},
+	)
+	res := &fakeResolver{ip: "172.18.0.4"}
+	routes, err := ResolveRoutes(app, res)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].Upstream != "172.18.0.4:80" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "172.18.0.4:80")
+	}
+}
+
+func TestResolveRoutesNilResolverDNSBehavior(t *testing.T) {
+	app := makeApp("web",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web"},
+		},
+	)
+	routes, err := ResolveRoutes(app, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if routes[0].Upstream != "web:80" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "web:80")
 	}
 }

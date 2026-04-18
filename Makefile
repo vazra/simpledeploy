@@ -1,4 +1,6 @@
-.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates e2e-mirror e2e-lite-mirror hooks-install mirror-images-list docker-build
+.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates e2e-mirror e2e-lite-mirror hooks-install mirror-images-list docker-build dev-docker dev-docker-down
+
+DEV_GOARCH := $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -33,6 +35,25 @@ ui:
 
 api-non-hmr: build-go
 	./bin/simpledeploy serve --config config.dev.yaml
+
+# Run simpledeploy in a container locally (Docker Desktop friendly).
+# Endpoint-only apps (no `ports:` published) are reachable on this path because
+# the container joins simpledeploy-public. Stop any native simpledeploy first.
+dev-docker:
+	@if lsof -iTCP:443 -sTCP:LISTEN -nP 2>/dev/null | grep -q simpledep; then \
+	  echo "error: a native simpledeploy is bound to :443. Stop it first."; exit 1; \
+	fi
+	GOOS=linux GOARCH=$(DEV_GOARCH) CGO_ENABLED=0 \
+	  go build -ldflags="$(LDFLAGS)" -o simpledeploy ./cmd/simpledeploy
+	docker compose -f deploy/docker-compose.dev.yml up --build -d
+	@echo ""
+	@echo "simpledeploy-dev is up. Manage UI: https://localhost:8500/"
+	@echo "Logs: docker compose -f deploy/docker-compose.dev.yml logs -f"
+	@echo "Stop: make dev-docker-down"
+
+dev-docker-down:
+	docker compose -f deploy/docker-compose.dev.yml down
+	rm -f simpledeploy
 
 clean:
 	rm -rf bin/ cmd/simpledeploy/ui_dist

@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 )
 
@@ -14,6 +15,9 @@ type Client interface {
 	ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error)
 	ContainerStats(ctx context.Context, containerID string) (container.StatsResponseReader, error)
 	ContainerLogs(ctx context.Context, containerID string, opts container.LogsOptions) (io.ReadCloser, error)
+	ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error)
+	NetworkInspect(ctx context.Context, id string) (network.Inspect, error)
+	NetworkCreate(ctx context.Context, name string, opts network.CreateOptions) (network.CreateResponse, error)
 	Raw() *dockerclient.Client
 }
 
@@ -55,4 +59,16 @@ func (c *DockerClient) ContainerStats(ctx context.Context, id string) (container
 
 func (c *DockerClient) ContainerLogs(ctx context.Context, containerID string, opts container.LogsOptions) (io.ReadCloser, error) {
 	return c.cli.ContainerLogs(ctx, containerID, opts)
+}
+
+func (c *DockerClient) ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error) {
+	return c.cli.ContainerInspect(ctx, id)
+}
+
+func (c *DockerClient) NetworkInspect(ctx context.Context, id string) (network.Inspect, error) {
+	return c.cli.NetworkInspect(ctx, id, network.InspectOptions{})
+}
+
+func (c *DockerClient) NetworkCreate(ctx context.Context, name string, opts network.CreateOptions) (network.CreateResponse, error) {
+	return c.cli.NetworkCreate(ctx, name, opts)
 }

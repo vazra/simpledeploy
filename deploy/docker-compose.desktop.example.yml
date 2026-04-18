@@ -1,5 +1,10 @@
 # Experimental: for local trial on Docker Desktop (macOS/Windows).
 # Not for production. See docs/install/docker.md for caveats.
+#
+# The `simpledeploy-public` network below is auto-created by simpledeploy on
+# first start; this compose just references it as external so Caddy inside
+# the container can reach deployed apps via `<service>:<port>` DNS in
+# addition to published host ports.
 services:
   simpledeploy:
     image: ghcr.io/vazra/simpledeploy:latest
@@ -16,3 +21,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/simpledeploy:/etc/simpledeploy
       - /var/lib/simpledeploy:/var/lib/simpledeploy
+    networks:
+      - simpledeploy-public
+
+networks:
+  simpledeploy-public:
+    external: true
+    name: simpledeploy-public

@@ -152,7 +152,30 @@ services:
 
 `SIMPLEDEPLOY_UPSTREAM_HOST` opts into an upstream rewrite: the proxy replaces `localhost:<port>` in resolved upstreams with `host.docker.internal:<port>` so Caddy inside the container can reach published app ports on the host.
 
-Known limitation: the `<service>:<port>` Docker-DNS upstream fallback is not supported in Docker mode today (same as the native install). Apps behind endpoints must publish a host port.
+The Desktop example also joins `simpledeploy-public` (see [Shared network](#shared-network) below) so Caddy can reach endpoint services over Docker DNS inside the VM, even when an app does not publish a host port.
+
+### Contributor shortcut: `make dev-docker`
+
+If you are hacking on simpledeploy locally on a Mac and want endpoint-only apps to work end to end, use the containerized dev workflow:
+
+```bash
+make dev-docker         # builds a linux binary + local image, starts the container
+make dev-docker-down    # stops and cleans up
+```
+
+This uses [`deploy/docker-compose.dev.yml`](https://github.com/vazra/simpledeploy/blob/main/deploy/docker-compose.dev.yml), bind-mounts your repo at the same path inside the container (so `docker compose -f <abs>` resolves on both sides), reuses `config.dev.yaml`, and binds host :80/:443/:8500. Stop any native `./bin/simpledeploy` on :443 before running it.
+
+## Shared network
+
+On first start simpledeploy auto-creates a bridge network called `simpledeploy-public`. Every deployed app's endpoint-bearing services (any service with `simpledeploy.endpoints.*` or `simpledeploy.domain` labels) is auto-attached to it.
+
+That is why endpoint services do not need to publish host ports to be reachable via their domain. Caddy resolves the upstream by container IP on the shared network.
+
+<Aside type="tip">
+You can still publish host ports with `ports:` if you want local access on `<host>:<port>`. When a host port is present, simpledeploy prefers it over the shared-network path.
+</Aside>
+
+For advanced app-to-app communication, you can reference `simpledeploy-public` as an external network on additional services. For most cross-app traffic, prefer exposing an endpoint and calling it over its domain.
 
 ## Security note
 

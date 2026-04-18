@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -83,6 +84,17 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	// before the compose file is persisted.
 	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
 		composeData = mirror.RewriteCompose(composeData, prefix)
+	}
+
+	// Attach the shared public network so endpoint services are reachable
+	// from the host-native Caddy without requiring published ports. On failure,
+	// log and fall through with the original bytes so the validator below can
+	// still produce a useful error.
+	if injected, changed, err := compose.InjectSharedNetwork(composeData, "simpledeploy-public"); err != nil {
+		log.Printf("[deploy] inject shared network for %s: %v (continuing)", body.Name, err)
+	} else {
+		composeData = injected
+		_ = changed
 	}
 
 	appDir := filepath.Join(s.appsDir, body.Name)

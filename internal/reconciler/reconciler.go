@@ -15,10 +15,15 @@ import (
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+// sharedNetworkName is the docker bridge network that endpoint services are
+// attached to so the host-native Caddy can reach them by container IP.
+const sharedNetworkName = "simpledeploy-public"
 
 // AppDeployer is the interface the reconciler uses to deploy and remove apps.
 type AppDeployer interface {
@@ -41,6 +46,7 @@ type Reconciler struct {
 	appsDir      string
 	config       *config.Config
 	masterSecret string
+	resolver     proxy.UpstreamResolver // nil-safe
 }
 
 // New creates a Reconciler.
@@ -50,6 +56,16 @@ func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *con
 		secret = cfg.MasterSecret
 	}
 	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret}
+}
+
+// SetDockerClient wires a Docker client for container-IP upstream resolution.
+// Nil is safe; routes fall back to DNS names in that case.
+func (r *Reconciler) SetDockerClient(c docker.Client) {
+	if c == nil {
+		r.resolver = nil
+		return
+	}
+	r.resolver = &proxy.DockerResolver{Client: c}
 }
 
 // SubscribeDeployLog returns a channel of deploy output lines for the given app slug.
@@ -128,7 +144,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
 	var routes []proxy.Route
 	for _, app := range apps {
-		appRoutes, err := proxy.ResolveRoutes(app)
+		appRoutes, err := proxy.ResolveRoutes(app, r.resolver)
 		if err != nil {
 			continue
 		}
@@ -137,6 +153,36 @@ func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
 	if err := r.proxy.SetRoutes(routes); err != nil {
 		fmt.Fprintf(os.Stderr, "reconciler: update proxy routes: %v\n", err)
 	}
+}
+
+// ensureSharedNetwork rewrites the compose file at path atomically if the
+// shared-network declaration is missing. Idempotent and nil-safe on errors
+// (logs and continues). Returns true iff the file was rewritten.
+func ensureSharedNetwork(path string) bool {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	out, changed, err := compose.InjectSharedNetwork(content, sharedNetworkName)
+	if err != nil {
+		log.Printf("[reconciler] inject shared network %s: %v", path, err)
+		return false
+	}
+	if !changed {
+		return false
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0644); err != nil {
+		log.Printf("[reconciler] write %s: %v", tmp, err)
+		return false
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("[reconciler] rename %s -> %s: %v", tmp, path, err)
+		_ = os.Remove(tmp)
+		return false
+	}
+	log.Printf("[reconciler] injected shared network into %s", path)
+	return true
 }
 
 // DeployOne deploys a single app from a compose file path.
@@ -357,6 +403,10 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 		if _, err := os.Stat(composePath); os.IsNotExist(err) {
 			continue
 		}
+
+		// Auto-migrate: ensure the shared-network declaration is present.
+		// Idempotent; only writes when bytes change.
+		ensureSharedNetwork(composePath)
 
 		cfg, err := compose.ParseFile(composePath, name)
 		if err != nil {

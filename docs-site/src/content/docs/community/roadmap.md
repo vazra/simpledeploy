@@ -5,6 +5,10 @@ description: Themes and direction for SimpleDeploy. No dates.
 
 SimpleDeploy follows a small, focused roadmap. The day-to-day backlog lives in [GitHub Issues](https://github.com/vazra/simpledeploy/issues) and the [GitHub Project board](https://github.com/vazra/simpledeploy/projects). The themes below describe direction, not commitments.
 
+## Shipped
+
+- **Shared Docker network for apps**: endpoint services auto-join `simpledeploy-public`; upstreams resolved by container IP. Ships in v\<next\>.
+
 ## Near term (next few releases)
 
 - **More backup strategies**: ClickHouse, Elasticsearch, generic exec hooks for "run this command, capture stdout".
@@ -13,7 +17,6 @@ SimpleDeploy follows a small, focused roadmap. The day-to-day backlog lives in [
 - **Audit log shipping**: stream the audit log to syslog or an HTTP sink for compliance.
 - **Better deploy diff**: show what's about to change before applying.
 - **CLI quality of life**: tab completion improvements, structured `--output json` everywhere.
-- **Shared Docker network for apps**: auto-attach each deployed app to a `simpledeploy-public` network so Caddy can reverse-proxy to `<service>:<port>` without the app needing to publish a host port. Tightens default security and makes the `<service>:<port>` upstream fallback work on both native and Docker installs.
 
 ## Medium term
 

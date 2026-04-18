@@ -1,3 +1,7 @@
+# Production Docker install recipe.
+# `network_mode: host` lets simpledeploy see container IPs directly via host
+# routing, so it does not need to join the `simpledeploy-public` shared
+# network (that's the Docker Desktop bridge-mode recipe's concern).
 services:
   simpledeploy:
     image: ghcr.io/vazra/simpledeploy:latest

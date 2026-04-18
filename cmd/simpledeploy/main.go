@@ -379,6 +379,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("docker ping: %w", err)
 	}
 
+	// Best-effort: ensure the shared bridge network used for endpoint upstream
+	// resolution exists. Non-fatal on failure so users who prefer host-port-only
+	// deployments are not blocked.
+	if err := docker.EnsureNetwork(cmd.Context(), dc, "simpledeploy-public"); err != nil {
+		log.Printf("[serve] ensure shared network: %v (continuing)", err)
+	}
+
 	proxyCfg := proxy.CaddyConfig{
 		ListenAddr: cfg.ListenAddr,
 		TLSMode:    cfg.TLS.Mode,
@@ -393,6 +400,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("simpledeploy requires Docker and Docker Compose.\nInstall Docker Engine: https://docs.docker.com/engine/install/\n\n%w", err)
 	}
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg)
+	rec.SetDockerClient(dc)
 
 	// metrics pipeline
 	metricsCh := make(chan metrics.MetricPoint, 500)

@@ -44,6 +44,8 @@ If `simpledeploy.domain` is not set, the app runs but has no proxy route (access
 
 If `simpledeploy.port` is not set, SimpleDeploy uses the first port mapping it finds in the compose file.
 
+Endpoint services no longer need to publish host ports to be reachable. SimpleDeploy auto-attaches them to a shared `simpledeploy-public` Docker network and reverse-proxies over that. `ports:` still works and, when present, takes precedence over the shared-network path.
+
 ## Access Control Labels
 
 See [IP access control](/guides/access-control/) for the full guide.

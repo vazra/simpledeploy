@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 )
 
@@ -18,6 +19,11 @@ type MockClient struct {
 	mu         sync.Mutex
 	Calls      []string
 	containers map[string]container.Summary
+
+	// Optional overrides for test setup.
+	NetworkInspectFn   func(ctx context.Context, id string) (network.Inspect, error)
+	NetworkCreateFn    func(ctx context.Context, name string, opts network.CreateOptions) (network.CreateResponse, error)
+	ContainerInspectFn func(ctx context.Context, id string) (container.InspectResponse, error)
 }
 
 func NewMockClient() *MockClient {
@@ -90,6 +96,30 @@ func (m *MockClient) ContainerStats(_ context.Context, _ string) (container.Stat
 
 func (m *MockClient) Raw() *dockerclient.Client {
 	return nil
+}
+
+func (m *MockClient) NetworkInspect(ctx context.Context, id string) (network.Inspect, error) {
+	m.record(fmt.Sprintf("NetworkInspect:%s", id))
+	if m.NetworkInspectFn != nil {
+		return m.NetworkInspectFn(ctx, id)
+	}
+	return network.Inspect{}, nil
+}
+
+func (m *MockClient) NetworkCreate(ctx context.Context, name string, opts network.CreateOptions) (network.CreateResponse, error) {
+	m.record(fmt.Sprintf("NetworkCreate:%s", name))
+	if m.NetworkCreateFn != nil {
+		return m.NetworkCreateFn(ctx, name, opts)
+	}
+	return network.CreateResponse{ID: name}, nil
+}
+
+func (m *MockClient) ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error) {
+	m.record(fmt.Sprintf("ContainerInspect:%s", id))
+	if m.ContainerInspectFn != nil {
+		return m.ContainerInspectFn(ctx, id)
+	}
+	return container.InspectResponse{}, nil
 }
 
 func (m *MockClient) ContainerLogs(_ context.Context, id string, _ container.LogsOptions) (io.ReadCloser, error) {
