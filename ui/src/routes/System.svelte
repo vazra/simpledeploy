@@ -274,6 +274,46 @@
     const total = totalRows(tierStats)
     return total > 0 ? (count / total) * 100 : 0
   }
+
+  async function copyCmd(cmd) {
+    try {
+      await navigator.clipboard.writeText(cmd)
+      toasts.success('Copied')
+    } catch {
+      toasts.error('Copy failed')
+    }
+  }
+
+  const deploymentHeadings = {
+    native: { icon: 'monitor', title: 'Native Binary', blurb: 'Running as a native binary on the host OS.' },
+    docker: { icon: 'docker', title: 'Docker', blurb: 'Running inside a Docker container with host networking.' },
+    'docker-desktop': { icon: 'docker', title: 'Docker Desktop', blurb: 'Running inside Docker Desktop. Resource metrics below reflect the Docker VM, not your host machine.' },
+    'docker-dev': { icon: 'docker', title: 'Contributor Dev Container', blurb: 'Running inside the dev container started by `make dev-docker`. Resource metrics reflect the Docker VM.' },
+  }
+
+  function deploymentUpgrade(mode) {
+    switch (mode) {
+      case 'docker':
+      case 'docker-desktop':
+        return ['cd /etc/simpledeploy', 'docker compose pull && docker compose up -d']
+      case 'docker-dev':
+        return ['make dev-docker']
+      case 'native':
+      default:
+        return ['# apt install:', 'sudo apt update && sudo apt upgrade simpledeploy', '', '# manual binary swap:', 'sudo systemctl stop simpledeploy', 'sudo mv ~/simpledeploy-new /usr/local/bin/simpledeploy', 'sudo systemctl start simpledeploy']
+    }
+  }
+
+  function deploymentLogHint(mode) {
+    if (mode === 'native') return 'journalctl -u simpledeploy -f'
+    return 'docker compose logs -f simpledeploy'
+  }
+
+  function resourceCaveat(mode) {
+    if (mode === 'native') return ''
+    if (mode === 'docker-desktop' || mode === 'docker-dev') return 'Values reflect the Docker VM, not your host.'
+    return 'Values reflect container view, not host.'
+  }
 </script>
 
 <Layout>
@@ -296,6 +336,57 @@
     </div>
   {:else if activeTab === 'overview'}
     {#if info}
+      {#if info.simpledeploy?.deployment_mode && deploymentHeadings[info.simpledeploy.deployment_mode]}
+        {@const dh = deploymentHeadings[info.simpledeploy.deployment_mode]}
+        <h2 class="text-base font-medium text-text-primary mb-4">Deployment</h2>
+        <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-8">
+          <div class="flex items-center gap-2 mb-3">
+            {#if dh.icon === 'monitor'}
+              <svg class="w-5 h-5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            {:else}
+              <svg class="w-6 h-4 text-accent" viewBox="0 0 24 14" fill="currentColor"><path d="M23.1 6.3c-.06-.04-.6-.43-1.74-.43-.3 0-.62.03-.93.08-.23-1.6-1.55-2.38-1.6-2.42l-.33-.19-.21.31c-.27.42-.47.89-.58 1.37-.22.95-.08 1.84.39 2.6-.57.32-1.48.4-1.67.4H.63a.63.63 0 0 0-.63.62 9.46 9.46 0 0 0 .58 3.4c.46 1.2 1.14 2.08 2.03 2.62C3.5 14.7 5.1 15 6.88 15c.8 0 1.6-.07 2.39-.22 1.1-.2 2.16-.58 3.14-1.12a8.64 8.64 0 0 0 2.14-1.74c1.05-1.18 1.68-2.5 2.14-3.66h.2c1.22 0 1.97-.49 2.39-.9.28-.27.5-.58.65-.95l.08-.24-.22-.12z"/></svg>
+            {/if}
+            <span class="text-sm font-semibold text-text-primary">{dh.title}</span>
+          </div>
+          <p class="text-xs text-text-secondary mb-4">{dh.blurb}</p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <div class="text-xs font-medium text-text-secondary mb-1">Upgrade</div>
+              <div class="space-y-1">
+                {#each deploymentUpgrade(info.simpledeploy.deployment_mode) as line}
+                  {#if line === ''}
+                    <div class="h-1"></div>
+                  {:else if line.startsWith('#')}
+                    <div class="text-xs text-text-muted font-mono">{line}</div>
+                  {:else}
+                    <button
+                      type="button"
+                      onclick={() => copyCmd(line)}
+                      class="block w-full text-left text-xs font-mono bg-surface-1 border border-border/30 rounded px-2 py-1 text-text-primary hover:border-accent transition-colors"
+                      title="Click to copy"
+                    >{line}</button>
+                  {/if}
+                {/each}
+              </div>
+            </div>
+            <div>
+              <div class="text-xs font-medium text-text-secondary mb-1">Process logs</div>
+              <button
+                type="button"
+                onclick={() => copyCmd(deploymentLogHint(info.simpledeploy.deployment_mode))}
+                class="block w-full text-left text-xs font-mono bg-surface-1 border border-border/30 rounded px-2 py-1 text-text-primary hover:border-accent transition-colors"
+                title="Click to copy"
+              >{deploymentLogHint(info.simpledeploy.deployment_mode)}</button>
+              {#if info.simpledeploy.deployment_mode !== 'native'}
+                <div class="text-xs font-medium text-text-secondary mt-3 mb-1">Backups</div>
+                <p class="text-xs text-text-secondary">Backup destination must be a path inside a mounted volume. Default <span class="font-mono text-text-primary">/var/lib/simpledeploy</span> is already mounted in the standard docker-compose.</p>
+              {/if}
+            </div>
+          </div>
+        </div>
+      {/if}
+
       <!-- SimpleDeploy -->
       <h2 class="text-base font-medium text-text-primary mb-4">SimpleDeploy</h2>
       <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-8">
@@ -378,6 +469,9 @@
             <div class="text-xs text-text-secondary">{formatBytes(info.resources?.disk_avail || 0)} free / {formatBytes(info.resources?.disk_total || 0)} total</div>
           </div>
         </div>
+        {#if resourceCaveat(info.simpledeploy?.deployment_mode)}
+          <p class="text-xs text-text-muted mt-4">{resourceCaveat(info.simpledeploy?.deployment_mode)}</p>
+        {/if}
       </div>
 
       <!-- Database -->
@@ -387,6 +481,9 @@
           <div>
             <div class="text-xs font-medium text-text-secondary">Path</div>
             <div class="text-sm font-semibold text-text-primary font-mono truncate">{info.database?.path || '-'}</div>
+            {#if info.simpledeploy?.deployment_mode && info.simpledeploy.deployment_mode !== 'native'}
+              <div class="text-xs text-text-muted mt-1">Path is inside the container; same-path bind mount ensures it matches on the host.</div>
+            {/if}
           </div>
           <div>
             <div class="text-xs font-medium text-text-secondary">File Size</div>
