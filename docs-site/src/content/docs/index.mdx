@@ -95,6 +95,14 @@ Comparisons are based on stable releases at time of writing. See each project's 
     sudo apt install simpledeploy
     ```
   </TabItem>
+  <TabItem label="Docker (any distro)">
+    ```bash
+    sudo mkdir -p /etc/simpledeploy /var/lib/simpledeploy
+    curl -fsSL https://raw.githubusercontent.com/vazra/simpledeploy/main/deploy/docker-compose.example.yml \
+      | sudo tee /etc/simpledeploy/docker-compose.yml
+    cd /etc/simpledeploy && sudo docker compose up -d
+    ```
+  </TabItem>
   <TabItem label="Linux binary (curl)">
     ```bash
     curl -fsSL https://github.com/vazra/simpledeploy/releases/latest/download/install.sh | sh

@@ -1,4 +1,4 @@
-.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates e2e-mirror e2e-lite-mirror hooks-install mirror-images-list
+.PHONY: build build-go test clean ui-build dev api ui api-non-hmr e2e e2e-lite e2e-headed e2e-report e2e-templates e2e-mirror e2e-lite-mirror hooks-install mirror-images-list docker-build
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -77,3 +77,7 @@ e2e-lite-mirror:
 # Print the image list the mirror workflow will push to GHCR.
 mirror-images-list:
 	@node e2e/scripts/list-mirror-images.mjs
+
+# Build multi-arch Docker image via goreleaser snapshot (no publish). Local smoke test.
+docker-build:
+	goreleaser release --snapshot --clean --skip=publish

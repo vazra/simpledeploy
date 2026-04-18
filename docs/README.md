@@ -10,7 +10,7 @@ Read the full site at https://vazra.github.io/simpledeploy.
 ## Top-level sections
 
 - `concepts/` what SimpleDeploy is and how it works
-- `install/` install on macOS, Ubuntu, generic Linux, or from source
+- `install/` install on Ubuntu, generic Linux, Docker, macOS CLI, or from source
 - `guides/` task-based guides (TLS, backups, alerts, registries, scaling, remote management, ...)
 - `reference/` configuration, compose labels, CLI, REST API, WebSocket, env vars, ports
 - `operations/` production checklist, security hardening, security audit, capacity sizing, DR, troubleshooting

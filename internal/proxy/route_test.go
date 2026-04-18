@@ -222,6 +222,96 @@ func TestResolveRoutesLocalTLS(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointUpstreamDefault(t *testing.T) {
+	// With SIMPLEDEPLOY_UPSTREAM_HOST unset, upstream uses "localhost".
+	t.Setenv("SIMPLEDEPLOY_UPSTREAM_HOST", "")
+	app := makeApp("hostdefault",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "8080", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("3000", "8080")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	if routes[0].Upstream != "localhost:3000" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "localhost:3000")
+	}
+}
+
+func TestResolveEndpointUpstreamRewrite(t *testing.T) {
+	// With SIMPLEDEPLOY_UPSTREAM_HOST set, upstream uses the override host.
+	t.Setenv("SIMPLEDEPLOY_UPSTREAM_HOST", "host.docker.internal")
+	app := makeApp("hostrewrite",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Port: "8080", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("3000", "8080")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	if routes[0].Upstream != "host.docker.internal:3000" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "host.docker.internal:3000")
+	}
+
+	// Docker-DNS fallback (<service>:<port>) is unaffected by the rewrite.
+	app2 := makeApp("fallback",
+		[]compose.EndpointConfig{
+			{Domain: "app.example.com", Port: "3000", Service: "web"},
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("5000", "5000")}, // no match for 3000
+		},
+	)
+	routes2, err := ResolveRoutes(app2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes2) != 1 {
+		t.Fatalf("len(routes2) = %d, want 1", len(routes2))
+	}
+	if routes2[0].Upstream != "web:3000" {
+		t.Errorf("Upstream: got %q, want %q", routes2[0].Upstream, "web:3000")
+	}
+}
+
+func TestResolveEndpointUpstreamRewriteFirstMapping(t *testing.T) {
+	// With no endpoint.Port set, resolver falls through to the "first host
+	// mapping" branch. That branch also uses upstreamHost(); exercise it.
+	t.Setenv("SIMPLEDEPLOY_UPSTREAM_HOST", "host.docker.internal")
+	app := makeApp("firstmap",
+		[]compose.EndpointConfig{
+			{Domain: "example.com", Service: "web"}, // no Port
+		},
+		[]compose.ServiceConfig{
+			{Name: "web", Ports: ports("4242", "80")},
+		},
+	)
+	routes, err := ResolveRoutes(app)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(routes) = %d, want 1", len(routes))
+	}
+	if routes[0].Upstream != "host.docker.internal:4242" {
+		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "host.docker.internal:4242")
+	}
+}
+
 func TestResolveRoutesSkipsEmptyDomain(t *testing.T) {
 	app := makeApp("partial",
 		[]compose.EndpointConfig{

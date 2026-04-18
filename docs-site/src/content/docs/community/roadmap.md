@@ -13,6 +13,7 @@ SimpleDeploy follows a small, focused roadmap. The day-to-day backlog lives in [
 - **Audit log shipping**: stream the audit log to syslog or an HTTP sink for compliance.
 - **Better deploy diff**: show what's about to change before applying.
 - **CLI quality of life**: tab completion improvements, structured `--output json` everywhere.
+- **Shared Docker network for apps**: auto-attach each deployed app to a `simpledeploy-public` network so Caddy can reverse-proxy to `<service>:<port>` without the app needing to publish a host port. Tightens default security and makes the `<service>:<port>` upstream fallback work on both native and Docker installs.
 
 ## Medium term
 
@@ -20,10 +21,11 @@ SimpleDeploy follows a small, focused roadmap. The day-to-day backlog lives in [
 - **Built-in load balancer driver**: Cloudflare and a generic "tell external LB to drain me" hook.
 - **First-class secrets**: a per-app encrypted secret store that exposes values into the compose env without writing to disk in plaintext.
 - **Plugin loader**: a stable interface for compiled-in extensions (custom Caddy modules, custom strategies/targets).
+- **Docker install feature parity**: document one-shot container workflows (init, rotate-secret, db-backup via `docker compose run --rm`) as first-class, and add an E2E suite variant (`make e2e-docker`) so the container path stays green on every release.
 
 ## Long term
 
-- **One-click upgrade**: dashboard-driven self-upgrade with automatic backup and rollback.
+- **One-click upgrade**: dashboard-driven self-upgrade with automatic backup and rollback. Mainly a concern on the apt/tarball paths; on the Docker install, `docker compose pull && up -d` already covers this.
 - **App templates marketplace**: curated compose files for common stacks.
 
 ## What we will not do

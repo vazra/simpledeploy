@@ -7,6 +7,8 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 
 The recommended path for production. The `.deb` package ships a systemd unit and pulls updates through normal `apt upgrade`.
 
+Prefer containers or on a non-Debian distro? See [Install via Docker](/install/docker/).
+
 ## Prerequisites
 
 - Ubuntu 22.04+ or Debian 12+, x86_64 or arm64.

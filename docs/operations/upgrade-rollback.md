@@ -67,6 +67,16 @@ mv /usr/local/bin/simpledeploy.new /usr/local/bin/simpledeploy
 
 Keeping `.old` around makes rollback instant.
 
+### Docker
+
+```bash
+cd /etc/simpledeploy
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+The container restarts with the new image. To pin a specific version, edit `image:` in `docker-compose.yml` (e.g. `ghcr.io/vazra/simpledeploy:1.3.0`) before `up -d`.
+
 ### From source
 
 ```bash
@@ -123,6 +133,9 @@ mv /usr/local/bin/simpledeploy.old /usr/local/bin/simpledeploy
 # Or via package manager
 sudo apt install simpledeploy=1.2.0
 brew install simpledeploy@1.2.0
+
+# Or via Docker (edit image: tag in /etc/simpledeploy/docker-compose.yml)
+cd /etc/simpledeploy && sudo docker compose up -d
 ```
 
 ### Step 3: Restore the DB if schema changed

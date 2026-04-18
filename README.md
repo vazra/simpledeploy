@@ -23,6 +23,17 @@ echo "deb [signed-by=/usr/share/keyrings/vazra.gpg arch=$(dpkg --print-architect
 sudo apt update && sudo apt install simpledeploy
 ```
 
+### Docker (any Linux distro)
+
+```bash
+sudo mkdir -p /etc/simpledeploy /var/lib/simpledeploy
+curl -fsSL https://raw.githubusercontent.com/vazra/simpledeploy/main/deploy/docker-compose.example.yml \
+  | sudo tee /etc/simpledeploy/docker-compose.yml
+cd /etc/simpledeploy && sudo docker compose up -d
+```
+
+Uses `network_mode: host` so Caddy binds 80/443 directly. Image: `ghcr.io/vazra/simpledeploy`.
+
 ### Linux (binary)
 
 ```bash

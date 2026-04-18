@@ -71,3 +71,39 @@ brews:
       bin.install "simpledeploy"
     test: |
       system "#{bin}/simpledeploy", "version"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/vazra/simpledeploy:{{ .Version }}-amd64"
+    use: buildx
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/vazra/simpledeploy"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+  - image_templates:
+      - "ghcr.io/vazra/simpledeploy:{{ .Version }}-arm64"
+    use: buildx
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/vazra/simpledeploy"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+docker_manifests:
+  - name_template: "ghcr.io/vazra/simpledeploy:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/vazra/simpledeploy:{{ .Version }}-amd64"
+      - "ghcr.io/vazra/simpledeploy:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/vazra/simpledeploy:latest"
+    image_templates:
+      - "ghcr.io/vazra/simpledeploy:{{ .Version }}-amd64"
+      - "ghcr.io/vazra/simpledeploy:{{ .Version }}-arm64"

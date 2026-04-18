@@ -31,6 +31,16 @@ sudo apt upgrade simpledeploy
 systemd restarts the service automatically when the package replaces the binary.
 </TabItem>
 
+<TabItem label="Docker">
+```bash
+cd /etc/simpledeploy
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+The container restarts with the new image. Schema migrations run on start.
+</TabItem>
+
 <TabItem label="macOS (CLI)">
 ```bash
 brew update

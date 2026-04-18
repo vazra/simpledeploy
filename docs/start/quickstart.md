@@ -23,6 +23,14 @@ Before you start: make sure ports 80 and 443 are open, Docker is installed, and 
    sudo apt update && sudo apt install simpledeploy
    ```
    </TabItem>
+   <TabItem label="Docker (any distro)">
+   ```bash
+   sudo mkdir -p /etc/simpledeploy /var/lib/simpledeploy
+   curl -fsSL https://raw.githubusercontent.com/vazra/simpledeploy/main/deploy/docker-compose.example.yml \
+     | sudo tee /etc/simpledeploy/docker-compose.yml
+   ```
+   Uses `network_mode: host` so Caddy binds 80/443 on the host directly. See [Install via Docker](/install/docker/).
+   </TabItem>
    <TabItem label="Generic Linux">
    ```bash
    curl -L https://github.com/vazra/simpledeploy/releases/latest/download/simpledeploy_linux_amd64.tar.gz | tar xz
@@ -67,6 +75,12 @@ Before you start: make sure ports 80 and 443 are open, Docker is installed, and 
    ```bash
    sudo systemctl enable --now simpledeploy
    sudo systemctl status simpledeploy
+   ```
+   </TabItem>
+   <TabItem label="Docker">
+   ```bash
+   cd /etc/simpledeploy && sudo docker compose up -d
+   sudo docker compose logs -f simpledeploy
    ```
    </TabItem>
    <TabItem label="Other Linux">

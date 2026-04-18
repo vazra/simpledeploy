@@ -16,9 +16,10 @@ description: End-to-end walk-through for installing SimpleDeploy on a VPS, confi
 
 Pick your platform:
 
-- [macOS (Homebrew)](/install/macos/)
 - [Ubuntu / Debian (APT)](/install/ubuntu/)
 - [Generic Linux (binary)](/install/linux/)
+- [Docker (any distro)](/install/docker/)
+- [macOS (Homebrew, CLI only)](/install/macos/)
 - [From source](/install/from-source/)
 
 Verify:

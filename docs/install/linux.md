@@ -7,6 +7,8 @@ import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
 For distros without an APT package (Fedora, Arch, Alpine, RHEL-likes, etc.). Drop the binary in `/usr/local/bin/`, set up a systemd unit, you are done.
 
+Prefer a containerized install? See [Install via Docker](/install/docker/); it works on the same distros without needing a systemd unit.
+
 ## Prerequisites
 
 - A modern Linux with systemd (or your own init manager).

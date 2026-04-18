@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +12,19 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
+
+// upstreamHost returns the host portion to use for localhost-bound upstreams.
+// When SIMPLEDEPLOY_UPSTREAM_HOST is set, it overrides "localhost". This lets
+// SimpleDeploy run inside a Docker container (e.g. Docker Desktop) where
+// "localhost" does not reach host-published ports; set it to
+// "host.docker.internal" in that case. Empty (default) preserves native
+// behavior.
+func upstreamHost() string {
+	if h := os.Getenv("SIMPLEDEPLOY_UPSTREAM_HOST"); h != "" {
+		return h
+	}
+	return "localhost"
+}
 
 // Route holds routing config for a deployed app.
 type Route struct {
@@ -132,7 +146,7 @@ func resolveEndpointUpstream(app *compose.AppConfig, ep compose.EndpointConfig) 
 		for _, pm := range svc.Ports {
 			if pm.Container == ep.Port {
 				if pm.Host != "" {
-					return "localhost:" + pm.Host, nil
+					return upstreamHost() + ":" + pm.Host, nil
 				}
 				// No host mapping, use Docker network
 				return fmt.Sprintf("%s:%s", ep.Service, ep.Port), nil
@@ -145,7 +159,7 @@ func resolveEndpointUpstream(app *compose.AppConfig, ep compose.EndpointConfig) 
 		// No port specified, use first mapping
 		for _, pm := range svc.Ports {
 			if pm.Host != "" {
-				return "localhost:" + pm.Host, nil
+				return upstreamHost() + ":" + pm.Host, nil
 			}
 		}
 		return "", fmt.Errorf("service %q has no port mappings", ep.Service)

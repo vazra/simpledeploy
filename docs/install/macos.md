@@ -9,6 +9,8 @@ import { Aside, Steps } from '@astrojs/starlight/components';
 SimpleDeploy targets Linux for production. Run the server on a Linux VPS. The macOS install is for the CLI client so you can manage remote servers from your laptop, the same way `kubectl` works.
 </Aside>
 
+Running a Linux server? See [Install via Docker](/install/docker/) for a non-Debian path.
+
 ## Install
 
 ```bash

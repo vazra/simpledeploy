@@ -1,0 +1,9 @@
+services:
+  simpledeploy:
+    image: ghcr.io/vazra/simpledeploy:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/simpledeploy:/etc/simpledeploy
+      - /var/lib/simpledeploy:/var/lib/simpledeploy
