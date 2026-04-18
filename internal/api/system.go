@@ -29,13 +29,15 @@ type systemInfoResponse struct {
 }
 
 type simpleDeployInfo struct {
-	Version    string      `json:"version"`
-	Commit     string      `json:"commit"`
-	BuildDate  string      `json:"build_date"`
-	Uptime     string      `json:"uptime"`
-	UptimeSec  int64       `json:"uptime_sec"`
-	GoVersion  string      `json:"go_version"`
-	Process    processInfo `json:"process"`
+	Version         string      `json:"version"`
+	Commit          string      `json:"commit"`
+	BuildDate       string      `json:"build_date"`
+	Uptime          string      `json:"uptime"`
+	UptimeSec       int64       `json:"uptime_sec"`
+	GoVersion       string      `json:"go_version"`
+	DeploymentMode  string      `json:"deployment_mode"`
+	DeploymentLabel string      `json:"deployment_label"`
+	Process         processInfo `json:"process"`
 }
 
 type processInfo struct {
@@ -106,12 +108,14 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	runtime.ReadMemStats(&mem)
 
 	sd := simpleDeployInfo{
-		Version:   s.buildVersion,
-		Commit:    s.buildCommit,
-		BuildDate: s.buildDate,
-		Uptime:    formatUptime(uptime),
-		UptimeSec: int64(uptime.Seconds()),
-		GoVersion: runtime.Version(),
+		Version:         s.buildVersion,
+		Commit:          s.buildCommit,
+		BuildDate:       s.buildDate,
+		Uptime:          formatUptime(uptime),
+		UptimeSec:       int64(uptime.Seconds()),
+		GoVersion:       runtime.Version(),
+		DeploymentMode:  string(s.deploymentMode),
+		DeploymentLabel: s.deploymentMode.Label(),
 		Process: processInfo{
 			MemAlloc:      mem.Alloc,
 			MemSys:        mem.Sys,

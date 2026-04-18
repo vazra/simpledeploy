@@ -19,6 +19,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/config"
+	"github.com/vazra/simpledeploy/internal/deployment"
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -60,16 +61,18 @@ type Server struct {
 	dataDir             string
 	cfg                 *config.Config
 	cfgPath             string
+	deploymentMode      deployment.Mode
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
 	s := &Server{
-		mux:         http.NewServeMux(),
-		port:        port,
-		store:       st,
-		jwt:         jwtMgr,
-		rateLimiter: rl,
-		startedAt:   time.Now(),
+		mux:            http.NewServeMux(),
+		port:           port,
+		store:          st,
+		jwt:            jwtMgr,
+		rateLimiter:    rl,
+		startedAt:      time.Now(),
+		deploymentMode: deployment.Detect(),
 	}
 	s.routes()
 	return s
