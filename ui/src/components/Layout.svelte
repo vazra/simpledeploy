@@ -1,5 +1,6 @@
 <script>
   import Sidebar from './Sidebar.svelte'
+  import StatusBar from './StatusBar.svelte'
   import { connection } from '../lib/stores/connection.svelte.js'
 
   let { children } = $props()
@@ -28,7 +29,7 @@
     </div>
   {/if}
 
-  <main class="flex-1 overflow-y-auto min-w-0">
+  <main class="flex-1 flex flex-col overflow-hidden min-w-0">
     <!-- Mobile header -->
     <div class="flex md:hidden items-center gap-3 px-4 py-3 border-b border-border/30 bg-surface-1 sticky top-0 z-40">
       <button onclick={() => mobileMenuOpen = true} class="text-text-secondary hover:text-text-primary" aria-label="Open menu">
@@ -51,9 +52,10 @@
         <button onclick={() => connection.check()} class="ml-auto text-xs underline hover:no-underline">Retry</button>
       </div>
     {/if}
-    <div class="p-4 md:p-8">
+    <div class="flex-1 overflow-y-auto p-4 md:p-8">
       {@render children()}
     </div>
+    <StatusBar />
   </main>
 </div>
 
