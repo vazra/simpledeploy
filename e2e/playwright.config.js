@@ -30,11 +30,11 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [['html', { open: 'never' }], ['list']],
-  // 240s covers the worst case: multi-service deploy where docker compose
-  // pull has to fetch multiple images (the mirror is fast but not free).
-  // Deploys expect `Deployed` for up to 180s, so the test timeout must be
-  // strictly larger or it masks the real wait.
-  timeout: 240_000,
+  // 360s covers the worst case: multi-service deploy pulling several
+  // images through the GHCR mirror on a cold-cache CI runner. Deploy
+  // expects inside tests now wait up to 300s, so the test-level timeout
+  // must exceed that by a clear margin.
+  timeout: 360_000,
   expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${process.env.SIMPLEDEPLOY_PORT || 8500}`,

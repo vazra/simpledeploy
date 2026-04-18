@@ -69,7 +69,7 @@ test.describe('Deploy via Templates', () => {
     // Next -> Deploy.
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
 
     await cleanupApp(slug);
   });
@@ -170,7 +170,7 @@ test.describe('Deploy via Templates', () => {
 
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
 
     await cleanupApp(slug);
   });

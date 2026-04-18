@@ -31,7 +31,7 @@ async function deployApp(page, appName, composeContent) {
   await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
   await dialog.getByRole('button', { name: 'Next' }).click();
   await dialog.getByRole('button', { name: 'Deploy' }).click();
-  await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
+  await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
   const viewAppBtn = dialog.getByRole('button', { name: 'View App' });
   if (await viewAppBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await viewAppBtn.click();
@@ -93,7 +93,7 @@ test.describe('Deploy Apps', () => {
     await dialog.getByRole('button', { name: 'Deploy' }).click();
     // App already exists -> confirmation dialog; click Redeploy to overwrite.
     await page.getByRole('button', { name: 'Redeploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 180_000 });
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
   });
 });
 
