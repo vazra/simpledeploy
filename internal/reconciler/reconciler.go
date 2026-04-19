@@ -109,6 +109,14 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		if !needsDeploy {
 			continue
 		}
+		// Skip slugs that are already being deployed via an API-driven path
+		// (handleDeploy spawns its own goroutine). Without this guard the
+		// watcher-triggered reconcile races against the API goroutine,
+		// double-dispatches docker compose for the same project, and
+		// orphans the WS subscribers watching the first deploy.
+		if r.IsDeploying(slug) {
+			continue
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(slug string, cfg *compose.AppConfig, exists bool) {
@@ -205,6 +213,9 @@ func (r *Reconciler) RestartOne(ctx context.Context, slug string) error {
 		return err
 	}
 	result := r.deployer.Restart(ctx, cfg)
+	if result.Skipped {
+		return nil
+	}
 	action := "restart"
 	status := "running"
 	if result.Err != nil {
@@ -288,6 +299,9 @@ func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
 		return fmt.Errorf("resolve registries: %w", err)
 	}
 	result := r.deployer.Pull(ctx, cfg, auths)
+	if result.Skipped {
+		return nil
+	}
 	action := "pull"
 	status := "running"
 	if result.Err != nil {
@@ -427,6 +441,11 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		log.Printf("[reconciler] resolve registries for %s: %v", slug, authErr)
 	}
 	result := r.deployer.Deploy(ctx, cfg, auths...)
+	if result.Skipped {
+		// Another in-flight deploy for this slug is handling store updates
+		// and WS notifications; nothing more to do here.
+		return nil
+	}
 
 	labels := make(map[string]string)
 	for _, svc := range cfg.Services {

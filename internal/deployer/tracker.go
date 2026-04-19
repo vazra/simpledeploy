@@ -140,16 +140,23 @@ func (t *Tracker) IsDeploying(slug string) bool {
 	return ok
 }
 
-func (t *Tracker) TrackWithLog(slug string, cancel context.CancelFunc) *DeployLog {
+// TrackWithLog registers an in-flight deploy and returns a fresh DeployLog.
+// Returns (nil, false) if a deploy for the same slug is already in flight; the
+// caller must skip its own docker compose invocation to avoid clobbering the
+// existing subscribers and racing compose on the same project.
+func (t *Tracker) TrackWithLog(slug string, cancel context.CancelFunc) (*DeployLog, bool) {
 	if t == nil {
-		return nil
+		return nil, true
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if _, busy := t.logs[slug]; busy {
+		return nil, false
+	}
 	t.flights[slug] = cancel
 	dl := newDeployLog()
 	t.logs[slug] = dl
-	return dl
+	return dl, true
 }
 
 func (t *Tracker) DoneWithLog(slug string, action string) {

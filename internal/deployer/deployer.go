@@ -19,8 +19,9 @@ type RegistryAuth struct {
 }
 
 type DeployResult struct {
-	Output string
-	Err    error
+	Output  string
+	Err     error
+	Skipped bool // true when another deploy for the same slug was already in flight
 }
 
 type ServiceStatus struct {
@@ -54,7 +55,12 @@ func (d *Deployer) runCmd(ctx context.Context, dl *DeployLog, name string, args 
 func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...RegistryAuth) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	dl := d.Tracker.TrackWithLog(app.Name, cancel)
+	dl, fresh := d.Tracker.TrackWithLog(app.Name, cancel)
+	if !fresh {
+		// Another deploy for this slug is in flight; skip to avoid racing
+		// docker compose on the same project and orphaning WS subscribers.
+		return DeployResult{Skipped: true}
+	}
 
 	project := "simpledeploy-" + app.Name
 	args := []string{
@@ -104,7 +110,10 @@ func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
 func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	dl := d.Tracker.TrackWithLog(app.Name, cancel)
+	dl, fresh := d.Tracker.TrackWithLog(app.Name, cancel)
+	if !fresh {
+		return DeployResult{Skipped: true}
+	}
 
 	project := "simpledeploy-" + app.Name
 	args := []string{
@@ -150,7 +159,10 @@ func (d *Deployer) Start(ctx context.Context, projectName string) error {
 func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []RegistryAuth) DeployResult {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	dl := d.Tracker.TrackWithLog(app.Name, cancel)
+	dl, fresh := d.Tracker.TrackWithLog(app.Name, cancel)
+	if !fresh {
+		return DeployResult{Skipped: true}
+	}
 
 	project := "simpledeploy-" + app.Name
 

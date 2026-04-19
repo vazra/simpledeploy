@@ -41,3 +41,40 @@ func TestTracker_Done(t *testing.T) {
 		t.Fatal("expected myapp to not be deploying after done")
 	}
 }
+
+// Regression: concurrent TrackWithLog for the same slug must not orphan the
+// first subscriber. The second caller gets (nil, false) so it skips its own
+// compose run, and subscribers on the first log still receive Done.
+func TestTracker_TrackWithLogRejectsDuplicate(t *testing.T) {
+	tr := NewTracker()
+	_, cancel := context.WithCancel(context.Background())
+
+	dl1, fresh1 := tr.TrackWithLog("app", cancel)
+	if !fresh1 || dl1 == nil {
+		t.Fatal("first TrackWithLog should return a fresh log")
+	}
+	ch, unsub := dl1.Subscribe()
+	defer unsub()
+
+	dl2, fresh2 := tr.TrackWithLog("app", cancel)
+	if fresh2 {
+		t.Fatal("second TrackWithLog for same slug should report busy")
+	}
+	if dl2 != nil {
+		t.Fatal("second TrackWithLog should return nil log")
+	}
+
+	tr.DoneWithLog("app", "deploy")
+
+	select {
+	case line, ok := <-ch:
+		if !ok {
+			t.Fatal("subscriber channel closed without Done event")
+		}
+		if !line.Done || line.Action != "deploy" {
+			t.Fatalf("expected Done deploy, got %+v", line)
+		}
+	default:
+		t.Fatal("expected Done to be delivered to original subscriber")
+	}
+}
