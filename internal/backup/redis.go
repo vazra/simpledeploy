@@ -42,23 +42,27 @@ func (s *RedisStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRes
 	container := opts.ContainerName
 	filename := fmt.Sprintf("%s-%s.rdb.gz", container, time.Now().Format("20060102-150405"))
 
-	// Capture the pre-BGSAVE LASTSAVE timestamp first. If we read it after
-	// BGSAVE, a fast save (e.g. an empty DB) may already have bumped the
-	// timestamp and the poll loop would never observe a change.
-	initial, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "LASTSAVE").Output()
-	if err != nil {
-		return nil, fmt.Errorf("redis LASTSAVE (initial): %w", err)
-	}
-	initialTS := strings.TrimSpace(string(initial))
-
-	// Trigger BGSAVE
-	out, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "BGSAVE").CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("redis BGSAVE: %w: %s", err, out)
-	}
-
-	if err := s.waitForSaveSince(ctx, container, initialTS); err != nil {
-		return nil, err
+	// Use synchronous SAVE instead of BGSAVE+poll. SAVE blocks the Redis
+	// server for the duration of the write, but for backup sizes typical of
+	// simpledeploy apps this is sub-second and avoids the race where
+	// BGSAVE's LASTSAVE timestamp (1s resolution) never appears to change
+	// on a loaded CI runner despite BGSAVE actually completing. BGSAVE
+	// fallback is kept for the (rare) case SAVE is disallowed by config.
+	out, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "SAVE").CombinedOutput()
+	if err != nil || !strings.Contains(strings.ToUpper(string(out)), "OK") {
+		// SAVE unavailable or errored; try BGSAVE with a wait loop.
+		initial, lerr := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "LASTSAVE").Output()
+		if lerr != nil {
+			return nil, fmt.Errorf("redis SAVE: %w: %s; LASTSAVE fallback: %v", err, out, lerr)
+		}
+		initialTS := strings.TrimSpace(string(initial))
+		bgOut, bgErr := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "BGSAVE").CombinedOutput()
+		if bgErr != nil {
+			return nil, fmt.Errorf("redis BGSAVE: %w: %s", bgErr, bgOut)
+		}
+		if werr := s.waitForSaveSince(ctx, container, initialTS); werr != nil {
+			return nil, werr
+		}
 	}
 
 	// Copy RDB file out via docker cp piped to stdout
