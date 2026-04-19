@@ -46,6 +46,22 @@ Conventions:
 - Mock Docker client in `internal/docker/mock.go`.
 - Mock command runner in `internal/deployer/runner.go`.
 
+## UI unit tests (vitest)
+
+Fast Svelte + JS tests covering pure helpers, stores, components, and routes. Run in ~4 seconds and gate every push via the `pre-push` hook.
+
+```bash
+cd ui
+npm test              # run once
+npm run test:watch    # watch mode
+```
+
+Tests live in `ui/src/**/__tests__/*.test.js` and use `@testing-library/svelte` + jsdom. `src/test-mocks/api.js` exposes `makeApiMock()` for stubbing the API module, and `src/routes/__tests__/LayoutStub.svelte` passes through `Layout` children so route-level tests stay focused.
+
+**Any UI change that adds new behavior, fixes a bug, or modifies component logic must include or update a vitest.** See [UI Test Coverage Rule](../../CLAUDE.md#ui-test-coverage-rule) for the full policy.
+
+Skip only for pure visual tweaks, docblock-only edits, or behavior fully covered by E2E where a vitest would duplicate without adding signal.
+
 ## E2E tests
 
 ```bash
@@ -56,6 +72,8 @@ make e2e-report    # open last HTML report
 
 Requires Docker running, Go, Node.js. The harness builds the binary, starts a real server on a random port with TLS off, and deploys real fixture apps. See [E2E tests](/contributing/e2e-tests/) for adding cases.
 
+Prefer a vitest over a new E2E spec when the logic can be exercised with mocks. Vitests run in seconds; the full E2E suite takes ~20 minutes.
+
 ## Where to add tests for each kind of change
 
 | Change | Add tests in |
@@ -65,7 +83,10 @@ Requires Docker running, Go, Node.js. The harness builds the binary, starts a re
 | New backup strategy | `internal/backup/<name>_test.go` |
 | New backup target | `internal/backup/<name>_test.go` |
 | New Caddy module | `internal/proxy/<module>_test.go` |
-| UI flow | New or extended file in `e2e/tests/` |
+| New UI component | `ui/src/components/__tests__/<Name>.test.js` |
+| New UI lib/helper | `ui/src/lib/__tests__/<name>.test.js` |
+| New UI route | `ui/src/routes/__tests__/<Name>.test.js` (smoke + key interaction) |
+| UI flow (full-stack) | New or extended file in `e2e/tests/` |
 | CLI command | `cmd/simpledeploy/*_test.go` if behavior is non-trivial |
 
 ## CI
@@ -73,7 +94,7 @@ Requires Docker running, Go, Node.js. The harness builds the binary, starts a re
 | Job | Trigger | What it does |
 |-----|---------|--------------|
 | `lint` | push + PR | `golangci-lint` |
-| `test` | push + PR | `go test ./...` |
+| `test` | push + PR | `go test ./...` and `cd ui && npm test` |
 | `build` | push + PR | full `make build` |
 | `e2e` | push to `main` | Playwright against a real server |
 

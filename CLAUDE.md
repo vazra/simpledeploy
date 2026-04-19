@@ -193,8 +193,21 @@ e2e/
 4. Add API endpoints in `internal/api/`
 5. Add CLI commands in `cmd/simpledeploy/main.go`
 6. Add UI page in `ui/src/routes/`
-7. Add E2E tests in `e2e/tests/` (new spec file or extend existing one)
-8. Run `make test && make e2e` before submitting
+7. Add or update vitests in `ui/src/**/__tests__/` (see rule below)
+8. Add E2E tests in `e2e/tests/` (new spec file or extend existing one)
+9. Run `make test && make e2e` before submitting
+
+## UI Test Coverage Rule
+
+Any UI change that adds new behavior, fixes a bug, or modifies an existing component's logic MUST include or update a vitest under `ui/src/**/__tests__/` when it makes sense to improve product quality. Specifically:
+
+- **New component or lib module** → add a `__tests__/<name>.test.js` next to it.
+- **Bug fix** → add a regression test that fails on the old code and passes on the fix.
+- **Prop/branch added to an existing component** → extend the existing test file to cover the new branch.
+- **Pure helpers (format, validation, state derivation)** → always unit-test; they are cheap and catch regressions instantly.
+- **Skip tests only for**: pure visual tweaks (class names, spacing), docblock-only edits, or changes fully covered by existing E2E specs where a vitest would duplicate without added signal.
+
+Run `cd ui && npm test` (also part of the pre-push hook) to verify. Prefer vitests over new E2E specs for logic that can be exercised with mocks since vitests run in ~2s vs ~20min for e2e.
 
 ## UI Design Philosophy
 

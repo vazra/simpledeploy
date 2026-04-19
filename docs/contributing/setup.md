@@ -111,11 +111,14 @@ Use `make dev-docker` when you need the binary in a container (e.g., testing net
 ## Testing
 
 ```bash
-go test ./...                              # all tests
-go test ./internal/api/ -v                 # specific package
-go test ./internal/store/ -run TestUpsert  # specific test
+go test ./...                              # all Go tests
+go test ./internal/api/ -v                 # specific Go package
+go test ./internal/store/ -run TestUpsert  # specific Go test
+cd ui && npm test                          # UI vitest suite (~4s)
 make e2e                                   # full Playwright suite (~10-15 min)
 ```
+
+See [Build and test](./build-test.md) for the full test-placement rules.
 
 - Docker tests skip when Docker is unavailable
 - Store tests use temp DB files

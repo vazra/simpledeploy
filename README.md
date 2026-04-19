@@ -128,9 +128,10 @@ simpledeploy apikey create --name "ci-deploy" --user-id 1
 ## Development
 
 ```bash
-make dev        # hot-reload API + UI
-make test       # Go unit/integration tests
-make e2e        # full E2E browser tests (needs Docker)
+make dev             # hot-reload API + UI
+make test            # Go unit/integration tests
+cd ui && npm test    # UI vitest suite (~4s)
+make e2e             # full E2E browser tests (needs Docker)
 ```
 
 CI runs lint, tests, and build on every PR. E2E tests run on push to `main`. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
