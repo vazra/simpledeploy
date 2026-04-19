@@ -152,13 +152,6 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		server["automatic_https"] = map[string]interface{}{
 			"disable": true,
 		}
-	} else {
-		// Explicitly enable TLS on this listener. Without a connection policy,
-		// Caddy only serves TLS on its built-in :443 listener, so a custom
-		// ListenAddr (e.g. tests using a random port, or non-standard prod
-		// ports) would serve plain HTTP even with tls.mode=local|auto|custom.
-		// An empty policy lets Caddy's automation issue/load certs per SNI.
-		server["tls_connection_policies"] = []interface{}{map[string]interface{}{}}
 	}
 
 	servers := map[string]interface{}{
