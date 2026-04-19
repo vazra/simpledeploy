@@ -83,12 +83,7 @@ function composeYAMLForDomain(domain, hostPort) {
 
 // -------- describe 1: local (self-signed) TLS mode --------
 
-// Pre-existing failure: Caddy binds plain-HTTP on the non-:443 listen_addr
-// used by the test server. Fixing this requires a production change to the
-// Caddy config (tls_connection_policies or https_port override) and cannot
-// be done safely from the test side. Tracking as a separate issue.
-// TODO(tls-nonstandard-port): unblock when proxy serves TLS on custom ports.
-test.describe.skip('TLS mode=local (self-signed via Caddy internal CA)', () => {
+test.describe('TLS mode=local (self-signed via Caddy internal CA)', () => {
   let server = null;
   let cookie = null;
   const appName = 'e2e-tls-local';

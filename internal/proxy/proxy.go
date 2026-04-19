@@ -152,6 +152,18 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		server["automatic_https"] = map[string]interface{}{
 			"disable": true,
 		}
+	} else {
+		// Caddy only terminates TLS on servers with a connection policy; an
+		// empty policy is enough to make the listener serve TLS and let the
+		// tls automation app provide certs. Disable implicit HTTP->HTTPS
+		// redirects because enabling them tries to bind :80 which is almost
+		// never available on test/CI runners and blocks the whole reload.
+		// The optional HTTPListenAddr block below covers that case when the
+		// user explicitly wants the redirect.
+		server["tls_connection_policies"] = []interface{}{map[string]interface{}{}}
+		server["automatic_https"] = map[string]interface{}{
+			"disable_redirects": true,
+		}
 	}
 
 	servers := map[string]interface{}{

@@ -42,12 +42,12 @@ jobs:
       - name: run 26 tls-ssl chain
         run: |
           cd e2e
-          npx playwright test 01-setup.spec.js 26-tls-ssl.spec.js --reporter=list
+          npx playwright test 01-setup.spec.js 03-deploy.spec.js 26-tls-ssl.spec.js --reporter=list
 
       - name: run slow-app-templates nginx-static
         run: |
           cd e2e
-          npx playwright test 01-setup.spec.js slow-app-templates-deploy.spec.js -g "nginx-static" --reporter=list
+          npx playwright test 01-setup.spec.js slow-app-templates-deploy.spec.js -g "Initial Setup|nginx-static" --reporter=list
 
       - uses: actions/upload-artifact@v4
         if: always()
