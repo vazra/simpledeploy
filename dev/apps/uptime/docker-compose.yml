@@ -1,0 +1,38 @@
+services:
+  kuma:
+    image: louislam/uptime-kuma:1.23
+    restart: unless-stopped
+    volumes:
+      - kuma-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - /app/extra/healthcheck.js
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    labels:
+      simpledeploy.endpoints.0.domain: kuma.local
+      simpledeploy.endpoints.0.port: '3001'
+      simpledeploy.endpoints.0.tls: letsencrypt
+      simpledeploy.backup.strategy: volume
+      simpledeploy.backup.schedule: 0 3 * * *
+      simpledeploy.backup.target: local
+      simpledeploy.backup.retention: '14'
+      simpledeploy.alert.cpu: '80'
+      simpledeploy.alert.memory: '85'
+    networks:
+      - simpledeploy-public
+volumes:
+  kuma-data: {}
+networks:
+  simpledeploy-public:
+    external: true
+    name: simpledeploy-public

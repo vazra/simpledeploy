@@ -1,0 +1,10 @@
+- support private docker registers 
+
+
+
+
+- the is an OSS project, add required legal documents both in the marketing website as well as in code . 
+
+- support sending emails. you can even setup a mail-server as an app if needed. 
+- do a overall code review 
+- check if app with same name replace the current name

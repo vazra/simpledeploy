@@ -1,18 +1,24 @@
 services:
-    redis:
-        image: redis:7-alpine
-        ports:
-            - "6379:6379"
-        volumes:
-            - redis-data:/data
-        labels:
-            simpledeploy.backup.strategy: "volume"
-            simpledeploy.backup.schedule: "0 * * * *"
-            simpledeploy.backup.target: "local"
-            simpledeploy.backup.retention: "3"
-            simpledeploy.endpoints.0.domain: ameen.com
-            simpledeploy.endpoints.0.port: "8080"
-            simpledeploy.endpoints.0.tls: off
-        restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    labels:
+      simpledeploy.backup.strategy: "volume"
+      simpledeploy.backup.schedule: "0 * * * *"
+      simpledeploy.backup.target: "local"
+      simpledeploy.backup.retention: "3"
+      simpledeploy.endpoints.0.domain: ameen.com
+      simpledeploy.endpoints.0.port: "8080"
+      simpledeploy.endpoints.0.tls: off
+    restart: unless-stopped
+    networks:
+      - simpledeploy-public
 volumes:
-    redis-data:
+  redis-data:
+networks:
+  simpledeploy-public:
+    external: true
+    name: simpledeploy-public

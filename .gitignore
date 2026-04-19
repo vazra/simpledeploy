@@ -1,4 +1,5 @@
 bin/
+config.dev.yaml
 *.db
 *.db-wal
 *.db-shm
