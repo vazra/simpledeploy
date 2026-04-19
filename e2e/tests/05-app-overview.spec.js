@@ -24,9 +24,14 @@ test.describe('App Overview', () => {
 
   test('multi-service app shows services', async ({ page }) => {
     const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    await expect(page.getByText('e2e-multi').first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('Services').first()).toBeVisible({ timeout: 10_000 });
+    // beforeEach already mounted AppDetail for e2e-nginx. svelte-spa-router
+    // reuses the component instance on hash changes, and AppDetail only
+    // loads data in onMount (no reactive effect on slug). Force a full page
+    // load so the component remounts with the new slug.
+    await page.goto(`${state.baseURL}/#/apps/e2e-multi`, { waitUntil: 'load' });
+    await page.reload();
+    await expect(page.locator('h1').getByText('e2e-multi')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('main').getByText('Services').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('tab navigation works', async ({ page }) => {

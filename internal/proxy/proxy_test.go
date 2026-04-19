@@ -144,8 +144,14 @@ func TestBuildConfigTLSLocal(t *testing.T) {
 	cfg := parseConfig(t, p)
 	server := getServer(t, cfg)
 
-	if _, ok := server["automatic_https"]; ok {
-		t.Error("automatic_https should not be set for local TLS mode")
+	// With tls.mode=local we attach a connection policy and disable
+	// implicit HTTP->HTTPS redirects so Caddy does not try to bind :80.
+	if pol, ok := server["tls_connection_policies"].([]interface{}); !ok || len(pol) != 1 {
+		t.Errorf("tls_connection_policies: got %v, want 1 entry", server["tls_connection_policies"])
+	}
+	ah, ok := server["automatic_https"].(map[string]interface{})
+	if !ok || ah["disable_redirects"] != true {
+		t.Errorf("automatic_https.disable_redirects: got %v, want true", server["automatic_https"])
 	}
 
 	apps := cfg["apps"].(map[string]interface{})
