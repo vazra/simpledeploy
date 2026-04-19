@@ -10,6 +10,8 @@ services:
     depends_on:
       - db
     restart: always
+    networks:
+      - simpledeploy-public
   db:
     image: postgres:16-alpine
     environment:
@@ -26,3 +28,7 @@ services:
     restart: unless-stopped
 volumes:
   pgdata: null
+networks:
+  simpledeploy-public:
+    external: true
+    name: simpledeploy-public

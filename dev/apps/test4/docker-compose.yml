@@ -1,0 +1,22 @@
+services:
+  web:
+    image: nginx:alpine
+    labels:
+      simpledeploy.domain: something.com
+      simpledeploy.port: '8000'
+      simpledeploy.tls: 'off'
+    ports:
+      - '4124:4123'
+    environment:
+      KEY: VAL
+    deploy:
+      resources:
+        limits:
+          cpus: '.5'
+          memory: 512m
+        reservations:
+          cpus: '.05'
+          memory: 10m
+    healthcheck: {}
+  service1:
+    image: postgres:16
