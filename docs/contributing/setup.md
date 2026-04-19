@@ -35,18 +35,13 @@ Access at https://localhost:8500/ (no hot reload in this mode).
 
 ## Dev Config
 
-`config.dev.yaml` at repo root. TLS off, data stored in `/tmp/simpledeploy-dev`.
+`config.dev.yaml` at repo root is gitignored so each developer can customize freely. Copy the tracked template on first checkout:
 
-```yaml
-data_dir: /tmp/simpledeploy-dev
-apps_dir: ./dev/apps
-listen_addr: ":8080"
-management_port: 8443
-domain: localhost
-tls:
-  mode: "off"
-master_secret: "dev-secret-do-not-use-in-production"
+```bash
+cp config.dev.yaml.example config.dev.yaml
 ```
+
+Defaults use local CA TLS, `/tmp/simpledeploy-dev` for data, and `domain: localhost`. Change `domain` to e.g. `simpledeploy.local` and add `127.0.0.1 simpledeploy.local` to `/etc/hosts` for a stable hostname. Trust Caddy's local root CA to skip browser warnings.
 
 ## Sample Apps
 
