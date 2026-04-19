@@ -94,7 +94,12 @@ func (s *RedisStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRes
 }
 
 func (s *RedisStrategy) waitForSaveSince(ctx context.Context, container, initialTS string) error {
-	for i := 0; i < 30; i++ {
+	// Cap wait at ~120s: each iteration costs a docker exec (~500ms on loaded
+	// CI runners) plus the 1s sleep, so 30 iterations can be short of real
+	// wall time under load. BGSAVE itself is near-instant for test-sized
+	// dbs; this is generous enough to absorb docker-exec overhead.
+	const maxAttempts = 120
+	for i := 0; i < maxAttempts; i++ {
 		current, err := exec.CommandContext(ctx, "docker", "exec", container, "redis-cli", "LASTSAVE").Output()
 		if err != nil {
 			return fmt.Errorf("redis LASTSAVE: %w", err)
@@ -108,7 +113,7 @@ func (s *RedisStrategy) waitForSaveSince(ctx context.Context, container, initial
 		case <-time.After(time.Second):
 		}
 	}
-	return fmt.Errorf("redis BGSAVE did not complete within 30s")
+	return fmt.Errorf("redis BGSAVE did not complete within %ds", maxAttempts)
 }
 
 func (s *RedisStrategy) Restore(ctx context.Context, opts RestoreOpts) error {

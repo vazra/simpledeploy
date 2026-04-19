@@ -17,7 +17,7 @@ import { findServiceContainer, containerRunning } from '../helpers/docker.js';
 // the domain to use.
 const CASES = [
   { id: 'nginx-static', slug: 'e2e-tpl-nginx',  service: 'web',  domain: 'e2e-tpl-nginx.local' },
-  { id: 'uptime-kuma',  slug: 'e2e-tpl-uptime', service: 'app',  domain: 'e2e-tpl-uptime.local' },
+  { id: 'uptime-kuma',  slug: 'e2e-tpl-uptime', service: 'kuma', domain: 'e2e-tpl-uptime.local' },
 ];
 
 async function removeAppIfExists(slug) {

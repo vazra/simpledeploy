@@ -6,18 +6,26 @@ export function dbPath() {
   return join(getState().dataDir, 'simpledeploy.db');
 }
 
+// The server runs with WAL mode and holds the DB open; external sqlite3
+// writes can briefly hit SQLITE_BUSY when a checkpoint is in progress. A
+// .timeout prelude makes sqlite3 wait up to 10s for the lock instead of
+// erroring immediately.
+const BUSY_TIMEOUT_MS = 10_000;
+
 export function sqliteExec(sql) {
-  return execFileSync('sqlite3', [dbPath(), sql], {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  return execFileSync(
+    'sqlite3',
+    [dbPath(), `.timeout ${BUSY_TIMEOUT_MS}`, sql],
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+  ).trim();
 }
 
 export function sqliteQuery(sql) {
-  const out = execFileSync('sqlite3', ['-json', dbPath(), sql], {
-    encoding: 'utf-8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  const out = execFileSync(
+    'sqlite3',
+    ['-json', dbPath(), `.timeout ${BUSY_TIMEOUT_MS}`, sql],
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+  ).trim();
   if (!out) return [];
   try { return JSON.parse(out); } catch { return []; }
 }
