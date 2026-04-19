@@ -31,18 +31,33 @@ const ORIGINAL_NGINX_ENDPOINTS = [
   { domain: 'nginx-test.local', port: '80', tls: 'off', service: 'web' },
 ];
 
-async function waitForProxyStatus(host, wantStatus, timeoutMs = 15_000) {
+// waitForProxyStatus polls Caddy until the response matches wantStatus and,
+// when bodyContains is provided, the response body also contains that
+// substring. The body check is necessary because Caddy's fallthrough
+// handler can return 200 with an empty body during the window between the
+// endpoints PUT and the reconciler installing the new route; accepting that
+// empty 200 would mask real routing failures.
+async function waitForProxyStatus(host, wantStatus, timeoutMs = 15_000, bodyContains = null) {
   const deadline = Date.now() + timeoutMs;
   let last = 0;
+  let lastBody = '';
   while (Date.now() < deadline) {
     try {
       const r = await fetchViaProxy(host, '/');
       last = r.status;
-      if (r.status === wantStatus) return r;
+      if (r.status === wantStatus) {
+        if (!bodyContains) return r;
+        const body = await r.text();
+        lastBody = body.slice(0, 60);
+        if (body.includes(bodyContains)) {
+          return { ...r, text: async () => body };
+        }
+      }
     } catch {}
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error(`host ${host} did not reach status ${wantStatus} within ${timeoutMs}ms (last=${last})`);
+  const hint = bodyContains ? ` body~${JSON.stringify(bodyContains)}` : '';
+  throw new Error(`host ${host} did not reach status ${wantStatus}${hint} within ${timeoutMs}ms (last=${last}, lastBody=${lastBody})`);
 }
 
 async function waitForProxyNotNginx(host, timeoutMs = 15_000) {
@@ -72,7 +87,7 @@ test.describe('Endpoints - Functional', () => {
     // Always restore nginx endpoints after each functional test.
     await apiRequest('PUT', '/api/apps/e2e-nginx/endpoints', ORIGINAL_NGINX_ENDPOINTS);
     try {
-      await waitForProxyStatus('nginx-test.local', 200, 20_000);
+      await waitForProxyStatus('nginx-test.local', 200, 20_000, 'Welcome to nginx');
     } catch {}
   });
 
@@ -83,7 +98,7 @@ test.describe('Endpoints - Functional', () => {
     ]);
     expect(res.ok).toBe(true);
 
-    const r = await waitForProxyStatus('added-e2e.local', 200, 20_000);
+    const r = await waitForProxyStatus('added-e2e.local', 200, 20_000, 'Welcome to nginx');
     const body = await r.text();
     expect(body).toContain('Welcome to nginx');
   });
@@ -105,9 +120,9 @@ test.describe('Endpoints - Functional', () => {
     ]);
     expect(res.ok).toBe(true);
 
-    const a = await waitForProxyStatus('nginx-test.local', 200, 20_000);
+    const a = await waitForProxyStatus('nginx-test.local', 200, 20_000, 'Welcome to nginx');
     expect(a.status).toBe(200);
-    const b = await waitForProxyStatus('alt-e2e.local', 200, 20_000);
+    const b = await waitForProxyStatus('alt-e2e.local', 200, 20_000, 'Welcome to nginx');
     expect(b.status).toBe(200);
   });
 });

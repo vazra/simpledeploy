@@ -25,8 +25,12 @@ test.describe('App Overview', () => {
   test('multi-service app shows services', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    await expect(page.getByText('e2e-multi').first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('Services').first()).toBeVisible({ timeout: 10_000 });
+    // Anchor on the h1 title (same pattern as the first test in this file)
+    // so getByText cannot latch onto an unrelated DOM occurrence, and give
+    // the SPA router time to finish loading the new app after the
+    // beforeEach navigation to a different slug.
+    await expect(page.locator('h1').getByText('e2e-multi')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('main').getByText('Services').first()).toBeVisible({ timeout: 10_000 });
   });
 
   test('tab navigation works', async ({ page }) => {

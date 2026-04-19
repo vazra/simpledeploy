@@ -1,0 +1,57 @@
+name: e2e-minimal
+
+# Temporary workflow: validate the four residual e2e fixes before merging
+# to main. Runs the minimal spec chains for each failure. Remove before merge.
+on:
+  push:
+    branches: [fix/e2e-residual-failures]
+  workflow_dispatch:
+
+jobs:
+  e2e-min:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: build binary
+        run: make build
+
+      - name: install e2e deps + browsers
+        run: |
+          cd e2e
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: run 05 app-overview chain
+        run: |
+          cd e2e
+          npx playwright test 01-setup.spec.js 03-deploy.spec.js 05-app-overview.spec.js --reporter=list
+
+      - name: run 08 app-endpoints chain
+        run: |
+          cd e2e
+          npx playwright test 01-setup.spec.js 03-deploy.spec.js 08-app-endpoints.spec.js --reporter=list
+
+      - name: run 26 tls-ssl chain
+        run: |
+          cd e2e
+          npx playwright test 01-setup.spec.js 26-tls-ssl.spec.js --reporter=list
+
+      - name: run slow-app-templates nginx-static
+        run: |
+          cd e2e
+          npx playwright test 01-setup.spec.js slow-app-templates-deploy.spec.js -g "nginx-static" --reporter=list
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-minimal-report
+          path: e2e/playwright-report/
+          retention-days: 7

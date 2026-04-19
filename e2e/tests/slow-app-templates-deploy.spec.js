@@ -53,6 +53,10 @@ test.describe('App templates - slow deploy', () => {
       const card = dialog.locator(`button[aria-label^="Use template "]`).filter({ hasText: new RegExp(c.id.replace(/-/g, '.'), 'i') });
       await card.first().click();
 
+      // Wizard defaults to quick-test access mode, which hides the domain
+      // input and auto-fills a sslip.io domain. Switch to Custom to expose
+      // #tpl-var-domain so we can deploy against the fixture hostname.
+      await dialog.getByRole('button', { name: 'Custom domain', exact: true }).click();
       await dialog.locator('#tpl-var-domain').fill(c.domain);
       await dialog.getByRole('button', { name: /^apply/i }).click();
 

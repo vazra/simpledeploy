@@ -49,6 +49,22 @@ async function setupAdminAndLogin(baseURL) {
   return login.setCookie;
 }
 
+// waitForHTTPSListening polls curlHTTPS until the TLS listener is bound on
+// proxyPort (any HTTP response status means Caddy is up). Replaces fragile
+// fixed sleeps after deploy: Caddy's internal CA cert issuance and listener
+// bind takes variable time on CI runners.
+async function waitForHTTPSListening(domain, proxyPort, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr = '';
+  while (Date.now() < deadline) {
+    const res = curlHTTPS(domain, proxyPort, '/');
+    if (res.status > 0) return res;
+    lastErr = res.error || '';
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`HTTPS listener on :${proxyPort} not ready within ${timeoutMs}ms (last error: ${lastErr})`);
+}
+
 async function waitForAppRunning(baseURL, cookie, slug, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
@@ -105,8 +121,9 @@ test.describe('TLS mode=local (self-signed via Caddy internal CA)', () => {
     expect(deploy.status, `deploy failed: ${JSON.stringify(deploy.data)}`).toBe(202);
 
     await waitForAppRunning(server.baseURL, cookie, appName);
-    // Give Caddy a couple seconds to issue the internal cert + hook up route.
-    await new Promise((r) => setTimeout(r, 3000));
+    // Wait for Caddy to bind the HTTPS listener; its internal-CA cert issuance
+    // takes variable time on CI and a fixed sleep can race the listener bind.
+    await waitForHTTPSListening(domain, server.proxyPort, 30_000);
   });
 
   test.afterAll(async () => {
