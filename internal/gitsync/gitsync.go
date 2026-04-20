@@ -103,6 +103,13 @@ type Reconciler interface {
 	ReconcileAfterSync(ctx context.Context, changedPaths []string) error
 }
 
+// ReconcilerFunc adapts a plain function to the Reconciler interface.
+type ReconcilerFunc func(ctx context.Context, paths []string) error
+
+func (f ReconcilerFunc) ReconcileAfterSync(ctx context.Context, paths []string) error {
+	return f(ctx, paths)
+}
+
 // commitReq is an internal work item for the worker.
 type commitReq struct {
 	paths  []string

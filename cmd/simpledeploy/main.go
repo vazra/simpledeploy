@@ -35,10 +35,12 @@ import (
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/gitsync"
 	"github.com/vazra/simpledeploy/internal/metrics"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/reconciler"
 	"github.com/vazra/simpledeploy/internal/store"
+	"sync/atomic"
 )
 
 var (
@@ -219,6 +221,25 @@ var configCmd = &cobra.Command{
 	Short: "Manage config sidecars (export/import for DR recovery)",
 }
 
+var gitCmd = &cobra.Command{
+	Use:   "git",
+	Short: "Git-backed config sync operations",
+}
+
+var gitStatusCmd = &cobra.Command{
+	Use:          "status",
+	Short:        "Print git sync status",
+	SilenceUsage: true,
+	RunE:         runGitStatus,
+}
+
+var gitSyncNowCmd = &cobra.Command{
+	Use:          "sync-now",
+	Short:        "Trigger an immediate pull from the remote",
+	SilenceUsage: true,
+	RunE:         runGitSyncNow,
+}
+
 var configExportCmd = &cobra.Command{
 	Use:          "export",
 	Short:        "Write all config sidecars from current DB state",
@@ -315,7 +336,9 @@ func init() {
 	configImportCmd.Flags().Bool("wipe", false, "truncate config tables before import")
 	configCmd.AddCommand(configExportCmd, configImportCmd)
 
-	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd, versionCmd, registryCmd, configCmd)
+	gitCmd.AddCommand(gitStatusCmd, gitSyncNowCmd)
+
+	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd, versionCmd, registryCmd, configCmd, gitCmd)
 }
 
 func main() {
@@ -474,8 +497,47 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// GitSync wiring (optional; non-fatal on error).
+	// Build syncer now (before ctx exists); Start deferred to after ctx creation.
+	var gitSyncer *gitsync.Syncer
+	var recRef atomic.Pointer[reconciler.Reconciler]
+	if cfg.GitSync.Enabled {
+		gitReconcilerFn := gitsync.ReconcilerFunc(func(gctx context.Context, paths []string) error {
+			r := recRef.Load()
+			if r == nil {
+				return nil
+			}
+			return r.Reconcile(gctx)
+		})
+		gsCfg := gitsync.Config{
+			Enabled:       true,
+			Remote:        cfg.GitSync.Remote,
+			Branch:        cfg.GitSync.Branch,
+			AppsDir:       cfg.AppsDir,
+			AuthorName:    cfg.GitSync.AuthorName,
+			AuthorEmail:   cfg.GitSync.AuthorEmail,
+			SSHKeyPath:    cfg.GitSync.SSHKeyPath,
+			HTTPSUsername: cfg.GitSync.HTTPSUsername,
+			HTTPSToken:    cfg.GitSync.HTTPSToken,
+			PollInterval:  cfg.GitSync.PollInterval,
+			WebhookSecret: cfg.GitSync.WebhookSecret,
+		}
+		gs, gsErr := gitsync.New(gsCfg, db, syncer, gitReconcilerFn)
+		if gsErr != nil {
+			log.Printf("[gitsync] init failed (continuing without git sync): %v", gsErr)
+		} else {
+			gitSyncer = gs
+			syncer.SetSidecarWriteHook(func(path, reason string) {
+				gs.EnqueueCommit([]string{path}, reason)
+			})
+		}
+	}
+
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg, syncer)
 	rec.SetDockerClient(dc)
+
+	// Late-bind reconciler pointer for gitsync callback.
+	recRef.Store(rec)
 
 	// metrics pipeline
 	metricsCh := make(chan metrics.MetricPoint, 500)
@@ -515,6 +577,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
+
+	// Start gitsync now that ctx exists.
+	if gitSyncer != nil {
+		if startErr := gitSyncer.Start(ctx); startErr != nil {
+			log.Printf("[gitsync] start failed (continuing without git sync): %v", startErr)
+			gitSyncer = nil
+		} else {
+			defer gitSyncer.Stop()
+		}
+	}
 
 	go func() {
 		ch := make(chan os.Signal, 1)
@@ -650,6 +722,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetAudit(audit.New(os.Stderr, 500))
 	srv.SetLogBuffer(logBuf)
 	srv.InitDBBackupSchedule()
+	if gitSyncer != nil {
+		srv.SetGitSync(gitSyncer)
+	}
 
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)
@@ -1629,5 +1704,66 @@ func runRegistryRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Printf("removed registry %q\n", name)
+	return nil
+}
+
+func buildGitSyncer(cfg *config.Config) (*gitsync.Syncer, error) {
+	if !cfg.GitSync.Enabled {
+		return nil, fmt.Errorf("gitsync is not enabled in config")
+	}
+	gsCfg := gitsync.Config{
+		Enabled:       true,
+		Remote:        cfg.GitSync.Remote,
+		Branch:        cfg.GitSync.Branch,
+		AppsDir:       cfg.AppsDir,
+		AuthorName:    cfg.GitSync.AuthorName,
+		AuthorEmail:   cfg.GitSync.AuthorEmail,
+		SSHKeyPath:    cfg.GitSync.SSHKeyPath,
+		HTTPSUsername: cfg.GitSync.HTTPSUsername,
+		HTTPSToken:    cfg.GitSync.HTTPSToken,
+		PollInterval:  cfg.GitSync.PollInterval,
+		WebhookSecret: cfg.GitSync.WebhookSecret,
+	}
+	return gitsync.New(gsCfg, nil, nil, nil)
+}
+
+func runGitStatus(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	gs, err := buildGitSyncer(cfg)
+	if err != nil {
+		return err
+	}
+	st := gs.Status()
+	fmt.Printf("enabled:       %v\n", st.Enabled)
+	fmt.Printf("remote:        %s\n", st.Remote)
+	fmt.Printf("branch:        %s\n", st.Branch)
+	fmt.Printf("head:          %s\n", st.HeadSHA)
+	fmt.Printf("last_sync:     %s\n", st.LastSyncAt.Format(time.RFC3339))
+	fmt.Printf("last_error:    %s\n", st.LastSyncError)
+	fmt.Printf("pending:       %d\n", st.PendingCommits)
+	fmt.Printf("dropped:       %d\n", st.DroppedRequests)
+	return nil
+}
+
+func runGitSyncNow(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	gs, err := buildGitSyncer(cfg)
+	if err != nil {
+		return err
+	}
+	if err := gs.Start(cmd.Context()); err != nil {
+		return fmt.Errorf("start gitsync: %w", err)
+	}
+	defer gs.Stop()
+	if err := gs.SyncNow(cmd.Context()); err != nil {
+		return fmt.Errorf("sync-now: %w", err)
+	}
+	fmt.Println("sync complete")
 	return nil
 }
