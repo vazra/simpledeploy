@@ -5,6 +5,8 @@ description: How SimpleDeploy mirrors every user-editable setting to YAML files 
 
 import { Aside } from '@astrojs/starlight/components';
 
+To sync sidecar files to a remote git repository automatically, see [Git sync](./git-sync).
+
 SimpleDeploy continuously mirrors every user-editable setting to plain YAML files called **config sidecars**. If the SQLite database is ever wiped, the server automatically imports the sidecars on the next start. No backup job needed for configuration; the live copy is always on disk.
 
 Historical data (metrics, deploy events, alert history, backup run records) is not mirrored and will be lost on a DB wipe. See [What is and isn't mirrored](#what-is-and-isnt-mirrored).
