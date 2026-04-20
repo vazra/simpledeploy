@@ -90,7 +90,7 @@
 
   {:else if notAdmin}
     <div class="bg-surface-2 rounded-xl p-6 shadow-sm border border-border/50 text-sm text-text-muted">
-      Requires admin role.
+      Git Sync is restricted to super admins.
     </div>
 
   {:else if disabled}
