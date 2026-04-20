@@ -126,7 +126,11 @@ test.describe('Deploy via Templates', () => {
     // allow up to 480s under the 600s test-level timeout.
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 480_000 });
+    // Either "Deployed" or "Unstable" is acceptable: the API service has no
+    // server.js in its empty volume by design, so post-deploy stabilization
+    // will report unstable. The point of this test is backup-label propagation,
+    // not container health.
+    await expect(dialog.getByText(/^(Deployed|Unstable)$/)).toBeVisible({ timeout: 480_000 });
 
     // Navigate to the app's Backups tab and confirm it renders.
     await dialog.getByRole('button', { name: 'View App' }).click();

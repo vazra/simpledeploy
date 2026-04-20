@@ -945,7 +945,7 @@ export const appTemplates = [
     compose: {
       services: {
         adminer: {
-          image: 'adminer:5.4',
+          image: 'adminer:5.4.2',
           restart: 'unless-stopped',
           deploy: limits('0.25', '64M'),
           healthcheck: {
