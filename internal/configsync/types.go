@@ -94,3 +94,37 @@ type WebhookEntry struct {
 	TemplateOverride string `yaml:"template_override,omitempty"`
 	HeadersJSON      string `yaml:"headers_json,omitempty"`
 }
+
+// RedactedGlobalSidecar is a git-safe view of global config.
+// Stored at {apps_dir}/_global.yml. Contains NO secrets — no password
+// hashes, no api-key hashes, no encrypted credentials, no webhook URLs.
+// Used by gitsync for portable config sharing; never used for DR.
+type RedactedGlobalSidecar struct {
+	Version          int                `yaml:"version"`
+	Users            []RedactedUser     `yaml:"users,omitempty"`
+	Registries       []RedactedRegistry `yaml:"registries,omitempty"`
+	Webhooks         []RedactedWebhook  `yaml:"webhooks,omitempty"`
+	DBBackupSchedule string             `yaml:"db_backup_schedule,omitempty"`
+	DBBackupTarget   string             `yaml:"db_backup_target,omitempty"`
+}
+
+// RedactedUser holds non-secret user fields.
+type RedactedUser struct {
+	Username    string `yaml:"username"`
+	Role        string `yaml:"role"`
+	DisplayName string `yaml:"display_name,omitempty"`
+	Email       string `yaml:"email,omitempty"`
+}
+
+// RedactedRegistry holds non-secret registry fields (URL is the registry hostname, not a secret).
+type RedactedRegistry struct {
+	ID   string `yaml:"id"`
+	Name string `yaml:"name"`
+	URL  string `yaml:"url"`
+}
+
+// RedactedWebhook holds non-secret webhook fields (no URL, no headers, no template).
+type RedactedWebhook struct {
+	Name string `yaml:"name"`
+	Type string `yaml:"type"`
+}
