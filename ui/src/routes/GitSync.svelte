@@ -33,6 +33,14 @@
   let fAuthorName = $state('SimpleDeploy')
   let fAuthorEmail = $state('bot@simpledeploy.local')
 
+  // Behaviour toggles
+  let fPollEnabled = $state(true)
+  let fAutoPushEnabled = $state(true)
+  let fAutoApplyEnabled = $state(true)
+  let fWebhookEnabled = $state(true)
+
+  let applying = $state(false)
+
   function timeAgo(isoStr) {
     if (!isoStr) return 'never'
     const diff = Date.now() - new Date(isoStr).getTime()
@@ -61,6 +69,10 @@
     fAuthorEmail = c.author_email || 'bot@simpledeploy.local'
     fHTTPSToken = ''
     fWebhookSecret = ''
+    fPollEnabled = c.poll_enabled !== false
+    fAutoPushEnabled = c.auto_push_enabled !== false
+    fAutoApplyEnabled = c.auto_apply_enabled !== false
+    fWebhookEnabled = c.webhook_enabled !== false
     if (c.ssh_key_path) {
       fAuthMethod = 'ssh'
     } else if (c.https_token_set || c.https_username) {
@@ -107,6 +119,10 @@
       // null = keep existing; "" = clear; "x" = set new value
       webhook_secret: fWebhookSecret !== '' ? fWebhookSecret : null,
       https_token: fAuthMethod === 'https' && fHTTPSToken !== '' ? fHTTPSToken : null,
+      poll_enabled: fPollEnabled,
+      auto_push_enabled: fAutoPushEnabled,
+      auto_apply_enabled: fAutoApplyEnabled,
+      webhook_enabled: fWebhookEnabled,
     }
 
     const res = await api.gitConfigUpdate(payload)
@@ -129,6 +145,13 @@
     }
     await load()
     syncing = false
+  }
+
+  async function applyPending() {
+    applying = true
+    await api.gitApplyPending()
+    await load()
+    applying = false
   }
 
   async function copyToClipboard(sha) {
@@ -209,6 +232,7 @@
                   class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
                 />
               </div>
+              {#if fPollEnabled}
               <div>
                 <label class="block text-xs text-text-muted mb-1" for="git-poll">Poll interval (seconds)</label>
                 <input
@@ -220,6 +244,40 @@
                   class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
                 />
               </div>
+              {/if}
+            </div>
+
+            <!-- Behaviour toggles -->
+            <div class="space-y-2.5">
+              <p class="text-xs text-text-muted font-medium">Sync behaviour</p>
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" bind:checked={fPollEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
+                <span class="text-sm text-text-primary">
+                  Poll for remote changes
+                  <span class="block text-xs text-text-muted font-normal">Check the remote every N seconds.</span>
+                </span>
+              </label>
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" bind:checked={fAutoPushEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
+                <span class="text-sm text-text-primary">
+                  Auto-push local changes
+                  <span class="block text-xs text-text-muted font-normal">Commit and push sidecars whenever they change.</span>
+                </span>
+              </label>
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" bind:checked={fAutoApplyEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
+                <span class="text-sm text-text-primary">
+                  Auto-apply remote changes
+                  <span class="block text-xs text-text-muted font-normal">Pull and apply remote commits automatically. When off, shows a pending indicator and waits for manual apply.</span>
+                </span>
+              </label>
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" bind:checked={fWebhookEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
+                <span class="text-sm text-text-primary">
+                  Enable webhook endpoint
+                  <span class="block text-xs text-text-muted font-normal">Accept push notifications at /api/git/webhook. Disable to reject all webhook calls.</span>
+                </span>
+              </label>
             </div>
 
             <!-- Auth method -->
@@ -362,6 +420,15 @@
         </Button>
       </div>
 
+      {#if status.PendingApply}
+        <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-4 py-3">
+          <span class="text-sm text-yellow-400 flex-1">{status.CommitsBehind} commit{status.CommitsBehind === 1 ? '' : 's'} behind — remote changes are waiting to be applied.</span>
+          <Button size="sm" onclick={applyPending} disabled={applying}>
+            {applying ? 'Applying...' : 'Apply now'}
+          </Button>
+        </div>
+      {/if}
+
       <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
         <div>
           <dt class="text-xs text-text-muted mb-0.5">Remote</dt>
@@ -385,6 +452,14 @@
         <div>
           <dt class="text-xs text-text-muted mb-0.5">Pending commits</dt>
           <dd class="text-text-secondary">{status.PendingCommits ?? 0}</dd>
+        </div>
+        <div>
+          <dt class="text-xs text-text-muted mb-0.5">Polling</dt>
+          <dd class="text-text-secondary">{status.PollEnabled ? 'enabled' : 'off'}</dd>
+        </div>
+        <div>
+          <dt class="text-xs text-text-muted mb-0.5">Webhook</dt>
+          <dd class="text-text-secondary">{status.WebhookEnabled ? 'enabled' : 'disabled'}</dd>
         </div>
       </dl>
 
