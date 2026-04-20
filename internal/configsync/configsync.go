@@ -176,8 +176,16 @@ func (s *Syncer) schedule(key string, fn func()) {
 // Safe to call even if the file or directory is gone. Ignores not-exist errors.
 func (s *Syncer) DeleteAppSidecar(slug string) error {
 	path := filepath.Join(s.appsDir, slug, appSidecarName)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("DeleteAppSidecar %s: %w", slug, err)
+	removed := true
+	if err := os.Remove(path); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("DeleteAppSidecar %s: %w", slug, err)
+		}
+		removed = false
+	}
+	if removed {
+		// Empty path signals "stage everything" so gitsync picks up the deletion.
+		s.callHook("", fmt.Sprintf("app sidecar deleted: %s", slug))
 	}
 	return nil
 }
@@ -217,6 +225,10 @@ func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
 			return removed, fmt.Errorf("PruneOrphanSidecars: remove %s: %w", sidecar, err)
 		}
 		removed = append(removed, name)
+	}
+	if len(removed) > 0 {
+		// Empty path signals "stage everything" so gitsync picks up deletions.
+		s.callHook("", fmt.Sprintf("orphan sidecars pruned: %v", removed))
 	}
 	return removed, nil
 }

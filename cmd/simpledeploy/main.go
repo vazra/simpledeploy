@@ -536,6 +536,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		} else {
 			gitSyncer = gs
 			syncer.SetSidecarWriteHook(func(path, reason string) {
+				if path == "" {
+					gs.EnqueueCommit(nil, reason)
+					return
+				}
 				gs.EnqueueCommit([]string{path}, reason)
 			})
 		}
