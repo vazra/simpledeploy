@@ -1,5 +1,8 @@
 import { defineConfig } from '@playwright/test';
 
+// Git-sync spec requires E2E_GITSYNC=1: spawns isolated server + bare git repo.
+const GITSYNC_SPEC = '**/26b-gitsync.spec.js';
+
 // Slow specs skipped when E2E_LITE=1. Each pulls large images, spawns
 // auxiliary containers (MinIO, DB engines, local registry), or waits on
 // long timing windows (webhook delivery). Trims ~15 min from the suite.
@@ -25,7 +28,11 @@ export default defineConfig({
     : undefined,
   testIgnore: TEMPLATES_ONLY
     ? undefined
-    : [TEMPLATES_SPEC, ...(process.env.E2E_LITE === '1' ? LITE_SKIP : [])],
+    : [
+        TEMPLATES_SPEC,
+        ...(process.env.E2E_GITSYNC !== '1' ? [GITSYNC_SPEC] : []),
+        ...(process.env.E2E_LITE === '1' ? LITE_SKIP : []),
+      ],
   fullyParallel: false,
   workers: 1,
   retries: 0,
