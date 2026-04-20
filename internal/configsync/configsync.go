@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	appSidecarName  = "simpledeploy.yml"
-	globalSidecar   = "config.yml"
-	debounceDelay   = 500 * time.Millisecond
-	globalKey       = "" // map key for global debounce entry
+	appSidecarName = "simpledeploy.yml"
+	globalSidecar  = "config.yml"
+	debounceDelay  = 500 * time.Millisecond
+	globalKey      = "\x00global" // non-slug sentinel for global debounce entry
 )
 
 // Syncer writes and reads config sidecar files, debouncing frequent writes.
@@ -104,18 +104,28 @@ func (s *Syncer) schedule(key string, fn func()) {
 	if s.closed {
 		return
 	}
+	// Stop and discard any existing timer so its closure can't run after we
+	// replace it. We always create a fresh timer whose closure captures a
+	// pointer to itself; under the lock it checks "am I still the active
+	// timer?" and skips if a newer call has already replaced it.
 	if t, ok := s.timers[key]; ok {
-		t.Reset(debounceDelay)
-		return
+		t.Stop()
 	}
 	s.pending[key] = struct{}{}
-	s.timers[key] = time.AfterFunc(debounceDelay, func() {
-		fn()
+	var self *time.Timer
+	self = time.AfterFunc(debounceDelay, func() {
 		s.mu.Lock()
+		if s.timers[key] != self {
+			// superseded by a later schedule() call; skip.
+			s.mu.Unlock()
+			return
+		}
 		delete(s.timers, key)
 		delete(s.pending, key)
 		s.mu.Unlock()
+		fn()
 	})
+	s.timers[key] = self
 }
 
 // WriteAppSidecar reads the app and its config from the store and writes the sidecar atomically.

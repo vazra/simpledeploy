@@ -476,7 +476,7 @@ func (s *Store) UpsertUserByUsername(u *User) error {
 	return nil
 }
 
-// UpsertAPIKey inserts or updates an API key by (username, name).
+// UpsertAPIKey inserts or updates an API key by key_hash.
 // Used by configsync ImportGlobal.
 func (s *Store) UpsertAPIKey(username, keyHash, name string, expiresAt *time.Time) error {
 	var userID int64

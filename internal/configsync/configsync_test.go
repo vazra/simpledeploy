@@ -3,6 +3,7 @@ package configsync
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -467,6 +468,71 @@ func TestImportMissingWebhookFails(t *testing.T) {
 	err := syncer.ImportAppSidecar(data)
 	if err == nil {
 		t.Error("expected error for missing webhook, got nil")
+	}
+}
+
+// TestDebouncerRaceNoDroppedWrite verifies that calling schedule just before
+// the timer fires does not lose the second write.
+func TestDebouncerRaceNoDroppedWrite(t *testing.T) {
+	callCount := 0
+	var mu sync.Mutex
+	fn := func() {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+	}
+
+	s := &Syncer{
+		timers:  make(map[string]*time.Timer),
+		pending: make(map[string]struct{}),
+	}
+
+	// First schedule.
+	s.schedule("x", fn)
+	// Wait just under the debounce window, then reschedule.
+	time.Sleep(400 * time.Millisecond)
+	s.schedule("x", fn)
+	// Wait for second timer to fire (500ms + margin).
+	time.Sleep(700 * time.Millisecond)
+
+	mu.Lock()
+	got := callCount
+	mu.Unlock()
+
+	if got != 1 {
+		t.Errorf("want exactly 1 fn call, got %d", got)
+	}
+}
+
+// TestDebouncerRapidFireNoLostWrite verifies that rapid-fire scheduling
+// eventually results in at least one fn call.
+func TestDebouncerRapidFireNoLostWrite(t *testing.T) {
+	callCount := 0
+	var mu sync.Mutex
+	fn := func() {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+	}
+
+	s := &Syncer{
+		timers:  make(map[string]*time.Timer),
+		pending: make(map[string]struct{}),
+	}
+
+	// Fire every 100ms for ~1s, then wait for final timer.
+	for i := 0; i < 10; i++ {
+		s.schedule("x", fn)
+		time.Sleep(100 * time.Millisecond)
+	}
+	time.Sleep(700 * time.Millisecond)
+
+	mu.Lock()
+	got := callCount
+	mu.Unlock()
+
+	if got < 1 {
+		t.Errorf("want at least 1 fn call, got %d", got)
 	}
 }
 
