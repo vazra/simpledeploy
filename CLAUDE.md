@@ -57,7 +57,7 @@ ui/                   Svelte SPA (Vite build)
 
 ## Database
 
-SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 16 migrations:
+SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 17 migrations:
 
 1. apps table
 2. app_labels
@@ -75,6 +75,7 @@ SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations
 14. alert history rule snapshot columns
 15. backups v2
 16. indexes (alert_history, backup_runs)
+17. alert_history.rule_id nullable (gitsync conflict alerts)
 
 ## Testing
 
