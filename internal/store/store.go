@@ -17,7 +17,8 @@ import (
 var migrationsFS embed.FS
 
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	hooks hookState
 }
 
 func Open(path string) (*Store, error) {
