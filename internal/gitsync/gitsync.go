@@ -56,6 +56,11 @@ const gitignoreContent = `# simpledeploy: config repo
 `
 
 // Config controls the sync worker.
+//
+// Boolean toggle fields (PollEnabled, AutoPushEnabled, AutoApplyEnabled,
+// WebhookEnabled) must be explicitly set; their zero value is false. The
+// resolver always sets them explicitly, defaulting missing DB keys to true
+// for backwards-compatibility with existing installs.
 type Config struct {
 	Enabled       bool
 	Remote        string        // "git@github.com:owner/repo.git" or https URL
@@ -68,6 +73,12 @@ type Config struct {
 	HTTPSToken    string        // for https remotes
 	PollInterval  time.Duration // default 60s. 0 disables polling.
 	WebhookSecret string        // HMAC secret. Empty disables webhook endpoint.
+
+	// Behaviour toggles. All default to true via the resolver.
+	PollEnabled      bool // false: poll loop is not started
+	AutoPushEnabled  bool // false: EnqueueCommit is a no-op
+	AutoApplyEnabled bool // false: fetch-only; use ApplyPending to apply
+	WebhookEnabled   bool // false: /api/git/webhook returns 404
 }
 
 func (c *Config) branch() string {
@@ -145,6 +156,16 @@ type Status struct {
 	DroppedRequests int64
 	RecentConflicts []Conflict
 	RecentCommits   []CommitInfo
+
+	// Toggle state (mirrors Config fields).
+	PollEnabled      bool
+	AutoPushEnabled  bool
+	AutoApplyEnabled bool
+	WebhookEnabled   bool
+
+	// AutoApplyEnabled=false state.
+	CommitsBehind int  // remote commits not yet applied locally
+	PendingApply  bool // true when CommitsBehind > 0 and AutoApplyEnabled=false
 }
 
 // Conflict records a single server-wins conflict resolution.
@@ -175,6 +196,7 @@ type Syncer struct {
 	lastSyncError   string
 	recentConflicts []Conflict
 	dropped         int64
+	commitsBehind   int
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -231,7 +253,7 @@ func (g *Syncer) Start(ctx context.Context) error {
 	g.wg.Add(1)
 	go g.worker(wctx)
 
-	if g.cfg.pollInterval() > 0 {
+	if g.cfg.PollEnabled && g.cfg.pollInterval() > 0 {
 		g.wg.Add(1)
 		go g.pollLoop(wctx)
 	}
@@ -253,8 +275,12 @@ func (g *Syncer) Stop() error {
 
 // EnqueueCommit marks the working tree dirty and requests a commit-and-push.
 // Non-blocking; drops if the channel is full. Coalesces naturally via buffered channel.
+// No-op when AutoPushEnabled=false.
 func (g *Syncer) EnqueueCommit(paths []string, reason string) {
 	if !g.cfg.Enabled {
+		return
+	}
+	if !g.cfg.AutoPushEnabled {
 		return
 	}
 	if g.suppress.Load() {
@@ -330,31 +356,52 @@ func (g *Syncer) recentCommits(n int) []CommitInfo {
 // Status returns a snapshot.
 func (g *Syncer) Status() Status {
 	if !g.cfg.Enabled {
-		return Status{Enabled: false, Remote: g.cfg.Remote, Branch: g.cfg.branch()}
+		return Status{
+			Enabled:          false,
+			Remote:           g.cfg.Remote,
+			Branch:           g.cfg.branch(),
+			PollEnabled:      g.cfg.PollEnabled,
+			AutoPushEnabled:  g.cfg.AutoPushEnabled,
+			AutoApplyEnabled: g.cfg.AutoApplyEnabled,
+			WebhookEnabled:   g.cfg.WebhookEnabled,
+		}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	conflicts := make([]Conflict, len(g.recentConflicts))
 	copy(conflicts, g.recentConflicts)
 	commits := g.recentCommits(20)
+	behind := g.commitsBehind
 	return Status{
-		Enabled:         true,
-		Remote:          g.cfg.Remote,
-		Branch:          g.cfg.branch(),
-		HeadSHA:         g.headSHA,
-		LastSyncAt:      g.lastSyncAt,
-		LastSyncError:   g.lastSyncError,
-		PendingCommits:  len(g.commitCh),
-		DroppedRequests: atomic.LoadInt64(&g.dropped),
-		RecentConflicts: conflicts,
-		RecentCommits:   commits,
+		Enabled:          true,
+		Remote:           g.cfg.Remote,
+		Branch:           g.cfg.branch(),
+		HeadSHA:          g.headSHA,
+		LastSyncAt:       g.lastSyncAt,
+		LastSyncError:    g.lastSyncError,
+		PendingCommits:   len(g.commitCh),
+		DroppedRequests:  atomic.LoadInt64(&g.dropped),
+		RecentConflicts:  conflicts,
+		RecentCommits:    commits,
+		PollEnabled:      g.cfg.PollEnabled,
+		AutoPushEnabled:  g.cfg.AutoPushEnabled,
+		AutoApplyEnabled: g.cfg.AutoApplyEnabled,
+		WebhookEnabled:   g.cfg.WebhookEnabled,
+		CommitsBehind:    behind,
+		PendingApply:     !g.cfg.AutoApplyEnabled && behind > 0,
 	}
 }
 
 // WebhookHandler returns an http.Handler or nil if disabled.
+// Returns a 404 handler when WebhookEnabled=false.
 func (g *Syncer) WebhookHandler() http.Handler {
 	if !g.cfg.Enabled || g.cfg.WebhookSecret == "" {
 		return nil
+	}
+	if !g.cfg.WebhookEnabled {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
 	}
 	return newWebhookHandler(g)
 }
@@ -678,19 +725,50 @@ func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 	}
 }
 
-// doPull fetches, rebases with server-wins conflict resolution, then reconciles.
+// doPull runs fetch+inspect then optionally apply depending on AutoApplyEnabled.
 func (g *Syncer) doPull(ctx context.Context) error {
 	if g.repo == nil {
 		return errors.New("gitsync: repo not initialized")
 	}
 
-	prevSHA := g.headSHA
+	fetched, err := g.fetchAndInspect()
+	if err != nil {
+		return err
+	}
+	if !fetched {
+		return nil
+	}
 
-	// Fetch.
+	if !g.cfg.AutoApplyEnabled {
+		// fetch-only mode: status is updated; don't rebase.
+		return nil
+	}
+
+	return g.applyFetched(ctx)
+}
+
+// ApplyPending runs fetchAndInspect + applyFetched regardless of AutoApplyEnabled.
+// Intended for on-demand application of pending remote changes.
+func (g *Syncer) ApplyPending(ctx context.Context) error {
+	if !g.cfg.Enabled {
+		return errors.New("gitsync: not enabled")
+	}
+	if g.repo == nil {
+		return errors.New("gitsync: repo not initialized")
+	}
+	if _, err := g.fetchAndInspect(); err != nil {
+		return err
+	}
+	return g.applyFetched(ctx)
+}
+
+// fetchAndInspect fetches from origin and updates CommitsBehind in Status.
+// Returns (true, nil) when new commits were fetched, (false, nil) when already up-to-date.
+func (g *Syncer) fetchAndInspect() (fetched bool, err error) {
 	auth, err := g.buildAuth()
 	if err != nil {
 		g.setError(err.Error())
-		return err
+		return false, err
 	}
 	fetchErr := g.repo.Fetch(&git.FetchOptions{
 		RemoteName: "origin",
@@ -699,12 +777,63 @@ func (g *Syncer) doPull(ctx context.Context) error {
 	})
 	if fetchErr != nil && fetchErr != git.NoErrAlreadyUpToDate {
 		g.setError(fetchErr.Error())
-		return fmt.Errorf("gitsync: fetch: %w", fetchErr)
+		return false, fmt.Errorf("gitsync: fetch: %w", fetchErr)
 	}
 	if fetchErr == git.NoErrAlreadyUpToDate {
 		g.setLastSync(nil)
-		return nil
+		g.mu.Lock()
+		g.commitsBehind = 0
+		g.mu.Unlock()
+		return false, nil
 	}
+
+	// Compute how many commits origin/<branch> is ahead of local HEAD.
+	behind := g.countCommitsBehind()
+	g.mu.Lock()
+	g.commitsBehind = behind
+	g.mu.Unlock()
+
+	return true, nil
+}
+
+// countCommitsBehind returns how many commits origin/<branch> has that local HEAD does not.
+func (g *Syncer) countCommitsBehind() int {
+	if g.repo == nil {
+		return 0
+	}
+	localRef, err := g.repo.Head()
+	if err != nil {
+		return 0
+	}
+	remoteRefName := plumbing.NewRemoteReferenceName("origin", g.cfg.branch())
+	remoteRef, err := g.repo.Reference(remoteRefName, true)
+	if err != nil {
+		return 0
+	}
+	if localRef.Hash() == remoteRef.Hash() {
+		return 0
+	}
+
+	// Walk from remoteRef back to localRef.
+	logIter, err := g.repo.Log(&git.LogOptions{From: remoteRef.Hash()})
+	if err != nil {
+		return 0
+	}
+	localHash := localRef.Hash()
+	count := 0
+	_ = logIter.ForEach(func(c *object.Commit) error {
+		if c.Hash == localHash {
+			return fmt.Errorf("stop")
+		}
+		count++
+		return nil
+	})
+	return count
+}
+
+// applyFetched rebases with server-wins conflict resolution, imports sidecars, and reconciles.
+func (g *Syncer) applyFetched(ctx context.Context) error {
+	prevSHA := g.headSHA
 
 	// Rebase via shell fallback (go-git rebase with conflict resolution is limited).
 	conflicts, newSHA, pullErr := rebaseServerWins(g.cfg.AppsDir, g.cfg.branch())
@@ -721,6 +850,7 @@ func (g *Syncer) doPull(ctx context.Context) error {
 	g.repo = repo
 	g.mu.Lock()
 	g.headSHA = newSHA
+	g.commitsBehind = 0
 	g.mu.Unlock()
 
 	// Record conflicts.

@@ -61,23 +61,43 @@ func ResolveConfig(st *store.Store, yamlCfg *appcfg.GitSyncConfig, appsDir, mast
 		}
 	}
 
+	// Behaviour toggles: missing key => true (backwards-compatible).
+	cfg.PollEnabled = dbBoolDefault(dbKV, "poll_enabled", true)
+	cfg.AutoPushEnabled = dbBoolDefault(dbKV, "auto_push_enabled", true)
+	cfg.AutoApplyEnabled = dbBoolDefault(dbKV, "auto_apply_enabled", true)
+	cfg.WebhookEnabled = dbBoolDefault(dbKV, "webhook_enabled", true)
+
 	applyDefaults(cfg)
 	return cfg, nil
 }
 
+// dbBoolDefault reads a bool from a KV map. If the key is absent, returns def.
+func dbBoolDefault(kv map[string]string, key string, def bool) bool {
+	v, ok := kv[key]
+	if !ok {
+		return def
+	}
+	return v == "true"
+}
+
 func yamlToConfig(y *appcfg.GitSyncConfig, appsDir string) *Config {
 	cfg := &Config{
-		Enabled:       y.Enabled,
-		Remote:        y.Remote,
-		Branch:        y.Branch,
-		AppsDir:       appsDir,
-		AuthorName:    y.AuthorName,
-		AuthorEmail:   y.AuthorEmail,
-		SSHKeyPath:    y.SSHKeyPath,
-		HTTPSUsername: y.HTTPSUsername,
-		HTTPSToken:    y.HTTPSToken,
-		PollInterval:  y.PollInterval,
-		WebhookSecret: y.WebhookSecret,
+		Enabled:          y.Enabled,
+		Remote:           y.Remote,
+		Branch:           y.Branch,
+		AppsDir:          appsDir,
+		AuthorName:       y.AuthorName,
+		AuthorEmail:      y.AuthorEmail,
+		SSHKeyPath:       y.SSHKeyPath,
+		HTTPSUsername:    y.HTTPSUsername,
+		HTTPSToken:       y.HTTPSToken,
+		PollInterval:     y.PollInterval,
+		WebhookSecret:    y.WebhookSecret,
+		// YAML path has no toggle fields; all default to true.
+		PollEnabled:      true,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}
 	applyDefaults(cfg)
 	return cfg
