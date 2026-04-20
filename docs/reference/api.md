@@ -413,28 +413,87 @@ Delete a registry. Returns `{"status": "ok"}`.
 
 For setup and configuration see [Git sync](/operations/git-sync/).
 
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/api/git/status` | super admin | Current sync state, toggle flags, commits-behind counter |
+| `POST` | `/api/git/webhook` | HMAC (`X-Hub-Signature-256`) | Webhook-triggered immediate sync |
+| `POST` | `/api/git/sync-now` | super admin | Force an immediate pull-and-apply cycle |
+| `GET` | `/api/git/config` | super admin | Read active git sync config (secrets redacted) |
+| `PUT` | `/api/git/config` | super admin | Update git sync config; DB values override YAML |
+| `POST` | `/api/git/disable` | super admin | Disable git sync and clear DB config |
+| `POST` | `/api/git/apply-pending` | super admin | Apply fetched remote commits when `auto_apply_enabled=false` |
+
 ### `GET /api/git/status`
 
-Admin only. Returns current sync state.
+Super admin only. Returns a snapshot of the sync worker state.
+
+```json
+{
+  "Enabled": true,
+  "Remote": "git@github.com:owner/repo.git",
+  "Branch": "main",
+  "HeadSHA": "a1b2c3d...",
+  "LastSyncAt": "2026-04-19T10:00:00Z",
+  "LastSyncError": "",
+  "PendingCommits": 0,
+  "DroppedRequests": 0,
+  "RecentConflicts": [],
+  "RecentCommits": [],
+  "PollEnabled": true,
+  "AutoPushEnabled": true,
+  "AutoApplyEnabled": true,
+  "WebhookEnabled": true,
+  "CommitsBehind": 0,
+  "PendingApply": false
+}
+```
+
+`CommitsBehind` is non-zero only when `AutoApplyEnabled=false` and the remote has commits that have not been applied. `PendingApply` is `true` when `CommitsBehind > 0` and `AutoApplyEnabled=false`.
+
+### `POST /api/git/webhook`
+
+Public endpoint, HMAC-verified via `X-Hub-Signature-256`. Triggers an immediate sync. Only available when `git_sync.webhook_secret` is configured and `WebhookEnabled=true`. Returns `404` with an empty body when the webhook toggle is disabled.
+
+Returns `202 Accepted` on success, `401` if the signature is invalid.
+
+### `POST /api/git/sync-now`
+
+Super admin only. Forces an immediate fetch-and-apply cycle regardless of `AutoApplyEnabled`. Rate-limited to prevent abuse.
+
+Returns `{"status": "ok"}` once the cycle completes.
+
+### `GET /api/git/config`
+
+Super admin only. Returns the active git sync configuration. Sensitive fields (`https_token`, `webhook_secret`, SSH key content) are replaced with `"<redacted>"` or a boolean `_set` flag. A `source` field (`"db"` or `"yaml"`) indicates which layer is providing each value.
+
+### `PUT /api/git/config`
+
+Super admin only. Updates git sync configuration. Accepts a partial or full config object. Values written here are stored in the database and override `config.yml` immediately without a restart. Includes the four behaviour toggles:
 
 ```json
 {
   "enabled": true,
-  "remote": "git@github.com:owner/repo.git",
+  "remote": "git@github.com:owner/infra.git",
   "branch": "main",
-  "last_sync": "2026-04-19T10:00:00Z",
-  "conflicts": []
+  "poll_enabled": true,
+  "auto_push_enabled": true,
+  "auto_apply_enabled": false,
+  "webhook_enabled": true
 }
 ```
 
-### `POST /api/git/webhook`
+Returns the updated (redacted) config on success.
 
-Public endpoint, HMAC-verified via `X-Hub-Signature-256`. Triggers an immediate sync. Only available when `git_sync.webhook_secret` is set in config.
+### `POST /api/git/disable`
 
-Returns `{"status": "queued"}` on success, `401` if the signature is invalid.
+Super admin only. Disables git sync and clears all DB-stored config, reverting to the `config.yml` defaults. The `.git` directory and local history in `apps_dir` are not removed.
 
-### `POST /api/git/sync-now`
+Returns `{"status": "ok"}`.
 
-Admin only. Forces an immediate pull-and-apply cycle. Rate-limited to prevent abuse.
+### `POST /api/git/apply-pending`
 
-Returns `{"status": "ok"}` once the sync cycle completes.
+Super admin only. Runs a full fetch, rebase (server-wins conflict resolution), sidecar import, and reconcile cycle on demand. Intended for use when `auto_apply_enabled=false` and you want to apply the pending remote commits after review.
+
+If the remote is already up-to-date, the operation is a no-op and returns success. If `git sync` is not configured, returns `503`.
+
+Returns `{"status": "ok"}` on success.

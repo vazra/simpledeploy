@@ -27,6 +27,10 @@ Never committed:
 - `{data_dir}/simpledeploy.db` (SQLite database)
 - Metrics, logs, and anything outside `apps_dir`
 
+## Configure from the UI
+
+Super admins can enable and edit git sync configuration directly on the **Git Sync** page without a server restart. Changes saved through the UI are written to the database and take effect immediately. DB values override the `config.yml` YAML block, and the API response includes a `source` field (`"db"` or `"yaml"`) so you can tell which value is active. To reset a field back to the YAML default, remove it from the DB via the UI.
+
 ## Config block
 
 Add a `git_sync:` block to your server `config.yml`:
@@ -41,6 +45,10 @@ git_sync:
   ssh_key_path: /etc/simpledeploy/gitsync_id_ed25519
   poll_interval: 60s
   webhook_secret: "your-webhook-secret"
+  poll_enabled: true
+  auto_push_enabled: true
+  auto_apply_enabled: true
+  webhook_enabled: true
 ```
 
 | Field | Required | Description |
@@ -55,6 +63,40 @@ git_sync:
 | `https_token` | one of | HTTPS token or password. Mutually exclusive with `ssh_key_path`. |
 | `poll_interval` | no | How often to pull from remote. Default `60s`. |
 | `webhook_secret` | no | HMAC secret for verifying GitHub-compatible webhook pushes. |
+| `poll_enabled` | no | Whether to run the poll loop. Default `true`. |
+| `auto_push_enabled` | no | Whether to auto-commit and push local changes. Default `true`. |
+| `auto_apply_enabled` | no | Whether to auto-apply fetched remote changes. Default `true`. |
+| `webhook_enabled` | no | Whether the webhook endpoint is active. Default `true`. |
+
+## Toggles
+
+Four behaviour toggles let you adjust the sync mode without disabling git sync entirely. All default to `true`. They can be set in `config.yml` or changed at runtime from the UI (DB overrides YAML).
+
+### `poll_enabled`
+
+Controls whether the background poll loop runs on `poll_interval`. Set to `false` if you rely exclusively on webhooks and want no background polling. The sync worker still starts; it just never fires the timer. Useful when you want tight control over when fetches happen.
+
+### `auto_push_enabled`
+
+Controls whether local config changes (deploys, env edits, sidecar updates) are automatically committed and pushed to the remote. Set to `false` for a pull-only setup where the remote is the source of truth and local changes are never pushed back. This is useful when you manage config entirely through the git repo and want to prevent the server from writing back.
+
+### `auto_apply_enabled`
+
+Controls whether fetched remote commits are automatically rebased onto the local working tree. Set to `false` to enter fetch-only mode: the server fetches on each poll or webhook trigger and tracks how many commits the remote is ahead, but it does not apply those commits. A banner appears in the UI showing the number of commits behind, and you can apply them manually with the **Apply** button (or via `POST /api/git/apply-pending`). Useful when you want to review remote changes before they affect running deployments.
+
+### `webhook_enabled`
+
+Controls whether `POST /api/git/webhook` accepts and processes incoming webhook payloads. Set to `false` to temporarily block webhook-triggered syncs, for example during maintenance windows. When disabled, the endpoint returns `404` with an empty body. The HMAC secret is not exposed in the response.
+
+## Pending apply
+
+When `auto_apply_enabled` is `false`, each fetch (poll or webhook) updates an internal counter of how many commits the remote is ahead of the local HEAD. The Git Sync page shows a banner:
+
+> **3 commits behind remote.** Review the changes in your git repository, then click Apply to update running deployments.
+
+Clicking **Apply now** (or calling `POST /api/git/apply-pending`) runs the full fetch, rebase with server-wins conflict resolution, sidecar import, and reconcile cycle. After a successful apply, the counter resets to zero and the banner disappears.
+
+If the remote is already up-to-date when apply is triggered, the operation completes immediately with no changes.
 
 ## Authentication
 

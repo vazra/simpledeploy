@@ -82,6 +82,10 @@ git_sync:
   https_token: ""
   poll_interval: 60s
   webhook_secret: ""       # set to enable POST /api/git/webhook
+  poll_enabled: true       # set false to rely solely on webhooks
+  auto_push_enabled: true  # set false for pull-only mode
+  auto_apply_enabled: true # set false to review before applying
+  webhook_enabled: true    # set false to block webhook syncs
 ```
 
 ### Field Reference
@@ -114,6 +118,10 @@ git_sync:
 | `git_sync.https_token` | string | `""` | Token/password for HTTPS remotes |
 | `git_sync.poll_interval` | duration | `60s` | How often to poll the remote |
 | `git_sync.webhook_secret` | string | `""` | HMAC secret; when set, enables `POST /api/git/webhook` |
+| `git_sync.poll_enabled` | bool | `true` | Run the background poll loop; set `false` to rely solely on webhooks |
+| `git_sync.auto_push_enabled` | bool | `true` | Auto-commit and push local config changes; set `false` for pull-only mode |
+| `git_sync.auto_apply_enabled` | bool | `true` | Auto-apply fetched remote commits; set `false` to review before applying |
+| `git_sync.webhook_enabled` | bool | `true` | Accept webhook-triggered syncs; set `false` to block during maintenance |
 
 See [Git sync](/operations/git-sync/) for setup and operational details.
 
