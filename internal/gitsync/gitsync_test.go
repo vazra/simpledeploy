@@ -81,13 +81,17 @@ func openStore(t *testing.T) *store.Store {
 func makeSyncer(t *testing.T, appsDir, bareDir string) *Syncer {
 	t.Helper()
 	cfg := Config{
-		Enabled:      true,
-		Remote:       "file://" + bareDir,
-		Branch:       "main",
-		AppsDir:      appsDir,
-		AuthorName:   "Test",
-		AuthorEmail:  "test@test.local",
-		PollInterval: 0, // disable polling in tests
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0, // disable polling in tests
+		PollEnabled:      false,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}
 	st := openStore(t)
 	s, err := New(cfg, st, nil, nil)
@@ -418,7 +422,7 @@ func TestPullConflictServerWins(t *testing.T) {
 // TestSuppressDuringImport: suppress flag blocks EnqueueCommit.
 func TestSuppressDuringImport(t *testing.T) {
 	s := &Syncer{
-		cfg:      Config{Enabled: true},
+		cfg:      Config{Enabled: true, AutoPushEnabled: true},
 		commitCh: make(chan commitReq, commitChanSize),
 	}
 
@@ -453,12 +457,15 @@ func TestWebhookHMACValid(t *testing.T) {
 	writeFile(t, filepath.Join(appsDir, "_global.yml"), "version: 1\n")
 
 	cfg := Config{
-		Enabled:       true,
-		Remote:        "file://" + bareDir,
-		Branch:        "main",
-		AppsDir:       appsDir,
-		PollInterval:  0,
-		WebhookSecret: secret,
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		PollInterval:     0,
+		WebhookSecret:    secret,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}
 	st := openStore(t)
 	s, _ := New(cfg, st, nil, &countingReconciler{count: &synced})
@@ -497,11 +504,14 @@ func TestWebhookHMACInvalid(t *testing.T) {
 	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 
 	cfg := Config{
-		Enabled:       true,
-		Remote:        "file://unused",
-		Branch:        "main",
-		AppsDir:       t.TempDir(),
-		WebhookSecret: secret,
+		Enabled:          true,
+		Remote:           "file://unused",
+		Branch:           "main",
+		AppsDir:          t.TempDir(),
+		WebhookSecret:    secret,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}
 	s := &Syncer{
 		cfg:      cfg,
@@ -696,13 +706,17 @@ func TestPollPullsChanges(t *testing.T) {
 	writeFile(t, filepath.Join(appsDir, "_global.yml"), "version: 1\n")
 
 	cfg := Config{
-		Enabled:      true,
-		Remote:       "file://" + bareDir,
-		Branch:       "main",
-		AppsDir:      appsDir,
-		AuthorName:   "Test",
-		AuthorEmail:  "test@test.local",
-		PollInterval: 100 * time.Millisecond,
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     100 * time.Millisecond,
+		PollEnabled:      true,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}
 	st := openStore(t)
 	s, err := New(cfg, st, nil, nil)
@@ -921,13 +935,16 @@ func TestPruneOrphanSidecarsCommitsToRemote(t *testing.T) {
 	}
 
 	cfg := Config{
-		Enabled:      true,
-		Remote:       "file://" + bareDir,
-		Branch:       "main",
-		AppsDir:      appsDir,
-		AuthorName:   "Test",
-		AuthorEmail:  "test@test.local",
-		PollInterval: 0,
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}
 
 	// Build configsync and gitsync syncers.
@@ -1019,6 +1036,258 @@ func TestPruneOrphanSidecarsCommitsToRemote(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected at least one bot commit in RecentCommits after prune")
+	}
+}
+
+// TestPollDisabledSkipsPollLoop: Start with PollEnabled=false should not launch poll goroutine.
+// We verify by checking the file is NOT pulled automatically within a short window.
+func TestPollDisabledSkipsPollLoop(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	cfg := Config{
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     50 * time.Millisecond, // would fire quickly if enabled
+		PollEnabled:      false,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
+	}
+	st := openStore(t)
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Remote editor pushes a change.
+	clone2Dir := t.TempDir()
+	if out, err := gitExec(clone2Dir, "clone", "-b", "main", "file://"+bareDir, "."); err != nil {
+		t.Fatalf("clone2 clone: %v\n%s", err, out)
+	}
+	_, _ = gitExec(clone2Dir, "config", "user.email", "c2@t.local")
+	_, _ = gitExec(clone2Dir, "config", "user.name", "c2")
+	writeFile(t, filepath.Join(clone2Dir, "app1", "docker-compose.yml"), "version: 'poll-disabled'\n")
+	if out, err := gitExec(clone2Dir, "add", "-f", "app1/docker-compose.yml"); err != nil {
+		t.Fatalf("clone2 add: %v\n%s", err, out)
+	}
+	if out, err := gitExec(clone2Dir, "commit", "-m", "remote change"); err != nil {
+		t.Fatalf("clone2 commit: %v\n%s", err, out)
+	}
+	if out, err := gitExec(clone2Dir, "push", "origin", "HEAD:main"); err != nil {
+		t.Fatalf("clone2 push: %v\n%s", err, out)
+	}
+
+	// Wait and verify file is NOT pulled automatically (poll is off).
+	time.Sleep(300 * time.Millisecond)
+	content, _ := os.ReadFile(filepath.Join(appsDir, "app1", "docker-compose.yml"))
+	if string(content) == "version: 'poll-disabled'\n" {
+		t.Fatal("poll loop should be disabled but remote change was applied automatically")
+	}
+}
+
+// TestAutoPushDisabledDropsEnqueue: EnqueueCommit is a no-op when AutoPushEnabled=false.
+func TestAutoPushDisabledDropsEnqueue(t *testing.T) {
+	s := &Syncer{
+		cfg: Config{
+			Enabled:         true,
+			AutoPushEnabled: false,
+		},
+		commitCh: make(chan commitReq, commitChanSize),
+	}
+
+	s.EnqueueCommit(nil, "should be dropped")
+	if len(s.commitCh) != 0 {
+		t.Fatal("expected commit to be dropped when AutoPushEnabled=false")
+	}
+}
+
+// TestAutoApplyDisabledFetchOnly: when AutoApplyEnabled=false, SyncNow only fetches.
+// The file should NOT be updated but CommitsBehind should be > 0.
+func TestAutoApplyDisabledFetchOnly(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	cfg := Config{
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0,
+		PollEnabled:      true,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: false,
+		WebhookEnabled:   true,
+	}
+	st := openStore(t)
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Remote pushes a change.
+	clone2Dir := t.TempDir()
+	if out, err := gitExec(clone2Dir, "clone", "-b", "main", "file://"+bareDir, "."); err != nil {
+		t.Fatalf("clone2 clone: %v\n%s", err, out)
+	}
+	_, _ = gitExec(clone2Dir, "config", "user.email", "c2@t.local")
+	_, _ = gitExec(clone2Dir, "config", "user.name", "c2")
+	writeFile(t, filepath.Join(clone2Dir, "app1", "docker-compose.yml"), "version: 'remote'\n")
+	if out, err := gitExec(clone2Dir, "add", "-f", "app1/docker-compose.yml"); err != nil {
+		t.Fatalf("clone2 add: %v\n%s", err, out)
+	}
+	if out, err := gitExec(clone2Dir, "commit", "-m", "remote change"); err != nil {
+		t.Fatalf("clone2 commit: %v\n%s", err, out)
+	}
+	if out, err := gitExec(clone2Dir, "push", "origin", "HEAD:main"); err != nil {
+		t.Fatalf("clone2 push: %v\n%s", err, out)
+	}
+
+	if err := s.SyncNow(ctx); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	// File should NOT have changed (fetch-only).
+	content, _ := os.ReadFile(filepath.Join(appsDir, "app1", "docker-compose.yml"))
+	if string(content) == "version: 'remote'\n" {
+		t.Fatal("file should not be updated when AutoApplyEnabled=false")
+	}
+	if string(content) != "version: '3'\n" {
+		t.Fatalf("unexpected content: %q", string(content))
+	}
+
+	// CommitsBehind should be > 0.
+	st2 := s.Status()
+	if st2.CommitsBehind == 0 {
+		t.Error("CommitsBehind should be > 0 after fetch when remote has new commits")
+	}
+	if !st2.PendingApply {
+		t.Error("PendingApply should be true when AutoApplyEnabled=false and CommitsBehind>0")
+	}
+}
+
+// TestApplyPendingAppliesChanges: ApplyPending applies and clears CommitsBehind.
+func TestApplyPendingAppliesChanges(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	cfg := Config{
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0,
+		PollEnabled:      true,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: false, // fetch-only mode
+		WebhookEnabled:   true,
+	}
+	st := openStore(t)
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Remote pushes a change.
+	clone2Dir := t.TempDir()
+	if out, err := gitExec(clone2Dir, "clone", "-b", "main", "file://"+bareDir, "."); err != nil {
+		t.Fatalf("clone2 clone: %v\n%s", err, out)
+	}
+	_, _ = gitExec(clone2Dir, "config", "user.email", "c2@t.local")
+	_, _ = gitExec(clone2Dir, "config", "user.name", "c2")
+	writeFile(t, filepath.Join(clone2Dir, "app1", "docker-compose.yml"), "version: 'applied'\n")
+	_, _ = gitExec(clone2Dir, "add", "-f", "app1/docker-compose.yml")
+	_, _ = gitExec(clone2Dir, "commit", "-m", "remote change")
+	_, _ = gitExec(clone2Dir, "push", "origin", "HEAD:main")
+
+	// SyncNow in fetch-only mode: just fetches.
+	if err := s.SyncNow(ctx); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	if s.Status().CommitsBehind == 0 {
+		t.Fatal("expected CommitsBehind>0 after fetch")
+	}
+
+	// ApplyPending should apply.
+	if err := s.ApplyPending(ctx); err != nil {
+		t.Fatalf("ApplyPending: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(appsDir, "app1", "docker-compose.yml"))
+	if string(content) != "version: 'applied'\n" {
+		t.Fatalf("expected applied content, got %q", string(content))
+	}
+	if s.Status().CommitsBehind != 0 {
+		t.Error("CommitsBehind should be 0 after ApplyPending")
+	}
+}
+
+// TestWebhookDisabledReturns404: when WebhookEnabled=false, handler returns 404.
+func TestWebhookDisabledReturns404(t *testing.T) {
+	cfg := Config{
+		Enabled:        true,
+		Remote:         "file://unused",
+		Branch:         "main",
+		AppsDir:        t.TempDir(),
+		WebhookSecret:  "secret",
+		WebhookEnabled: false,
+	}
+	s := &Syncer{
+		cfg:      cfg,
+		commitCh: make(chan commitReq, 1),
+		syncCh:   make(chan syncReq, 1),
+	}
+
+	h := s.WebhookHandler()
+	if h == nil {
+		t.Fatal("WebhookHandler should not be nil when secret is set (even if disabled)")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when WebhookEnabled=false, got %d", w.Code)
 	}
 }
 

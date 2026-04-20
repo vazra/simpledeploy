@@ -61,12 +61,15 @@ func TestGitWebhookRateLimit(t *testing.T) {
 	bareDir := t.TempDir()
 	appsDir := t.TempDir()
 	gs, err := gitsync.New(gitsync.Config{
-		Enabled:       true,
-		Remote:        "file://" + bareDir,
-		Branch:        "main",
-		AppsDir:       appsDir,
-		WebhookSecret: secret,
-		PollInterval:  0,
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		WebhookSecret:    secret,
+		PollInterval:     0,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}, st, nil, nil)
 	if err != nil {
 		t.Fatalf("gitsync.New: %v", err)
@@ -98,6 +101,46 @@ func TestGitWebhookRateLimit(t *testing.T) {
 	}
 }
 
+// TestApplyPending_NilSyncer: returns 503 when gs is nil.
+func TestApplyPending_NilSyncer(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/git/apply-pending", nil)
+	w := httptest.NewRecorder()
+	srv.handleGitApplyPending(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+}
+
+// TestApplyPending_AuthRequired: unauthenticated request returns 401.
+func TestApplyPending_AuthRequired(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/git/apply-pending", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// TestApplyPending_SuperAdminOnly: non-super-admin returns 403.
+func TestApplyPending_SuperAdminOnly(t *testing.T) {
+	srv, st := newTestServer(t)
+	jwtMgr := auth.NewJWTManager("test-secret", time.Hour)
+	srv.jwt = jwtMgr
+	if _, err := st.CreateUser("regular", "hashed", "admin", "", ""); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	tok, _ := jwtMgr.Generate(2, "regular", "admin")
+	req := httptest.NewRequest("POST", "/api/git/apply-pending", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: tok})
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", w.Code)
+	}
+}
+
 // TestGitStatusAfterStartFailure: when gs is nil (Start errored and caller set
 // gs=nil), /api/git/status returns 503. This matches the current behavior in
 // handleGitStatus and the UI which handles 503 gracefully.
@@ -117,9 +160,12 @@ func TestGitStatusAfterStartFailure(t *testing.T) {
 	// In that case the server could inject a non-nil syncer with Enabled=false.
 	// Status() still returns useful info (Enabled: false, Remote, Branch).
 	gs, err := gitsync.New(gitsync.Config{
-		Enabled: false,
-		Remote:  "file:///unused",
-		Branch:  "main",
+		Enabled:          false,
+		Remote:           "file:///unused",
+		Branch:           "main",
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
 	}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("gitsync.New disabled: %v", err)

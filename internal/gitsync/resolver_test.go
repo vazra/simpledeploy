@@ -103,3 +103,78 @@ func TestResolveConfig_DisabledWhenNeitherSet(t *testing.T) {
 		t.Error("expected Enabled=false when no DB and no YAML")
 	}
 }
+
+// TestResolveConfig_TogglesDefaultTrueWhenMissing: DB keys present but toggle keys absent.
+// All four toggles should default to true.
+func TestResolveConfig_TogglesDefaultTrueWhenMissing(t *testing.T) {
+	st := openTestStore(t)
+	_ = st.SetGitSyncConfig(map[string]string{
+		"enabled": "true",
+		"remote":  "file:///tmp/bare.git",
+		// no poll_enabled / auto_push_enabled / auto_apply_enabled / webhook_enabled
+	})
+
+	cfg, err := ResolveConfig(st, nil, "/apps", "secret")
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if !cfg.PollEnabled {
+		t.Error("PollEnabled should default to true when key missing")
+	}
+	if !cfg.AutoPushEnabled {
+		t.Error("AutoPushEnabled should default to true when key missing")
+	}
+	if !cfg.AutoApplyEnabled {
+		t.Error("AutoApplyEnabled should default to true when key missing")
+	}
+	if !cfg.WebhookEnabled {
+		t.Error("WebhookEnabled should default to true when key missing")
+	}
+}
+
+// TestResolveConfig_TogglesOverriddenFromDB: explicitly set to false in DB.
+func TestResolveConfig_TogglesOverriddenFromDB(t *testing.T) {
+	st := openTestStore(t)
+	_ = st.SetGitSyncConfig(map[string]string{
+		"enabled":            "true",
+		"remote":             "file:///tmp/bare.git",
+		"poll_enabled":       "false",
+		"auto_push_enabled":  "false",
+		"auto_apply_enabled": "false",
+		"webhook_enabled":    "false",
+	})
+
+	cfg, err := ResolveConfig(st, nil, "/apps", "secret")
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if cfg.PollEnabled {
+		t.Error("PollEnabled should be false from DB")
+	}
+	if cfg.AutoPushEnabled {
+		t.Error("AutoPushEnabled should be false from DB")
+	}
+	if cfg.AutoApplyEnabled {
+		t.Error("AutoApplyEnabled should be false from DB")
+	}
+	if cfg.WebhookEnabled {
+		t.Error("WebhookEnabled should be false from DB")
+	}
+}
+
+// TestResolveConfig_YAMLPathTogglesTrueByDefault: when using YAML (no DB), toggles all true.
+func TestResolveConfig_YAMLPathTogglesTrueByDefault(t *testing.T) {
+	st := openTestStore(t)
+	yaml := &appcfg.GitSyncConfig{
+		Enabled: true,
+		Remote:  "git@github.com:owner/repo.git",
+	}
+	cfg, err := ResolveConfig(st, yaml, "/apps", "secret")
+	if err != nil {
+		t.Fatalf("ResolveConfig: %v", err)
+	}
+	if !cfg.PollEnabled || !cfg.AutoPushEnabled || !cfg.AutoApplyEnabled || !cfg.WebhookEnabled {
+		t.Errorf("all toggles should be true via YAML path: poll=%v push=%v apply=%v webhook=%v",
+			cfg.PollEnabled, cfg.AutoPushEnabled, cfg.AutoApplyEnabled, cfg.WebhookEnabled)
+	}
+}

@@ -174,6 +174,63 @@ func TestPutGitConfig_Validation(t *testing.T) {
 	}
 }
 
+func TestPutGitConfig_PersistsToggles(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		AppsDir:      t.TempDir(),
+		MasterSecret: "test-master-secret",
+	}
+	srv.masterSecret = "test-master-secret"
+
+	jwtMgr := auth.NewJWTManager("test-secret", time.Hour)
+	srv.jwt = jwtMgr
+	cookie := superAdminCookie(t, jwtMgr)
+
+	f := false
+	payload := gitConfigRequest{
+		Enabled:          false,
+		Remote:           "file:///tmp/bare.git",
+		PollEnabled:      &f,
+		AutoPushEnabled:  &f,
+		AutoApplyEnabled: &f,
+		WebhookEnabled:   &f,
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("PUT", "/api/git/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT want 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	kv, err := srv.store.GetGitSyncConfig()
+	if err != nil {
+		t.Fatalf("GetGitSyncConfig: %v", err)
+	}
+	for _, key := range []string{"poll_enabled", "auto_push_enabled", "auto_apply_enabled", "webhook_enabled"} {
+		if kv[key] != "false" {
+			t.Errorf("expected %s=false in DB, got %q", key, kv[key])
+		}
+	}
+
+	// GET should reflect the toggles.
+	req2 := httptest.NewRequest("GET", "/api/git/config", nil)
+	req2.AddCookie(cookie)
+	w2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w2, req2)
+	var resp gitConfigResponse
+	if err := json.NewDecoder(w2.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode GET: %v", err)
+	}
+	if resp.PollEnabled || resp.AutoPushEnabled || resp.AutoApplyEnabled || resp.WebhookEnabled {
+		t.Errorf("toggles should all be false: poll=%v push=%v apply=%v webhook=%v",
+			resp.PollEnabled, resp.AutoPushEnabled, resp.AutoApplyEnabled, resp.WebhookEnabled)
+	}
+}
+
 func TestDisableGitSync(t *testing.T) {
 	srv, _ := newTestServer(t)
 	srv.cfg = &config.Config{AppsDir: t.TempDir(), MasterSecret: "secret"}
