@@ -19,7 +19,7 @@ export const serviceTemplates = [
       volumes: ['pgdata:/var/lib/postgresql/data'],
       restart: 'unless-stopped',
       healthcheck: {
-        test: ['CMD-SHELL', 'pg_isready -U postgres -d app'],
+        test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER:-postgres}" -d "$${POSTGRES_DB:-postgres}"'],
         interval: '10s',
         timeout: '5s',
         retries: 5,

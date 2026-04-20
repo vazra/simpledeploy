@@ -232,8 +232,11 @@ export const categories = [
 // --------------------------- shared fragments -------------------------
 
 const HC = {
+  // pg_isready -U <user>: the user must exist or the check fails forever.
+  // Use $$POSTGRES_USER so compose substitutes the env var inside the
+  // container, and fall back to "postgres" when unset.
   pg: {
-    test: ['CMD-SHELL', 'pg_isready -U postgres'],
+    test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER:-postgres}"'],
     interval: '10s',
     timeout: '5s',
     retries: 5,
