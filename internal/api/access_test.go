@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,9 +10,52 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+func TestHandleUpdateAccess_ReconcileCtxNotCancelled(t *testing.T) {
+	srv, s := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+	s.UpsertApp(&store.App{Name: "accctxapp", Slug: "accctxapp", ComposePath: composePath, Status: "running"}, nil)
+
+	rec := &captureCtxReconciler{
+		gotCtx:  make(chan context.Context, 1),
+		release: make(chan struct{}),
+	}
+	srv.SetReconciler(rec)
+
+	httpSrv := httptest.NewServer(srv.Handler())
+	defer httpSrv.Close()
+
+	body, _ := json.Marshal(map[string]string{"allow": "192.168.1.0/24"})
+	req, _ := http.NewRequest(http.MethodPut, httpSrv.URL+"/api/apps/accctxapp/access", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp.Body.Close()
+
+	var ctx context.Context
+	select {
+	case ctx = <-rec.gotCtx:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Reconcile not invoked within 2s")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := ctx.Err(); err != nil {
+		t.Errorf("Reconcile context cancelled after request returned: %v", err)
+	}
+	close(rec.release)
+}
 
 func TestHandleUpdateAccess(t *testing.T) {
 	srv, s := newTestServer(t)

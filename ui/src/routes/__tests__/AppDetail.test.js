@@ -29,4 +29,9 @@ describe('AppDetail', () => {
     const { findByText } = render(AppDetail, { params: { slug: 'foo' } });
     expect(await findByText('foo')).toBeInTheDocument();
   });
+
+  it('exposes an Events tab', async () => {
+    const { findByRole } = render(AppDetail, { params: { slug: 'foo' } });
+    expect(await findByRole('button', { name: /^events$/i })).toBeInTheDocument();
+  });
 });

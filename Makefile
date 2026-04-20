@@ -58,7 +58,7 @@ dev-docker-down:
 dev-docker-rebuild:
 	GOOS=linux GOARCH=$(DEV_GOARCH) CGO_ENABLED=0 \
 	  go build -ldflags="$(LDFLAGS)" -o simpledeploy ./cmd/simpledeploy
-	docker compose -f deploy/docker-compose.dev.yml restart simpledeploy
+	docker compose -f deploy/docker-compose.dev.yml up -d --build simpledeploy
 
 clean:
 	rm -rf bin/ cmd/simpledeploy/ui_dist

@@ -4,6 +4,7 @@
   import MetricsChart from '../components/MetricsChart.svelte'
   import LogViewer from '../components/LogViewer.svelte'
   import OverviewTab from '../components/OverviewTab.svelte'
+  import EventsTab from '../components/EventsTab.svelte'
   import SettingsTab from '../components/SettingsTab.svelte'
   import BackupsTab from '../components/BackupsTab.svelte'
   import ActionModal from '../components/ActionModal.svelte'
@@ -47,7 +48,7 @@
   let actionLoading = $state('')
   let scaleInputs = $state({})
 
-  const tabs = ['overview', 'logs', 'metrics', 'backups', 'settings']
+  const tabs = ['overview', 'events', 'logs', 'metrics', 'backups', 'settings']
   const ranges = ['1h', '6h', '24h', '1w', '1m', '1yr']
 
   // Filter non-simpledeploy labels for display as tags
@@ -369,6 +370,9 @@
     <!-- Tab Content -->
     {#if activeTab === 'overview'}
       <OverviewTab {slug} {app} {services} onSwitchTab={(tab) => activeTab = tab} />
+
+    {:else if activeTab === 'events'}
+      <EventsTab {slug} deploying={app?.deploying || false} />
 
     {:else if activeTab === 'logs'}
       <LogViewer {slug} />

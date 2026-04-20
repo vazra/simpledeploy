@@ -104,10 +104,14 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	copy(routes, c.routes)
 	c.mu.Unlock()
 
-	// Collect custom TLS cert files
+	// Collect custom TLS cert files and per-route local-TLS domains
 	var loadFiles []interface{}
+	var localTLSDomains []string
 
 	for _, r := range routes {
+		if r.TLS == "local" {
+			localTLSDomains = append(localTLSDomains, r.Domain)
+		}
 		handlers := []interface{}{
 			map[string]interface{}{"handler": "simpledeploy_ipaccess"},
 			map[string]interface{}{"handler": "simpledeploy_ratelimit"},
@@ -148,7 +152,9 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		"routes": caddyRoutes,
 	}
 
-	if c.tlsMode == "off" {
+	needsLocalTLS := len(localTLSDomains) > 0
+
+	if c.tlsMode == "off" && !needsLocalTLS {
 		server["automatic_https"] = map[string]interface{}{
 			"disable": true,
 		}
@@ -209,7 +215,7 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		},
 	}
 
-	if c.tlsMode == "local" && c.dataDir != "" {
+	if (c.tlsMode == "local" || needsLocalTLS) && c.dataDir != "" {
 		cfg["storage"] = map[string]interface{}{
 			"module": "file_system",
 			"root":   filepath.Join(c.dataDir, "caddy"),
@@ -247,6 +253,30 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 					},
 				},
 			},
+		}
+		hasTLS = true
+	}
+
+	// Per-route local TLS: add subject-scoped internal CA policies when global mode won't cover them.
+	if needsLocalTLS && c.tlsMode != "local" {
+		existing, _ := tlsCfg["automation"].(map[string]interface{})
+		var policies []interface{}
+		if existing != nil {
+			policies, _ = existing["policies"].([]interface{})
+		}
+		for _, domain := range localTLSDomains {
+			policies = append(policies, map[string]interface{}{
+				"subjects": []string{domain},
+				"issuers": []interface{}{
+					map[string]interface{}{"module": "internal"},
+				},
+			})
+		}
+		if existing == nil {
+			tlsCfg["automation"] = map[string]interface{}{"policies": policies}
+		} else {
+			existing["policies"] = policies
+			tlsCfg["automation"] = existing
 		}
 		hasTLS = true
 	}

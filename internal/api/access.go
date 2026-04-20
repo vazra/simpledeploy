@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -55,7 +56,7 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.reconciler != nil {
-		go func() { _ = s.reconciler.Reconcile(r.Context()) }()
+		go func() { _ = s.reconciler.Reconcile(context.Background()) }()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

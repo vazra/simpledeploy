@@ -283,6 +283,109 @@ func TestBuildConfigHTTPListenerIgnoredWhenTLSOff(t *testing.T) {
 	}
 }
 
+func TestBuildConfigPerRouteLocalTLSWithGlobalOff(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr: ":443",
+		TLSMode:    "off",
+		DataDir:    "/tmp/sd-test",
+	})
+	p.mu.Lock()
+	p.routes = []Route{
+		{Domain: "vscode1.mac", Upstream: "localhost:8080", TLS: "local"},
+	}
+	p.mu.Unlock()
+
+	cfg := parseConfig(t, p)
+	server := getServer(t, cfg)
+
+	// should NOT fully disable TLS -- a route needs it
+	autoHTTPS, _ := server["automatic_https"].(map[string]interface{})
+	if autoHTTPS["disable"] == true {
+		t.Error("automatic_https.disable should not be true when a route uses tls:local")
+	}
+
+	// should have tls_connection_policies so Caddy serves TLS
+	if pol, ok := server["tls_connection_policies"].([]interface{}); !ok || len(pol) == 0 {
+		t.Errorf("tls_connection_policies: got %v, want at least 1 entry", server["tls_connection_policies"])
+	}
+
+	// should have internal CA policy scoped to the domain
+	apps := cfg["apps"].(map[string]interface{})
+	tlsApp, ok := apps["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatal("apps.tls not set")
+	}
+	automation, ok := tlsApp["automation"].(map[string]interface{})
+	if !ok {
+		t.Fatal("tls.automation not set")
+	}
+	policies, ok := automation["policies"].([]interface{})
+	if !ok || len(policies) == 0 {
+		t.Fatal("tls.automation.policies: want at least 1 entry")
+	}
+	found := false
+	for _, p := range policies {
+		pol := p.(map[string]interface{})
+		subjects, _ := pol["subjects"].([]interface{})
+		issuers, _ := pol["issuers"].([]interface{})
+		if len(subjects) == 1 && subjects[0] == "vscode1.mac" && len(issuers) == 1 {
+			if issuers[0].(map[string]interface{})["module"] == "internal" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected automation policy with subjects=[vscode1.mac] and module=internal")
+	}
+
+	// storage should be set for cert persistence
+	storage, ok := cfg["storage"].(map[string]interface{})
+	if !ok {
+		t.Fatal("storage not set")
+	}
+	if storage["module"] != "file_system" {
+		t.Errorf("storage.module: got %v, want file_system", storage["module"])
+	}
+}
+
+func TestBuildConfigPerRouteLocalTLSWithGlobalAuto(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr: ":443",
+		TLSMode:    "auto",
+		TLSEmail:   "admin@example.com",
+	})
+	p.mu.Lock()
+	p.routes = []Route{
+		{Domain: "vscode1.mac", Upstream: "localhost:8080", TLS: "local"},
+	}
+	p.mu.Unlock()
+
+	cfg := parseConfig(t, p)
+	apps := cfg["apps"].(map[string]interface{})
+	tlsApp, ok := apps["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatal("apps.tls not set")
+	}
+	automation := tlsApp["automation"].(map[string]interface{})
+	policies := automation["policies"].([]interface{})
+
+	// expect global ACME policy + per-domain internal policy
+	found := false
+	for _, p := range policies {
+		pol := p.(map[string]interface{})
+		subjects, _ := pol["subjects"].([]interface{})
+		issuers, _ := pol["issuers"].([]interface{})
+		if len(subjects) == 1 && subjects[0] == "vscode1.mac" && len(issuers) == 1 {
+			if issuers[0].(map[string]interface{})["module"] == "internal" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("expected per-domain internal CA policy for vscode1.mac alongside global auto policy")
+	}
+}
+
 // --- MockProxy tests ---
 
 func TestMockProxySetRoutes(t *testing.T) {
