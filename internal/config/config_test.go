@@ -162,7 +162,7 @@ func TestGitSyncConfig_Parses(t *testing.T) {
 master_secret: "s3cr3t"
 tls:
   mode: "off"
-gitsync:
+git_sync:
   enabled: true
   remote: "git@github.com:owner/repo.git"
   branch: "prod"
@@ -206,7 +206,7 @@ func TestGitSyncConfig_Defaults(t *testing.T) {
 master_secret: "s3cr3t"
 tls:
   mode: "off"
-gitsync:
+git_sync:
   enabled: true
   remote: "https://github.com/owner/repo.git"
 `
@@ -239,7 +239,7 @@ func TestGitSyncConfig_MissingRemote(t *testing.T) {
 master_secret: "s3cr3t"
 tls:
   mode: "off"
-gitsync:
+git_sync:
   enabled: true
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
@@ -258,7 +258,7 @@ func TestGitSyncConfig_DisabledNoRemote(t *testing.T) {
 master_secret: "s3cr3t"
 tls:
   mode: "off"
-gitsync:
+git_sync:
   enabled: false
 `
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {

@@ -24,7 +24,7 @@ type Config struct {
 	TrustedProxies []string        `yaml:"trusted_proxies"`
 	LogBufferSize  int             `yaml:"log_buffer_size"`
 	PublicHost     string          `yaml:"public_host"`
-	GitSync        GitSyncConfig   `yaml:"gitsync"`
+	GitSync        GitSyncConfig   `yaml:"git_sync"`
 }
 
 // GitSyncConfig controls optional git-backed config sync.
