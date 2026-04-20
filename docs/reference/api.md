@@ -408,3 +408,33 @@ Update a registry. Same request body as create.
 ### `DELETE /api/registries/{id}`
 
 Delete a registry. Returns `{"status": "ok"}`.
+
+## Git Sync
+
+For setup and configuration see [Git sync](/operations/git-sync/).
+
+### `GET /api/git/status`
+
+Admin only. Returns current sync state.
+
+```json
+{
+  "enabled": true,
+  "remote": "git@github.com:owner/repo.git",
+  "branch": "main",
+  "last_sync": "2026-04-19T10:00:00Z",
+  "conflicts": []
+}
+```
+
+### `POST /api/git/webhook`
+
+Public endpoint, HMAC-verified via `X-Hub-Signature-256`. Triggers an immediate sync. Only available when `git_sync.webhook_secret` is set in config.
+
+Returns `{"status": "queued"}` on success, `401` if the signature is invalid.
+
+### `POST /api/git/sync-now`
+
+Admin only. Forces an immediate pull-and-apply cycle. Rate-limited to prevent abuse.
+
+Returns `{"status": "ok"}` once the sync cycle completes.

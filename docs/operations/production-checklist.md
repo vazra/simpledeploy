@@ -79,6 +79,10 @@ Do not skip backup *restore* testing. An untested backup is not a backup.
 - [ ] Decide upgrade cadence (monthly is reasonable for most teams)
 - [ ] Staging environment exists for upgrade dry runs
 
+## GitOps (optional)
+
+- [ ] If using two-way GitOps: enable `git_sync:` and configure the webhook (see [Git sync](/operations/git-sync/))
+
 ## Access
 
 - [ ] Long-lived API key minted for CI/CD with appropriate role (admin, not super_admin)

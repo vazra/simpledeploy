@@ -31,6 +31,7 @@ SQL files live in `internal/store/migrations/` and are embedded with `go:embed`.
 | 014 | alert history rule snapshot columns |
 | 015 | backups v2 |
 | 016 | indexes (alert_history, backup_runs) |
+| 017 | alert_history.rule_id nullable for gitsync conflict alerts |
 
 Migrations are forward-only. Adding a column with a default is safe; renames and drops are forbidden in published migrations to keep rollback to a previous binary version possible.
 

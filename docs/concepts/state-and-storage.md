@@ -33,7 +33,7 @@ Everything in `apps_dir/` is owned by you, the operator. Edit files freely; the 
 
 ## What SQLite holds
 
-One file, all tables. WAL mode lets concurrent reads (API, dashboard) proceed against a single writer (reconciler, metrics writer, audit log). See [/internal/store/](https://github.com/vazra/simpledeploy/tree/main/internal/store) and the 16 migrations under `migrations/`. High-level groups:
+One file, all tables. WAL mode lets concurrent reads (API, dashboard) proceed against a single writer (reconciler, metrics writer, audit log). See [/internal/store/](https://github.com/vazra/simpledeploy/tree/main/internal/store) and the 17 migrations under `migrations/`. High-level groups:
 
 - App metadata: `apps`, `app_labels`, `compose_hash`, `compose_versions`, `deploy_events`
 - Auth: `users`, `api_keys`, `user_app_access`

@@ -232,6 +232,51 @@ simpledeploy registry remove ghcr-org
 
 Credentials are encrypted with AES-256-GCM using the `master_secret` from config.
 
+## Config Sidecar Commands
+
+### `simpledeploy config export`
+
+Write all config sidecars from the current DB state to disk. Useful to verify sidecar content or backfill after a manual DB edit.
+
+```bash
+simpledeploy config export
+```
+
+See [Config sidecars](/operations/config-sidecars/) for the file layout.
+
+### `simpledeploy config import`
+
+Rebuild the DB from on-disk sidecars. Normally auto-recovery on startup handles this; use this command when you want to force an import into a non-empty DB.
+
+```bash
+simpledeploy config import --force --wipe
+```
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Required to import into a non-empty DB |
+| `--wipe` | Truncate config tables before importing (destructive) |
+
+## Git Sync Commands
+
+### `simpledeploy git status`
+
+Show current git sync status: remote, branch, last sync time, and any recent conflicts.
+
+```bash
+simpledeploy git status
+```
+
+### `simpledeploy git sync-now`
+
+Trigger an immediate pull-and-apply cycle without waiting for the next poll interval.
+
+```bash
+simpledeploy git sync-now
+```
+
+See [Git sync](/operations/git-sync/) for setup.
+
 ## Utility Commands
 
 ### `simpledeploy version`

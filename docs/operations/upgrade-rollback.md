@@ -161,6 +161,10 @@ sudo systemctl start simpledeploy
 
 Open a GitHub issue with the version, the error logs (`journalctl -u simpledeploy -p err --since "1 hour ago"`), and steps to reproduce.
 
+## Config sidecars and upgrade
+
+After upgrading to a version with config sidecar support (the first release of the feature), the first `serve` start writes a complete sidecar set from the existing DB and records `{data_dir}/.configsync_backfill_v1`. No action is needed. If you downgrade to a version without sidecar support, the marker file and sidecar files are harmless and will be ignored.
+
 ## Major version upgrades
 
 For `vN -> v(N+1)` jumps, read the migration guide in the release notes. These can include API breaking changes (e.g., the `master_secret` requirement and API key hash change introduced in v1.0).

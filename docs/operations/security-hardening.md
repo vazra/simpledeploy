@@ -105,6 +105,14 @@ Every compose file is parsed and validated before deployment. The following dire
 | Bind mounts of `/var/run/docker.sock` | Docker socket = root access |
 | Volume paths containing `..` | Path traversal |
 
+## Config Sync Storage
+
+Config sidecar files are written with mode `0600` (owner read/write only). There are three sidecar locations: `{apps_dir}/{slug}/simpledeploy.yml` for per-app settings (alert rules, backup configs, access grants), `{apps_dir}/_global.yml` for git-safe global state (redacted: no password hashes, no secret URLs), and `{data_dir}/config.yml` for sensitive global state (users with bcrypt hashes, AES-GCM encrypted registry and backup credentials).
+
+`{data_dir}/config.yml` is the most sensitive sidecar. It contains bcrypt password hashes and AES-GCM encrypted credential blobs. Without `master_secret`, those blobs are unrecoverable even if the file is intact. Keep `master_secret` in a password manager separate from the host.
+
+`{apps_dir}/_global.yml` is redacted and git-safe: it contains no hashes and no secret URLs. It is the file intended for committing to a private repository when using two-way git sync. See [Config sidecars](/operations/config-sidecars/) for full details.
+
 ## Data Protection
 
 ### Encryption at Rest

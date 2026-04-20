@@ -69,6 +69,19 @@ ratelimit:
 registries:
   - ghcr-org
   - my-ecr
+
+# Two-way git sync (optional). See docs/operations/git-sync.md for setup.
+git_sync:
+  enabled: false
+  remote: git@github.com:owner/repo.git
+  branch: main
+  author_name: SimpleDeploy
+  author_email: bot@simpledeploy.local
+  ssh_key_path: ""         # path to private key file; leave empty for system default
+  https_username: ""       # for HTTPS remotes instead of SSH
+  https_token: ""
+  poll_interval: 60s
+  webhook_secret: ""       # set to enable POST /api/git/webhook
 ```
 
 ### Field Reference
@@ -91,6 +104,18 @@ registries:
 | `ratelimit.burst` | int | `50` | Burst allowance |
 | `ratelimit.by` | string | `ip` | Rate limit key |
 | `registries` | list | `[]` | Default registry names for all apps |
+| `git_sync.enabled` | bool | `false` | Enable two-way git sync |
+| `git_sync.remote` | string | - | Git remote URL (required if enabled); SSH or HTTPS |
+| `git_sync.branch` | string | `main` | Branch to sync against |
+| `git_sync.author_name` | string | `SimpleDeploy` | Git commit author name |
+| `git_sync.author_email` | string | `bot@simpledeploy.local` | Git commit author email |
+| `git_sync.ssh_key_path` | string | `""` | Path to SSH private key; empty uses the system default |
+| `git_sync.https_username` | string | `""` | Username for HTTPS remotes |
+| `git_sync.https_token` | string | `""` | Token/password for HTTPS remotes |
+| `git_sync.poll_interval` | duration | `60s` | How often to poll the remote |
+| `git_sync.webhook_secret` | string | `""` | HMAC secret; when set, enables `POST /api/git/webhook` |
+
+See [Git sync](/operations/git-sync/) for setup and operational details.
 
 ### TLS modes
 

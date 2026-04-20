@@ -7,7 +7,7 @@ Migrations live in `internal/store/migrations/` and are embedded into the binary
 
 ## Adding a migration
 
-1. Pick the next sequence number (look at the existing files; current high water mark is 16).
+1. Pick the next sequence number (look at the existing files; current high water mark is 17).
 2. Create `NNN_short_topic.sql`. Example: `017_add_user_avatar_url.sql`.
 3. Write idempotent SQL. Always include `IF NOT EXISTS` on tables and indexes when feasible.
 4. Run the suite: `make test`. The store tests apply all migrations on a fresh DB.
