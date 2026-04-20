@@ -445,6 +445,75 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	return nil
 }
 
+// ImportGlobalIfEmpty imports the global sidecar only when the DB has zero users.
+// Returns (imported bool, err error). If no sidecar exists -> (false, nil).
+// If users table is non-empty -> (false, nil) without modifying DB.
+func (s *Syncer) ImportGlobalIfEmpty() (bool, error) {
+	users, err := s.store.ListUsers()
+	if err != nil {
+		return false, fmt.Errorf("ImportGlobalIfEmpty: list users: %w", err)
+	}
+	if len(users) > 0 {
+		return false, nil
+	}
+
+	data, err := s.ReadGlobal()
+	if err != nil {
+		return false, fmt.Errorf("ImportGlobalIfEmpty: read global: %w", err)
+	}
+	if data == nil {
+		return false, nil
+	}
+
+	if err := s.ImportGlobal(data); err != nil {
+		return false, fmt.Errorf("ImportGlobalIfEmpty: import: %w", err)
+	}
+	return true, nil
+}
+
+// ImportAppSidecarIfMissing reads the per-app sidecar and imports it only when
+// the app's DB-side state (alert rules + backup configs + access grants) is empty.
+// Returns (imported bool, err error). Missing sidecar -> (false, nil).
+// If any of the three is non-empty, treat as "DB has state" and skip import.
+// The app row must already exist before calling.
+func (s *Syncer) ImportAppSidecarIfMissing(slug string) (bool, error) {
+	app, err := s.store.GetAppBySlug(slug)
+	if err != nil {
+		return false, fmt.Errorf("ImportAppSidecarIfMissing %s: get app: %w", slug, err)
+	}
+
+	rules, err := s.store.ListAlertRules(&app.ID)
+	if err != nil {
+		return false, fmt.Errorf("ImportAppSidecarIfMissing %s: list alert rules: %w", slug, err)
+	}
+	backups, err := s.store.ListBackupConfigs(&app.ID)
+	if err != nil {
+		return false, fmt.Errorf("ImportAppSidecarIfMissing %s: list backup configs: %w", slug, err)
+	}
+	access, err := s.store.ListAccessForApp(app.ID)
+	if err != nil {
+		return false, fmt.Errorf("ImportAppSidecarIfMissing %s: list access: %w", slug, err)
+	}
+
+	if len(rules) > 0 || len(backups) > 0 || len(access) > 0 {
+		// DB already has state; do not clobber.
+		return false, nil
+	}
+
+	data, err := s.ReadAppSidecar(slug)
+	if err != nil {
+		return false, fmt.Errorf("ImportAppSidecarIfMissing %s: read sidecar: %w", slug, err)
+	}
+	if data == nil {
+		return false, nil
+	}
+
+	if err := s.ImportAppSidecar(data); err != nil {
+		return false, fmt.Errorf("ImportAppSidecarIfMissing %s: import: %w", slug, err)
+	}
+	return true, nil
+}
+
 // atomicWriteYAML marshals v to YAML and atomically writes it to path (0600 perm).
 func atomicWriteYAML(path string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
