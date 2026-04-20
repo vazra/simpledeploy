@@ -177,7 +177,7 @@ func (d *Deployer) inspectState(ctx context.Context, id string) (ServiceState, e
 	}
 	// RestartCount lives at the container root, not in .State; query separately.
 	if rc, _, err := d.runner.Run(ctx, "docker", "inspect", "--format", "{{.RestartCount}}", id); err == nil {
-		fmt.Sscanf(strings.TrimSpace(rc), "%d", &st.RestartCount)
+		_, _ = fmt.Sscanf(strings.TrimSpace(rc), "%d", &st.RestartCount)
 	}
 	return st, nil
 }
