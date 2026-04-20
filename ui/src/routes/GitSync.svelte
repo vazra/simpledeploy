@@ -166,6 +166,53 @@
       {/if}
     </div>
 
+    <!-- Recent activity -->
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-4">
+      <div class="mb-4">
+        <h2 class="text-sm font-medium text-text-primary">Recent activity</h2>
+        <p class="text-xs text-text-muted mt-0.5">Last 20 commits on this branch</p>
+      </div>
+      {#if status.RecentCommits && status.RecentCommits.length > 0}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-border/50">
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">When</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Who</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Message</th>
+                <th class="text-left text-xs font-medium text-text-muted py-3 px-4">Commit ID</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border/30">
+              {#each status.RecentCommits as c}
+                <tr class="hover:bg-surface-hover">
+                  <td class="py-3 px-4 text-text-secondary text-xs whitespace-nowrap">{timeAgo(c.When)}</td>
+                  <td class="py-3 px-4 text-text-secondary text-xs whitespace-nowrap">
+                    {c.AuthorName}
+                    {#if c.BotCommit}
+                      <span class="ml-1 inline-flex items-center rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent" title="Committed by SimpleDeploy bot">bot</span>
+                    {/if}
+                  </td>
+                  <td class="py-3 px-4 text-text-primary text-xs max-w-xs truncate" title={c.Subject}>{c.Subject}</td>
+                  <td class="py-3 px-4">
+                    <button
+                      onclick={() => copyToClipboard(c.SHA)}
+                      class="font-mono text-xs text-text-secondary hover:text-accent transition-colors"
+                      title="Click to copy full commit ID"
+                    >
+                      {copiedSHA === c.SHA ? 'Copied!' : c.ShortSHA}
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else}
+        <p class="text-sm text-text-muted">No commits yet. Commits will appear here once git sync has something to push.</p>
+      {/if}
+    </div>
+
     <!-- Conflicts table -->
     {#if status.RecentConflicts && status.RecentConflicts.length > 0}
       <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
