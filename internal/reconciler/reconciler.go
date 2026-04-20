@@ -14,6 +14,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/config"
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/mirror"
@@ -47,15 +48,16 @@ type Reconciler struct {
 	config       *config.Config
 	masterSecret string
 	resolver     proxy.UpstreamResolver // nil-safe
+	syncer       *configsync.Syncer     // nil means configsync disabled
 }
 
-// New creates a Reconciler.
-func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *config.Config) *Reconciler {
+// New creates a Reconciler. syncer may be nil (disables configsync recovery).
+func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *config.Config, syncer *configsync.Syncer) *Reconciler {
 	secret := ""
 	if cfg != nil {
 		secret = cfg.MasterSecret
 	}
-	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret}
+	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret, syncer: syncer}
 }
 
 // SetDockerClient wires a Docker client for container-IP upstream resolution.
@@ -566,6 +568,15 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	}
 	if err := r.store.UpsertApp(app, labels); err != nil {
 		return fmt.Errorf("upsert app: %w", err)
+	}
+
+	// Rehydrate app config from sidecar if DB had no state (DR recovery path).
+	if r.syncer != nil {
+		if imported, err := r.syncer.ImportAppSidecarIfMissing(slug); err != nil {
+			log.Printf("[configsync] ImportAppSidecarIfMissing %s: %v", slug, err)
+		} else if imported {
+			log.Printf("[configsync] imported app sidecar for %s", slug)
+		}
 	}
 
 	content, _ := os.ReadFile(cfg.ComposePath)
