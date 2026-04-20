@@ -122,6 +122,17 @@ type syncReq struct {
 	done chan<- error
 }
 
+// CommitInfo is a summary of a single commit for the status endpoint.
+type CommitInfo struct {
+	SHA         string    // full SHA
+	ShortSHA    string    // first 7 chars
+	Subject     string    // first line of message
+	AuthorName  string
+	AuthorEmail string
+	When        time.Time
+	BotCommit   bool // true when message contains "Source: simpledeploy-sync"
+}
+
 // Status is a snapshot of the Syncer state for the UI / status endpoint.
 type Status struct {
 	Enabled         bool
@@ -133,6 +144,7 @@ type Status struct {
 	PendingCommits  int
 	DroppedRequests int64
 	RecentConflicts []Conflict
+	RecentCommits   []CommitInfo
 }
 
 // Conflict records a single server-wins conflict resolution.
@@ -276,6 +288,45 @@ func (g *Syncer) SyncNow(ctx context.Context) error {
 	}
 }
 
+// recentCommits walks the repo log from HEAD and returns up to n CommitInfo entries.
+// Returns an empty slice when the repo is nil or has no commits.
+func (g *Syncer) recentCommits(n int) []CommitInfo {
+	if g.repo == nil {
+		return nil
+	}
+	logIter, err := g.repo.Log(&git.LogOptions{})
+	if err != nil {
+		return nil
+	}
+	var out []CommitInfo
+	_ = logIter.ForEach(func(c *object.Commit) error {
+		if len(out) >= n {
+			return fmt.Errorf("stop") // non-nil stops iteration
+		}
+		msg := c.Message
+		subject := msg
+		if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
+			subject = msg[:idx]
+		}
+		sha := c.Hash.String()
+		short := sha
+		if len(short) > 7 {
+			short = short[:7]
+		}
+		out = append(out, CommitInfo{
+			SHA:         sha,
+			ShortSHA:    short,
+			Subject:     subject,
+			AuthorName:  c.Author.Name,
+			AuthorEmail: c.Author.Email,
+			When:        c.Author.When,
+			BotCommit:   strings.Contains(msg, "Source: simpledeploy-sync"),
+		})
+		return nil
+	})
+	return out
+}
+
 // Status returns a snapshot.
 func (g *Syncer) Status() Status {
 	if !g.cfg.Enabled {
@@ -285,6 +336,7 @@ func (g *Syncer) Status() Status {
 	defer g.mu.Unlock()
 	conflicts := make([]Conflict, len(g.recentConflicts))
 	copy(conflicts, g.recentConflicts)
+	commits := g.recentCommits(20)
 	return Status{
 		Enabled:         true,
 		Remote:          g.cfg.Remote,
@@ -295,6 +347,7 @@ func (g *Syncer) Status() Status {
 		PendingCommits:  len(g.commitCh),
 		DroppedRequests: atomic.LoadInt64(&g.dropped),
 		RecentConflicts: conflicts,
+		RecentCommits:   commits,
 	}
 }
 

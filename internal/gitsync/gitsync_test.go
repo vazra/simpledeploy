@@ -752,6 +752,62 @@ func TestPollPullsChanges(t *testing.T) {
 	}
 }
 
+// TestStatusRecentCommits: after two commits, Status().RecentCommits has at least
+// 2 entries in reverse-chronological order and BotCommit is correctly detected.
+func TestStatusRecentCommits(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+	writeFile(t, filepath.Join(appsDir, "_global.yml"), "version: 1\n")
+
+	s := makeSyncer(t, appsDir, bareDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// First bot commit already happened during Start (initial sync commit).
+	prevSHA := s.Status().HeadSHA
+
+	// Second bot commit: modify a file and enqueue.
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3.9'\n")
+	s.EnqueueCommit(nil, "second-change")
+	drainCommits(t, s, 5*time.Second)
+	waitForHeadUpdate(t, s, prevSHA, 5*time.Second)
+
+	st := s.Status()
+	if len(st.RecentCommits) < 2 {
+		t.Fatalf("expected >= 2 RecentCommits, got %d", len(st.RecentCommits))
+	}
+
+	// First entry is newest.
+	if !st.RecentCommits[0].When.After(st.RecentCommits[1].When) &&
+		!st.RecentCommits[0].When.Equal(st.RecentCommits[1].When) {
+		t.Fatalf("commits not in reverse-chronological order: [0].When=%v [1].When=%v",
+			st.RecentCommits[0].When, st.RecentCommits[1].When)
+	}
+
+	// The newest commit (enqueued) must be detected as a bot commit.
+	if !st.RecentCommits[0].BotCommit {
+		t.Errorf("newest commit should be BotCommit=true, subject=%q", st.RecentCommits[0].Subject)
+	}
+
+	// All entries must have valid SHA fields.
+	for i, c := range st.RecentCommits {
+		if len(c.ShortSHA) != 7 {
+			t.Errorf("commit[%d] ShortSHA length %d, want 7", i, len(c.ShortSHA))
+		}
+		if c.SHA == "" {
+			t.Errorf("commit[%d] SHA empty", i)
+		}
+	}
+}
+
 // ---- helpers ----
 
 type countingReconciler struct {
