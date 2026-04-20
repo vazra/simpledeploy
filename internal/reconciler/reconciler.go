@@ -608,5 +608,10 @@ func (r *Reconciler) removeApp(ctx context.Context, slug string) error {
 	if err := r.store.DeleteApp(slug); err != nil {
 		return fmt.Errorf("delete app: %w", err)
 	}
+	if r.syncer != nil {
+		if err := r.syncer.DeleteAppSidecar(slug); err != nil {
+			log.Printf("[configsync] DeleteAppSidecar %s: %v", slug, err)
+		}
+	}
 	return nil
 }

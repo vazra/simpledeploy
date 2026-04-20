@@ -19,6 +19,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/config"
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployment"
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/gitsync"
@@ -64,6 +65,7 @@ type Server struct {
 	cfgPath             string
 	deploymentMode      deployment.Mode
 	gs                  *gitsync.Syncer
+	cs                  *configsync.Syncer
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -128,6 +130,9 @@ func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
 
 // SetGitSync sets the gitsync.Syncer (nil disables git endpoints).
 func (s *Server) SetGitSync(gs *gitsync.Syncer) { s.gs = gs }
+
+// SetConfigSync sets the configsync.Syncer (nil disables sidecar cleanup on delete).
+func (s *Server) SetConfigSync(cs *configsync.Syncer) { s.cs = cs }
 
 // EnqueueGitCommit enqueues a commit for paths if gitsync is enabled. No-op when nil.
 func (s *Server) EnqueueGitCommit(paths []string, reason string) {

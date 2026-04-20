@@ -192,6 +192,12 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if s.cs != nil {
+		if err := s.cs.DeleteAppSidecar(slug); err != nil {
+			log.Printf("[configsync] DeleteAppSidecar %s: %v", slug, err)
+		}
+	}
+
 	appDir := filepath.Join(s.appsDir, slug)
 	if err := os.RemoveAll(appDir); err != nil {
 		http.Error(w, "failed to remove app directory", http.StatusInternalServerError)
