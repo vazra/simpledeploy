@@ -9,7 +9,6 @@ package configsync
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -498,8 +497,3 @@ func readYAML[T any](path string) (*T, error) {
 
 // bytesReader wraps a byte slice for yaml.NewDecoder.
 func bytesReader(data []byte) *bytes.Reader { return bytes.NewReader(data) }
-
-// logWarn logs unknown key warnings; used as a hook in tests.
-var logWarn = func(format string, args ...any) {
-	log.Printf("[configsync] "+format, args...)
-}
