@@ -219,6 +219,7 @@ func (s *Store) CreateBackupConfig(cfg *BackupConfig) error {
 	if err != nil {
 		return fmt.Errorf("create backup config: %w", err)
 	}
+	s.fireAppHook(cfg.AppID)
 	return nil
 }
 
@@ -244,6 +245,7 @@ func (s *Store) UpdateBackupConfig(cfg *BackupConfig) error {
 	if n == 0 {
 		return fmt.Errorf("backup config %d not found", cfg.ID)
 	}
+	s.fireAppHook(cfg.AppID)
 	return nil
 }
 
@@ -314,6 +316,10 @@ func (s *Store) GetBackupConfig(id int64) (*BackupConfig, error) {
 }
 
 func (s *Store) DeleteBackupConfig(id int64) error {
+	// Fetch app_id before delete for hook.
+	var appID int64
+	_ = s.db.QueryRow(`SELECT app_id FROM backup_configs WHERE id = ?`, id).Scan(&appID)
+
 	res, err := s.db.Exec(`DELETE FROM backup_configs WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete backup config: %w", err)
@@ -324,6 +330,9 @@ func (s *Store) DeleteBackupConfig(id int64) error {
 	}
 	if n == 0 {
 		return fmt.Errorf("backup config %d not found", id)
+	}
+	if appID != 0 {
+		s.fireAppHook(appID)
 	}
 	return nil
 }

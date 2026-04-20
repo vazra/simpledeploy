@@ -52,6 +52,7 @@ func (s *Store) CreateWebhook(w *Webhook) error {
 	if err != nil {
 		return fmt.Errorf("create webhook: %w", err)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -121,6 +122,7 @@ func (s *Store) UpdateWebhook(w *Webhook) error {
 	if n == 0 {
 		return fmt.Errorf("webhook %d not found", w.ID)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -136,6 +138,7 @@ func (s *Store) DeleteWebhook(id int64) error {
 	if n == 0 {
 		return fmt.Errorf("webhook %d not found", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -156,6 +159,11 @@ func (s *Store) CreateAlertRule(r *AlertRule) error {
 		Scan(&r.ID, &r.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("create alert rule: %w", err)
+	}
+	if r.AppID != nil {
+		s.fireAppHook(*r.AppID)
+	} else {
+		s.fireHook(ScopeGlobal, "")
 	}
 	return nil
 }
@@ -264,10 +272,19 @@ func (s *Store) UpdateAlertRule(r *AlertRule) error {
 	`, r.Metric, r.AppSlug, r.Operator, r.Threshold, r.ID); err != nil {
 		log.Printf("[store] update alert history snapshot: %v", err)
 	}
+	if r.AppID != nil {
+		s.fireAppHook(*r.AppID)
+	} else {
+		s.fireHook(ScopeGlobal, "")
+	}
 	return nil
 }
 
 func (s *Store) DeleteAlertRule(id int64) error {
+	// Fetch rule before delete to know scope for hook.
+	row := s.db.QueryRow(`SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at FROM alert_rules WHERE id = ?`, id)
+	rule, _ := scanAlertRule(row)
+
 	_ = s.ResolveAlertsByRule(id)
 	res, err := s.db.Exec(`DELETE FROM alert_rules WHERE id = ?`, id)
 	if err != nil {
@@ -279,6 +296,11 @@ func (s *Store) DeleteAlertRule(id int64) error {
 	}
 	if n == 0 {
 		return fmt.Errorf("alert rule %d not found", id)
+	}
+	if rule.AppID != nil {
+		s.fireAppHook(*rule.AppID)
+	} else {
+		s.fireHook(ScopeGlobal, "")
 	}
 	return nil
 }
@@ -433,6 +455,7 @@ func (s *Store) DeleteAlertRulesForApp(appID int64) error {
 	if _, err := s.db.Exec(`DELETE FROM alert_rules WHERE app_id = ?`, appID); err != nil {
 		return fmt.Errorf("delete alert rules for app %d: %w", appID, err)
 	}
+	s.fireAppHook(appID)
 	return nil
 }
 

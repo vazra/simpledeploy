@@ -35,6 +35,7 @@ func (s *Store) SetDBBackupConfig(key, value string) error {
 	if err != nil {
 		return fmt.Errorf("upsert db_backup_config: %w", err)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 

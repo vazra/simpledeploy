@@ -38,6 +38,7 @@ func (s *Store) CreateUser(username, passwordHash, role, displayName, email stri
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return &u, nil
 }
 
@@ -108,6 +109,7 @@ func (s *Store) DeleteUser(id int64) error {
 	if n == 0 {
 		return fmt.Errorf("user %d not found", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -139,6 +141,7 @@ func (s *Store) CreateAPIKey(userID int64, keyHash, name string) (*APIKeyRecord,
 	if err != nil {
 		return nil, fmt.Errorf("create api key: %w", err)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return &k, nil
 }
 
@@ -221,6 +224,7 @@ func (s *Store) DeleteAPIKey(id, userID int64) error {
 	if n == 0 {
 		return fmt.Errorf("api key %d not found", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -232,6 +236,7 @@ func (s *Store) GrantAppAccess(userID, appID int64) error {
 	if err != nil {
 		return fmt.Errorf("grant app access: %w", err)
 	}
+	s.fireAppHook(appID)
 	return nil
 }
 
@@ -243,6 +248,7 @@ func (s *Store) RevokeAppAccess(userID, appID int64) error {
 	if err != nil {
 		return fmt.Errorf("revoke app access: %w", err)
 	}
+	s.fireAppHook(appID)
 	return nil
 }
 
@@ -319,6 +325,7 @@ func (s *Store) UpdateProfile(id int64, displayName, email string) error {
 	if n == 0 {
 		return fmt.Errorf("user %d not found", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -335,6 +342,7 @@ func (s *Store) UpdateUserRole(id int64, role string) error {
 	if n == 0 {
 		return fmt.Errorf("user %d not found", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -351,6 +359,7 @@ func (s *Store) UpdatePassword(id int64, newHash string) error {
 	if n == 0 {
 		return fmt.Errorf("user %d not found", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -454,7 +463,11 @@ func (s *Store) ReplaceAppAccess(appID int64, usernames []string) error {
 			return fmt.Errorf("grant access for %q: %w", username, err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.fireAppHook(appID)
+	return nil
 }
 
 // UpsertUserByUsername inserts or updates a user by username.
@@ -473,6 +486,7 @@ func (s *Store) UpsertUserByUsername(u *User) error {
 	if err != nil {
 		return fmt.Errorf("upsert user %q: %w", u.Username, err)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -504,6 +518,7 @@ func (s *Store) UpsertAPIKey(username, keyHash, name string, expiresAt *time.Tim
 	if err != nil {
 		return fmt.Errorf("upsert api key %q/%q: %w", username, name, err)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 

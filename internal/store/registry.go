@@ -35,7 +35,12 @@ func (s *Store) CreateRegistry(name, url, usernameEnc, passwordEnc string) (*Reg
 	if err != nil {
 		return nil, fmt.Errorf("insert registry: %w", err)
 	}
-	return s.GetRegistry(id)
+	r, err := s.GetRegistry(id)
+	if err != nil {
+		return nil, err
+	}
+	s.fireHook(ScopeGlobal, "")
+	return r, nil
 }
 
 func (s *Store) ListRegistries() ([]Registry, error) {
@@ -92,6 +97,7 @@ func (s *Store) UpdateRegistry(id, name, url, usernameEnc, passwordEnc string) e
 	if n == 0 {
 		return fmt.Errorf("registry not found: %s", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -111,6 +117,7 @@ func (s *Store) UpsertRegistryByID(r *Registry) error {
 	if err != nil {
 		return fmt.Errorf("upsert registry %q: %w", r.ID, err)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
 
@@ -126,5 +133,6 @@ func (s *Store) DeleteRegistry(id string) error {
 	if n == 0 {
 		return fmt.Errorf("registry not found: %s", id)
 	}
+	s.fireHook(ScopeGlobal, "")
 	return nil
 }
