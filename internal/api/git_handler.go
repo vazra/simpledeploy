@@ -40,3 +40,23 @@ func (s *Server) handleGitWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	h.ServeHTTP(w, r)
 }
+
+func (s *Server) handleGitApplyPending(w http.ResponseWriter, r *http.Request) {
+	if s.gs == nil {
+		http.Error(w, "git sync not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.gs.ApplyPending(r.Context()); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	status := s.gs.Status()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+func (s *Server) handleGitApplyPendingSafe(w http.ResponseWriter, r *http.Request) {
+	gsMu.RLock()
+	defer gsMu.RUnlock()
+	s.handleGitApplyPending(w, r)
+}

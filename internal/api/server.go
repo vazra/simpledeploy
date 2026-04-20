@@ -348,6 +348,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/git/config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGetGitConfig))))
 	s.mux.Handle("PUT /api/git/config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePutGitConfig))))
 	s.mux.Handle("POST /api/git/disable", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDisableGitSync))))
+	s.mux.Handle("POST /api/git/apply-pending", s.authMiddleware(s.superAdminMiddleware(s.rateLimitMiddleware(http.HandlerFunc(s.handleGitApplyPendingSafe)))))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

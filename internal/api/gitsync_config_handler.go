@@ -99,6 +99,12 @@ type gitConfigResponse struct {
 	WebhookSecretSet    bool   `json:"webhook_secret_set"`
 	HTTPSTokenSet       bool   `json:"https_token_set"`
 	Source              string `json:"source"` // "db" or "yaml"
+
+	// Behaviour toggles.
+	PollEnabled      bool `json:"poll_enabled"`
+	AutoPushEnabled  bool `json:"auto_push_enabled"`
+	AutoApplyEnabled bool `json:"auto_apply_enabled"`
+	WebhookEnabled   bool `json:"webhook_enabled"`
 }
 
 // gitConfigRequest is the shape accepted by PUT /api/git/config.
@@ -113,6 +119,12 @@ type gitConfigRequest struct {
 	HTTPSUsername       string  `json:"https_username"`
 	WebhookSecret       *string `json:"webhook_secret"`  // nil=unchanged, ""=clear, "x"=set
 	HTTPSToken          *string `json:"https_token"`     // same
+
+	// Behaviour toggles (optional; absent=true for backwards-compat).
+	PollEnabled      *bool `json:"poll_enabled"`
+	AutoPushEnabled  *bool `json:"auto_push_enabled"`
+	AutoApplyEnabled *bool `json:"auto_apply_enabled"`
+	WebhookEnabled   *bool `json:"webhook_enabled"`
 }
 
 func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +151,11 @@ func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
 				resp.PollIntervalSeconds = secs
 			}
 		}
+		// Toggles: missing key defaults to true.
+		resp.PollEnabled = dbKV["poll_enabled"] != "false"
+		resp.AutoPushEnabled = dbKV["auto_push_enabled"] != "false"
+		resp.AutoApplyEnabled = dbKV["auto_apply_enabled"] != "false"
+		resp.WebhookEnabled = dbKV["webhook_enabled"] != "false"
 	} else if s.cfg != nil && s.cfg.GitSync.Enabled {
 		resp.Source = "yaml"
 		resp.Enabled = s.cfg.GitSync.Enabled
@@ -151,6 +168,11 @@ func (s *Server) handleGetGitConfig(w http.ResponseWriter, r *http.Request) {
 		resp.WebhookSecretSet = s.cfg.GitSync.WebhookSecret != ""
 		resp.HTTPSTokenSet = s.cfg.GitSync.HTTPSToken != ""
 		resp.PollIntervalSeconds = int(s.cfg.GitSync.PollInterval.Seconds())
+		// YAML path has no toggle fields; all default to true.
+		resp.PollEnabled = true
+		resp.AutoPushEnabled = true
+		resp.AutoApplyEnabled = true
+		resp.WebhookEnabled = true
 	} else {
 		resp.Source = "yaml"
 		resp.Enabled = false
@@ -193,14 +215,18 @@ func (s *Server) handlePutGitConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Build the new KV map.
 	kvs := map[string]string{
-		"enabled":       boolStr(req.Enabled),
-		"remote":        req.Remote,
-		"branch":        req.Branch,
-		"author_name":   req.AuthorName,
-		"author_email":  req.AuthorEmail,
-		"ssh_key_path":  req.SSHKeyPath,
-		"https_username": req.HTTPSUsername,
-		"poll_interval": strconv.Itoa(req.PollIntervalSeconds),
+		"enabled":            boolStr(req.Enabled),
+		"remote":             req.Remote,
+		"branch":             req.Branch,
+		"author_name":        req.AuthorName,
+		"author_email":       req.AuthorEmail,
+		"ssh_key_path":       req.SSHKeyPath,
+		"https_username":     req.HTTPSUsername,
+		"poll_interval":      strconv.Itoa(req.PollIntervalSeconds),
+		"poll_enabled":       boolPtrStr(req.PollEnabled, true),
+		"auto_push_enabled":  boolPtrStr(req.AutoPushEnabled, true),
+		"auto_apply_enabled": boolPtrStr(req.AutoApplyEnabled, true),
+		"webhook_enabled":    boolPtrStr(req.WebhookEnabled, true),
 	}
 
 	// Fetch existing encrypted values to support "unchanged" semantics.
@@ -272,6 +298,15 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// boolPtrStr returns "true"/"false" from a *bool pointer.
+// When ptr is nil, the def (default) value is used.
+func boolPtrStr(ptr *bool, def bool) string {
+	if ptr == nil {
+		return boolStr(def)
+	}
+	return boolStr(*ptr)
 }
 
 // wrapGsMu wraps the existing git handlers to acquire a read lock on gsMu.

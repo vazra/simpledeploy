@@ -258,6 +258,7 @@ export const api = {
   gitConfig: () => request('GET', '/git/config'),
   gitConfigUpdate: (payload) => request('PUT', '/git/config', payload),
   gitDisable: () => request('POST', '/git/disable'),
+  gitApplyPending: () => request('POST', '/git/apply-pending'),
 
   // Public host (used by template quick-test mode)
   getPublicHost: () => request('GET', '/system/public-host'),
