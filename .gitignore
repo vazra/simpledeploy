@@ -32,3 +32,5 @@ docs-site/src/content/docs/reference/
 docs-site/src/content/docs/start/
 docs-site/src/content/docs/faq.md
 docs-site/src/content/docs/README.md
+
+.worktrees/
