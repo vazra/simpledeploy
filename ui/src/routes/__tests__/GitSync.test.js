@@ -72,6 +72,73 @@ describe('GitSync', () => {
     expect(await findByText('No conflicts recorded.')).toBeInTheDocument();
   });
 
+  it('renders recent activity rows when RecentCommits present', async () => {
+    const status = {
+      ...baseStatus,
+      RecentCommits: [
+        {
+          SHA: 'aabbccddeeff00112233445566778899aabbccdd',
+          ShortSHA: 'aabbccd',
+          Subject: 'chore(simpledeploy): sync config',
+          AuthorName: 'SimpleDeploy',
+          AuthorEmail: 'bot@simpledeploy.local',
+          When: new Date(Date.now() - 30000).toISOString(),
+          BotCommit: true,
+        },
+        {
+          SHA: '11223344556677889900aabbccddeeff11223344',
+          ShortSHA: '1122334',
+          Subject: 'feat: manual commit',
+          AuthorName: 'Alice',
+          AuthorEmail: 'alice@example.com',
+          When: new Date(Date.now() - 90000).toISOString(),
+          BotCommit: false,
+        },
+      ],
+    };
+    apiMock.gitStatus.mockResolvedValueOnce({ data: status, error: null, status: 200 });
+    const { findByText, queryByText } = render(GitSync);
+    expect(await findByText('Recent activity')).toBeInTheDocument();
+    expect(await findByText('aabbccd')).toBeInTheDocument();
+    expect(await findByText('1122334')).toBeInTheDocument();
+    expect(await findByText('chore(simpledeploy): sync config')).toBeInTheDocument();
+    expect(await findByText('feat: manual commit')).toBeInTheDocument();
+    // bot badge present for bot commit
+    expect(await findByText('bot')).toBeInTheDocument();
+    // no badge for human commit (Alice row has no bot badge)
+    expect(await findByText('Alice')).toBeInTheDocument();
+    // no empty-state message
+    expect(queryByText(/No commits yet/)).toBeNull();
+  });
+
+  it('renders empty state when RecentCommits is empty', async () => {
+    const status = { ...baseStatus, RecentCommits: [] };
+    apiMock.gitStatus.mockResolvedValueOnce({ data: status, error: null, status: 200 });
+    const { findByText } = render(GitSync);
+    expect(await findByText(/No commits yet/)).toBeInTheDocument();
+  });
+
+  it('renders bot badge only on bot commits', async () => {
+    const status = {
+      ...baseStatus,
+      RecentCommits: [
+        {
+          SHA: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+          ShortSHA: 'deadbee',
+          Subject: 'chore(simpledeploy): sync config',
+          AuthorName: 'SimpleDeploy',
+          AuthorEmail: 'bot@simpledeploy.local',
+          When: new Date(Date.now() - 5000).toISOString(),
+          BotCommit: true,
+        },
+      ],
+    };
+    apiMock.gitStatus.mockResolvedValueOnce({ data: status, error: null, status: 200 });
+    const { findAllByText } = render(GitSync);
+    const badges = await findAllByText('bot');
+    expect(badges.length).toBe(1);
+  });
+
   it('renders conflicts table when conflicts present', async () => {
     const status = {
       ...baseStatus,
