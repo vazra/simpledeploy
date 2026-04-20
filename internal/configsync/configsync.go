@@ -9,6 +9,7 @@ package configsync
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -20,10 +21,11 @@ import (
 )
 
 const (
-	appSidecarName = "simpledeploy.yml"
-	globalSidecar  = "config.yml"
-	debounceDelay  = 500 * time.Millisecond
-	globalKey      = "\x00global" // non-slug sentinel for global debounce entry
+	appSidecarName        = "simpledeploy.yml"
+	globalSidecar         = "config.yml"
+	redactedGlobalSidecar = "_global.yml"
+	debounceDelay         = 500 * time.Millisecond
+	globalKey             = "\x00global" // non-slug sentinel for global debounce entry
 )
 
 // Syncer writes and reads config sidecar files, debouncing frequent writes.
@@ -72,14 +74,17 @@ func (s *Syncer) Close() error {
 
 	var errs []error
 	for _, k := range keys {
-		var err error
 		if k == globalKey {
-			err = s.WriteGlobal()
+			if err := s.WriteGlobal(); err != nil {
+				errs = append(errs, err)
+			}
+			if err := s.WriteRedactedGlobal(); err != nil {
+				errs = append(errs, err)
+			}
 		} else {
-			err = s.WriteAppSidecar(k)
-		}
-		if err != nil {
-			errs = append(errs, err)
+			if err := s.WriteAppSidecar(k); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	if len(errs) > 0 {
@@ -93,9 +98,17 @@ func (s *Syncer) ScheduleAppWrite(slug string) {
 	s.schedule(slug, func() { _ = s.WriteAppSidecar(slug) })
 }
 
-// ScheduleGlobalWrite schedules a debounced write of the global sidecar.
+// ScheduleGlobalWrite schedules a debounced write of both global sidecars
+// (config.yml and _global.yml) in a single 500ms window.
 func (s *Syncer) ScheduleGlobalWrite() {
-	s.schedule(globalKey, func() { _ = s.WriteGlobal() })
+	s.schedule(globalKey, func() {
+		if err := s.WriteGlobal(); err != nil {
+			log.Printf("configsync: WriteGlobal: %v", err)
+		}
+		if err := s.WriteRedactedGlobal(); err != nil {
+			log.Printf("configsync: WriteRedactedGlobal: %v", err)
+		}
+	})
 }
 
 func (s *Syncer) schedule(key string, fn func()) {
@@ -469,6 +482,110 @@ func (s *Syncer) ImportGlobalIfEmpty() (bool, error) {
 		return false, fmt.Errorf("ImportGlobalIfEmpty: import: %w", err)
 	}
 	return true, nil
+}
+
+// WriteRedactedGlobal reads global config from the store and writes the redacted
+// {apps_dir}/_global.yml. Contains no secrets.
+func (s *Syncer) WriteRedactedGlobal() error {
+	users, err := s.store.ListUsersWithHashes()
+	if err != nil {
+		return fmt.Errorf("WriteRedactedGlobal: list users: %w", err)
+	}
+
+	webhooks, err := s.store.ListWebhooks()
+	if err != nil {
+		return fmt.Errorf("WriteRedactedGlobal: list webhooks: %w", err)
+	}
+
+	registries, err := s.store.ListRegistries()
+	if err != nil {
+		return fmt.Errorf("WriteRedactedGlobal: list registries: %w", err)
+	}
+
+	dbBackupCfg, err := s.store.GetDBBackupConfig()
+	if err != nil {
+		return fmt.Errorf("WriteRedactedGlobal: get db backup config: %w", err)
+	}
+
+	sidecar := RedactedGlobalSidecar{
+		Version:          Version,
+		DBBackupSchedule: dbBackupCfg["schedule"],
+		DBBackupTarget:   dbBackupCfg["target"],
+	}
+
+	for _, u := range users {
+		sidecar.Users = append(sidecar.Users, RedactedUser{
+			Username:    u.Username,
+			Role:        u.Role,
+			DisplayName: u.DisplayName,
+			Email:       u.Email,
+		})
+	}
+
+	for _, r := range registries {
+		sidecar.Registries = append(sidecar.Registries, RedactedRegistry{
+			ID:   r.ID,
+			Name: r.Name,
+			URL:  r.URL,
+		})
+	}
+
+	for _, w := range webhooks {
+		sidecar.Webhooks = append(sidecar.Webhooks, RedactedWebhook{
+			Name: w.Name,
+			Type: w.Type,
+		})
+	}
+
+	path := filepath.Join(s.appsDir, redactedGlobalSidecar)
+	return atomicWriteYAML(path, sidecar)
+}
+
+// ReadRedactedGlobal reads the redacted global sidecar. Returns (nil, nil) if missing.
+func (s *Syncer) ReadRedactedGlobal() (*RedactedGlobalSidecar, error) {
+	path := filepath.Join(s.appsDir, redactedGlobalSidecar)
+	return readYAML[RedactedGlobalSidecar](path)
+}
+
+// ImportRedactedGlobal applies non-secret deltas from the redacted file to the DB.
+// Preserves existing password hashes, encrypted registry credentials, and webhook URLs.
+// Does NOT delete users/registries/webhooks that are absent from the file.
+// Does NOT touch api_keys.
+func (s *Syncer) ImportRedactedGlobal(data *RedactedGlobalSidecar) error {
+	if data == nil {
+		return nil
+	}
+
+	for _, w := range data.Webhooks {
+		if err := s.store.UpsertWebhookFromRedacted(w.Name, w.Type); err != nil {
+			return fmt.Errorf("ImportRedactedGlobal: upsert webhook %q: %w", w.Name, err)
+		}
+	}
+
+	for _, u := range data.Users {
+		if err := s.store.UpdateUserFromRedacted(u.Username, u.Role, u.DisplayName, u.Email); err != nil {
+			return fmt.Errorf("ImportRedactedGlobal: upsert user %q: %w", u.Username, err)
+		}
+	}
+
+	for _, r := range data.Registries {
+		if err := s.store.UpsertRegistryFromRedacted(r.ID, r.Name, r.URL); err != nil {
+			return fmt.Errorf("ImportRedactedGlobal: upsert registry %q: %w", r.ID, err)
+		}
+	}
+
+	if data.DBBackupSchedule != "" {
+		if err := s.store.SetDBBackupConfig("schedule", data.DBBackupSchedule); err != nil {
+			return fmt.Errorf("ImportRedactedGlobal: set db_backup_config schedule: %w", err)
+		}
+	}
+	if data.DBBackupTarget != "" {
+		if err := s.store.SetDBBackupConfig("target", data.DBBackupTarget); err != nil {
+			return fmt.Errorf("ImportRedactedGlobal: set db_backup_config target: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // ImportAppSidecarIfMissing reads the per-app sidecar and imports it only when
