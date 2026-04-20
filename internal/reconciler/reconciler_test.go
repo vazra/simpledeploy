@@ -110,7 +110,7 @@ func newTestEnv(t *testing.T) (*Reconciler, *mockDeployer, *store.Store, string)
 	appsDir := t.TempDir()
 
 	mockProxy := proxy.NewMockProxy()
-	r := New(st, mock, mockProxy, appsDir, nil)
+	r := New(st, mock, mockProxy, appsDir, nil, nil)
 	return r, mock, st, appsDir
 }
 

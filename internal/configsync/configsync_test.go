@@ -536,6 +536,225 @@ func TestDebouncerRapidFireNoLostWrite(t *testing.T) {
 	}
 }
 
+// ---------- ImportGlobalIfEmpty tests ----------
+
+func TestImportGlobalIfEmpty_empty(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Write global sidecar with one user.
+	sidecar := GlobalSidecar{
+		Version: Version,
+		Users: []UserEntry{{Username: "admin", PasswordHash: "$2a$10$hash", Role: "admin"}},
+	}
+	if err := atomicWriteYAML(filepath.Join(dataDir, globalSidecar), sidecar); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	imported, err := syncer.ImportGlobalIfEmpty()
+	if err != nil {
+		t.Fatalf("ImportGlobalIfEmpty: %v", err)
+	}
+	if !imported {
+		t.Fatal("expected imported=true when DB is empty and sidecar exists")
+	}
+
+	users, err := st.ListUsers()
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "admin" {
+		t.Errorf("expected 1 user 'admin', got %v", users)
+	}
+}
+
+func TestImportGlobalIfEmpty_nonempty(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Pre-seed DB with a user.
+	if err := st.UpsertUserByUsername(&store.User{Username: "existing", PasswordHash: "h", Role: "admin"}); err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+
+	// Write sidecar with a different user.
+	sidecar := GlobalSidecar{
+		Version: Version,
+		Users: []UserEntry{{Username: "recovered", PasswordHash: "$2a$10$hash", Role: "admin"}},
+	}
+	if err := atomicWriteYAML(filepath.Join(dataDir, globalSidecar), sidecar); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	imported, err := syncer.ImportGlobalIfEmpty()
+	if err != nil {
+		t.Fatalf("ImportGlobalIfEmpty: %v", err)
+	}
+	if imported {
+		t.Fatal("expected imported=false when DB already has users")
+	}
+
+	// DB should still only have the pre-seeded user.
+	users, err := st.ListUsers()
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	for _, u := range users {
+		if u.Username == "recovered" {
+			t.Error("sidecar user should not have been imported")
+		}
+	}
+}
+
+func TestImportGlobalIfEmpty_missing(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// No sidecar on disk, empty DB.
+	imported, err := syncer.ImportGlobalIfEmpty()
+	if err != nil {
+		t.Fatalf("ImportGlobalIfEmpty: %v", err)
+	}
+	if imported {
+		t.Fatal("expected imported=false when sidecar is missing")
+	}
+}
+
+// ---------- ImportAppSidecarIfMissing tests ----------
+
+func TestImportAppSidecarIfMissing_empty(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Seed app row.
+	app := &store.App{Name: "testapp", Slug: "testapp", ComposePath: "/apps/testapp/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+
+	// Write sidecar with one alert rule (no webhook ref needed for Enabled-only rule).
+	wh := &store.Webhook{Name: "slack", Type: "slack", URL: "https://example.com"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+	sidecar := AppSidecar{
+		Version: Version,
+		App:     AppMeta{Slug: "testapp", DisplayName: "testapp"},
+		AlertRules: []AlertRuleEntry{
+			{Metric: "cpu", Operator: ">", Threshold: 75, DurationSec: 60, Webhook: "slack", Enabled: true},
+		},
+	}
+	appDir := filepath.Join(appsDir, "testapp")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := atomicWriteYAML(filepath.Join(appDir, appSidecarName), sidecar); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	imported, err := syncer.ImportAppSidecarIfMissing("testapp")
+	if err != nil {
+		t.Fatalf("ImportAppSidecarIfMissing: %v", err)
+	}
+	if !imported {
+		t.Fatal("expected imported=true when DB has no state")
+	}
+
+	rules, err := st.ListAlertRules(&app.ID)
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(rules) != 1 || rules[0].Metric != "cpu" {
+		t.Errorf("expected 1 cpu rule, got %v", rules)
+	}
+}
+
+func TestImportAppSidecarIfMissing_nonempty(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	app := &store.App{Name: "testapp", Slug: "testapp", ComposePath: "/apps/testapp/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+
+	// Pre-seed a webhook (required by FK).
+	wh := &store.Webhook{Name: "opsgenie", Type: "custom", URL: "https://opsgenie.example.com"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+
+	// Pre-seed an alert rule in DB.
+	rule := &store.AlertRule{AppID: &app.ID, Metric: "mem", Operator: ">", Threshold: 90, DurationSec: 30, WebhookID: wh.ID, Enabled: true}
+	if err := st.CreateAlertRule(rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	// Write sidecar with a different rule.
+	sidecar := AppSidecar{
+		Version: Version,
+		App:     AppMeta{Slug: "testapp", DisplayName: "testapp"},
+		AlertRules: []AlertRuleEntry{
+			{Metric: "cpu", Operator: ">", Threshold: 75, DurationSec: 60, Enabled: true},
+		},
+	}
+	appDir := filepath.Join(appsDir, "testapp")
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := atomicWriteYAML(filepath.Join(appDir, appSidecarName), sidecar); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	imported, err := syncer.ImportAppSidecarIfMissing("testapp")
+	if err != nil {
+		t.Fatalf("ImportAppSidecarIfMissing: %v", err)
+	}
+	if imported {
+		t.Fatal("expected imported=false when DB already has state")
+	}
+
+	// DB should still only have the pre-seeded rule.
+	rules, err := st.ListAlertRules(&app.ID)
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(rules) != 1 || rules[0].Metric != "mem" {
+		t.Errorf("expected original mem rule, got %v", rules)
+	}
+}
+
+func TestImportAppSidecarIfMissing_missing(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	app := &store.App{Name: "testapp", Slug: "testapp", ComposePath: "/apps/testapp/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+
+	// No sidecar on disk, empty app state.
+	imported, err := syncer.ImportAppSidecarIfMissing("testapp")
+	if err != nil {
+		t.Fatalf("ImportAppSidecarIfMissing: %v", err)
+	}
+	if imported {
+		t.Fatal("expected imported=false when sidecar is missing")
+	}
+}
+
 func TestRoundtripEmptyApp(t *testing.T) {
 	st := openTestStore(t)
 	appsDir := t.TempDir()
