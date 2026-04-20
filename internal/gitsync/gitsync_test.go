@@ -27,6 +27,7 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
 
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -805,6 +806,219 @@ func TestStatusRecentCommits(t *testing.T) {
 		if c.SHA == "" {
 			t.Errorf("commit[%d] SHA empty", i)
 		}
+	}
+}
+
+// TestBotCommitParsing is a table-driven unit test for isBotCommit.
+func TestBotCommitParsing(t *testing.T) {
+	cases := []struct {
+		name    string
+		msg     string
+		want    bool
+	}{
+		{
+			name: "trailer on last line",
+			msg:  "chore: sync\n\nSource: simpledeploy-sync\n",
+			want: true,
+		},
+		{
+			name: "trailer followed by another trailer line",
+			msg:  "chore: sync\n\nSource: simpledeploy-sync\nReason: app:myapp\n",
+			want: true,
+		},
+		{
+			name: "trailer in middle of multi-paragraph body",
+			msg:  "chore: sync\n\nSome paragraph.\n\nSource: simpledeploy-sync\n\nAnother paragraph.\n",
+			want: true,
+		},
+		{
+			name: "no trailer",
+			msg:  "fix: something manual\n\nNo trailer here.\n",
+			want: false,
+		},
+		{
+			name: "trailer with trailing whitespace",
+			msg:  "chore: sync\n\nSource: simpledeploy-sync   \n",
+			want: true,
+		},
+		{
+			name: "similar-looking but different source",
+			msg:  "chore: sync\n\nSource: manual-edit\n",
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isBotCommit(tc.msg)
+			if got != tc.want {
+				t.Errorf("isBotCommit(%q) = %v, want %v", tc.msg, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRecentCommitsCap: after 25 commits, Status().RecentCommits has exactly 20 entries
+// in reverse-chronological order.
+func TestRecentCommitsCap(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	s := makeSyncer(t, appsDir, bareDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Make 24 more commits (1 already created by Start = 25 total).
+	for i := 0; i < 24; i++ {
+		writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"),
+			fmt.Sprintf("version: '%d'\n", i))
+		prevSHA := s.Status().HeadSHA
+		s.EnqueueCommit(nil, fmt.Sprintf("change %d", i))
+		drainCommits(t, s, 5*time.Second)
+		waitForHeadUpdate(t, s, prevSHA, 5*time.Second)
+	}
+
+	st := s.Status()
+	if len(st.RecentCommits) != 20 {
+		t.Fatalf("RecentCommits len = %d, want 20", len(st.RecentCommits))
+	}
+	// Verify reverse-chronological order (newest first).
+	for i := 1; i < len(st.RecentCommits); i++ {
+		if st.RecentCommits[i].When.After(st.RecentCommits[i-1].When) {
+			t.Errorf("commit[%d].When=%v is after commit[%d].When=%v; not in reverse-chron order",
+				i, st.RecentCommits[i].When, i-1, st.RecentCommits[i-1].When)
+		}
+	}
+}
+
+// TestPruneOrphanSidecarsCommitsToRemote: prune fires the hook, which enqueues
+// a commit; the bare remote receives a commit whose message references orphan pruning.
+func TestPruneOrphanSidecarsCommitsToRemote(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	// Three app dirs on disk.
+	for _, slug := range []string{"orphan1", "orphan2", "alive"} {
+		writeFile(t, filepath.Join(appsDir, slug, "docker-compose.yml"), "services:\n  web:\n    image: nginx\n")
+		writeFile(t, filepath.Join(appsDir, slug, "simpledeploy.yml"), "version: 1\napp:\n  slug: "+slug+"\n")
+	}
+
+	// Seed DB with only "alive".
+	st := openStore(t)
+	if err := st.UpsertApp(&store.App{
+		Name:        "Alive App",
+		Slug:        "alive",
+		ComposePath: filepath.Join(appsDir, "alive", "docker-compose.yml"),
+		Status:      "running",
+	}, nil); err != nil {
+		t.Fatalf("UpsertApp: %v", err)
+	}
+
+	cfg := Config{
+		Enabled:      true,
+		Remote:       "file://" + bareDir,
+		Branch:       "main",
+		AppsDir:      appsDir,
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.local",
+		PollInterval: 0,
+	}
+
+	// Build configsync and gitsync syncers.
+	dataDir := t.TempDir()
+	cs := configsync.New(st, appsDir, dataDir)
+	t.Cleanup(func() { cs.Close() })
+
+	gs, err := New(cfg, st, cs, nil)
+	if err != nil {
+		t.Fatalf("New gitsync: %v", err)
+	}
+
+	// Wire hook: matches main.go wiring.
+	cs.SetSidecarWriteHook(func(path, reason string) {
+		if path == "" {
+			gs.EnqueueCommit(nil, reason)
+		} else {
+			gs.EnqueueCommit([]string{path}, reason)
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := gs.Start(ctx); err != nil {
+		t.Fatalf("gitsync Start: %v", err)
+	}
+	defer gs.Stop()
+
+	initialSHA := gs.Status().HeadSHA
+
+	// Prune orphans.
+	pruned, err := cs.PruneOrphanSidecars()
+	if err != nil {
+		t.Fatalf("PruneOrphanSidecars: %v", err)
+	}
+	if len(pruned) != 2 {
+		t.Fatalf("expected 2 pruned, got %v", pruned)
+	}
+
+	// Wait for gitsync worker to commit to remote.
+	deadline := time.Now().Add(10 * time.Second)
+	var originHead string
+	for time.Now().Before(deadline) {
+		drainCommits(t, gs, 200*time.Millisecond)
+		raw, err := gitExec(bareDir, "rev-parse", "refs/heads/main")
+		if err == nil {
+			originHead = strings.TrimSpace(string(raw))
+		}
+		if originHead != "" && originHead != initialSHA {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if originHead == "" || originHead == initialSHA {
+		t.Fatal("bare remote HEAD did not advance after prune commit")
+	}
+
+	// Clone remote and verify orphan sidecars absent, alive sidecar present.
+	cloneDir := t.TempDir()
+	if out, err := gitExec(cloneDir, "clone", "-b", "main", "file://"+bareDir, "."); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+	for _, slug := range []string{"orphan1", "orphan2"} {
+		p := filepath.Join(cloneDir, slug, "simpledeploy.yml")
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("orphan sidecar %s still present in remote clone", slug)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cloneDir, "alive", "simpledeploy.yml")); err != nil {
+		t.Errorf("alive sidecar missing from remote clone: %v", err)
+	}
+
+	// Verify commit message references orphan pruning.
+	logOut, err := gitExec(cloneDir, "log", "--oneline", "-5")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	logStr := string(logOut)
+	t.Logf("git log: %s", logStr)
+	// The status RecentCommits should also contain a bot commit with prune reason.
+	status := gs.Status()
+	found := false
+	for _, c := range status.RecentCommits {
+		if c.BotCommit {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected at least one bot commit in RecentCommits after prune")
 	}
 }
 

@@ -1575,3 +1575,52 @@ func TestPruneOrphanSidecars(t *testing.T) {
 		t.Errorf("alive sidecar should still exist: %v", err)
 	}
 }
+
+// TestDeleteAppSidecarNoOpNoHook verifies that DeleteAppSidecar does not invoke
+// the hook when the sidecar file does not exist, and invokes it exactly once
+// when it does.
+func TestDeleteAppSidecarNoOpNoHook(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	var calls []string
+	var mu sync.Mutex
+	syncer.SetSidecarWriteHook(func(path, reason string) {
+		mu.Lock()
+		calls = append(calls, reason)
+		mu.Unlock()
+	})
+
+	// File does not exist: hook must NOT be called.
+	if err := syncer.DeleteAppSidecar("ghost"); err != nil {
+		t.Fatalf("DeleteAppSidecar ghost (no file): %v", err)
+	}
+	mu.Lock()
+	gotCalls := len(calls)
+	mu.Unlock()
+	if gotCalls != 0 {
+		t.Fatalf("expected 0 hook calls when file absent, got %d", gotCalls)
+	}
+
+	// Create a real sidecar.
+	sidecarDir := filepath.Join(appsDir, "realapp")
+	if err := os.MkdirAll(sidecarDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	sidecarPath := filepath.Join(sidecarDir, appSidecarName)
+	if err := os.WriteFile(sidecarPath, []byte("version: 1\n"), 0o600); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	if err := syncer.DeleteAppSidecar("realapp"); err != nil {
+		t.Fatalf("DeleteAppSidecar realapp: %v", err)
+	}
+	mu.Lock()
+	gotCalls = len(calls)
+	mu.Unlock()
+	if gotCalls != 1 {
+		t.Fatalf("expected exactly 1 hook call after deleting real sidecar, got %d", gotCalls)
+	}
+}

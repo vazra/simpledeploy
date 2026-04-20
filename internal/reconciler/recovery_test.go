@@ -124,3 +124,66 @@ func writeSidecarYAML(path string, v any) error {
 	}
 	return os.WriteFile(path, data, 0o600)
 }
+
+// TestReconcilerRemovesSidecarOnComposeDelete verifies that when a compose file
+// is removed from disk, Reconcile removes the app from the DB and also deletes
+// the per-app sidecar (simpledeploy.yml).
+func TestReconcilerRemovesSidecarOnComposeDelete(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+
+	appDir := filepath.Join(appsDir, "webapp")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	composeContent := "services:\n  web:\n    image: nginx:latest\n"
+	composePath := filepath.Join(appDir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte(composeContent), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+
+	sidecarPath := filepath.Join(appDir, "simpledeploy.yml")
+	sidecarContent := "version: 1\napp:\n  slug: webapp\n  display_name: Web App\n"
+	if err := os.WriteFile(sidecarPath, []byte(sidecarContent), 0o600); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	syncer := configsync.New(st, appsDir, dataDir)
+	t.Cleanup(func() { syncer.Close() })
+
+	mock := &mockDeployer{}
+	r := New(st, mock, proxy.NewMockProxy(), appsDir, nil, syncer)
+
+	// First reconcile: app should be discovered and added to DB.
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+	if _, err := st.GetAppBySlug("webapp"); err != nil {
+		t.Fatalf("app should be in DB after first reconcile: %v", err)
+	}
+
+	// Delete the compose file to simulate app removal.
+	if err := os.Remove(composePath); err != nil {
+		t.Fatalf("remove compose: %v", err)
+	}
+
+	// Second reconcile: app should be removed from DB and sidecar deleted.
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+
+	if _, err := st.GetAppBySlug("webapp"); err == nil {
+		t.Fatal("expected app to be gone from DB after compose deletion, but it still exists")
+	}
+	if _, err := os.Stat(sidecarPath); err == nil {
+		t.Fatal("expected sidecar to be deleted after compose deletion, but it still exists")
+	}
+}

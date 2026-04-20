@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -395,5 +396,58 @@ func TestValidateComposeMalformedBase64(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestHandleRemoveAppDeletesSidecar verifies that DELETE /api/apps/{slug} removes
+// the per-app sidecar (simpledeploy.yml) from disk when configsync is wired.
+func TestHandleRemoveAppDeletesSidecar(t *testing.T) {
+	srv, appsDir := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	// Seed an app in the store.
+	if err := srv.store.UpsertApp(&store.App{
+		Name:        "sidecar-app",
+		Slug:        "sidecar-app",
+		ComposePath: filepath.Join(appsDir, "sidecar-app", "docker-compose.yml"),
+		Status:      "running",
+	}, nil); err != nil {
+		t.Fatalf("UpsertApp: %v", err)
+	}
+
+	// Create app dir with compose + sidecar.
+	appDir := filepath.Join(appsDir, "sidecar-app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "docker-compose.yml"), []byte("services:\n  web:\n    image: nginx\n"), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+	sidecarPath := filepath.Join(appDir, "simpledeploy.yml")
+	if err := os.WriteFile(sidecarPath, []byte("version: 1\napp:\n  slug: sidecar-app\n"), 0o600); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	// Wire configsync.
+	cs := configsync.New(srv.store, appsDir, t.TempDir())
+	t.Cleanup(func() { cs.Close() })
+	srv.SetConfigSync(cs)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/apps/sidecar-app", nil)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/apps/sidecar-app: status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	// App dir entirely removed by handleRemoveApp.
+	if _, err := os.Stat(appDir); !os.IsNotExist(err) {
+		t.Error("app dir should be fully removed after DELETE")
+	}
+	// Sidecar specifically gone (redundant with above but documents intent).
+	if _, err := os.Stat(sidecarPath); !os.IsNotExist(err) {
+		t.Error("sidecar simpledeploy.yml should be gone after DELETE")
 	}
 }

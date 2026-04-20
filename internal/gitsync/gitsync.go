@@ -320,7 +320,7 @@ func (g *Syncer) recentCommits(n int) []CommitInfo {
 			AuthorName:  c.Author.Name,
 			AuthorEmail: c.Author.Email,
 			When:        c.Author.When,
-			BotCommit:   strings.Contains(msg, "Source: simpledeploy-sync"),
+			BotCommit:   isBotCommit(msg),
 		})
 		return nil
 	})
@@ -563,9 +563,10 @@ func (g *Syncer) remoteHasBranch() (bool, error) {
 }
 
 // stageAllowed stages all tracked files (docker-compose.yml, .env, simpledeploy.yml, _global.yml, .gitignore).
+// It also stages deletions for tracked files that have been removed from disk.
 func (g *Syncer) stageAllowed(wt *git.Worktree) error {
-	// Walk the appsDir and add whitelisted files.
-	return filepath.Walk(g.cfg.AppsDir, func(path string, info os.FileInfo, err error) error {
+	// Walk the appsDir and add whitelisted files that exist on disk.
+	if err := filepath.Walk(g.cfg.AppsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -583,7 +584,26 @@ func (g *Syncer) stageAllowed(wt *git.Worktree) error {
 			return addErr
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Stage deletions: iterate the worktree status and remove tracked files
+	// that are missing from disk (go-git's Walk above won't visit deleted paths).
+	st, err := wt.Status()
+	if err != nil {
+		return err
+	}
+	for rel, fs := range st {
+		if fs.Worktree == git.Deleted {
+			if isAllowedPath(rel) {
+				if _, err := wt.Remove(rel); err != nil {
+					log.Printf("[gitsync] stage removal %s: %v", rel, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func isAllowedPath(rel string) bool {
@@ -911,6 +931,18 @@ func (g *Syncer) recordConflict(c Conflict) {
 	if len(g.recentConflicts) > maxConflicts {
 		g.recentConflicts = g.recentConflicts[len(g.recentConflicts)-maxConflicts:]
 	}
+}
+
+// isBotCommit reports whether the commit message was produced by simpledeploy-sync.
+// It checks for the "Source: simpledeploy-sync" trailer anywhere in the message,
+// trimming trailing whitespace from each line so minor formatting variation is tolerated.
+func isBotCommit(msg string) bool {
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.TrimRight(line, " \t") == "Source: simpledeploy-sync" {
+			return true
+		}
+	}
+	return false
 }
 
 func buildCommitMessage(subject, reason string) string {
