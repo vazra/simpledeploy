@@ -28,6 +28,10 @@ const (
 	globalKey             = "\x00global" // non-slug sentinel for global debounce entry
 )
 
+// SidecarWriteHook is invoked after every successful sidecar write with the
+// absolute path of the file written and a short reason string.
+type SidecarWriteHook func(path string, reason string)
+
 // Syncer writes and reads config sidecar files, debouncing frequent writes.
 type Syncer struct {
 	store   *store.Store
@@ -38,6 +42,33 @@ type Syncer struct {
 	timers  map[string]*time.Timer
 	pending map[string]struct{} // keys with a live timer
 	closed  bool
+
+	hookMu sync.RWMutex
+	hook   SidecarWriteHook
+}
+
+// SetSidecarWriteHook installs a callback invoked after each successful sidecar
+// write. The hook receives the absolute file path. Panics from the hook are
+// recovered so a buggy hook cannot corrupt writes.
+func (s *Syncer) SetSidecarWriteHook(h SidecarWriteHook) {
+	s.hookMu.Lock()
+	s.hook = h
+	s.hookMu.Unlock()
+}
+
+func (s *Syncer) callHook(path, reason string) {
+	s.hookMu.RLock()
+	h := s.hook
+	s.hookMu.RUnlock()
+	if h == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("configsync: SidecarWriteHook panic: %v", r)
+		}
+	}()
+	h(path, reason)
 }
 
 // New creates a Syncer. It does not start any background work until Schedule* is called.
@@ -214,7 +245,11 @@ func (s *Syncer) WriteAppSidecar(slug string) error {
 	}
 
 	path := filepath.Join(s.appsDir, slug, appSidecarName)
-	return atomicWriteYAML(path, sidecar)
+	if err := atomicWriteYAML(path, sidecar); err != nil {
+		return err
+	}
+	s.callHook(path, "app:"+slug)
+	return nil
 }
 
 // WriteGlobal reads global config from the store and writes the global sidecar atomically.
@@ -292,7 +327,11 @@ func (s *Syncer) WriteGlobal() error {
 	}
 
 	path := filepath.Join(s.dataDir, globalSidecar)
-	return atomicWriteYAML(path, sidecar)
+	if err := atomicWriteYAML(path, sidecar); err != nil {
+		return err
+	}
+	s.callHook(path, "global")
+	return nil
 }
 
 // ReadAppSidecar reads the app sidecar from disk. Returns (nil, nil) if the file does not exist.
@@ -538,7 +577,11 @@ func (s *Syncer) WriteRedactedGlobal() error {
 	}
 
 	path := filepath.Join(s.appsDir, redactedGlobalSidecar)
-	return atomicWriteYAML(path, sidecar)
+	if err := atomicWriteYAML(path, sidecar); err != nil {
+		return err
+	}
+	s.callHook(path, "redacted-global")
+	return nil
 }
 
 // ReadRedactedGlobal reads the redacted global sidecar. Returns (nil, nil) if missing.
