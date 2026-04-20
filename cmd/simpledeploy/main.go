@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"github.com/vazra/simpledeploy/internal/alerts"
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/api"
@@ -399,7 +400,30 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("simpledeploy requires Docker and Docker Compose.\nInstall Docker Engine: https://docs.docker.com/engine/install/\n\n%w", err)
 	}
-	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg)
+
+	syncer := configsync.New(db, cfg.AppsDir, cfg.DataDir)
+	defer syncer.Close()
+
+	// Rehydrate global config if DB is empty (first boot after DR).
+	if imported, err := syncer.ImportGlobalIfEmpty(); err != nil {
+		log.Printf("[configsync] global import failed: %v", err)
+	} else if imported {
+		log.Printf("[configsync] imported global sidecar into empty DB")
+	}
+
+	// Install mutation hook so future mutations update sidecars.
+	db.SetMutationHook(func(scope store.MutationScope, slug string) {
+		switch scope {
+		case store.ScopeApp:
+			if slug != "" {
+				syncer.ScheduleAppWrite(slug)
+			}
+		case store.ScopeGlobal:
+			syncer.ScheduleGlobalWrite()
+		}
+	})
+
+	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg, syncer)
 	rec.SetDockerClient(dc)
 
 	// metrics pipeline
@@ -628,7 +652,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("simpledeploy requires Docker and Docker Compose.\nInstall Docker Engine: https://docs.docker.com/engine/install/\n\n%w", err)
 	}
-	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg)
+	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg, nil)
 	ctx := cmd.Context()
 
 	file, _ := cmd.Flags().GetString("file")
@@ -700,7 +724,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("simpledeploy requires Docker and Docker Compose.\nInstall Docker Engine: https://docs.docker.com/engine/install/\n\n%w", err)
 	}
-	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg)
+	rec := reconciler.New(db, dep, nil, cfg.AppsDir, cfg, nil)
 
 	if err := rec.RemoveOne(cmd.Context(), name); err != nil {
 		return fmt.Errorf("remove %s: %w", name, err)
