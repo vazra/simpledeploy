@@ -32,7 +32,7 @@ type AlertRule struct {
 
 type AlertHistory struct {
 	ID         int64      `json:"id"`
-	RuleID     int64      `json:"rule_id"`
+	RuleID     *int64     `json:"rule_id"`
 	FiredAt    time.Time  `json:"fired_at"`
 	ResolvedAt *time.Time `json:"resolved_at"`
 	Value      float64    `json:"value"`
@@ -310,7 +310,7 @@ func (s *Store) DeleteAlertRule(id int64) error {
 
 func (s *Store) CreateAlertHistory(ruleID int64, value float64, rule *AlertRule) (*AlertHistory, error) {
 	var h AlertHistory
-	h.RuleID = ruleID
+	h.RuleID = &ruleID
 	h.Value = value
 	var metric, appSlug, operator string
 	var threshold float64
@@ -365,17 +365,21 @@ func (s *Store) ResolveAlert(historyID int64) error {
 
 func (s *Store) GetActiveAlert(ruleID int64) (*AlertHistory, error) {
 	var h AlertHistory
+	var nullRuleID sql.NullInt64
 	err := s.db.QueryRow(`
 		SELECT id, rule_id, fired_at, resolved_at, value
 		FROM alert_history
 		WHERE rule_id = ? AND resolved_at IS NULL
 		ORDER BY fired_at DESC LIMIT 1
-	`, ruleID).Scan(&h.ID, &h.RuleID, &h.FiredAt, new(sql.NullTime), &h.Value)
+	`, ruleID).Scan(&h.ID, &nullRuleID, &h.FiredAt, new(sql.NullTime), &h.Value)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get active alert: %w", err)
+	}
+	if nullRuleID.Valid {
+		h.RuleID = &nullRuleID.Int64
 	}
 	return &h, nil
 }
@@ -401,9 +405,13 @@ func (s *Store) ListAlertHistory(ruleID *int64, limit int) ([]AlertHistory, erro
 	var hist []AlertHistory
 	for rows.Next() {
 		var h AlertHistory
+		var nullRuleID sql.NullInt64
 		var resolvedAt sql.NullTime
-		if err := rows.Scan(&h.ID, &h.RuleID, &h.FiredAt, &resolvedAt, &h.Value, &h.Metric, &h.AppSlug, &h.Operator, &h.Threshold); err != nil {
+		if err := rows.Scan(&h.ID, &nullRuleID, &h.FiredAt, &resolvedAt, &h.Value, &h.Metric, &h.AppSlug, &h.Operator, &h.Threshold); err != nil {
 			return nil, fmt.Errorf("scan alert history: %w", err)
+		}
+		if nullRuleID.Valid {
+			h.RuleID = &nullRuleID.Int64
 		}
 		if resolvedAt.Valid {
 			t := resolvedAt.Time

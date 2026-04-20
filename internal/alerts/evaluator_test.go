@@ -43,7 +43,7 @@ func (m *mockAlertStore) GetActiveAlert(ruleID int64) (*store.AlertHistory, erro
 func (m *mockAlertStore) CreateAlertHistory(ruleID int64, value float64, rule *store.AlertRule) (*store.AlertHistory, error) {
 	h := &store.AlertHistory{
 		ID:      m.nextHistoryID,
-		RuleID:  ruleID,
+		RuleID:  &ruleID,
 		FiredAt: time.Now(),
 		Value:   value,
 	}
@@ -243,7 +243,8 @@ func TestEvaluateOnce_ResolvesAlert(t *testing.T) {
 	ms.webhooks[10] = &store.Webhook{ID: 10, Type: "slack", URL: srv.URL}
 
 	// pre-existing active alert
-	existing := &store.AlertHistory{ID: 99, RuleID: 1, FiredAt: time.Now().Add(-5 * time.Minute), Value: 90}
+	existingRuleID := int64(1)
+	existing := &store.AlertHistory{ID: 99, RuleID: &existingRuleID, FiredAt: time.Now().Add(-5 * time.Minute), Value: 90}
 	ms.activeAlerts[1] = existing
 
 	// metrics now below threshold
@@ -288,7 +289,8 @@ func TestEvaluateOnce_NoDoubleFire(t *testing.T) {
 	}
 	ms.webhooks[10] = &store.Webhook{ID: 10, Type: "slack", URL: srv.URL}
 	// already active
-	ms.activeAlerts[1] = &store.AlertHistory{ID: 50, RuleID: 1, FiredAt: time.Now().Add(-2 * time.Minute), Value: 90}
+	alreadyActiveRuleID := int64(1)
+	ms.activeAlerts[1] = &store.AlertHistory{ID: 50, RuleID: &alreadyActiveRuleID, FiredAt: time.Now().Add(-2 * time.Minute), Value: 90}
 
 	now := time.Now().Unix()
 	mq := &mockMetricQuerier{
