@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -607,6 +608,148 @@ func TestStopFlushesPending(t *testing.T) {
 	// The commit may or may not have been flushed depending on timing, but Stop
 	// must return within 6s without deadlock. If a commit happened, great.
 	// We verify Stop didn't hang.
+}
+
+// TestPullDoesNotRebound: a remote change pulled via SyncNow must not produce
+// a follow-up bot commit. Waits 2x suppressTail after the pull to be sure.
+func TestPullDoesNotRebound(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "appX", "docker-compose.yml"), "version: '3'\n")
+	writeFile(t, filepath.Join(appsDir, "appX", "simpledeploy.yml"), "version: 1\napp:\n  slug: appX\n  display_name: AppX\n")
+
+	s := makeSyncer(t, appsDir, bareDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Capture the SHA the local Syncer pushed to origin during Start.
+	initialSHA := s.Status().HeadSHA
+
+	// Second clone edits simpledeploy.yml and pushes.
+	clone2Dir := t.TempDir()
+	if out, err := gitExec(clone2Dir, "clone", "-b", "main", "file://"+bareDir, "."); err != nil {
+		t.Fatalf("clone2: %v\n%s", err, out)
+	}
+	_, _ = gitExec(clone2Dir, "config", "user.email", "editor@t.local")
+	_, _ = gitExec(clone2Dir, "config", "user.name", "editor")
+	writeFile(t, filepath.Join(clone2Dir, "appX", "simpledeploy.yml"), "version: 1\napp:\n  slug: appX\n  display_name: AppX Edited\n")
+	if out, err := gitExec(clone2Dir, "add", "-f", "appX/simpledeploy.yml"); err != nil {
+		t.Fatalf("clone2 add: %v\n%s", err, out)
+	}
+	if out, err := gitExec(clone2Dir, "commit", "-m", "remote edit sidecar"); err != nil {
+		t.Fatalf("clone2 commit: %v\n%s", err, out)
+	}
+	var remoteEditorSHA string
+	if out, err := gitExec(clone2Dir, "rev-parse", "HEAD"); err != nil {
+		t.Fatalf("clone2 rev-parse: %v\n%s", err, out)
+	} else {
+		remoteEditorSHA = strings.TrimSpace(string(out))
+	}
+	if out, err := gitExec(clone2Dir, "push", "origin", "HEAD:main"); err != nil {
+		t.Fatalf("clone2 push: %v\n%s", err, out)
+	}
+
+	// Sanity: initial SHA should not equal the remote editor's commit.
+	if initialSHA == remoteEditorSHA {
+		t.Fatalf("expected initial SHA != remote editor SHA, got same: %s", initialSHA)
+	}
+
+	// SyncNow pulls the remote change.
+	if err := s.SyncNow(ctx); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+
+	// Wait longer than suppressTail + debounceDelay to let any spurious commit fire.
+	time.Sleep(suppressTail + 700*time.Millisecond)
+
+	// Drain any pending commit work.
+	drainCommits(t, s, 2*time.Second)
+
+	// origin/main HEAD must equal the remote editor's commit.
+	originHeadRaw, err := gitExec(bareDir, "rev-parse", "refs/heads/main")
+	if err != nil {
+		t.Fatalf("rev-parse origin: %v", err)
+	}
+	originHead := strings.TrimSpace(string(originHeadRaw))
+
+	if originHead != remoteEditorSHA {
+		t.Fatalf("origin/main HEAD = %s, want remote editor SHA %s\n"+
+			"A rebound bot commit was pushed; the suppress-tail fix is needed.",
+			originHead, remoteEditorSHA)
+	}
+}
+
+// TestPollPullsChanges: with a short PollInterval the poll loop automatically
+// pulls remote changes without an explicit SyncNow call.
+func TestPollPullsChanges(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+	writeFile(t, filepath.Join(appsDir, "_global.yml"), "version: 1\n")
+
+	cfg := Config{
+		Enabled:      true,
+		Remote:       "file://" + bareDir,
+		Branch:       "main",
+		AppsDir:      appsDir,
+		AuthorName:   "Test",
+		AuthorEmail:  "test@test.local",
+		PollInterval: 100 * time.Millisecond,
+	}
+	st := openStore(t)
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Remote editor pushes a change.
+	clone2Dir := t.TempDir()
+	if out, err := gitExec(clone2Dir, "clone", "-b", "main", "file://"+bareDir, "."); err != nil {
+		t.Fatalf("clone2 clone: %v\n%s", err, out)
+	}
+	_, _ = gitExec(clone2Dir, "config", "user.email", "c2@t.local")
+	_, _ = gitExec(clone2Dir, "config", "user.name", "c2")
+	writeFile(t, filepath.Join(clone2Dir, "app1", "docker-compose.yml"), "version: 'polled'\n")
+	if out, err := gitExec(clone2Dir, "add", "-f", "app1/docker-compose.yml"); err != nil {
+		t.Fatalf("clone2 add: %v\n%s", err, out)
+	}
+	if out, err := gitExec(clone2Dir, "commit", "-m", "poll test change"); err != nil {
+		t.Fatalf("clone2 commit: %v\n%s", err, out)
+	}
+	if out, err := gitExec(clone2Dir, "push", "origin", "HEAD:main"); err != nil {
+		t.Fatalf("clone2 push: %v\n%s", err, out)
+	}
+
+	// Wait up to 3s for the poll loop to pull the change without calling SyncNow.
+	filePath := filepath.Join(appsDir, "app1", "docker-compose.yml")
+	deadline := time.Now().Add(3 * time.Second)
+	var content string
+	for time.Now().Before(deadline) {
+		b, _ := os.ReadFile(filePath)
+		content = string(b)
+		if content == "version: 'polled'\n" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if content != "version: 'polled'\n" {
+		t.Fatalf("poll loop did not pull change within 3s; content = %q", content)
+	}
 }
 
 // ---- helpers ----

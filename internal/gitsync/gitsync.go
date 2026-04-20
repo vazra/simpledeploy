@@ -172,6 +172,13 @@ const (
 	commitChanSize = 32
 	syncChanSize   = 8
 	maxConflicts   = 20
+
+	// suppressTail is how long to keep suppress=true after an import completes.
+	// The configsync debouncer fires up to 500ms after the last ScheduleAppWrite
+	// call; keeping suppress active for 2x that window ensures the debounced
+	// WriteAppSidecar -> callHook -> EnqueueCommit path is also suppressed,
+	// preventing a spurious bot commit after every remote pull.
+	suppressTail = 1200 * time.Millisecond
 )
 
 // New validates config and constructs a Syncer. Does not touch disk or network.
@@ -665,9 +672,18 @@ func (g *Syncer) doPull(ctx context.Context) error {
 	}
 
 	// Import sidecar changes; suppress new commits during this window.
+	// Keep suppress active for suppressTail after import so that the
+	// configsync debouncer (500ms) cannot fire a WriteAppSidecar ->
+	// callHook -> EnqueueCommit sequence that would produce a spurious
+	// bot commit rebounding the pulled change.
 	g.suppress.Store(true)
-	defer g.suppress.Store(false)
+	defer func() {
+		time.AfterFunc(suppressTail, func() { g.suppress.Store(false) })
+	}()
 
+	if g.cs == nil {
+		goto afterImport
+	}
 	for _, p := range changedPaths {
 		switch {
 		case strings.HasSuffix(p, "/simpledeploy.yml"):
@@ -691,6 +707,7 @@ func (g *Syncer) doPull(ctx context.Context) error {
 		}
 	}
 
+afterImport:
 	if g.rec != nil {
 		if recErr := g.rec.ReconcileAfterSync(ctx, changedPaths); recErr != nil {
 			log.Printf("[gitsync] reconcile after sync: %v", recErr)
