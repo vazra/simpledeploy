@@ -755,6 +755,50 @@ func TestImportAppSidecarIfMissing_missing(t *testing.T) {
 	}
 }
 
+// TestFirstBootBackfillIdempotent verifies that running WriteGlobal +
+// WriteAppSidecar twice (simulating first-boot backfill) succeeds without error.
+func TestFirstBootBackfillIdempotent(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Seed one user.
+	if err := st.UpsertUserByUsername(&store.User{Username: "admin", PasswordHash: "$2a$10$h", Role: "super_admin"}); err != nil {
+		t.Fatalf("upsert user: %v", err)
+	}
+
+	// Seed one app.
+	app := &store.App{Name: "My App", Slug: "myapp", ComposePath: "/apps/myapp/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+
+	// First backfill pass.
+	if err := syncer.WriteGlobal(); err != nil {
+		t.Fatalf("WriteGlobal pass 1: %v", err)
+	}
+	if err := syncer.WriteAppSidecar("myapp"); err != nil {
+		t.Fatalf("WriteAppSidecar pass 1: %v", err)
+	}
+
+	// Assert sidecar files exist.
+	if _, err := os.Stat(filepath.Join(dataDir, globalSidecar)); err != nil {
+		t.Errorf("global sidecar missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(appsDir, "myapp", appSidecarName)); err != nil {
+		t.Errorf("app sidecar missing: %v", err)
+	}
+
+	// Second backfill pass (idempotent).
+	if err := syncer.WriteGlobal(); err != nil {
+		t.Fatalf("WriteGlobal pass 2: %v", err)
+	}
+	if err := syncer.WriteAppSidecar("myapp"); err != nil {
+		t.Fatalf("WriteAppSidecar pass 2: %v", err)
+	}
+}
+
 func TestRoundtripEmptyApp(t *testing.T) {
 	st := openTestStore(t)
 	appsDir := t.TempDir()
