@@ -7,11 +7,31 @@
 
   let status = $state(null)
   let loading = $state(true)
-  let disabled = $state(false)
   let notAdmin = $state(false)
   let syncing = $state(false)
   let copiedSHA = $state(null)
   let interval = null
+
+  // Config form state
+  let cfg = $state(null)
+  let cfgLoading = $state(true)
+  let cfgSaving = $state(false)
+  let cfgError = $state('')
+  let cfgSuccess = $state(false)
+  let showAdvanced = $state(false)
+
+  // Form fields
+  let fEnabled = $state(false)
+  let fRemote = $state('')
+  let fBranch = $state('main')
+  let fPollInterval = $state(60)
+  let fAuthMethod = $state('none') // 'none' | 'ssh' | 'https'
+  let fSSHKeyPath = $state('')
+  let fHTTPSUsername = $state('git')
+  let fHTTPSToken = $state('')   // empty = unchanged if https_token_set
+  let fWebhookSecret = $state('') // empty = unchanged if webhook_secret_set
+  let fAuthorName = $state('SimpleDeploy')
+  let fAuthorEmail = $state('bot@simpledeploy.local')
 
   function timeAgo(isoStr) {
     if (!isoStr) return 'never'
@@ -29,13 +49,36 @@
     return sha ? sha.slice(0, 8) : ''
   }
 
+  function applyCfg(c) {
+    cfg = c
+    fEnabled = c.enabled
+    fRemote = c.remote || ''
+    fBranch = c.branch || 'main'
+    fPollInterval = c.poll_interval_seconds || 60
+    fSSHKeyPath = c.ssh_key_path || ''
+    fHTTPSUsername = c.https_username || 'git'
+    fAuthorName = c.author_name || 'SimpleDeploy'
+    fAuthorEmail = c.author_email || 'bot@simpledeploy.local'
+    fHTTPSToken = ''
+    fWebhookSecret = ''
+    if (c.ssh_key_path) {
+      fAuthMethod = 'ssh'
+    } else if (c.https_token_set || c.https_username) {
+      fAuthMethod = 'https'
+    } else {
+      fAuthMethod = 'none'
+    }
+  }
+
+  async function loadConfig() {
+    cfgLoading = true
+    const res = await api.gitConfig()
+    cfgLoading = false
+    if (res.data) applyCfg(res.data)
+  }
+
   async function load() {
     const res = await api.gitStatus()
-    if (res.status === 503) {
-      disabled = true
-      loading = false
-      return
-    }
     if (res.status === 403) {
       notAdmin = true
       loading = false
@@ -45,6 +88,37 @@
       status = res.data
     }
     loading = false
+  }
+
+  async function saveConfig() {
+    cfgError = ''
+    cfgSuccess = false
+    cfgSaving = true
+
+    const payload = {
+      enabled: fEnabled,
+      remote: fRemote,
+      branch: fBranch,
+      poll_interval_seconds: Number(fPollInterval),
+      author_name: fAuthorName,
+      author_email: fAuthorEmail,
+      ssh_key_path: fAuthMethod === 'ssh' ? fSSHKeyPath : '',
+      https_username: fAuthMethod === 'https' ? fHTTPSUsername : '',
+      // null = keep existing; "" = clear; "x" = set new value
+      webhook_secret: fWebhookSecret !== '' ? fWebhookSecret : null,
+      https_token: fAuthMethod === 'https' && fHTTPSToken !== '' ? fHTTPSToken : null,
+    }
+
+    const res = await api.gitConfigUpdate(payload)
+    cfgSaving = false
+    if (res.error) {
+      cfgError = res.error
+      return
+    }
+    cfgSuccess = true
+    setTimeout(() => { cfgSuccess = false }, 3000)
+    await loadConfig()
+    await load()
   }
 
   async function syncNow() {
@@ -68,6 +142,7 @@
   }
 
   onMount(() => {
+    loadConfig()
     load()
     interval = setInterval(load, 15000)
   })
@@ -83,7 +158,7 @@
     <p class="text-sm text-text-muted mt-1">Mirror your app config to a Git repository</p>
   </div>
 
-  {#if loading}
+  {#if loading && cfgLoading}
     <div class="space-y-4">
       <Skeleton type="card" count={2} />
     </div>
@@ -93,34 +168,191 @@
       Git Sync is restricted to super admins.
     </div>
 
-  {:else if disabled}
-    <div class="bg-surface-2 rounded-xl p-6 shadow-sm border border-border/50">
-      <div class="flex items-start gap-3">
-        <svg class="w-5 h-5 text-text-muted shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-        </svg>
-        <div>
-          <p class="text-sm font-medium text-text-primary">Git Sync is not enabled</p>
-          <p class="text-sm text-text-muted mt-1">
-            Git Sync keeps your app configs in a Git repository so changes are tracked and recoverable.
-            To enable it, configure the <code class="bg-surface-3 px-1 rounded text-xs">git_sync</code> section in your SimpleDeploy config file.
-          </p>
-          <a
-            href="https://simpledeploy.dev/docs/operations/config-sidecars/#git-sync-optional"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center gap-1 mt-3 text-sm text-accent hover:underline"
-          >
-            Learn how to set up Git Sync
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-            </svg>
-          </a>
-        </div>
-      </div>
+  {:else}
+    <!-- Configuration card -->
+    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-4">
+      <h2 class="text-sm font-medium text-text-primary mb-4">Configuration</h2>
+
+      {#if cfgLoading}
+        <Skeleton type="card" count={1} />
+      {:else}
+        <form onsubmit={(e) => { e.preventDefault(); saveConfig() }} class="space-y-4">
+          <!-- Enable toggle -->
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" bind:checked={fEnabled} class="w-4 h-4 accent-accent" />
+            <span class="text-sm font-medium text-text-primary">Enable Git Sync</span>
+          </label>
+
+          {#if fEnabled}
+            <!-- Remote URL -->
+            <div>
+              <label class="block text-xs text-text-muted mb-1" for="git-remote">Remote URL <span class="text-red-400">*</span></label>
+              <input
+                id="git-remote"
+                type="text"
+                bind:value={fRemote}
+                required
+                placeholder="git@github.com:owner/repo.git"
+                class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+
+            <!-- Branch + Poll interval -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs text-text-muted mb-1" for="git-branch">Branch</label>
+                <input
+                  id="git-branch"
+                  type="text"
+                  bind:value={fBranch}
+                  placeholder="main"
+                  class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+              <div>
+                <label class="block text-xs text-text-muted mb-1" for="git-poll">Poll interval (seconds)</label>
+                <input
+                  id="git-poll"
+                  type="number"
+                  bind:value={fPollInterval}
+                  min="5"
+                  placeholder="60"
+                  class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+            </div>
+
+            <!-- Auth method -->
+            <div>
+              <p class="text-xs text-text-muted mb-2">Authentication</p>
+              <div class="flex gap-4 text-sm">
+                {#each [['none','None (public repo)'],['ssh','SSH key'],['https','HTTPS token']] as [val, label]}
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" bind:group={fAuthMethod} value={val} class="accent-accent" />
+                    <span class="text-text-secondary">{label}</span>
+                  </label>
+                {/each}
+              </div>
+            </div>
+
+            {#if fAuthMethod === 'ssh'}
+              <div>
+                <label class="block text-xs text-text-muted mb-1" for="git-ssh-key">SSH key path</label>
+                <input
+                  id="git-ssh-key"
+                  type="text"
+                  bind:value={fSSHKeyPath}
+                  placeholder="/run/secrets/git_ssh_key"
+                  class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+            {:else if fAuthMethod === 'https'}
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs text-text-muted mb-1" for="git-https-user">HTTPS username</label>
+                  <input
+                    id="git-https-user"
+                    type="text"
+                    bind:value={fHTTPSUsername}
+                    placeholder="git"
+                    class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-text-muted mb-1" for="git-https-token">
+                    HTTPS token
+                    {#if cfg?.https_token_set && fHTTPSToken === ''}
+                      <span class="ml-1 inline-flex items-center rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-400">configured</span>
+                    {/if}
+                  </label>
+                  <input
+                    id="git-https-token"
+                    type="password"
+                    bind:value={fHTTPSToken}
+                    placeholder={cfg?.https_token_set ? 'Leave blank to keep existing' : 'Token or password'}
+                    class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                </div>
+              </div>
+            {/if}
+
+            <!-- Webhook secret -->
+            <div>
+              <label class="block text-xs text-text-muted mb-1" for="git-webhook-secret">
+                Webhook secret
+                {#if cfg?.webhook_secret_set && fWebhookSecret === ''}
+                  <span class="ml-1 inline-flex items-center rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-400">configured</span>
+                {/if}
+              </label>
+              <input
+                id="git-webhook-secret"
+                type="password"
+                bind:value={fWebhookSecret}
+                placeholder={cfg?.webhook_secret_set ? 'Leave blank to keep existing' : 'Optional HMAC secret for push webhook'}
+                class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <p class="text-xs text-text-muted mt-1">Used to verify GitHub/GitLab push webhook signatures.</p>
+            </div>
+
+            <!-- Advanced (author) -->
+            <div>
+              <button
+                type="button"
+                onclick={() => { showAdvanced = !showAdvanced }}
+                class="text-xs text-accent hover:underline"
+              >
+                {showAdvanced ? 'Hide' : 'Show'} advanced settings
+              </button>
+              {#if showAdvanced}
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs text-text-muted mb-1" for="git-author-name">Commit author name</label>
+                    <input
+                      id="git-author-name"
+                      type="text"
+                      bind:value={fAuthorName}
+                      placeholder="SimpleDeploy"
+                      class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-text-muted mb-1" for="git-author-email">Commit author email</label>
+                    <input
+                      id="git-author-email"
+                      type="text"
+                      bind:value={fAuthorEmail}
+                      placeholder="bot@simpledeploy.local"
+                      class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          {#if cfgError}
+            <p class="text-sm text-red-400">{cfgError}</p>
+          {/if}
+          {#if cfgSuccess}
+            <p class="text-sm text-green-400">Configuration saved.</p>
+          {/if}
+
+          <div class="flex gap-2 pt-1">
+            <Button type="submit" size="sm" disabled={cfgSaving}>
+              {cfgSaving ? 'Saving...' : 'Save'}
+            </Button>
+            {#if cfg?.source === 'db'}
+              <Button type="button" size="sm" variant="secondary" onclick={async () => { await api.gitDisable(); await loadConfig(); await load() }}>
+                Reset to defaults
+              </Button>
+            {/if}
+          </div>
+        </form>
+      {/if}
     </div>
 
-  {:else if status}
+    <!-- Status section (only when enabled) -->
+    {#if !loading && status?.Enabled}
     <!-- Status card -->
     <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-4">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -255,6 +487,7 @@
         <h2 class="text-sm font-medium text-text-primary mb-2">Recent Conflicts</h2>
         <p class="text-sm text-text-muted">No conflicts recorded.</p>
       </div>
+    {/if}
     {/if}
   {/if}
 </Layout>

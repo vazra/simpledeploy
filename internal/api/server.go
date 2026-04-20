@@ -342,9 +342,12 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteRegistry)))
 
 	// Git sync
-	s.mux.Handle("GET /api/git/status", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGitStatus))))
-	s.mux.Handle("POST /api/git/sync-now", s.authMiddleware(s.superAdminMiddleware(s.rateLimitMiddleware(http.HandlerFunc(s.handleGitSyncNow)))))
-	s.mux.Handle("POST /api/git/webhook", s.rateLimitMiddleware(http.HandlerFunc(s.handleGitWebhook)))
+	s.mux.Handle("GET /api/git/status", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGitStatusSafe))))
+	s.mux.Handle("POST /api/git/sync-now", s.authMiddleware(s.superAdminMiddleware(s.rateLimitMiddleware(http.HandlerFunc(s.handleGitSyncNowSafe)))))
+	s.mux.Handle("POST /api/git/webhook", s.rateLimitMiddleware(http.HandlerFunc(s.handleGitWebhookSafe)))
+	s.mux.Handle("GET /api/git/config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGetGitConfig))))
+	s.mux.Handle("PUT /api/git/config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePutGitConfig))))
+	s.mux.Handle("POST /api/git/disable", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDisableGitSync))))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

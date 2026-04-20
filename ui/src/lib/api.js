@@ -255,6 +255,9 @@ export const api = {
   // Git Sync
   gitStatus: () => request('GET', '/git/status'),
   gitSyncNow: () => requestWithToast('POST', '/git/sync-now', null, 'Sync triggered'),
+  gitConfig: () => request('GET', '/git/config'),
+  gitConfigUpdate: (payload) => request('PUT', '/git/config', payload),
+  gitDisable: () => request('POST', '/git/disable'),
 
   // Public host (used by template quick-test mode)
   getPublicHost: () => request('GET', '/system/public-host'),

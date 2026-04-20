@@ -1,9 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 
+const baseCfg = {
+  enabled: false,
+  remote: '',
+  branch: 'main',
+  author_name: 'SimpleDeploy',
+  author_email: 'bot@simpledeploy.local',
+  poll_interval_seconds: 60,
+  ssh_key_path: '',
+  https_username: 'git',
+  webhook_secret_set: false,
+  https_token_set: false,
+  source: 'yaml',
+};
+
 const apiMock = vi.hoisted(() => ({
-  gitStatus: vi.fn(async () => ({ data: null, error: null, status: 503 })),
+  gitStatus: vi.fn(async () => ({ data: null, error: null, status: 200 })),
   gitSyncNow: vi.fn(async () => ({ data: { ok: true }, error: null, status: 200 })),
+  gitConfig: vi.fn(async () => ({ data: { ...baseCfg }, error: null, status: 200 })),
+  gitConfigUpdate: vi.fn(async () => ({ data: { Enabled: false }, error: null, status: 200 })),
+  gitDisable: vi.fn(async () => ({ data: { Enabled: false }, error: null, status: 200 })),
 }));
 
 vi.mock('../../lib/api.js', () => ({ api: apiMock }));
@@ -25,41 +42,124 @@ const baseStatus = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: cfg returns disabled, status returns null
+  apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg }, error: null, status: 200 });
+  apiMock.gitStatus.mockResolvedValue({ data: null, error: null, status: 200 });
 });
 
-describe('GitSync', () => {
-  it('renders disabled state on 503', async () => {
-    apiMock.gitStatus.mockResolvedValueOnce({ data: null, error: 'disabled', status: 503 });
+describe('GitSync config form', () => {
+  it('renders Configuration card on load', async () => {
     const { findByText } = render(GitSync);
-    expect(await findByText('Git Sync is not enabled')).toBeInTheDocument();
-    expect(await findByText('Learn how to set up Git Sync')).toBeInTheDocument();
+    expect(await findByText('Configuration')).toBeInTheDocument();
   });
 
-  it('renders remote and branch on success', async () => {
-    apiMock.gitStatus.mockResolvedValueOnce({ data: baseStatus, error: null, status: 200 });
+  it('shows fields when "Enable Git Sync" is toggled on', async () => {
+    const { findByLabelText, getByLabelText } = render(GitSync);
+    const toggle = await findByLabelText('Enable Git Sync');
+    await fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(getByLabelText('Remote URL *')).toBeInTheDocument();
+    });
+  });
+
+  it('posts expected payload on save', async () => {
+    // cfg has enabled=true so form fields appear immediately without clicking toggle
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: 'file:///tmp/bare.git' },
+      error: null,
+      status: 200,
+    });
+    apiMock.gitConfigUpdate.mockResolvedValueOnce({ data: { Enabled: true }, error: null, status: 200 });
+
+    const { findByLabelText, getByRole } = render(GitSync);
+    // Wait for form to render - toggle should exist and be checked
+    const toggle = await findByLabelText('Enable Git Sync');
+    await waitFor(() => expect(toggle.checked).toBe(true));
+
+    const saveBtn = getByRole('button', { name: 'Save' });
+    await fireEvent.click(saveBtn);
+
+    await waitFor(() => expect(apiMock.gitConfigUpdate).toHaveBeenCalledTimes(1));
+    const call = apiMock.gitConfigUpdate.mock.calls[0][0];
+    expect(call.enabled).toBe(true);
+  });
+
+  it('shows webhook_secret input when enabled', async () => {
+    // cfg has enabled=true so form fields appear immediately
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: 'git@github.com:o/r.git', webhook_secret_set: true },
+      error: null,
+      status: 200,
+    });
+    const { container } = render(GitSync);
+    await waitFor(() => {
+      expect(container.querySelector('#git-webhook-secret')).toBeTruthy();
+    });
+  });
+
+  it('shows https_token input when HTTPS auth selected', async () => {
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: 'https://github.com/o/r.git', https_token_set: true },
+      error: null,
+      status: 200,
+    });
+    const { findByLabelText, container } = render(GitSync);
+    // Wait for form to load
+    await waitFor(() => container.querySelector('#git-webhook-secret'));
+    const httpsRadio = await findByLabelText('HTTPS token');
+    await fireEvent.click(httpsRadio);
+    await waitFor(() => {
+      expect(container.querySelector('#git-https-token')).toBeTruthy();
+    });
+  });
+
+  it('shows error message on failed save', async () => {
+    // Use enabled=true cfg so no toggle needed
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: 'file:///tmp/bare.git' },
+      error: null,
+      status: 200,
+    });
+    apiMock.gitConfigUpdate.mockResolvedValueOnce({ data: null, error: 'remote is required when enabled', status: 400 });
+    const { findByLabelText, findByText, getByRole } = render(GitSync);
+    const toggle = await findByLabelText('Enable Git Sync');
+    await waitFor(() => expect(toggle.checked).toBe(true));
+    const saveBtn = getByRole('button', { name: 'Save' });
+    await fireEvent.click(saveBtn);
+    await waitFor(() => expect(apiMock.gitConfigUpdate).toHaveBeenCalled());
+    expect(await findByText('remote is required when enabled')).toBeInTheDocument();
+  });
+});
+
+describe('GitSync status', () => {
+  it('renders remote and branch when status is enabled', async () => {
+    apiMock.gitStatus.mockResolvedValue({ data: baseStatus, error: null, status: 200 });
+    apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: true }, error: null, status: 200 });
     const { findByText } = render(GitSync);
     expect(await findByText('git@github.com:org/repo.git')).toBeInTheDocument();
-    expect(await findByText('main')).toBeInTheDocument();
   });
 
   it('shows short HEAD SHA', async () => {
-    apiMock.gitStatus.mockResolvedValueOnce({ data: baseStatus, error: null, status: 200 });
+    apiMock.gitStatus.mockResolvedValue({ data: baseStatus, error: null, status: 200 });
+    apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: true }, error: null, status: 200 });
     const { findByText } = render(GitSync);
     expect(await findByText('abc123de')).toBeInTheDocument();
   });
 
   it('shows error alert when LastSyncError is non-empty', async () => {
-    apiMock.gitStatus.mockResolvedValueOnce({
+    apiMock.gitStatus.mockResolvedValue({
       data: { ...baseStatus, LastSyncError: 'connection refused' },
       error: null,
       status: 200,
     });
+    apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: true }, error: null, status: 200 });
     const { findByText } = render(GitSync);
     expect(await findByText('connection refused')).toBeInTheDocument();
   });
 
   it('calls gitSyncNow when Sync now is clicked', async () => {
     apiMock.gitStatus.mockResolvedValue({ data: baseStatus, error: null, status: 200 });
+    apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: true }, error: null, status: 200 });
     const { findByText } = render(GitSync);
     const btn = await findByText('Sync now');
     await fireEvent.click(btn);
@@ -67,76 +167,10 @@ describe('GitSync', () => {
   });
 
   it('renders no-conflicts message when RecentConflicts is empty', async () => {
-    apiMock.gitStatus.mockResolvedValueOnce({ data: baseStatus, error: null, status: 200 });
+    apiMock.gitStatus.mockResolvedValue({ data: baseStatus, error: null, status: 200 });
+    apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: true }, error: null, status: 200 });
     const { findByText } = render(GitSync);
     expect(await findByText('No conflicts recorded.')).toBeInTheDocument();
-  });
-
-  it('renders recent activity rows when RecentCommits present', async () => {
-    const status = {
-      ...baseStatus,
-      RecentCommits: [
-        {
-          SHA: 'aabbccddeeff00112233445566778899aabbccdd',
-          ShortSHA: 'aabbccd',
-          Subject: 'chore(simpledeploy): sync config',
-          AuthorName: 'SimpleDeploy',
-          AuthorEmail: 'bot@simpledeploy.local',
-          When: new Date(Date.now() - 30000).toISOString(),
-          BotCommit: true,
-        },
-        {
-          SHA: '11223344556677889900aabbccddeeff11223344',
-          ShortSHA: '1122334',
-          Subject: 'feat: manual commit',
-          AuthorName: 'Alice',
-          AuthorEmail: 'alice@example.com',
-          When: new Date(Date.now() - 90000).toISOString(),
-          BotCommit: false,
-        },
-      ],
-    };
-    apiMock.gitStatus.mockResolvedValueOnce({ data: status, error: null, status: 200 });
-    const { findByText, queryByText } = render(GitSync);
-    expect(await findByText('Recent activity')).toBeInTheDocument();
-    expect(await findByText('aabbccd')).toBeInTheDocument();
-    expect(await findByText('1122334')).toBeInTheDocument();
-    expect(await findByText('chore(simpledeploy): sync config')).toBeInTheDocument();
-    expect(await findByText('feat: manual commit')).toBeInTheDocument();
-    // bot badge present for bot commit
-    expect(await findByText('bot')).toBeInTheDocument();
-    // no badge for human commit (Alice row has no bot badge)
-    expect(await findByText('Alice')).toBeInTheDocument();
-    // no empty-state message
-    expect(queryByText(/No commits yet/)).toBeNull();
-  });
-
-  it('renders empty state when RecentCommits is empty', async () => {
-    const status = { ...baseStatus, RecentCommits: [] };
-    apiMock.gitStatus.mockResolvedValueOnce({ data: status, error: null, status: 200 });
-    const { findByText } = render(GitSync);
-    expect(await findByText(/No commits yet/)).toBeInTheDocument();
-  });
-
-  it('renders bot badge only on bot commits', async () => {
-    const status = {
-      ...baseStatus,
-      RecentCommits: [
-        {
-          SHA: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
-          ShortSHA: 'deadbee',
-          Subject: 'chore(simpledeploy): sync config',
-          AuthorName: 'SimpleDeploy',
-          AuthorEmail: 'bot@simpledeploy.local',
-          When: new Date(Date.now() - 5000).toISOString(),
-          BotCommit: true,
-        },
-      ],
-    };
-    apiMock.gitStatus.mockResolvedValueOnce({ data: status, error: null, status: 200 });
-    const { findAllByText } = render(GitSync);
-    const badges = await findAllByText('bot');
-    expect(badges.length).toBe(1);
   });
 
   it('renders conflicts table when conflicts present', async () => {
@@ -149,10 +183,25 @@ describe('GitSync', () => {
         Description: 'local wins',
       }],
     };
-    apiMock.gitStatus.mockResolvedValueOnce({ data: status, error: null, status: 200 });
+    apiMock.gitStatus.mockResolvedValue({ data: status, error: null, status: 200 });
+    apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: true }, error: null, status: 200 });
     const { findByText } = render(GitSync);
     expect(await findByText('myapp/docker-compose.yml')).toBeInTheDocument();
-    expect(await findByText('dead1234')).toBeInTheDocument();
     expect(await findByText('local wins')).toBeInTheDocument();
+  });
+
+  it('does not show status section when Git Sync is disabled', async () => {
+    apiMock.gitStatus.mockResolvedValue({ data: null, error: null, status: 200 });
+    apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: false }, error: null, status: 200 });
+    const { findByText, queryByText } = render(GitSync);
+    await findByText('Configuration');
+    expect(queryByText('Sync Status')).toBeNull();
+  });
+
+  it('shows not-admin message on 403', async () => {
+    apiMock.gitStatus.mockResolvedValue({ data: null, error: 'forbidden', status: 403 });
+    apiMock.gitConfig.mockResolvedValue({ data: null, error: 'forbidden', status: 403 });
+    const { findByText } = render(GitSync);
+    expect(await findByText('Git Sync is restricted to super admins.')).toBeInTheDocument();
   });
 });

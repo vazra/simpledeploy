@@ -506,42 +506,35 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// GitSync wiring (optional; non-fatal on error).
-	// Build syncer now (before ctx exists); Start deferred to after ctx creation.
+	// Build syncer using DB-wins resolver. Start deferred to after ctx creation.
 	var gitSyncer *gitsync.Syncer
 	var recRef atomic.Pointer[reconciler.Reconciler]
-	if cfg.GitSync.Enabled {
-		gitReconcilerFn := gitsync.ReconcilerFunc(func(gctx context.Context, paths []string) error {
-			r := recRef.Load()
-			if r == nil {
-				return nil
-			}
-			return r.Reconcile(gctx)
-		})
-		gsCfg := gitsync.Config{
-			Enabled:       true,
-			Remote:        cfg.GitSync.Remote,
-			Branch:        cfg.GitSync.Branch,
-			AppsDir:       cfg.AppsDir,
-			AuthorName:    cfg.GitSync.AuthorName,
-			AuthorEmail:   cfg.GitSync.AuthorEmail,
-			SSHKeyPath:    cfg.GitSync.SSHKeyPath,
-			HTTPSUsername: cfg.GitSync.HTTPSUsername,
-			HTTPSToken:    cfg.GitSync.HTTPSToken,
-			PollInterval:  cfg.GitSync.PollInterval,
-			WebhookSecret: cfg.GitSync.WebhookSecret,
+	gitReconcilerFn := gitsync.ReconcilerFunc(func(gctx context.Context, paths []string) error {
+		r := recRef.Load()
+		if r == nil {
+			return nil
 		}
-		gs, gsErr := gitsync.New(gsCfg, db, syncer, gitReconcilerFn)
-		if gsErr != nil {
-			log.Printf("[gitsync] init failed (continuing without git sync): %v", gsErr)
-		} else {
-			gitSyncer = gs
-			syncer.SetSidecarWriteHook(func(path, reason string) {
-				if path == "" {
-					gs.EnqueueCommit(nil, reason)
-					return
-				}
-				gs.EnqueueCommit([]string{path}, reason)
-			})
+		return r.Reconcile(gctx)
+	})
+	{
+		yamlGS := cfg.GitSync
+		gsCfg, resolveErr := gitsync.ResolveConfig(db, &yamlGS, cfg.AppsDir, cfg.MasterSecret)
+		if resolveErr != nil {
+			log.Printf("[gitsync] resolve config failed (continuing without git sync): %v", resolveErr)
+		} else if gsCfg.Enabled {
+			gs, gsErr := gitsync.New(*gsCfg, db, syncer, gitReconcilerFn)
+			if gsErr != nil {
+				log.Printf("[gitsync] init failed (continuing without git sync): %v", gsErr)
+			} else {
+				gitSyncer = gs
+				syncer.SetSidecarWriteHook(func(path, reason string) {
+					if path == "" {
+						gs.EnqueueCommit(nil, reason)
+						return
+					}
+					gs.EnqueueCommit([]string{path}, reason)
+				})
+			}
 		}
 	}
 
@@ -738,6 +731,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		srv.SetGitSync(gitSyncer)
 	}
 	srv.SetConfigSync(syncer)
+	srv.SetReconcilerRef(gitReconcilerFn)
 
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)
