@@ -20,6 +20,14 @@ describe('AppCard', () => {
     expect(container.querySelector('.bg-danger')).not.toBeNull();
   });
 
+  it('uses the warning color dot and warning badge for unstable status', () => {
+    const { container, getByText } = render(AppCard, {
+      app: { Slug: 'foo', Name: 'Foo', Status: 'unstable' },
+    });
+    expect(container.querySelector('.bg-warning')).not.toBeNull();
+    expect(getByText('unstable')).toBeInTheDocument();
+  });
+
   it('omits domain line when app has no domain', () => {
     const { queryByText } = render(AppCard, {
       app: { Slug: 'foo', Name: 'Foo', Status: 'running' },

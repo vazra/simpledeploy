@@ -84,6 +84,15 @@ describe('applyAccessMode', () => {
     expect(c.services.a.labels['simpledeploy.endpoints.0.tls']).toBe('letsencrypt');
   });
 
+  it('custom-local rewrites all tls labels to local but keeps domains', () => {
+    const c = singleEndpointCompose();
+    const out = applyAccessMode(c, 'custom-local');
+    expect(out.services.web.labels['simpledeploy.endpoints.0.tls']).toBe('local');
+    expect(out.services.web.labels['simpledeploy.endpoints.0.domain']).toBe(
+      c.services.web.labels['simpledeploy.endpoints.0.domain']
+    );
+  });
+
   it('port-only strips endpoint labels and adds ports', () => {
     const c = singleEndpointCompose();
     const out = applyAccessMode(c, 'port-only');

@@ -66,7 +66,7 @@ export function applyVars(node, vars) {
 
 // --------------------------- access modes -----------------------------
 
-export const ACCESS_MODES = ['quick-test', 'custom', 'port-only'];
+export const ACCESS_MODES = ['quick-test', 'custom', 'custom-local', 'port-only'];
 export const DEFAULT_ACCESS_MODE = 'quick-test';
 
 // Count endpoint labels across all services.
@@ -120,7 +120,7 @@ export function computeQuickTestDomain(slug, host) {
 export function applyAccessMode(compose, mode, _opts) {
   if (mode === 'custom' || !mode) return compose;
   const next = JSON.parse(JSON.stringify(compose));
-  if (mode === 'quick-test') {
+  if (mode === 'quick-test' || mode === 'custom-local') {
     for (const svc of Object.values(next.services || {})) {
       if (!svc.labels) continue;
       for (const k of Object.keys(svc.labels)) {
@@ -560,7 +560,7 @@ export const appTemplates = [
     compose: {
       services: {
         gitea: {
-          image: 'gitea/gitea:1.21',
+          image: 'gitea/gitea:1.26',
           restart: 'unless-stopped',
           environment: {
             USER_UID: '1000',
@@ -655,10 +655,14 @@ export const appTemplates = [
         code: {
           image: 'codercom/code-server:4.116.0',
           restart: 'unless-stopped',
+          user: '1000:1000',
           environment: {
             PASSWORD: '{{password}}',
+            DOCKER_USER: 'coder',
           },
-          volumes: ['code-config:/home/coder/.config', 'code-project:/home/coder/project'],
+          // Mount only the project dir; .config lives inside the container to avoid
+          // root-owned named-volume init blocking code-server's first-run mkdir.
+          volumes: ['code-project:/home/coder/project'],
           deploy: limits('1.0', '1024M'),
           healthcheck: {
             test: ['CMD', 'wget', '-qO-', 'http://localhost:8080/'],
@@ -681,7 +685,7 @@ export const appTemplates = [
           },
         },
       },
-      volumes: { 'code-config': {}, 'code-project': {} },
+      volumes: { 'code-project': {} },
     },
     notes: [
       'The default `0.0.0.0/0` CIDR allows anyone. Narrow it to your IP range for sensitive projects.',
@@ -757,7 +761,7 @@ export const appTemplates = [
     compose: {
       services: {
         mailpit: {
-          image: 'axllent/mailpit:v1.20',
+          image: 'axllent/mailpit:v1.29',
           restart: 'unless-stopped',
           environment: {
             MP_SMTP_AUTH_ACCEPT_ANY: '1',
@@ -821,7 +825,7 @@ export const appTemplates = [
     compose: {
       services: {
         minio: {
-          image: 'minio/minio:RELEASE.2024-10-13T13-34-11Z',
+          image: 'minio/minio:RELEASE.2025-09-07T16-13-09Z',
           restart: 'unless-stopped',
           command: 'server /data --console-address :9001',
           environment: {
@@ -833,7 +837,7 @@ export const appTemplates = [
           volumes: ['minio-data:/data'],
           deploy: limits('1.0', '512M'),
           healthcheck: {
-            test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live'],
+            test: ['CMD-SHELL', 'curl -fsS http://localhost:9000/minio/health/live || exit 1'],
             interval: '30s',
             timeout: '5s',
             retries: 3,
@@ -885,7 +889,7 @@ export const appTemplates = [
     compose: {
       services: {
         meili: {
-          image: 'getmeili/meilisearch:v1.11',
+          image: 'getmeili/meilisearch:v1.42',
           restart: 'unless-stopped',
           environment: {
             MEILI_MASTER_KEY: '{{master_key}}',
@@ -941,7 +945,7 @@ export const appTemplates = [
     compose: {
       services: {
         adminer: {
-          image: 'adminer:4.8.1',
+          image: 'adminer:5.4',
           restart: 'unless-stopped',
           deploy: limits('0.25', '64M'),
           healthcheck: {
@@ -991,7 +995,7 @@ export const appTemplates = [
     compose: {
       services: {
         pgadmin: {
-          image: 'dpage/pgadmin4:8',
+          image: 'dpage/pgadmin4:9',
           restart: 'unless-stopped',
           environment: {
             PGADMIN_DEFAULT_EMAIL: '{{admin_email}}',
@@ -1063,7 +1067,7 @@ export const appTemplates = [
     compose: {
       services: {
         n8n: {
-          image: 'n8nio/n8n:2.17.2',
+          image: 'n8nio/n8n:2.16.1',
           restart: 'unless-stopped',
           environment: {
             DB_TYPE: 'postgresdb',
@@ -1223,7 +1227,7 @@ export const appTemplates = [
     compose: {
       services: {
         umami: {
-          image: 'ghcr.io/umami-software/umami:postgresql-v2.14',
+          image: 'ghcr.io/umami-software/umami:postgresql-v2.20.2',
           restart: 'unless-stopped',
           environment: {
             DATABASE_URL: 'postgresql://umami:{{db_password}}@db:5432/umami',
@@ -1314,7 +1318,7 @@ export const appTemplates = [
     compose: {
       services: {
         authelia: {
-          image: 'authelia/authelia:4.38',
+          image: 'authelia/authelia:4.39',
           restart: 'unless-stopped',
           environment: {
             AUTHELIA_JWT_SECRET: '{{jwt_secret}}',
@@ -1326,7 +1330,7 @@ export const appTemplates = [
           depends_on: { redis: { condition: 'service_healthy' } },
           deploy: limits('0.5', '128M'),
           healthcheck: {
-            test: ['CMD', 'wget', '-qO-', 'http://localhost:9091/api/health'],
+            test: ['CMD', '/app/authelia', 'healthcheck'],
             interval: '30s',
             timeout: '5s',
             retries: 3,
@@ -1384,7 +1388,7 @@ export const appTemplates = [
     compose: {
       services: {
         registry: {
-          image: 'registry:2.8',
+          image: 'registry:2.8.3',
           restart: 'unless-stopped',
           environment: {
             REGISTRY_STORAGE_DELETE_ENABLED: 'true',
@@ -1392,7 +1396,7 @@ export const appTemplates = [
           volumes: ['registry-data:/var/lib/registry'],
           deploy: limits('0.5', '256M'),
           healthcheck: {
-            test: ['CMD', 'wget', '-qO-', 'http://localhost:5000/v2/'],
+            test: ['CMD', '/bin/registry', '--version'],
             interval: '30s',
             timeout: '5s',
             retries: 3,
@@ -1419,8 +1423,15 @@ export const appTemplates = [
             DELETE_IMAGES: 'true',
             SINGLE_REGISTRY: 'true',
           },
-          depends_on: ['registry'],
+          depends_on: { registry: { condition: 'service_healthy' } },
           deploy: limits('0.25', '128M'),
+          healthcheck: {
+            test: ['CMD-SHELL', 'wget -qO- http://localhost/ >/dev/null || exit 1'],
+            interval: '30s',
+            timeout: '5s',
+            retries: 3,
+            start_period: '15s',
+          },
           labels: {
             'simpledeploy.endpoints.0.domain': '{{ui_domain}}',
             'simpledeploy.endpoints.0.port': '80',
@@ -1580,8 +1591,15 @@ export const appTemplates = [
             WOODPECKER_MAX_WORKFLOWS: '2',
           },
           volumes: ['/var/run/docker.sock:/var/run/docker.sock'],
-          depends_on: ['server'],
+          depends_on: { server: { condition: 'service_healthy' } },
           deploy: limits('0.5', '256M'),
+          healthcheck: {
+            test: ['CMD', '/bin/woodpecker-agent', 'ping'],
+            interval: '30s',
+            timeout: '5s',
+            retries: 3,
+            start_period: '20s',
+          },
         },
       },
       volumes: { 'woodpecker-server-data': {} },
@@ -1608,8 +1626,15 @@ export const appTemplates = [
         webhook: {
           image: 'tarampampam/webhook-tester:2.3',
           restart: 'unless-stopped',
-          command: 'serve --port 8080',
+          command: 'start --port 8080',
           deploy: limits('0.25', '128M'),
+          healthcheck: {
+            test: ['CMD', '/bin/app', 'start', 'healthcheck'],
+            interval: '30s',
+            timeout: '5s',
+            retries: 3,
+            start_period: '10s',
+          },
           labels: {
             'simpledeploy.endpoints.0.domain': '{{domain}}',
             'simpledeploy.endpoints.0.port': '8080',

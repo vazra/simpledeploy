@@ -19,10 +19,10 @@ export const serviceTemplates = [
       volumes: ['pgdata:/var/lib/postgresql/data'],
       restart: 'unless-stopped',
       healthcheck: {
-        test: ['CMD-SHELL', 'pg_isready -U postgres'],
+        test: ['CMD-SHELL', 'pg_isready -U postgres -d app'],
         interval: '10s',
         timeout: '5s',
-        retries: 3,
+        retries: 5,
         start_period: '30s',
       },
     },
@@ -43,11 +43,11 @@ export const serviceTemplates = [
       volumes: ['mysqldata:/var/lib/mysql'],
       restart: 'unless-stopped',
       healthcheck: {
-        test: ['CMD-SHELL', 'mysqladmin ping -h localhost'],
+        test: ['CMD-SHELL', 'mysqladmin ping -h localhost -uroot -p"$$MYSQL_ROOT_PASSWORD" --silent'],
         interval: '10s',
         timeout: '5s',
-        retries: 3,
-        start_period: '30s',
+        retries: 10,
+        start_period: '60s',
       },
     },
   },
@@ -70,8 +70,8 @@ export const serviceTemplates = [
         test: ['CMD-SHELL', 'healthcheck.sh --connect --innodb_initialized'],
         interval: '10s',
         timeout: '5s',
-        retries: 3,
-        start_period: '30s',
+        retries: 10,
+        start_period: '60s',
       },
     },
   },
@@ -91,11 +91,11 @@ export const serviceTemplates = [
       volumes: ['mongodata:/data/db'],
       restart: 'unless-stopped',
       healthcheck: {
-        test: ['CMD-SHELL', "mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1"],
+        test: ['CMD-SHELL', "mongosh --quiet -u root -p changeme --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1"],
         interval: '10s',
-        timeout: '5s',
-        retries: 3,
-        start_period: '30s',
+        timeout: '10s',
+        retries: 10,
+        start_period: '40s',
       },
     },
   },
@@ -112,6 +112,13 @@ export const serviceTemplates = [
       },
       volumes: ['couchdbdata:/opt/couchdb/data'],
       restart: 'unless-stopped',
+      healthcheck: {
+        test: ['CMD-SHELL', 'curl -fsS http://localhost:5984/_up || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '30s',
+      },
     },
   },
 
@@ -127,11 +134,11 @@ export const serviceTemplates = [
       restart: 'unless-stopped',
       command: 'redis-server --appendonly yes --save 60 1',
       healthcheck: {
-        test: ['CMD-SHELL', 'redis-cli ping'],
+        test: ['CMD', 'redis-cli', 'ping'],
         interval: '10s',
         timeout: '5s',
-        retries: 3,
-        start_period: '30s',
+        retries: 5,
+        start_period: '10s',
       },
     },
   },
@@ -146,11 +153,11 @@ export const serviceTemplates = [
       restart: 'unless-stopped',
       command: 'valkey-server --appendonly yes --save 60 1',
       healthcheck: {
-        test: ['CMD-SHELL', 'valkey-cli ping'],
+        test: ['CMD', 'valkey-cli', 'ping'],
         interval: '10s',
         timeout: '5s',
-        retries: 3,
-        start_period: '30s',
+        retries: 5,
+        start_period: '10s',
       },
     },
   },
@@ -163,6 +170,13 @@ export const serviceTemplates = [
       image: 'memcached:1.6-alpine',
       restart: 'unless-stopped',
       command: 'memcached -m 256',
+      healthcheck: {
+        test: ['CMD-SHELL', 'echo stats | nc -w 1 127.0.0.1 11211 | grep -q uptime'],
+        interval: '10s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '10s',
+      },
     },
   },
 
@@ -184,6 +198,13 @@ export const serviceTemplates = [
       ulimits: {
         nofile: { soft: 262144, hard: 262144 },
       },
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '30s',
+      },
     },
   },
   {
@@ -199,6 +220,13 @@ export const serviceTemplates = [
       },
       volumes: ['meilidata:/meili_data'],
       restart: 'unless-stopped',
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:7700/health || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '20s',
+      },
     },
   },
   {
@@ -214,6 +242,13 @@ export const serviceTemplates = [
       },
       volumes: ['typesensedata:/data'],
       restart: 'unless-stopped',
+      healthcheck: {
+        test: ['CMD-SHELL', 'curl -fsS http://localhost:8108/health || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '20s',
+      },
     },
   },
 
@@ -233,11 +268,11 @@ export const serviceTemplates = [
       ports: ['15672:15672'],
       restart: 'unless-stopped',
       healthcheck: {
-        test: ['CMD-SHELL', 'rabbitmq-diagnostics -q ping'],
-        interval: '10s',
-        timeout: '5s',
-        retries: 3,
-        start_period: '30s',
+        test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping'],
+        interval: '15s',
+        timeout: '15s',
+        retries: 10,
+        start_period: '60s',
       },
     },
   },
@@ -249,8 +284,15 @@ export const serviceTemplates = [
     config: {
       image: 'nats:2-alpine',
       restart: 'unless-stopped',
-      command: '-js -sd /data',
+      command: '-js -sd /data -m 8222',
       volumes: ['natsdata:/data'],
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:8222/healthz || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '15s',
+      },
     },
   },
 
@@ -261,7 +303,7 @@ export const serviceTemplates = [
     icon: '🪣',
     description: 'S3-compatible object storage',
     config: {
-      image: 'minio/minio:latest',
+      image: 'minio/minio:RELEASE.2024-10-13T13-34-11Z',
       environment: {
         MINIO_ROOT_USER: 'admin',
         MINIO_ROOT_PASSWORD: 'changeme-at-least-8-chars',
@@ -270,11 +312,11 @@ export const serviceTemplates = [
       command: 'server /data --console-address ":9001"',
       restart: 'unless-stopped',
       healthcheck: {
-        test: ['CMD-SHELL', 'mc ready local || curl -f http://localhost:9000/minio/health/live'],
+        test: ['CMD-SHELL', 'curl -fsS http://localhost:9000/minio/health/live || exit 1'],
         interval: '15s',
         timeout: '5s',
-        retries: 3,
-        start_period: '30s',
+        retries: 5,
+        start_period: '20s',
       },
     },
   },
@@ -292,8 +334,8 @@ export const serviceTemplates = [
         test: ['CMD-SHELL', 'wget -qO- http://localhost/ >/dev/null || exit 1'],
         interval: '15s',
         timeout: '5s',
-        retries: 3,
-        start_period: '20s',
+        retries: 5,
+        start_period: '10s',
       },
     },
   },
@@ -314,6 +356,13 @@ export const serviceTemplates = [
         MP_SMTP_AUTH_ACCEPT_ANY: '1',
         MP_SMTP_AUTH_ALLOW_INSECURE: '1',
       },
+      healthcheck: {
+        test: ['CMD', '/mailpit', 'readyz'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '15s',
+      },
     },
   },
   {
@@ -322,8 +371,15 @@ export const serviceTemplates = [
     icon: '🛠️',
     description: 'Lightweight web UI for managing SQL databases',
     config: {
-      image: 'adminer:latest',
+      image: 'adminer:4',
       restart: 'unless-stopped',
+      healthcheck: {
+        test: ['CMD-SHELL', 'php -r "exit(@fsockopen(\'localhost\',8080)?0:1);"'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '15s',
+      },
     },
   },
 
@@ -344,7 +400,7 @@ export const serviceTemplates = [
         test: ['CMD', 'redis-cli', 'ping'],
         interval: '10s',
         timeout: '5s',
-        retries: 3,
+        retries: 5,
         start_period: '20s',
       },
     },
@@ -359,10 +415,19 @@ export const serviceTemplates = [
     config: {
       image: 'eclipse-mosquitto:2',
       restart: 'unless-stopped',
+      // Default config disallows anonymous; provide a permissive default for quick-start.
+      command: "sh -c \"printf 'listener 1883\\nallow_anonymous true\\n' > /mosquitto/config/mosquitto.conf && exec /docker-entrypoint.sh /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf\"",
       volumes: [
         'mosquittodata:/mosquitto/data',
         'mosquittologs:/mosquitto/log',
       ],
+      healthcheck: {
+        test: ['CMD-SHELL', 'mosquitto_sub -h localhost -t healthcheck -E -i healthcheck-probe -W 2 || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '15s',
+      },
     },
   },
 
@@ -376,6 +441,13 @@ export const serviceTemplates = [
       image: 'louislam/uptime-kuma:1',
       restart: 'unless-stopped',
       volumes: ['uptimekumadata:/app/data'],
+      healthcheck: {
+        test: ['CMD', 'extra/healthcheck'],
+        interval: '30s',
+        timeout: '10s',
+        retries: 5,
+        start_period: '60s',
+      },
     },
   },
   {
@@ -384,10 +456,18 @@ export const serviceTemplates = [
     icon: '🔥',
     description: 'Metrics collection and time-series database',
     config: {
-      image: 'prom/prometheus:latest',
+      image: 'prom/prometheus:v2.55.1',
       restart: 'unless-stopped',
+      user: '65534:65534',
       volumes: ['prometheusdata:/prometheus'],
       command: '--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus',
+      healthcheck: {
+        test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:9090/-/healthy'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '20s',
+      },
     },
   },
   {
@@ -396,11 +476,19 @@ export const serviceTemplates = [
     icon: '📉',
     description: 'Dashboards and visualization for metrics',
     config: {
-      image: 'grafana/grafana-oss:latest',
+      image: 'grafana/grafana-oss:11.3.0',
       restart: 'unless-stopped',
+      user: '472:472',
       volumes: ['grafanadata:/var/lib/grafana'],
       environment: {
         GF_SECURITY_ADMIN_PASSWORD: 'changeme',
+      },
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health | grep -q ok || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '30s',
       },
     },
   },
@@ -415,6 +503,15 @@ export const serviceTemplates = [
       image: 'authelia/authelia:4',
       restart: 'unless-stopped',
       volumes: ['autheliaconfig:/config'],
+      // Authelia requires a /config/configuration.yml before it will start.
+      // Long start_period gives the user time to mount or generate one.
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:9091/api/health || exit 1'],
+        interval: '30s',
+        timeout: '5s',
+        retries: 3,
+        start_period: '120s',
+      },
     },
   },
   {
@@ -429,6 +526,13 @@ export const serviceTemplates = [
       environment: {
         ADMIN_TOKEN: 'changeme-long-random-token',
         SIGNUPS_ALLOWED: 'false',
+      },
+      healthcheck: {
+        test: ['CMD-SHELL', 'curl -fsS http://localhost:80/alive || exit 1'],
+        interval: '30s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '30s',
       },
     },
   },
@@ -451,6 +555,13 @@ export const serviceTemplates = [
         USER_UID: '1000',
         USER_GID: '1000',
       },
+      healthcheck: {
+        test: ['CMD-SHELL', 'curl -fsS http://localhost:3000/api/healthz || exit 1'],
+        interval: '30s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '60s',
+      },
     },
   },
   {
@@ -465,6 +576,13 @@ export const serviceTemplates = [
       environment: {
         N8N_HOST: 'localhost',
         GENERIC_TIMEZONE: 'UTC',
+      },
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:5678/healthz || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '60s',
       },
     },
   },
@@ -481,6 +599,14 @@ export const serviceTemplates = [
         DATABASE_TYPE: 'postgresql',
         APP_SECRET: 'changeme-random-string',
       },
+      // Long start_period: umami waits on an external Postgres before becoming healthy.
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/heartbeat || exit 1'],
+        interval: '30s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '120s',
+      },
     },
   },
   {
@@ -495,6 +621,13 @@ export const serviceTemplates = [
       environment: {
         HOMEPAGE_ALLOWED_HOSTS: '*',
       },
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/ >/dev/null || exit 1'],
+        interval: '30s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '30s',
+      },
     },
   },
   {
@@ -506,6 +639,13 @@ export const serviceTemplates = [
       image: 'ghcr.io/muchobien/pocketbase:latest',
       restart: 'unless-stopped',
       volumes: ['pocketbasedata:/pb_data'],
+      healthcheck: {
+        test: ['CMD-SHELL', 'wget -qO- http://localhost:8090/api/health || exit 1'],
+        interval: '15s',
+        timeout: '5s',
+        retries: 5,
+        start_period: '20s',
+      },
     },
   },
 ];

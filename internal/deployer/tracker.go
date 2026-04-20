@@ -7,10 +7,22 @@ import (
 )
 
 type OutputLine struct {
-	Line   string `json:"line"`
-	Stream string `json:"stream"` // "stdout" or "stderr"
-	Done   bool   `json:"done"`
-	Action string `json:"action,omitempty"` // set on done: "deploy", "pull_failed", etc.
+	Line     string         `json:"line"`
+	Stream   string         `json:"stream"` // "stdout" or "stderr"
+	Done     bool           `json:"done"`
+	Action   string         `json:"action,omitempty"`   // set on done: "deploy", "pull_failed", etc.
+	Status   string         `json:"status,omitempty"`   // set on done: "success", "unstable", "failed"
+	Services []ServiceState `json:"services,omitempty"` // set on done when a stabilization check ran
+}
+
+// ServiceState captures the post-deploy state of one compose service
+// for the stabilization summary.
+type ServiceState struct {
+	Service      string `json:"service"`
+	State        string `json:"state"`         // running, restarting, exited, etc.
+	Health       string `json:"health"`        // healthy, unhealthy, starting, "" (no healthcheck)
+	RestartCount int    `json:"restart_count"` // delta during the stabilization window
+	ExitCode     int    `json:"exit_code"`
 }
 
 type DeployLog struct {
@@ -73,13 +85,20 @@ func (dl *DeployLog) Send(line OutputLine) {
 }
 
 func (dl *DeployLog) Close(action string) {
+	dl.CloseWith(action, "", nil)
+}
+
+// CloseWith closes the log with extra status info captured by a post-deploy
+// stabilization check. status is "success", "unstable", or "failed". services
+// may be nil when no stabilization ran (e.g. compose itself failed).
+func (dl *DeployLog) CloseWith(action, status string, services []ServiceState) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
 	if dl.closed {
 		return
 	}
 	dl.closed = true
-	done := OutputLine{Done: true, Action: action}
+	done := OutputLine{Done: true, Action: action, Status: status, Services: services}
 	dl.history = append(dl.history, done)
 	for _, sub := range dl.subscribers {
 		select {
@@ -160,6 +179,11 @@ func (t *Tracker) TrackWithLog(slug string, cancel context.CancelFunc) (*DeployL
 }
 
 func (t *Tracker) DoneWithLog(slug string, action string) {
+	t.DoneWithLogStatus(slug, action, "", nil)
+}
+
+// DoneWithLogStatus closes a deploy with stabilization status + per-service detail.
+func (t *Tracker) DoneWithLogStatus(slug, action, status string, services []ServiceState) {
 	if t == nil {
 		return
 	}
@@ -169,7 +193,7 @@ func (t *Tracker) DoneWithLog(slug string, action string) {
 	delete(t.logs, slug)
 	t.mu.Unlock()
 	if dl != nil {
-		dl.Close(action)
+		dl.CloseWith(action, status, services)
 	}
 }
 

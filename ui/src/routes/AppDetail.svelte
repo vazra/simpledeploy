@@ -314,15 +314,15 @@
       </a>
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div class="flex items-center gap-3 flex-wrap">
-          <span class="w-3 h-3 rounded-full ring-2 ring-surface-0 shrink-0 {app.Status === 'running' ? 'bg-success' : app.Status === 'degraded' ? 'bg-warning' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
+          <span class="w-3 h-3 rounded-full ring-2 ring-surface-0 shrink-0 {app.Status === 'running' ? 'bg-success' : (app.Status === 'degraded' || app.Status === 'unstable') ? 'bg-warning' : app.Status === 'error' ? 'bg-danger' : 'bg-text-muted'}"></span>
           <h1 class="text-2xl font-semibold text-text-primary tracking-tight">{app.Name}</h1>
-          <Badge variant={app.Status === 'running' ? 'success' : app.Status === 'degraded' ? 'warning' : app.Status === 'error' ? 'danger' : 'default'}>{app.Status}</Badge>
+          <Badge variant={app.Status === 'running' ? 'success' : (app.Status === 'degraded' || app.Status === 'unstable') ? 'warning' : app.Status === 'error' ? 'danger' : 'default'}>{app.Status}</Badge>
           {#each displayLabels as label}
             <span class="px-2 py-0.5 text-[11px] rounded-md bg-surface-3/60 text-text-secondary">{label}</span>
           {/each}
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          {#if app.Status === 'running' || app.Status === 'degraded'}
+          {#if app.Status === 'running' || app.Status === 'degraded' || app.Status === 'unstable'}
             <Button variant="secondary" size="sm" onclick={() => showRestartModal = true} loading={actionLoading === 'restart'}>Restart</Button>
             <Button variant="secondary" size="sm" onclick={handleStop} loading={actionLoading === 'stop'}>Stop</Button>
           {:else if app.Status === 'stopped'}

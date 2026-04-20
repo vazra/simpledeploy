@@ -130,8 +130,16 @@
 
   function serviceVariant(state) {
     if (state === 'running') return 'success'
-    if (state === 'exited') return 'danger'
+    if (state === 'exited' || state === 'dead') return 'danger'
+    if (state === 'restarting') return 'warning'
     return 'warning'
+  }
+
+  function eventActionLabel(action) {
+    if (action === 'deploy_unstable') return 'deployed (unstable)'
+    if (action === 'restart_unstable') return 'restarted (unstable)'
+    if (action === 'pull_unstable') return 'pulled (unstable)'
+    return action
   }
 
   function healthVariant(health) {
@@ -144,6 +152,7 @@
   function eventVariant(action) {
     if (['deploy', 'restart', 'pull'].includes(action)) return 'success'
     if (action?.endsWith('_failed')) return 'danger'
+    if (action?.endsWith('_unstable')) return 'warning'
     if (action === 'rollback') return 'warning'
     return 'info'
   }
@@ -223,7 +232,7 @@
     <div class="space-y-2">
       {#each events as evt}
         <div class="flex items-center gap-3 px-3 py-2 bg-surface-1 rounded-lg border border-border/30 text-sm">
-          <Badge variant={eventVariant(evt.action)}>{evt.action}</Badge>
+          <Badge variant={eventVariant(evt.action)}>{eventActionLabel(evt.action)}</Badge>
           <span class="text-text-secondary flex-1 truncate">{evt.detail?.split('\n')[0] || '-'}</span>
           <span class="text-xs text-text-muted shrink-0">{relativeTime(evt.created_at)}</span>
         </div>

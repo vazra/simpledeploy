@@ -47,3 +47,30 @@ Two services, one endpoint, one app named after the directory.
 ## Lifecycle
 
 Created when you (or the API) writes the compose file into `apps_dir/<slug>/`. Updated when the file content changes (SHA-256 hash compare). Removed when the directory disappears: the next reconcile pass calls `docker compose down --remove-orphans`. Deploy history is recorded in the `compose_versions` and `deploy_events` tables (migration 009).
+
+## App status values
+
+The Status column on the dashboard and app detail page reflects the most recent reconciler outcome:
+
+| Status | Meaning |
+| --- | --- |
+| `running` | Compose succeeded and the post-deploy stabilization check confirmed every container is up (and healthy when a healthcheck is defined). |
+| `unstable` | Compose succeeded but at least one container was still restarting, unhealthy, or exited at the end of the 30-second stabilization window. The app may still be partly usable. Open Logs for the failing service to see the underlying error, then redeploy after fixing. |
+| `degraded` | A previously running app has lost a service since the last reconcile. |
+| `error` | Compose itself failed (bad YAML, missing image, registry auth, port conflict). The deploy did not start. |
+| `stopped` | App is intentionally stopped via the Stop action. |
+
+The deploy wizard reports the same three terminal states as `success`, `unstable`, and `failed`, plus a per-service breakdown when stabilization runs. See [Troubleshooting -> Deploy reported "Unstable"](/operations/troubleshooting/#deploy-reported-unstable) for what to do when you see it.
+
+## Healthchecks
+
+Every template SimpleDeploy ships with includes a `healthcheck` for each service. When a service has a healthcheck, the post-deploy stabilization check waits for `healthy` (up to 30s) before reporting success; without one, it just verifies the container is running and not restart-looping. If you write your own compose file, add a healthcheck for any service that takes more than a second or two to be ready, otherwise stabilization may report `unstable` while the service is still warming up. A reasonable default for an HTTP app:
+
+```yaml
+healthcheck:
+  test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+```

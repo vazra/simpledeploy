@@ -22,12 +22,36 @@ type DeployResult struct {
 	Output  string
 	Err     error
 	Skipped bool // true when another deploy for the same slug was already in flight
+	// Status is the post-stabilization outcome: "success", "unstable", or
+	// "failed". "" when no stabilization ran (Skipped or composeErr present
+	// before the check).
+	Status   string
+	Services []ServiceState
 }
 
 type ServiceStatus struct {
 	Service string `json:"service"`
 	State   string `json:"state"`
 	Health  string `json:"health"`
+}
+
+// finishDeploy runs a stabilization check on a successful compose run and
+// closes the deploy log with the resulting status. action is "deploy",
+// "restart", or "pull"; on stabilization failure it becomes "<action>_unstable"
+// and the WS done event carries status="unstable" + per-service detail.
+// composeErr is the error from the preceding compose command (nil = success).
+func (d *Deployer) finishDeploy(ctx context.Context, dl *DeployLog, slug, project, action string, composeErr error) (status string, services []ServiceState) {
+	if composeErr != nil {
+		d.Tracker.DoneWithLogStatus(slug, action+"_failed", "failed", nil)
+		return "failed", nil
+	}
+	status, services = d.stabilize(ctx, dl, project)
+	doneAction := action
+	if status == "unstable" {
+		doneAction = action + "_unstable"
+	}
+	d.Tracker.DoneWithLogStatus(slug, doneAction, status, services)
+	return status, services
 }
 
 type Deployer struct {
@@ -82,14 +106,11 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...
 	}
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)
-	action := "deploy"
+	status, services := d.finishDeploy(ctx, dl, app.Name, project, "deploy", err)
 	if err != nil {
-		action = "deploy_failed"
-		d.Tracker.DoneWithLog(app.Name, action)
-		return DeployResult{Output: output, Err: fmt.Errorf("compose up: %w", err)}
+		return DeployResult{Output: output, Err: fmt.Errorf("compose up: %w", err), Status: status, Services: services}
 	}
-	d.Tracker.DoneWithLog(app.Name, action)
-	return DeployResult{Output: output}
+	return DeployResult{Output: output, Status: status, Services: services}
 }
 
 func (d *Deployer) Teardown(ctx context.Context, projectName string) error {
@@ -126,14 +147,11 @@ func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployRe
 	}
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)
-	action := "restart"
+	status, services := d.finishDeploy(ctx, dl, app.Name, project, "restart", err)
 	if err != nil {
-		action = "restart_failed"
-		d.Tracker.DoneWithLog(app.Name, action)
-		return DeployResult{Output: output, Err: fmt.Errorf("compose restart: %w", err)}
+		return DeployResult{Output: output, Err: fmt.Errorf("compose restart: %w", err), Status: status, Services: services}
 	}
-	d.Tracker.DoneWithLog(app.Name, action)
-	return DeployResult{Output: output}
+	return DeployResult{Output: output, Status: status, Services: services}
 }
 
 func (d *Deployer) Stop(ctx context.Context, projectName string) error {
@@ -181,8 +199,8 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", pullArgs...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)
 	if err != nil {
-		d.Tracker.DoneWithLog(app.Name, "pull_failed")
-		return DeployResult{Output: output, Err: fmt.Errorf("compose pull: %w", err)}
+		d.Tracker.DoneWithLogStatus(app.Name, "pull_failed", "failed", nil)
+		return DeployResult{Output: output, Err: fmt.Errorf("compose pull: %w", err), Status: "failed"}
 	}
 
 	upArgs := []string{
@@ -195,12 +213,11 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 	stdout, stderr, err = d.runCmd(ctx, dl, "docker", upArgs...)
 	output += "\n" + strings.TrimSpace(stdout+"\n"+stderr)
 	output = strings.TrimSpace(output)
+	status, services := d.finishDeploy(ctx, dl, app.Name, project, "pull", err)
 	if err != nil {
-		d.Tracker.DoneWithLog(app.Name, "pull_failed")
-		return DeployResult{Output: output, Err: fmt.Errorf("compose up after pull: %w", err)}
+		return DeployResult{Output: output, Err: fmt.Errorf("compose up after pull: %w", err), Status: status, Services: services}
 	}
-	d.Tracker.DoneWithLog(app.Name, "pull")
-	return DeployResult{Output: output}
+	return DeployResult{Output: output, Status: status, Services: services}
 }
 
 func writeDockerConfig(auths []RegistryAuth) (string, error) {

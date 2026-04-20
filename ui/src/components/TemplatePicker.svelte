@@ -140,7 +140,7 @@
 
   function handleBlur(v) {
     // Domain vars are validated differently based on access mode.
-    if (v.type === 'domain' && accessMode !== 'custom') {
+    if (v.type === 'domain' && accessMode !== 'custom' && accessMode !== 'custom-local') {
       const next = { ...errors }
       delete next[v.key]
       errors = next
@@ -210,7 +210,7 @@
 
     // Validate, but skip domain checks when not in custom mode.
     const errs = validateVars(selected.variables, merged)
-    if (accessMode !== 'custom') {
+    if (accessMode !== 'custom' && accessMode !== 'custom-local') {
       for (const v of domainVars) delete errs[v.key]
     }
     if (accessMode === 'quick-test' && !isValidIPv4(quickHost)) {
@@ -348,12 +348,12 @@
         <button
           type="button"
           aria-label="Custom domain"
-          onclick={() => (accessMode = 'custom')}
+          onclick={() => (accessMode = accessMode === 'custom-local' ? 'custom-local' : 'custom')}
           class="text-left px-3 py-2 rounded-lg border text-sm transition-colors
-            {accessMode === 'custom' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+            {accessMode === 'custom' || accessMode === 'custom-local' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
         >
           <div class="font-medium">Custom domain</div>
-          <div class="text-xs text-text-muted mt-0.5">Your own domain with Let's Encrypt TLS.</div>
+          <div class="text-xs text-text-muted mt-0.5">Your own domain with Let's Encrypt or local CA.</div>
         </button>
         <button
           type="button"
@@ -411,6 +411,30 @@
             to remove the warning.
           </p>
         </div>
+      {:else if accessMode === 'custom' || accessMode === 'custom-local'}
+        <div class="bg-surface-3/40 border border-border/30 rounded-lg px-3 py-3 flex flex-col gap-2">
+          <label class="block text-xs text-text-muted">TLS source</label>
+          <div class="flex gap-2">
+            <button
+              type="button"
+              onclick={() => (accessMode = 'custom')}
+              class="flex-1 text-left px-3 py-2 rounded-lg border text-xs transition-colors
+                {accessMode === 'custom' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+            >
+              <div class="font-medium">Let's Encrypt</div>
+              <div class="text-[11px] text-text-muted mt-0.5">Public domain with DNS pointing here.</div>
+            </button>
+            <button
+              type="button"
+              onclick={() => (accessMode = 'custom-local')}
+              class="flex-1 text-left px-3 py-2 rounded-lg border text-xs transition-colors
+                {accessMode === 'custom-local' ? 'border-accent bg-accent/10 text-text-primary' : 'border-border/50 text-text-muted hover:text-text-primary'}"
+            >
+              <div class="font-medium">Local CA</div>
+              <div class="text-[11px] text-text-muted mt-0.5">Private domain. Install root cert from <a href="/trust" target="_blank" rel="noopener" class="text-accent hover:underline">Trust page</a>.</div>
+            </button>
+          </div>
+        </div>
       {:else if accessMode === 'port-only'}
         <p class="text-xs text-text-muted bg-surface-3/40 border border-border/30 rounded-lg px-3 py-2">
           Accessible at http://&lt;server&gt;:&lt;assigned-port&gt; after deploy. The port will appear on the app overview.
@@ -459,7 +483,7 @@
 {/if}
 
 {#snippet fieldRow(v)}
-  {#if v.type === 'domain' && accessMode !== 'custom'}
+  {#if v.type === 'domain' && accessMode !== 'custom' && accessMode !== 'custom-local'}
     <!-- Domain vars are handled by the access-mode selector; render nothing. -->
   {:else}
   <div>

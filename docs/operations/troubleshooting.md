@@ -27,6 +27,29 @@ simpledeploy registry list
 - Network issue: confirm DNS works (`getent hosts registry-1.docker.io`) and outbound 443 is open.
 - Rate limited by Docker Hub: log in to a paid account or use a registry mirror.
 
+## Deploy reported "Unstable"
+
+**Symptom:** The deploy wizard shows a yellow "Unstable" status. The per-service summary lists one or more services as `restarting`, `unhealthy`, or with `restarted Nx`.
+
+**What it means:** `docker compose up` finished without an error, but during the 30-second post-deploy stabilization window one of the containers either kept restarting, reported `unhealthy` from its healthcheck, or exited. This is almost always an application-level error rather than a SimpleDeploy bug.
+
+**Diagnose:**
+
+```bash
+# Watch the offending container's logs (replace slug + service)
+sudo docker logs simpledeploy-<slug>-<service>-1 --tail 200
+```
+
+In the UI: open the app, **Logs** tab, pick the unhealthy service, scroll to the latest entries. The actual error from the container is usually in the last few lines before the restart.
+
+**Common causes:**
+- **Permission errors writing to a volume** (`EACCES`, `Permission denied`). The image runs as a non-root user but the named volume was created root-owned. Add `user: "1000:1000"` (or whatever UID the image documents) to the service, or use the templated version of the app from the wizard which handles this.
+- **Required env var missing.** Container exits with "X is required". Add the missing env var via the **Config** tab.
+- **Port already bound** in `port-only` mode if the same host port is requested by another app.
+- **Healthcheck endpoint not yet implemented** in your code. Either add the endpoint or relax the healthcheck (longer `start_period`).
+
+**Fix and redeploy:** edit the compose via the **Config** tab and click **Redeploy**. The next deploy will re-run the stabilization check.
+
 ## Deploy fails with "compose file rejected"
 
 **Symptom:** Deploy refused with a validation error.

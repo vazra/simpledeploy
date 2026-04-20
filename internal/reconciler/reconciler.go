@@ -221,6 +221,9 @@ func (r *Reconciler) RestartOne(ctx context.Context, slug string) error {
 	if result.Err != nil {
 		action = "restart_failed"
 		status = "error"
+	} else if result.Status == "unstable" {
+		action = "restart_unstable"
+		status = "unstable"
 	}
 	r.store.CreateDeployEvent(slug, action, nil, result.Output)
 	r.store.UpdateAppStatus(slug, status)
@@ -467,6 +470,9 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	if result.Err != nil {
 		status = "error"
 		action = "deploy_failed"
+	} else if result.Status == "unstable" {
+		status = "unstable"
+		action = "deploy_unstable"
 	}
 
 	app := &store.App{

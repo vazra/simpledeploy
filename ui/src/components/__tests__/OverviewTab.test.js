@@ -32,4 +32,26 @@ describe('OverviewTab', () => {
     });
     expect(await findByText(/30/)).toBeInTheDocument();
   });
+
+  it('renders restarting service with warning badge', async () => {
+    const { findByText } = render(OverviewTab, {
+      slug: 'foo',
+      app: { Name: 'foo', Status: 'unstable' },
+      services: [{ service: 'web', state: 'restarting' }],
+    });
+    expect(await findByText('restarting')).toBeInTheDocument();
+  });
+
+  it('humanizes deploy_unstable event label', async () => {
+    apiMock.getDeployEvents.mockResolvedValueOnce({
+      data: [{ action: 'deploy_unstable', at: '2026-01-01T00:00:00Z' }],
+      error: null,
+    });
+    const { findByText } = render(OverviewTab, {
+      slug: 'foo',
+      app: { Name: 'foo', Status: 'unstable' },
+      services: [{ service: 'web', state: 'running' }],
+    });
+    expect(await findByText('deployed (unstable)')).toBeInTheDocument();
+  });
 });

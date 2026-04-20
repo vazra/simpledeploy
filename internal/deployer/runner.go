@@ -32,12 +32,23 @@ type MockRunner struct {
 	mu    sync.Mutex
 	Calls []RunCall
 	Err   error
+	// Respond optionally returns a custom response per call. If nil or returns
+	// ok=false, the default empty/Err response is used. Useful for tests that
+	// need to script different docker subcommand outputs (e.g. stabilize).
+	Respond func(call RunCall) (stdout, stderr string, err error, ok bool)
 }
 
 func (m *MockRunner) Run(_ context.Context, name string, args ...string) (string, string, error) {
+	call := RunCall{Name: name, Args: args}
 	m.mu.Lock()
-	m.Calls = append(m.Calls, RunCall{Name: name, Args: args})
+	m.Calls = append(m.Calls, call)
+	respond := m.Respond
 	m.mu.Unlock()
+	if respond != nil {
+		if stdout, stderr, err, ok := respond(call); ok {
+			return stdout, stderr, err
+		}
+	}
 	if m.Err != nil {
 		return "", fmt.Sprintf("mock error: %v", m.Err), m.Err
 	}

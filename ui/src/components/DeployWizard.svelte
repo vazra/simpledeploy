@@ -248,6 +248,7 @@
   let deployWs = $state(null)
   let logContainer = $state(null)
   let confirmOverwrite = $state(false)
+  let deployServices = $state([]) // per-service stabilization detail (from done event)
 
   async function startDeploy(force = false) {
     step = 3
@@ -281,8 +282,13 @@
     deployWs.onmessage = (event) => {
       const msg = JSON.parse(event.data)
       if (msg.done) {
-        deployStatus = msg.action === 'deploy' ? 'success' : 'failed'
-        currentAction = msg.action === 'deploy' ? 'Deploy complete' : `Failed: ${msg.action}`
+        // Server-reported status takes precedence; fall back to action name for old servers.
+        const s = msg.status || (msg.action === 'deploy' ? 'success' : 'failed')
+        deployStatus = s
+        if (s === 'success') currentAction = 'Deploy complete'
+        else if (s === 'unstable') currentAction = 'Deploy completed but app is unstable'
+        else currentAction = `Failed: ${msg.action || 'deploy'}`
+        deployServices = Array.isArray(msg.services) ? msg.services : []
         deployWs?.close()
         deployWs = null
         return
@@ -617,6 +623,11 @@
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
                 Deployed
               </span>
+            {:else if deployStatus === 'unstable'}
+              <span class="flex items-center gap-1.5 text-sm font-medium text-warning">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                Unstable
+              </span>
             {:else}
               <span class="flex items-center gap-1.5 text-sm font-medium text-danger">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -644,11 +655,37 @@
             {/if}
           </div>
 
+          <!-- Per-service stabilization summary (shown when server reported services) -->
+          {#if deployServices.length > 0 && (deployStatus === 'unstable' || deployStatus === 'success')}
+            <div class="rounded-lg border border-border/40 bg-surface-3/40 px-3 py-2">
+              <div class="text-xs font-medium text-text-muted mb-1.5">Service status after deploy</div>
+              <div class="flex flex-col gap-1">
+                {#each deployServices as svc}
+                  {@const bad = svc.state === 'restarting' || svc.state === 'exited' || svc.state === 'dead' || svc.health === 'unhealthy' || (svc.restart_count || 0) > 0}
+                  <div class="flex items-center justify-between text-xs">
+                    <span class="font-mono text-text-primary">{svc.service}</span>
+                    <span class="{bad ? 'text-warning' : 'text-text-muted'}">
+                      {svc.state}{svc.health ? ` / ${svc.health}` : ''}{(svc.restart_count || 0) > 0 ? ` (restarted ${svc.restart_count}x)` : ''}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+              {#if deployStatus === 'unstable'}
+                <p class="text-[11px] text-text-muted mt-2">
+                  Compose started successfully but one or more containers are restart looping or unhealthy. Check the app logs for the underlying error.
+                </p>
+              {/if}
+            </div>
+          {/if}
+
           <!-- Actions -->
           <div class="flex gap-2">
             {#if deployStatus === 'success'}
               <Button size="sm" onclick={() => { onComplete(); window.location.hash = `#/apps/${appName.trim()}` }}>View App</Button>
               <Button size="sm" variant="secondary" onclick={resetWizard}>Deploy Another</Button>
+            {:else if deployStatus === 'unstable'}
+              <Button size="sm" onclick={() => { onComplete(); window.location.hash = `#/apps/${appName.trim()}` }}>View App &amp; Logs</Button>
+              <Button size="sm" variant="secondary" onclick={() => { step = 1 }}>Back to Edit</Button>
             {:else if deployStatus === 'failed'}
               <Button size="sm" variant="secondary" onclick={() => { step = 1 }}>Back to Edit</Button>
               <Button size="sm" variant="secondary" onclick={resetWizard}>Start Over</Button>
