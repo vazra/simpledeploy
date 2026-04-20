@@ -1261,7 +1261,8 @@ func TestApplyPendingAppliesChanges(t *testing.T) {
 	}
 }
 
-// TestWebhookDisabledReturns404: when WebhookEnabled=false, handler returns 404.
+// TestWebhookDisabledReturns404: when WebhookEnabled=false, handler returns 404
+// with an empty body (no HMAC-related content leaked).
 func TestWebhookDisabledReturns404(t *testing.T) {
 	cfg := Config{
 		Enabled:        true,
@@ -1288,6 +1289,120 @@ func TestWebhookDisabledReturns404(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 when WebhookEnabled=false, got %d", w.Code)
+	}
+	// Body must be empty: no HMAC error or other content should leak.
+	if body := strings.TrimSpace(w.Body.String()); body != "" && body != "404 page not found" {
+		// http.NotFound writes "404 page not found\n"; that is acceptable.
+		// Anything else (e.g. HMAC error text) is a leak.
+		if strings.Contains(body, "hmac") || strings.Contains(body, "signature") || strings.Contains(body, "secret") {
+			t.Fatalf("404 body leaks HMAC-related content: %q", body)
+		}
+	}
+}
+
+// TestFetchAndInspectUpToDate: when remote has no new commits fetchAndInspect
+// returns (false, nil) and CommitsBehind stays 0.
+func TestFetchAndInspectUpToDate(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	s := makeSyncer(t, appsDir, bareDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// fetchAndInspect when already up-to-date.
+	fetched, err := s.fetchAndInspect()
+	if err != nil {
+		t.Fatalf("fetchAndInspect: %v", err)
+	}
+	if fetched {
+		t.Fatal("expected fetched=false when remote has no new commits")
+	}
+	if s.Status().CommitsBehind != 0 {
+		t.Errorf("CommitsBehind should be 0 when up-to-date, got %d", s.Status().CommitsBehind)
+	}
+}
+
+// TestApplyPendingWhenUpToDate: ApplyPending when CommitsBehind=0 completes
+// without error and does not create a spurious commit.
+func TestApplyPendingWhenUpToDate(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	s := makeSyncer(t, appsDir, bareDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	initialSHA := s.Status().HeadSHA
+
+	// ApplyPending when already up-to-date: should be a no-op (no new commit).
+	if err := s.ApplyPending(ctx); err != nil {
+		t.Fatalf("ApplyPending: %v", err)
+	}
+
+	// HEAD must not advance (no spurious commit).
+	if s.Status().HeadSHA != initialSHA {
+		t.Errorf("ApplyPending created a spurious commit when CommitsBehind=0")
+	}
+	if s.Status().CommitsBehind != 0 {
+		t.Errorf("CommitsBehind should remain 0 after ApplyPending on up-to-date repo")
+	}
+}
+
+// TestApplyPendingWithAutoApplyEnabled: ApplyPending works even when
+// AutoApplyEnabled=true (it bypasses the flag and applies like SyncNow).
+func TestApplyPendingWithAutoApplyEnabled(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	// Full auto mode (default).
+	s := makeSyncer(t, appsDir, bareDir)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Remote pushes a change.
+	clone2Dir := t.TempDir()
+	if out, err := gitExec(clone2Dir, "clone", "-b", "main", "file://"+bareDir, "."); err != nil {
+		t.Fatalf("clone2 clone: %v\n%s", err, out)
+	}
+	_, _ = gitExec(clone2Dir, "config", "user.email", "c2@t.local")
+	_, _ = gitExec(clone2Dir, "config", "user.name", "c2")
+	writeFile(t, filepath.Join(clone2Dir, "app1", "docker-compose.yml"), "version: 'ap-auto'\n")
+	_, _ = gitExec(clone2Dir, "add", "-f", "app1/docker-compose.yml")
+	_, _ = gitExec(clone2Dir, "commit", "-m", "remote change")
+	if out, err := gitExec(clone2Dir, "push", "origin", "HEAD:main"); err != nil {
+		t.Fatalf("clone2 push: %v\n%s", err, out)
+	}
+
+	// ApplyPending on full-auto syncer should succeed and apply the change.
+	if err := s.ApplyPending(ctx); err != nil {
+		t.Fatalf("ApplyPending with AutoApplyEnabled=true: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(appsDir, "app1", "docker-compose.yml"))
+	if string(content) != "version: 'ap-auto'\n" {
+		t.Fatalf("expected applied content, got %q", string(content))
 	}
 }
 
