@@ -77,7 +77,7 @@ test.describe('Deploy via Templates', () => {
   test('deploy via Node API + Postgres template propagates backup label', async ({ page }) => {
     // Deploy pulls node:20-alpine + postgres:16-alpine; on slow networks
     // this can exceed 5 min end-to-end, so we give it a generous budget.
-    test.setTimeout(900_000);
+    test.setTimeout(1_200_000);
     const slug = 'e2e-node-tpl';
 
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
@@ -131,7 +131,7 @@ test.describe('Deploy via Templates', () => {
     // in its empty volume by design (Unstable), and on slow CI runners
     // the pull may be slow enough to land in Failed. Bumped timeout to
     // cover slow Docker Hub pulls of node:20-alpine + postgres:16-alpine.
-    await expect(dialog.getByText(/^(Deployed|Unstable|Failed)$/)).toBeVisible({ timeout: 720_000 });
+    await expect(dialog.getByText(/^(Deployed|Unstable|Failed)$/)).toBeVisible({ timeout: 1_080_000 });
 
     // Navigate to the app's Backups tab and confirm it renders.
     await dialog.getByRole('button', { name: 'View App' }).click();
