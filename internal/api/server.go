@@ -338,6 +338,7 @@ func (s *Server) routes() {
 
 	// Git sync
 	s.mux.Handle("GET /api/git/status", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGitStatus))))
+	s.mux.Handle("POST /api/git/sync-now", s.authMiddleware(s.superAdminMiddleware(s.rateLimitMiddleware(http.HandlerFunc(s.handleGitSyncNow)))))
 	s.mux.Handle("POST /api/git/webhook", s.rateLimitMiddleware(http.HandlerFunc(s.handleGitWebhook)))
 }
 

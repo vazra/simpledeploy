@@ -5,6 +5,19 @@ import (
 	"net/http"
 )
 
+func (s *Server) handleGitSyncNow(w http.ResponseWriter, r *http.Request) {
+	if s.gs == nil {
+		http.Error(w, "git sync not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	if err := s.gs.SyncNow(r.Context()); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
 func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 	if s.gs == nil {
 		http.Error(w, "git sync not enabled", http.StatusServiceUnavailable)
