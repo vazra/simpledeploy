@@ -7,6 +7,8 @@ import { Aside } from '@astrojs/starlight/components';
 
 When things go badly wrong, the speed of recovery depends entirely on how you set things up beforehand. This page covers three failure modes, ordered by severity.
 
+SimpleDeploy also mirrors every user-editable setting (users, alert rules, backup configs, registries, webhooks) to YAML sidecar files on disk. A wiped database can be recovered from those files without a prior backup. See [Config sidecars and sidecar-based recovery](/operations/config-sidecars/) for the full procedure.
+
 ## RTO and RPO targets
 
 - **RPO** (recovery point objective) = how much data you can afford to lose. This is driven by *backup frequency*. Hourly backups = ~1h RPO.
