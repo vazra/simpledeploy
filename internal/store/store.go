@@ -143,6 +143,38 @@ func (s *Store) migrate() error {
 	return nil
 }
 
+// WipeConfigForRestore truncates config tables (children first) while leaving
+// historical/operational tables (metrics, deploy_events, etc.) untouched.
+// Intended for DR import --wipe. Disables FK enforcement during delete so the
+// explicit ordering is purely for clarity.
+func (s *Store) WipeConfigForRestore() error {
+	tables := []string{
+		"user_app_access",
+		"api_keys",
+		"users",
+		"alert_rules",
+		"webhooks",
+		"backup_configs",
+		"registries",
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("WipeConfigForRestore: begin tx: %w", err)
+	}
+	for _, t := range tables {
+		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("WipeConfigForRestore: delete %s: %w", t, err)
+		}
+	}
+	// Wipe db_backup_config key-value rows.
+	if _, err := tx.Exec("DELETE FROM db_backup_config"); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("WipeConfigForRestore: delete db_backup_config: %w", err)
+	}
+	return tx.Commit()
+}
+
 func parseVersion(filename string) (int, error) {
 	// expects format: 001_description.sql
 	parts := strings.SplitN(filename, "_", 2)
