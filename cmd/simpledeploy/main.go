@@ -454,15 +454,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if listErr != nil {
 			log.Printf("[configsync] backfill: list apps failed: %v (skipping)", listErr)
 		} else {
-			backfillErr := syncer.WriteGlobal()
-			if backfillErr != nil {
-				log.Printf("[configsync] backfill: write global failed: %v (skipping)", backfillErr)
-			} else {
-				for _, a := range allApps {
-					if werr := syncer.WriteAppSidecar(a.Slug); werr != nil {
-						log.Printf("[configsync] backfill: write sidecar for %s: %v", a.Slug, werr)
-					}
+			allOK := true
+			if backfillErr := syncer.WriteGlobal(); backfillErr != nil {
+				log.Printf("[configsync] backfill: write global failed: %v", backfillErr)
+				allOK = false
+			}
+			for _, a := range allApps {
+				if werr := syncer.WriteAppSidecar(a.Slug); werr != nil {
+					log.Printf("[configsync] backfill: write sidecar for %s: %v", a.Slug, werr)
+					allOK = false
 				}
+			}
+			if allOK {
 				log.Printf("[configsync] first-boot sidecar backfill: wrote %d apps + global", len(allApps))
 				if werr := os.WriteFile(backfillMarker, nil, 0600); werr != nil {
 					log.Printf("[configsync] backfill: write marker failed: %v", werr)
