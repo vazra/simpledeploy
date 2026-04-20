@@ -5,7 +5,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func openHookTestStore(t *testing.T) *Store {
@@ -132,7 +131,6 @@ func TestMutationHook_GlobalEntities(t *testing.T) {
 		t.Fatalf("CreateWebhook: %v", err)
 	}
 	assertLastHook(t, rec, ScopeGlobal, "")
-	before := rec.count()
 
 	// UpdateWebhook
 	w.URL = "http://b.com"
@@ -146,7 +144,6 @@ func TestMutationHook_GlobalEntities(t *testing.T) {
 		t.Fatalf("DeleteWebhook: %v", err)
 	}
 	assertLastHook(t, rec, ScopeGlobal, "")
-	_ = before
 
 	// CreateUser
 	u, err := s.CreateUser("alice", "hash", "admin", "", "")
@@ -377,8 +374,7 @@ func TestMutationHook_GlobalAlertRule(t *testing.T) {
 func TestMutationHook_ConcurrentRace(t *testing.T) {
 	s := openHookTestStore(t)
 	appID := seedApp(t, s, "race-app")
-	whID := seedWebhook(t, s)
-	_ = whID
+	_ = seedWebhook(t, s)
 
 	var count atomic.Int64
 	s.SetMutationHook(func(MutationScope, string) { count.Add(1) })
@@ -444,5 +440,3 @@ func assertLastHook(t *testing.T, rec *recorder, wantScope MutationScope, wantSl
 		t.Fatalf("hook call: got {scope=%d slug=%q}, want {scope=%d slug=%q}", c.scope, c.slug, wantScope, wantSlug)
 	}
 }
-
-var _ = time.Now // ensure time import used (not actually needed but suppresses lint)

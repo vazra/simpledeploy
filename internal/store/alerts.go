@@ -283,7 +283,10 @@ func (s *Store) UpdateAlertRule(r *AlertRule) error {
 func (s *Store) DeleteAlertRule(id int64) error {
 	// Fetch rule before delete to know scope for hook.
 	row := s.db.QueryRow(`SELECT id, app_id, metric, operator, threshold, duration_sec, webhook_id, enabled, created_at FROM alert_rules WHERE id = ?`, id)
-	rule, _ := scanAlertRule(row)
+	rule, err := scanAlertRule(row)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("scan alert rule: %w", err)
+	}
 
 	_ = s.ResolveAlertsByRule(id)
 	res, err := s.db.Exec(`DELETE FROM alert_rules WHERE id = ?`, id)

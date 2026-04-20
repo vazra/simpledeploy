@@ -49,7 +49,11 @@ func (s *Store) fireHook(scope MutationScope, slug string) {
 // fireAppHook resolves slug from app ID and fires ScopeApp. Silent if the lookup fails.
 func (s *Store) fireAppHook(appID int64) {
 	app, err := s.GetAppByID(appID)
-	if err != nil || app == nil {
+	if err != nil {
+		log.Printf("[store] fireAppHook: app lookup id=%d failed: %v", appID, err)
+		return
+	}
+	if app == nil {
 		return
 	}
 	s.fireHook(ScopeApp, app.Slug)
