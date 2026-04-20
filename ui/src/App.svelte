@@ -11,6 +11,7 @@
   import Docker from './routes/Docker.svelte'
   import System from './routes/System.svelte'
   import Profile from './routes/Profile.svelte'
+  import GitSync from './routes/GitSync.svelte'
 
   const routes = {
     '/login': Login,
@@ -23,6 +24,7 @@
     '/docker': Docker,
     '/system': System,
     '/profile': Profile,
+    '/git-sync': GitSync,
   }
 </script>
 

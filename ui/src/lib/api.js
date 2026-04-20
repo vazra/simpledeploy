@@ -252,6 +252,10 @@ export const api = {
   systemSetBackupConfig: (cfg) => request('POST', '/system/backup/config', cfg),
   systemBackupRuns: () => request('GET', '/system/backup/runs'),
 
+  // Git Sync
+  gitStatus: () => request('GET', '/git/status'),
+  gitSyncNow: () => requestWithToast('POST', '/git/sync-now', null, 'Sync triggered'),
+
   // Public host (used by template quick-test mode)
   getPublicHost: () => request('GET', '/system/public-host'),
   setPublicHost: (host) => requestWithToast('PUT', '/system/public-host', { public_host: host }, 'Default host saved'),
