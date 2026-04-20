@@ -214,6 +214,25 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Manage config sidecars (export/import for DR recovery)",
+}
+
+var configExportCmd = &cobra.Command{
+	Use:          "export",
+	Short:        "Write all config sidecars from current DB state",
+	SilenceUsage: true,
+	RunE:         runConfigExport,
+}
+
+var configImportCmd = &cobra.Command{
+	Use:          "import",
+	Short:        "Rebuild DB config from sidecars on disk (DR recovery)",
+	SilenceUsage: true,
+	RunE:         runConfigImport,
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "/etc/simpledeploy/config.yaml", "config file path")
 
@@ -292,7 +311,11 @@ func init() {
 
 	registryCmd.AddCommand(registryAddCmd, registryListCmd, registryRemoveCmd)
 
-	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd, versionCmd, registryCmd)
+	configImportCmd.Flags().Bool("force", false, "allow import even if DB has some state")
+	configImportCmd.Flags().Bool("wipe", false, "truncate config tables before import")
+	configCmd.AddCommand(configExportCmd, configImportCmd)
+
+	rootCmd.AddCommand(serveCmd, initCmd, applyCmd, removeCmd, listCmd, usersCmd, apikeyCmd, backupCmd, restoreCmd, logsCmd, versionCmd, registryCmd, configCmd)
 }
 
 func main() {
@@ -422,6 +445,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 			syncer.ScheduleGlobalWrite()
 		}
 	})
+
+	// First-boot sidecar backfill: write sidecars for all existing DB state
+	// so that upgrades from pre-configsync installs get sidecars on first boot.
+	backfillMarker := filepath.Join(cfg.DataDir, ".configsync_backfill_v1")
+	if _, err := os.Stat(backfillMarker); os.IsNotExist(err) {
+		allApps, listErr := db.ListApps()
+		if listErr != nil {
+			log.Printf("[configsync] backfill: list apps failed: %v (skipping)", listErr)
+		} else {
+			backfillErr := syncer.WriteGlobal()
+			if backfillErr != nil {
+				log.Printf("[configsync] backfill: write global failed: %v (skipping)", backfillErr)
+			} else {
+				for _, a := range allApps {
+					if werr := syncer.WriteAppSidecar(a.Slug); werr != nil {
+						log.Printf("[configsync] backfill: write sidecar for %s: %v", a.Slug, werr)
+					}
+				}
+				log.Printf("[configsync] first-boot sidecar backfill: wrote %d apps + global", len(allApps))
+				if werr := os.WriteFile(backfillMarker, nil, 0600); werr != nil {
+					log.Printf("[configsync] backfill: write marker failed: %v", werr)
+				}
+			}
+		}
+	}
 
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg, syncer)
 	rec.SetDockerClient(dc)
@@ -1443,6 +1491,118 @@ func runRegistryList(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("%-20s %-40s user=%-15s id=%s\n", r.Name, r.URL, username, r.ID)
 	}
+	return nil
+}
+
+func runConfigExport(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	syncer := configsync.New(db, cfg.AppsDir, cfg.DataDir)
+	defer syncer.Close()
+
+	if err := syncer.WriteGlobal(); err != nil {
+		return fmt.Errorf("write global sidecar: %w", err)
+	}
+
+	apps, err := db.ListApps()
+	if err != nil {
+		return fmt.Errorf("list apps: %w", err)
+	}
+	for _, a := range apps {
+		if err := syncer.WriteAppSidecar(a.Slug); err != nil {
+			return fmt.Errorf("write sidecar for %s: %w", a.Slug, err)
+		}
+	}
+
+	log.Printf("exported global + %d apps to sidecars", len(apps))
+	return nil
+}
+
+func runConfigImport(cmd *cobra.Command, args []string) error {
+	force, _ := cmd.Flags().GetBool("force")
+	wipe, _ := cmd.Flags().GetBool("wipe")
+
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	db, err := store.Open(filepath.Join(cfg.DataDir, "simpledeploy.db"))
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
+
+	count, err := db.UserCount()
+	if err != nil {
+		return fmt.Errorf("check users: %w", err)
+	}
+
+	if count > 0 && !force {
+		return fmt.Errorf("DB is not empty (%d users); pass --force to proceed", count)
+	}
+	if count > 0 && force && !wipe {
+		return fmt.Errorf("DB is not empty; pass --wipe to clear config tables first")
+	}
+
+	if wipe {
+		if err := db.WipeConfigForRestore(); err != nil {
+			return fmt.Errorf("wipe config tables: %w", err)
+		}
+		log.Printf("config tables wiped")
+	}
+
+	syncer := configsync.New(db, cfg.AppsDir, cfg.DataDir)
+	defer syncer.Close()
+
+	// Import global sidecar.
+	gdata, err := syncer.ReadGlobal()
+	if err != nil {
+		return fmt.Errorf("read global sidecar: %w", err)
+	}
+	if gdata != nil {
+		if err := syncer.ImportGlobal(gdata); err != nil {
+			return fmt.Errorf("import global: %w", err)
+		}
+		log.Printf("imported global sidecar")
+	} else {
+		log.Printf("no global sidecar found, skipping")
+	}
+
+	// Import per-app sidecars.
+	entries, err := os.ReadDir(cfg.AppsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read apps dir: %w", err)
+	}
+	appCount := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		slug := e.Name()
+		data, err := syncer.ReadAppSidecar(slug)
+		if err != nil {
+			log.Printf("read sidecar for %s: %v (skipping)", slug, err)
+			continue
+		}
+		if data == nil {
+			continue
+		}
+		if err := syncer.ImportAppSidecar(data); err != nil {
+			log.Printf("import sidecar for %s: %v (skipping)", slug, err)
+			continue
+		}
+		appCount++
+	}
+
+	log.Printf("config import complete: %d app sidecars imported", appCount)
 	return nil
 }
 
