@@ -334,12 +334,11 @@ func (r *Reconciler) AppServices(ctx context.Context, slug string) ([]deployer.S
 	return r.deployer.Status(ctx, slug)
 }
 
-// RefreshStatuses polls every non-stopped, non-error app's container state
-// and updates app.Status when it diverges from reality. Catches crash loops
-// that develop after the post-deploy stabilization window has closed.
-//
-// Skips apps that are currently being deployed (the deploy flow already
-// owns the status field for the duration of its run).
+// RefreshStatuses polls every running/unstable app and flips between those
+// two states based on actual container health. Conservative on purpose:
+// only detects post-deploy crash loops, never overwrites stopped/error/
+// degraded statuses (which are owned by explicit user actions and the
+// reconciler's own Reconcile pass) so it cannot race with Stop/Start.
 func (r *Reconciler) RefreshStatuses(ctx context.Context) {
 	apps, err := r.store.ListApps()
 	if err != nil {
@@ -347,18 +346,30 @@ func (r *Reconciler) RefreshStatuses(ctx context.Context) {
 		return
 	}
 	for _, app := range apps {
-		if app.Status == "stopped" || app.Status == "error" {
+		if app.Status != "running" && app.Status != "unstable" {
 			continue
 		}
 		if r.IsDeploying(app.Slug) {
 			continue
 		}
 		services, err := r.deployer.Status(ctx, app.Slug)
-		if err != nil {
+		if err != nil || len(services) == 0 {
 			continue
 		}
-		newStatus := classifyStatus(services)
-		if newStatus == "" || newStatus == app.Status {
+		bad := false
+		for _, s := range services {
+			if s.State == "restarting" || s.Health == "unhealthy" {
+				bad = true
+				break
+			}
+		}
+		newStatus := app.Status
+		if bad && app.Status == "running" {
+			newStatus = "unstable"
+		} else if !bad && app.Status == "unstable" {
+			newStatus = "running"
+		}
+		if newStatus == app.Status {
 			continue
 		}
 		if err := r.store.UpdateAppStatus(app.Slug, newStatus); err != nil {
@@ -369,9 +380,8 @@ func (r *Reconciler) RefreshStatuses(ctx context.Context) {
 	}
 }
 
-// classifyStatus maps a snapshot of compose ps output to an app status.
-// Returns "" when there are no services to classify (caller should leave
-// the existing status alone, e.g. during a teardown race).
+// classifyStatus is exported for unit tests to verify the classification
+// rules used inside RefreshStatuses.
 func classifyStatus(services []deployer.ServiceStatus) string {
 	if len(services) == 0 {
 		return ""

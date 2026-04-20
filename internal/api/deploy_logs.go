@@ -16,9 +16,13 @@ func (s *Server) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+	// Generous read deadline: a deploy can include slow image pulls plus
+	// a 30s stabilization window. Browsers do not auto-ping, so any
+	// shorter deadline drops the connection mid-deploy and the wizard
+	// never receives the "done" event.
+	conn.SetReadDeadline(time.Now().Add(20 * time.Minute))
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
+		conn.SetReadDeadline(time.Now().Add(20 * time.Minute))
 		return nil
 	})
 
