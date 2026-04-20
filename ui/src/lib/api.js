@@ -26,8 +26,18 @@ async function baseRequest(method, path, body, responseMode) {
     }
     if (!res.ok) {
       const text = await res.text()
-      const error = text || `HTTP ${res.status}`
-      return { data: null, error, status: res.status }
+      let data = null
+      let error = text || `HTTP ${res.status}`
+      const ct = res.headers.get('content-type')
+      if (ct && ct.includes('application/json') && text) {
+        try {
+          data = JSON.parse(text)
+          if (data && typeof data === 'object' && typeof data.error === 'string') {
+            error = data.error
+          }
+        } catch { /* fall back to text */ }
+      }
+      return { data, error, status: res.status }
     }
     let data
     if (responseMode === 'text') {
@@ -87,7 +97,7 @@ export const api = {
   listApps: () => request('GET', '/apps'),
   getApp: (slug) => request('GET', `/apps/${slug}`),
   removeApp: (slug) => requestWithToast('DELETE', `/apps/${slug}`, null, 'App removed'),
-  deploy: (name, compose, force = false) => request('POST', '/apps/deploy', { name, compose, force }),
+  deploy: (name, compose, source = 'manual') => request('POST', '/apps/deploy', { name, compose, source }),
   getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
   restartApp: (slug) => request('POST', `/apps/${slug}/restart`),

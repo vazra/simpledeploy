@@ -17,10 +17,44 @@
   let startView = $state('chooser')
 
   let existingAppNames = $state([])
+  let appsFetched = $state(false)
+
+  // Reset internal state when wizard transitions from closed to open.
+  // Without this, reopening after a successful deploy (View App flow calls
+  // onComplete but not onclose/resetWizard) leaves step=3 and stale state.
+  let wasOpen = false
+  $effect(() => {
+    if (open && !wasOpen) {
+      step = 0
+      startView = 'chooser'
+      appName = ''
+      nameError = ''
+      editorMode = 'visual'
+      compose = { services: { web: { image: '' } } }
+      composeText = ''
+      composeValid = false
+      composeErrors = []
+      visualErrors = {}
+      source = 'manual'
+      nameTakenOpen = false
+      nameTakenSuggestion = ''
+      nameTakenError = ''
+      nameTakenOriginal = ''
+      deployStatus = 'deploying'
+      deployLines = []
+      currentAction = ''
+      deployServices = []
+      confirmClose = false
+      existingAppNames = []
+      appsFetched = false
+    }
+    wasOpen = open
+  })
 
   // Fetch existing app names when wizard opens (for suggestName dedup).
   $effect(() => {
-    if (open && existingAppNames.length === 0) {
+    if (open && !appsFetched) {
+      appsFetched = true
       api.listApps().then((res) => {
         if (!res.error && Array.isArray(res.data)) {
           existingAppNames = res.data.map((a) => a.name).filter(Boolean)
@@ -37,6 +71,7 @@
     appName = suggestName(template.nameSuggestion, existingAppNames)
     nameError = ''
     editorMode = 'visual'
+    source = 'template'
     scheduleValidation(composeText)
     step = 1
   }
@@ -45,6 +80,7 @@
     compose = { services: { web: { image: '' } } }
     composeText = ''
     editorMode = 'visual'
+    source = 'manual'
     step = 1
   }
 
@@ -63,6 +99,7 @@
         compose = yaml.load(text) || { services: {} }
       } catch { compose = { services: {} } }
       editorMode = 'yaml'
+      source = 'manual'
       scheduleValidation(text)
       step = 1
     }
@@ -247,10 +284,16 @@
   let currentAction = $state('')
   let deployWs = $state(null)
   let logContainer = $state(null)
-  let confirmOverwrite = $state(false)
   let deployServices = $state([]) // per-service stabilization detail (from done event)
+  let source = $state('manual')
 
-  async function startDeploy(force = false) {
+  // Name-taken modal (template flow with suggested_name)
+  let nameTakenOpen = $state(false)
+  let nameTakenSuggestion = $state('')
+  let nameTakenError = $state('')
+  let nameTakenOriginal = $state('')
+
+  async function startDeploy() {
     step = 3
     deployStatus = 'deploying'
     deployLines = []
@@ -262,13 +305,22 @@
     }
 
     const encoded = encodeBase64(composeText)
-    const res = await api.deploy(appName.trim(), encoded, force)
+    const res = await api.deploy(appName.trim(), encoded, source)
 
     if (res.status === 409) {
-      // App already exists, ask for confirmation
+      // Name collision. Stay on step 2, clear deploying state.
       deployStatus = 'deploying'
       step = 2
-      confirmOverwrite = true
+      const suggested = res.data?.suggested_name
+      if (source === 'template' && suggested) {
+        nameTakenOriginal = appName.trim()
+        nameTakenSuggestion = suggested
+        nameTakenError = ''
+        nameTakenOpen = true
+      } else {
+        nameError = res.error || 'An app with this name already exists. Delete it first, or pick a different name.'
+        step = 1
+      }
       return
     }
 
@@ -333,6 +385,7 @@
     deployLines = []
     currentAction = ''
     existingAppNames = []
+    appsFetched = false
   }
 
   let confirmClose = $state(false)
@@ -701,8 +754,8 @@
     {#if step === 1 || step === 2}
       <div class="flex justify-between px-6 py-4 border-t border-border/50 shrink-0">
         {#if step === 2}
-          <Button variant="secondary" size="sm" onclick={() => { step = 1; confirmOverwrite = false }}>Back</Button>
-          <Button size="sm" onclick={() => startDeploy(false)}>Deploy</Button>
+          <Button variant="secondary" size="sm" onclick={() => { step = 1 }}>Back</Button>
+          <Button size="sm" onclick={() => startDeploy()}>Deploy</Button>
         {:else}
           <Button variant="secondary" size="sm" onclick={() => step = 0}>Back</Button>
           <Button size="sm" disabled={!canProceed} onclick={enterStep2}>Next</Button>
@@ -713,16 +766,34 @@
 </div>
 {/if}
 
-<!-- Overwrite confirmation -->
-{#if confirmOverwrite}
-  <div class="fixed inset-0 z-50 flex items-center justify-center">
-    <button class="absolute inset-0 bg-black/40" onclick={() => confirmOverwrite = false} aria-label="Cancel"></button>
-    <div class="relative bg-surface-2 border border-border/50 rounded-xl p-6 max-w-sm shadow-2xl">
-      <p class="text-sm text-text-primary mb-1 font-medium">App already exists</p>
-      <p class="text-xs text-text-muted mb-4">"{appName}" is already deployed. This will update the existing app with your new configuration.</p>
-      <div class="flex gap-2 justify-end">
-        <Button size="sm" variant="secondary" onclick={() => confirmOverwrite = false}>Cancel</Button>
-        <Button size="sm" variant="danger" onclick={() => { confirmOverwrite = false; startDeploy(true) }}>Redeploy</Button>
+<!-- Name already taken (template flow) -->
+{#if nameTakenOpen}
+  <div class="fixed inset-0 z-50 flex items-center justify-center" data-testid="name-taken-modal">
+    <button class="absolute inset-0 bg-black/40" onclick={() => nameTakenOpen = false} aria-label="Cancel"></button>
+    <div class="relative bg-surface-2 border border-border/50 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+      <p class="text-sm text-text-primary mb-1 font-medium">Name already taken</p>
+      <p class="text-xs text-text-muted mb-3">"{nameTakenOriginal}" is already in use. Pick a different name to deploy this template.</p>
+      <label class="block text-xs font-medium text-text-primary mb-1.5">App name</label>
+      <input
+        data-testid="name-taken-input"
+        value={nameTakenSuggestion}
+        oninput={(e) => { nameTakenSuggestion = e.currentTarget.value; nameTakenError = '' }}
+        class="w-full px-3 py-2 bg-input-bg border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 {nameTakenError ? 'border-danger/50' : 'border-border/50'}"
+      />
+      {#if nameTakenError}
+        <p class="text-xs text-danger mt-1">{nameTakenError}</p>
+      {/if}
+      <div class="flex gap-2 justify-end mt-4">
+        <Button size="sm" variant="secondary" onclick={() => { nameTakenOpen = false; step = 1 }}>Cancel</Button>
+        <Button size="sm" onclick={() => {
+          const candidate = nameTakenSuggestion.trim()
+          const err = validateName(candidate)
+          if (err) { nameTakenError = err; return }
+          appName = candidate
+          nameError = ''
+          nameTakenOpen = false
+          startDeploy()
+        }}>Deploy</Button>
       </div>
     </div>
   </div>

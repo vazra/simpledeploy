@@ -11,6 +11,8 @@ import {
   dockerExec,
 } from '../helpers/docker.js';
 import { fetchViaProxy } from '../helpers/proxy.js';
+import { apiRequest, apiLogin } from '../helpers/api.js';
+import { TEST_ADMIN } from '../helpers/auth.js';
 
 const FIXTURES = join(import.meta.dirname, '..', 'fixtures');
 
@@ -76,10 +78,77 @@ test.describe('Deploy Apps', () => {
     await expect(dialog.getByText(/failed|error|invalid/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('redeploy existing app succeeds (update)', async ({ page }) => {
+  test('deploying same template twice auto-suggests name-2', async ({ page }) => {
     const state = getState();
     await page.goto(`${state.baseURL}/#/`);
-    const compose = readFixture('compose-nginx.yml');
+
+    // First deploy: pick nginx-static template, name it collide-tpl.
+    await page.getByRole('button', { name: 'Deploy App' }).first().click();
+    let dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: /browse templates/i }).click();
+    await dialog.getByRole('button', { name: /use template nginx static site/i }).click();
+    // On vars step: default access mode is quick-test with prefilled host. Apply.
+    await dialog.getByRole('button', { name: /apply/i }).click();
+    // Step 1: set app name.
+    const nameInput = dialog.getByPlaceholder('my-app');
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill('collide-tpl');
+    await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    await dialog.getByRole('button', { name: 'Deploy' }).click();
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
+    // Close wizard via View App (matches the deployApp helper).
+    const viewApp = dialog.getByRole('button', { name: 'View App' });
+    if (await viewApp.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await viewApp.click();
+    } else {
+      await page.keyboard.press('Escape');
+    }
+    await expect(dialog).toBeHidden({ timeout: 10_000 });
+    await page.goto(`${state.baseURL}/#/`);
+
+    // Second deploy: same template, same name -> expect name-taken modal.
+    await page.getByRole('button', { name: 'Deploy App' }).first().click();
+    dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: /browse templates/i }).click();
+    await dialog.getByRole('button', { name: /use template nginx static site/i }).click();
+    await dialog.getByRole('button', { name: /apply/i }).click();
+    const nameInput2 = dialog.getByPlaceholder('my-app');
+    await nameInput2.fill('collide-tpl');
+    await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    await dialog.getByRole('button', { name: 'Deploy' }).click();
+
+    // Expect the name-taken modal with pre-filled suggestion "collide-tpl-2".
+    const modal = page.getByTestId('name-taken-modal');
+    await expect(modal).toBeVisible({ timeout: 15_000 });
+    const suggestionInput = page.getByTestId('name-taken-input');
+    await expect(suggestionInput).toHaveValue('collide-tpl-2');
+    await modal.getByRole('button', { name: 'Deploy' }).click();
+
+    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
+
+    // Both apps should exist.
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    const list = await apiRequest('GET', '/api/apps');
+    const names = (list.data || []).map((a) => a.Name || a.name);
+    expect(names).toContain('collide-tpl');
+    expect(names).toContain('collide-tpl-2');
+  });
+
+  test('manual deploy with existing name shows inline error and does not overwrite', async ({ page }) => {
+    const state = getState();
+    await page.goto(`${state.baseURL}/#/`);
+
+    // Capture existing compose hash for e2e-nginx before the attempt.
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    const before = await apiRequest('GET', '/api/apps/e2e-nginx');
+    expect(before.ok).toBe(true);
+    const beforeHash = before.data && (before.data.ComposeHash || before.data.compose_hash);
+
+    // Attempt a manual deploy reusing e2e-nginx name with a different compose.
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -87,13 +156,23 @@ test.describe('Deploy Apps', () => {
     await dialog.getByPlaceholder('my-app').fill('e2e-nginx');
     await dialog.getByRole('button', { name: 'YAML' }).click();
     const editor = dialog.locator('textarea').last();
-    await editor.fill(compose);
+    // A valid but different compose (distinct image tag) so hash would change if it overwrote.
+    await editor.fill(
+      "services:\n  web:\n    image: nginx:1.25-alpine\n    ports:\n      - '8080:80'\n"
+    );
     await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
-    // App already exists -> confirmation dialog; click Redeploy to overwrite.
-    await page.getByRole('button', { name: 'Redeploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
+
+    // Expect inline name error on step 1 (no overwrite path in manual source).
+    await expect(dialog.getByText(/already exists/i).first()).toBeVisible({ timeout: 10_000 });
+    // No template suggestion modal should appear for manual source.
+    await expect(page.getByTestId('name-taken-modal')).toHaveCount(0);
+
+    // Verify the original e2e-nginx compose hash is unchanged.
+    const after = await apiRequest('GET', '/api/apps/e2e-nginx');
+    const afterHash = after.data && (after.data.ComposeHash || after.data.compose_hash);
+    expect(afterHash).toBe(beforeHash);
   });
 });
 

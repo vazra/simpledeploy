@@ -173,15 +173,14 @@ func TestRemoveAppEndpoint(t *testing.T) {
 	}
 }
 
-func TestDeployConflictExistingApp(t *testing.T) {
+func TestDeployConflictManualNoSuggestion(t *testing.T) {
 	srv, _ := newDeployTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
 
-	// Insert an app into the store so it already exists
 	srv.store.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", Status: "running"}, nil)
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("services:\n  web:\n    image: nginx\n"))
-	body, _ := json.Marshal(map[string]string{"name": "myapp", "compose": encoded})
+	body, _ := json.Marshal(map[string]string{"name": "myapp", "compose": encoded, "source": "manual"})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/deploy", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -192,16 +191,73 @@ func TestDeployConflictExistingApp(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
 	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if _, ok := resp["suggested_name"]; ok {
+		t.Errorf("manual conflict must not return suggested_name, got %q", resp["suggested_name"])
+	}
+	if resp["error"] == "" {
+		t.Errorf("expected error message, got empty")
+	}
 }
 
-func TestDeployForceOverwriteExistingApp(t *testing.T) {
+func TestDeployConflictTemplateSuggestsName2(t *testing.T) {
 	srv, _ := newDeployTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
 
 	srv.store.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", Status: "running"}, nil)
 
 	encoded := base64.StdEncoding.EncodeToString([]byte("services:\n  web:\n    image: nginx\n"))
-	body, _ := json.Marshal(map[string]any{"name": "myapp", "compose": encoded, "force": true})
+	body, _ := json.Marshal(map[string]string{"name": "myapp", "compose": encoded, "source": "template"})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/deploy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["suggested_name"] != "myapp-2" {
+		t.Errorf("suggested_name = %q, want myapp-2", resp["suggested_name"])
+	}
+}
+
+func TestDeployConflictTemplateSkipsTakenCandidate(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	srv.store.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", Status: "running"}, nil)
+	srv.store.UpsertApp(&store.App{Name: "myapp-2", Slug: "myapp-2", Status: "running"}, nil)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("services:\n  web:\n    image: nginx\n"))
+	body, _ := json.Marshal(map[string]string{"name": "myapp", "compose": encoded, "source": "template"})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/deploy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["suggested_name"] != "myapp-3" {
+		t.Errorf("suggested_name = %q, want myapp-3", resp["suggested_name"])
+	}
+}
+
+func TestDeployFreshNameProceeds(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	encoded := base64.StdEncoding.EncodeToString([]byte("services:\n  web:\n    image: nginx\n"))
+	body, _ := json.Marshal(map[string]string{"name": "brandnew", "compose": encoded, "source": "template"})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/deploy", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

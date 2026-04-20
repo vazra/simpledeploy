@@ -46,7 +46,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name    string `json:"name"`
 		Compose string `json:"compose"`
-		Force   bool   `json:"force"`
+		Source  string `json:"source"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -61,13 +61,37 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if app already exists
-	if !body.Force && s.store != nil {
+	// Collision handling: never clobber an existing app.
+	// Manual flow: reject and ask user to delete first.
+	// Template flow: suggest a free candidate name (foo-2..foo-50).
+	if s.store != nil {
 		if _, err := s.store.GetAppBySlug(body.Name); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
+			if body.Source == "template" {
+				suggested := ""
+				for i := 2; i <= 50; i++ {
+					candidate := fmt.Sprintf("%s-%d", body.Name, i)
+					if _, err := s.store.GetAppBySlug(candidate); err == nil {
+						continue
+					}
+					if _, statErr := os.Stat(filepath.Join(s.appsDir, candidate)); !os.IsNotExist(statErr) {
+						continue
+					}
+					suggested = candidate
+					break
+				}
+				resp := map[string]string{
+					"error": fmt.Sprintf("app %q already exists", body.Name),
+				}
+				if suggested != "" {
+					resp["suggested_name"] = suggested
+				}
+				json.NewEncoder(w).Encode(resp)
+				return
+			}
 			json.NewEncoder(w).Encode(map[string]string{
-				"error": fmt.Sprintf("app %q already exists", body.Name),
+				"error": fmt.Sprintf("app %q already exists. Delete it before reusing the name.", body.Name),
 			})
 			return
 		}
