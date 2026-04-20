@@ -21,6 +21,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployment"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/gitsync"
 	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -62,6 +63,7 @@ type Server struct {
 	cfg                 *config.Config
 	cfgPath             string
 	deploymentMode      deployment.Mode
+	gs                  *gitsync.Syncer
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
@@ -123,6 +125,16 @@ func (s *Server) SetConfig(cfg *config.Config, path string) {
 
 // SetDocker sets the docker client.
 func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
+
+// SetGitSync sets the gitsync.Syncer (nil disables git endpoints).
+func (s *Server) SetGitSync(gs *gitsync.Syncer) { s.gs = gs }
+
+// EnqueueGitCommit enqueues a commit for paths if gitsync is enabled. No-op when nil.
+func (s *Server) EnqueueGitCommit(paths []string, reason string) {
+	if s.gs != nil {
+		s.gs.EnqueueCommit(paths, reason)
+	}
+}
 
 // SetUIFS serves the embedded SPA with fallback to index.html.
 func (s *Server) SetUIFS(fsys fs.FS) {
@@ -323,6 +335,10 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/registries", s.authMiddleware(http.HandlerFunc(s.handleCreateRegistry)))
 	s.mux.Handle("PUT /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateRegistry)))
 	s.mux.Handle("DELETE /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteRegistry)))
+
+	// Git sync
+	s.mux.Handle("GET /api/git/status", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGitStatus))))
+	s.mux.Handle("POST /api/git/webhook", s.rateLimitMiddleware(http.HandlerFunc(s.handleGitWebhook)))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

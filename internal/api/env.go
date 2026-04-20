@@ -102,6 +102,7 @@ func (s *Server) handlePutEnv(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to write .env", http.StatusInternalServerError)
 		return
 	}
+	s.EnqueueGitCommit([]string{envPath}, "env:"+slug)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"ok"}`))

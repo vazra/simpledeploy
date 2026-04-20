@@ -117,6 +117,21 @@ func (s *Server) checkAppAccessByID(w http.ResponseWriter, r *http.Request, appI
 	return true
 }
 
+// rateLimitMiddleware applies the server-level rate limiter to a handler.
+// Used for unauthenticated endpoints that should still be rate-limited (e.g. git webhook).
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.rateLimiter != nil {
+			ip := auth.RealIP(r, s.trustedProxies)
+			if !s.rateLimiter.Allow(ip) {
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // superAdminMiddleware requires the caller to have role "super_admin".
 // Use for destructive system-wide operations (vacuum, prune, audit clear).
 func (s *Server) superAdminMiddleware(next http.Handler) http.Handler {

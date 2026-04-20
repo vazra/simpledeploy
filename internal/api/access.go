@@ -54,6 +54,7 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	s.EnqueueGitCommit([]string{app.ComposePath}, "access:"+slug)
 
 	if s.reconciler != nil {
 		go func() { _ = s.reconciler.Reconcile(context.Background()) }()

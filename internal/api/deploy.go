@@ -151,6 +151,8 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.EnqueueGitCommit([]string{composePath}, "deploy:"+body.Name)
+
 	if s.reconciler != nil {
 		go func() {
 			if err := s.reconciler.DeployOne(context.Background(), composePath, body.Name); err != nil {
