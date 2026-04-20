@@ -829,3 +829,247 @@ func TestRoundtripEmptyApp(t *testing.T) {
 		t.Errorf("expected 0 rules, got %d", len(rules))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Redacted global sidecar tests
+// ---------------------------------------------------------------------------
+
+func TestRedactedGlobalRoundtrip(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Seed data with secrets.
+	if _, err := st.CreateUser("alice", "$2a$12$fakehashalice", "super_admin", "Alice Admin", "alice@example.com"); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := st.CreateRegistry("MyReg", "registry.example.com", "enc-user-blob", "enc-pass-blob"); err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	wh := &store.Webhook{Name: "notify-slack", Type: "slack", URL: "https://hooks.slack.com/secret-token"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+
+	if err := syncer.WriteRedactedGlobal(); err != nil {
+		t.Fatalf("WriteRedactedGlobal: %v", err)
+	}
+
+	path := filepath.Join(appsDir, "_global.yml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read _global.yml: %v", err)
+	}
+	content := string(raw)
+
+	// Secrets must NOT appear.
+	if contains(content, "fakehashalice") {
+		t.Error("_global.yml must not contain password hash")
+	}
+	if contains(content, "enc-user-blob") {
+		t.Error("_global.yml must not contain username_enc")
+	}
+	if contains(content, "enc-pass-blob") {
+		t.Error("_global.yml must not contain password_enc")
+	}
+	if contains(content, "secret-token") {
+		t.Error("_global.yml must not contain webhook URL secret")
+	}
+
+	// Non-secret fields must be present.
+	data, err := syncer.ReadRedactedGlobal()
+	if err != nil {
+		t.Fatalf("ReadRedactedGlobal: %v", err)
+	}
+	if data == nil {
+		t.Fatal("expected non-nil RedactedGlobalSidecar")
+	}
+	if len(data.Users) != 1 || data.Users[0].Username != "alice" || data.Users[0].Role != "super_admin" {
+		t.Errorf("unexpected users: %+v", data.Users)
+	}
+	if len(data.Registries) != 1 || data.Registries[0].URL != "registry.example.com" {
+		t.Errorf("unexpected registries: %+v", data.Registries)
+	}
+	if len(data.Webhooks) != 1 || data.Webhooks[0].Name != "notify-slack" || data.Webhooks[0].Type != "slack" {
+		t.Errorf("unexpected webhooks: %+v", data.Webhooks)
+	}
+}
+
+func TestImportRedactedPreservesSecrets(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	origHash := "$2a$12$originalHashForBob"
+	if _, err := st.CreateUser("bob", origHash, "admin", "Bob", "bob@example.com"); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	reg, err := st.CreateRegistry("BobReg", "reg.example.com", "orig-user-enc", "orig-pass-enc")
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	wh := &store.Webhook{Name: "bob-hook", Type: "slack", URL: "https://real-url.example.com/webhook"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+
+	// Write redacted file (captures current state).
+	if err := syncer.WriteRedactedGlobal(); err != nil {
+		t.Fatalf("WriteRedactedGlobal: %v", err)
+	}
+	data, err := syncer.ReadRedactedGlobal()
+	if err != nil {
+		t.Fatalf("ReadRedactedGlobal: %v", err)
+	}
+
+	// Modify non-secret fields in the redacted data (simulate edit).
+	data.Users[0].DisplayName = "Robert"
+	data.Webhooks[0].Type = "discord"
+
+	// Import – must NOT overwrite secrets.
+	if err := syncer.ImportRedactedGlobal(data); err != nil {
+		t.Fatalf("ImportRedactedGlobal: %v", err)
+	}
+
+	// Assert password_hash preserved.
+	u, err := st.GetUserByUsername("bob")
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	if u.PasswordHash != origHash {
+		t.Errorf("password_hash changed: want %q got %q", origHash, u.PasswordHash)
+	}
+	if u.DisplayName != "Robert" {
+		t.Errorf("display_name not updated: %q", u.DisplayName)
+	}
+
+	// Assert registry encrypted creds preserved.
+	r, err := st.GetRegistry(reg.ID)
+	if err != nil {
+		t.Fatalf("get registry: %v", err)
+	}
+	if r.UsernameEnc != "orig-user-enc" || r.PasswordEnc != "orig-pass-enc" {
+		t.Errorf("registry enc creds changed: %q / %q", r.UsernameEnc, r.PasswordEnc)
+	}
+
+	// Assert webhook URL preserved.
+	got, err := st.GetWebhook(wh.ID)
+	if err != nil {
+		t.Fatalf("get webhook: %v", err)
+	}
+	if got.URL != "https://real-url.example.com/webhook" {
+		t.Errorf("webhook URL changed: %q", got.URL)
+	}
+	if got.Type != "discord" {
+		t.Errorf("webhook type not updated: %q", got.Type)
+	}
+}
+
+func TestImportRedactedCreatesUserWithoutPassword(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	data := &RedactedGlobalSidecar{
+		Version: 1,
+		Users: []RedactedUser{
+			{Username: "newbie", Role: "viewer", DisplayName: "New User"},
+		},
+	}
+	if err := syncer.ImportRedactedGlobal(data); err != nil {
+		t.Fatalf("ImportRedactedGlobal: %v", err)
+	}
+
+	u, err := st.GetUserByUsername("newbie")
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	if u.PasswordHash != "" {
+		t.Errorf("expected empty password_hash for new user, got %q", u.PasswordHash)
+	}
+	// Confirm bcrypt.CompareHashAndPassword("", anything) returns an error (cannot auth).
+	// This is verified by the empty hash: bcrypt treats "" as invalid cost.
+}
+
+func TestImportRedactedNoDeletes(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Pre-existing user not in redacted file.
+	if _, err := st.CreateUser("alice", "$2a$12$hash", "admin", "", ""); err != nil {
+		t.Fatalf("create alice: %v", err)
+	}
+
+	// Redacted file has only "bob".
+	data := &RedactedGlobalSidecar{
+		Version: 1,
+		Users:   []RedactedUser{{Username: "bob", Role: "viewer"}},
+	}
+	if err := syncer.ImportRedactedGlobal(data); err != nil {
+		t.Fatalf("ImportRedactedGlobal: %v", err)
+	}
+
+	// Alice must still exist.
+	if _, err := st.GetUserByUsername("alice"); err != nil {
+		t.Errorf("alice was deleted by import: %v", err)
+	}
+	// Bob must have been created.
+	if _, err := st.GetUserByUsername("bob"); err != nil {
+		t.Errorf("bob was not created: %v", err)
+	}
+}
+
+func TestDebouncedGlobalWritesBothFiles(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+	defer syncer.Close()
+
+	if _, err := st.CreateUser("carol", "$2a$12$hash", "admin", "", ""); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	syncer.ScheduleGlobalWrite()
+
+	// Wait for debounce to fire (500ms + buffer).
+	time.Sleep(700 * time.Millisecond)
+
+	secretPath := filepath.Join(dataDir, "config.yml")
+	redactedPath := filepath.Join(appsDir, "_global.yml")
+
+	if _, err := os.Stat(secretPath); err != nil {
+		t.Errorf("config.yml missing: %v", err)
+	}
+	if _, err := os.Stat(redactedPath); err != nil {
+		t.Errorf("_global.yml missing: %v", err)
+	}
+
+	// Verify _global.yml does NOT contain the hash.
+	raw, err := os.ReadFile(redactedPath)
+	if err != nil {
+		t.Fatalf("read _global.yml: %v", err)
+	}
+	if contains(string(raw), "$2a$12$hash") {
+		t.Error("_global.yml must not contain password_hash")
+	}
+}
+
+// contains is a simple substring check.
+func contains(s, sub string) bool {
+	return len(sub) > 0 && len(s) >= len(sub) && (s == sub || len(s) > 0 && stringContains(s, sub))
+}
+
+func stringContains(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
