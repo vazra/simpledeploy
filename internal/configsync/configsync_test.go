@@ -1490,3 +1490,88 @@ func stringContains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestDeleteAppSidecar(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Seed app and write sidecar.
+	app := &store.App{Name: "Delete Me", Slug: "deleteme", ComposePath: "/apps/deleteme/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+	if err := syncer.WriteAppSidecar("deleteme"); err != nil {
+		t.Fatalf("WriteAppSidecar: %v", err)
+	}
+	sidecarPath := filepath.Join(appsDir, "deleteme", appSidecarName)
+	if _, err := os.Stat(sidecarPath); err != nil {
+		t.Fatalf("sidecar should exist: %v", err)
+	}
+
+	// Delete it.
+	if err := syncer.DeleteAppSidecar("deleteme"); err != nil {
+		t.Fatalf("DeleteAppSidecar: %v", err)
+	}
+	if _, err := os.Stat(sidecarPath); !os.IsNotExist(err) {
+		t.Fatal("sidecar should be gone after DeleteAppSidecar")
+	}
+
+	// Idempotent: calling again on missing file must not error.
+	if err := syncer.DeleteAppSidecar("deleteme"); err != nil {
+		t.Fatalf("DeleteAppSidecar on missing file: %v", err)
+	}
+}
+
+func TestPruneOrphanSidecars(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Seed one live app.
+	alive := &store.App{Name: "Alive", Slug: "alive", ComposePath: "/apps/alive/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(alive, nil); err != nil {
+		t.Fatalf("upsert alive: %v", err)
+	}
+	if err := syncer.WriteAppSidecar("alive"); err != nil {
+		t.Fatalf("WriteAppSidecar alive: %v", err)
+	}
+
+	// Create orphan sidecars on disk (no matching DB rows).
+	for _, ghost := range []string{"ghost1", "ghost2"} {
+		dir := filepath.Join(appsDir, ghost)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatalf("mkdir %s: %v", ghost, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, appSidecarName), []byte("version: 1\n"), 0600); err != nil {
+			t.Fatalf("write ghost sidecar %s: %v", ghost, err)
+		}
+	}
+
+	pruned, err := syncer.PruneOrphanSidecars()
+	if err != nil {
+		t.Fatalf("PruneOrphanSidecars: %v", err)
+	}
+
+	// Both ghosts should be pruned.
+	if len(pruned) != 2 {
+		t.Fatalf("expected 2 pruned, got %d: %v", len(pruned), pruned)
+	}
+	for _, ghost := range []string{"ghost1", "ghost2"} {
+		sidecar := filepath.Join(appsDir, ghost, appSidecarName)
+		if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+			t.Errorf("ghost sidecar %s should be gone", ghost)
+		}
+		// Directory should still exist.
+		if _, err := os.Stat(filepath.Join(appsDir, ghost)); err != nil {
+			t.Errorf("ghost dir %s should still exist: %v", ghost, err)
+		}
+	}
+
+	// Alive sidecar must remain.
+	if _, err := os.Stat(filepath.Join(appsDir, "alive", appSidecarName)); err != nil {
+		t.Errorf("alive sidecar should still exist: %v", err)
+	}
+}

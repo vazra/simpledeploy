@@ -172,6 +172,55 @@ func (s *Syncer) schedule(key string, fn func()) {
 	s.timers[key] = self
 }
 
+// DeleteAppSidecar removes {apps_dir}/{slug}/simpledeploy.yml if it exists.
+// Safe to call even if the file or directory is gone. Ignores not-exist errors.
+func (s *Syncer) DeleteAppSidecar(slug string) error {
+	path := filepath.Join(s.appsDir, slug, appSidecarName)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("DeleteAppSidecar %s: %w", slug, err)
+	}
+	return nil
+}
+
+// PruneOrphanSidecars removes per-app sidecar files for slugs not present in the DB.
+// Safe to call on every startup. Returns the list of slugs whose sidecars were removed.
+// Skips hidden dirs and names starting with '_' or '.'.
+func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
+	entries, err := os.ReadDir(s.appsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("PruneOrphanSidecars: readdir %s: %w", s.appsDir, err)
+	}
+
+	var removed []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if len(name) == 0 || name[0] == '.' || name[0] == '_' {
+			continue
+		}
+		sidecar := filepath.Join(s.appsDir, name, appSidecarName)
+		if _, err := os.Stat(sidecar); os.IsNotExist(err) {
+			continue
+		}
+		_, err := s.store.GetAppBySlug(name)
+		if err == nil {
+			// App exists in DB; keep sidecar.
+			continue
+		}
+		// Not in DB; remove sidecar.
+		if err := os.Remove(sidecar); err != nil && !os.IsNotExist(err) {
+			return removed, fmt.Errorf("PruneOrphanSidecars: remove %s: %w", sidecar, err)
+		}
+		removed = append(removed, name)
+	}
+	return removed, nil
+}
+
 // WriteAppSidecar reads the app and its config from the store and writes the sidecar atomically.
 func (s *Syncer) WriteAppSidecar(slug string) error {
 	app, err := s.store.GetAppBySlug(slug)
