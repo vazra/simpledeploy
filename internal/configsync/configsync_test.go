@@ -1060,6 +1060,423 @@ func TestDebouncedGlobalWritesBothFiles(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Idempotency tests
+// ---------------------------------------------------------------------------
+
+// TestImportAppSidecarIdempotent verifies that importing the same app sidecar
+// twice leaves the DB in exactly the same state as after the first import.
+func TestImportAppSidecarIdempotent(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	wh := &store.Webhook{Name: "slack-idem", Type: "slack", URL: "https://hooks.example.com/idem"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+
+	app := &store.App{Name: "IdemApp", Slug: "idemapp", ComposePath: "/apps/idemapp/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+
+	r1 := &store.AlertRule{AppID: &app.ID, Metric: "cpu", Operator: ">", Threshold: 80, DurationSec: 300, WebhookID: wh.ID, Enabled: true}
+	if err := st.CreateAlertRule(r1); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	retDays := 14
+	bc := &store.BackupConfig{
+		AppID: app.ID, Strategy: "postgres", Target: "s3",
+		ScheduleCron: "0 4 * * *", TargetConfigJSON: "enc-blob-idem",
+		RetentionMode: "count", RetentionCount: 5, RetentionDays: &retDays,
+	}
+	if err := st.CreateBackupConfig(bc); err != nil {
+		t.Fatalf("create backup config: %v", err)
+	}
+
+	u, err := st.CreateUser("accessuser", "$2a$10$h", "viewer", "", "")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := st.ReplaceAppAccess(app.ID, []string{u.Username}); err != nil {
+		t.Fatalf("grant access: %v", err)
+	}
+
+	// Write sidecar then clear tables.
+	if err := syncer.WriteAppSidecar("idemapp"); err != nil {
+		t.Fatalf("WriteAppSidecar: %v", err)
+	}
+	if err := st.DeleteAlertRulesForApp(app.ID); err != nil {
+		t.Fatalf("delete rules: %v", err)
+	}
+	if err := st.DeleteBackupConfigsForApp(app.ID); err != nil {
+		t.Fatalf("delete backup configs: %v", err)
+	}
+	if err := st.ReplaceAppAccess(app.ID, nil); err != nil {
+		t.Fatalf("clear access: %v", err)
+	}
+
+	data, err := syncer.ReadAppSidecar("idemapp")
+	if err != nil || data == nil {
+		t.Fatalf("ReadAppSidecar: %v / nil=%v", err, data == nil)
+	}
+
+	// First import.
+	if err := syncer.ImportAppSidecar(data); err != nil {
+		t.Fatalf("ImportAppSidecar first: %v", err)
+	}
+
+	// Capture state after first import.
+	rules1, _ := st.ListAlertRules(&app.ID)
+	cfgs1, _ := st.ListBackupConfigs(&app.ID)
+	access1, _ := st.ListAccessForApp(app.ID)
+
+	// Second import (idempotent).
+	if err := syncer.ImportAppSidecar(data); err != nil {
+		t.Fatalf("ImportAppSidecar second: %v", err)
+	}
+
+	rules2, _ := st.ListAlertRules(&app.ID)
+	cfgs2, _ := st.ListBackupConfigs(&app.ID)
+	access2, _ := st.ListAccessForApp(app.ID)
+
+	if len(rules2) != len(rules1) {
+		t.Errorf("alert rules count changed: first=%d second=%d", len(rules1), len(rules2))
+	}
+	if len(cfgs2) != len(cfgs1) {
+		t.Errorf("backup configs count changed: first=%d second=%d", len(cfgs1), len(cfgs2))
+	}
+	if len(rules1) > 0 && len(rules2) > 0 {
+		if rules1[0].Metric != rules2[0].Metric || rules1[0].Threshold != rules2[0].Threshold {
+			t.Errorf("rule value changed: %+v -> %+v", rules1[0], rules2[0])
+		}
+	}
+	if len(cfgs1) > 0 && len(cfgs2) > 0 {
+		if cfgs1[0].TargetConfigJSON != cfgs2[0].TargetConfigJSON {
+			t.Errorf("target_config_enc changed: %q -> %q", cfgs1[0].TargetConfigJSON, cfgs2[0].TargetConfigJSON)
+		}
+	}
+	if len(access2) != len(access1) {
+		t.Errorf("access count changed: first=%d second=%d", len(access1), len(access2))
+	}
+}
+
+// TestImportGlobalIdempotent verifies that importing the same global sidecar
+// twice leaves the DB in exactly the same state as after the first import.
+func TestImportGlobalIdempotent(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	u, err := st.CreateUser("alice", "$2a$10$fakehash", "admin", "Alice", "alice@example.com")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := st.CreateAPIKey(u.ID, "keyhash-idem", "ci"); err != nil {
+		t.Fatalf("create api key: %v", err)
+	}
+	wh := &store.Webhook{Name: "idem-slack", Type: "slack", URL: "https://hooks.example.com/idem"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+	reg, err := st.CreateRegistry("idemreg", "reg.example.com", "encuser", "encpass")
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	if err := st.SetDBBackupConfig("schedule", "0 3 * * *"); err != nil {
+		t.Fatalf("set db_backup_config: %v", err)
+	}
+
+	if err := syncer.WriteGlobal(); err != nil {
+		t.Fatalf("WriteGlobal: %v", err)
+	}
+	gdata, err := syncer.ReadGlobal()
+	if err != nil || gdata == nil {
+		t.Fatalf("ReadGlobal: %v / nil=%v", err, gdata == nil)
+	}
+
+	// Wipe tables.
+	if err := st.DeleteUser(u.ID); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	if err := st.DeleteWebhook(wh.ID); err != nil {
+		t.Fatalf("delete webhook: %v", err)
+	}
+	if err := st.DeleteRegistry(reg.ID); err != nil {
+		t.Fatalf("delete registry: %v", err)
+	}
+
+	// First import.
+	if err := syncer.ImportGlobal(gdata); err != nil {
+		t.Fatalf("ImportGlobal first: %v", err)
+	}
+
+	users1, _ := st.ListUsers()
+	webhooks1, _ := st.ListWebhooks()
+	regs1, _ := st.ListRegistries()
+	cfg1, _ := st.GetDBBackupConfig()
+
+	// Second import.
+	if err := syncer.ImportGlobal(gdata); err != nil {
+		t.Fatalf("ImportGlobal second: %v", err)
+	}
+
+	users2, _ := st.ListUsers()
+	webhooks2, _ := st.ListWebhooks()
+	regs2, _ := st.ListRegistries()
+	cfg2, _ := st.GetDBBackupConfig()
+
+	if len(users2) != len(users1) {
+		t.Errorf("users count changed: %d -> %d", len(users1), len(users2))
+	}
+	if len(webhooks2) != len(webhooks1) {
+		t.Errorf("webhooks count changed: %d -> %d", len(webhooks1), len(webhooks2))
+	}
+	if len(regs2) != len(regs1) {
+		t.Errorf("registries count changed: %d -> %d", len(regs1), len(regs2))
+	}
+	if cfg1["schedule"] != cfg2["schedule"] {
+		t.Errorf("db_backup_config schedule changed: %q -> %q", cfg1["schedule"], cfg2["schedule"])
+	}
+	if len(users1) > 0 && len(users2) > 0 {
+		if users1[0].Username != users2[0].Username || users1[0].Role != users2[0].Role {
+			t.Errorf("user fields changed: %+v -> %+v", users1[0], users2[0])
+		}
+	}
+}
+
+// TestDBBackupConfigEncRoundtrip verifies that a binary-blob value in
+// db_backup_config survives WriteGlobal -> ReadGlobal -> ImportGlobal
+// byte-for-byte, including non-printable bytes.
+func TestDBBackupConfigEncRoundtrip(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Build a blob with non-printable bytes to stress the YAML codec.
+	blob := "AES256\x00\x01\x02\xFF\xFEbinary\x00data\nwith\nnewlines"
+
+	if err := st.SetDBBackupConfig("target_config_enc", blob); err != nil {
+		t.Fatalf("SetDBBackupConfig target_config_enc: %v", err)
+	}
+	if err := st.SetDBBackupConfig("schedule", "0 3 * * *"); err != nil {
+		t.Fatalf("SetDBBackupConfig schedule: %v", err)
+	}
+	if err := st.SetDBBackupConfig("target", "s3"); err != nil {
+		t.Fatalf("SetDBBackupConfig target: %v", err)
+	}
+
+	if err := syncer.WriteGlobal(); err != nil {
+		t.Fatalf("WriteGlobal: %v", err)
+	}
+
+	gdata, err := syncer.ReadGlobal()
+	if err != nil || gdata == nil {
+		t.Fatalf("ReadGlobal: %v / nil=%v", err, gdata == nil)
+	}
+
+	got := gdata.DBBackupConfig["target_config_enc"]
+	if got != blob {
+		t.Errorf("blob changed after write+read\nwant: %q\ngot:  %q", blob, got)
+	}
+
+	// Wipe and re-import.
+	if err := st.SetDBBackupConfig("target_config_enc", ""); err != nil {
+		t.Fatalf("wipe target_config_enc: %v", err)
+	}
+	if err := st.SetDBBackupConfig("schedule", ""); err != nil {
+		t.Fatalf("wipe schedule: %v", err)
+	}
+	if err := st.SetDBBackupConfig("target", ""); err != nil {
+		t.Fatalf("wipe target: %v", err)
+	}
+
+	if err := syncer.ImportGlobal(gdata); err != nil {
+		t.Fatalf("ImportGlobal: %v", err)
+	}
+
+	cfg, err := st.GetDBBackupConfig()
+	if err != nil {
+		t.Fatalf("GetDBBackupConfig: %v", err)
+	}
+
+	if cfg["target_config_enc"] != blob {
+		t.Errorf("blob changed after import\nwant: %q\ngot:  %q", blob, cfg["target_config_enc"])
+	}
+	if cfg["schedule"] != "0 3 * * *" {
+		t.Errorf("schedule changed: %q", cfg["schedule"])
+	}
+	if cfg["target"] != "s3" {
+		t.Errorf("target changed: %q", cfg["target"])
+	}
+}
+
+// TestConfigExportImportRoundtrip: full export (WriteGlobal + WriteAppSidecar),
+// WipeConfigForRestore, then ImportGlobal + ImportAppSidecar restores everything.
+func TestConfigExportImportRoundtrip(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	// Seed global data.
+	u, err := st.CreateUser("roundtrip-admin", "$2a$10$hash", "super_admin", "Admin", "admin@example.com")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := st.CreateAPIKey(u.ID, "apikeyhash", "mykey"); err != nil {
+		t.Fatalf("create api key: %v", err)
+	}
+	wh := &store.Webhook{Name: "rt-slack", Type: "slack", URL: "https://hooks.example.com/rt"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("create webhook: %v", err)
+	}
+	reg, err := st.CreateRegistry("rtreg", "reg.example.com", "encuser-rt", "encpass-rt")
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	if err := st.SetDBBackupConfig("schedule", "0 5 * * *"); err != nil {
+		t.Fatalf("set db_backup_config: %v", err)
+	}
+
+	// Seed app.
+	app := &store.App{Name: "RT App", Slug: "rtapp", ComposePath: "/apps/rtapp/docker-compose.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+	r1 := &store.AlertRule{AppID: &app.ID, Metric: "cpu", Operator: ">", Threshold: 75, DurationSec: 120, WebhookID: wh.ID, Enabled: true}
+	if err := st.CreateAlertRule(r1); err != nil {
+		t.Fatalf("create alert rule: %v", err)
+	}
+	retDays := 7
+	bc := &store.BackupConfig{
+		AppID: app.ID, Strategy: "volume", Target: "s3",
+		ScheduleCron: "0 2 * * *", TargetConfigJSON: "enc-vol",
+		RetentionMode: "time", RetentionDays: &retDays,
+	}
+	if err := st.CreateBackupConfig(bc); err != nil {
+		t.Fatalf("create backup config: %v", err)
+	}
+	if err := st.ReplaceAppAccess(app.ID, []string{u.Username}); err != nil {
+		t.Fatalf("grant access: %v", err)
+	}
+
+	// Export.
+	if err := syncer.WriteGlobal(); err != nil {
+		t.Fatalf("WriteGlobal: %v", err)
+	}
+	if err := syncer.WriteAppSidecar("rtapp"); err != nil {
+		t.Fatalf("WriteAppSidecar: %v", err)
+	}
+
+	// Wipe config tables (keeps apps/metrics/deploy_events etc.).
+	if err := st.WipeConfigForRestore(); err != nil {
+		t.Fatalf("WipeConfigForRestore: %v", err)
+	}
+
+	// Re-read sidecars from disk.
+	gdata, err := syncer.ReadGlobal()
+	if err != nil || gdata == nil {
+		t.Fatalf("ReadGlobal after wipe: %v / nil=%v", err, gdata == nil)
+	}
+	adata, err := syncer.ReadAppSidecar("rtapp")
+	if err != nil || adata == nil {
+		t.Fatalf("ReadAppSidecar after wipe: %v / nil=%v", err, adata == nil)
+	}
+
+	// Import global first (webhooks must exist before app sidecar import).
+	if err := syncer.ImportGlobal(gdata); err != nil {
+		t.Fatalf("ImportGlobal: %v", err)
+	}
+	if err := syncer.ImportAppSidecar(adata); err != nil {
+		t.Fatalf("ImportAppSidecar: %v", err)
+	}
+
+	// Assert users.
+	users, err := st.ListUsers()
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "roundtrip-admin" || users[0].Role != "super_admin" {
+		t.Errorf("users after roundtrip: %+v", users)
+	}
+	restored, err := st.GetUserByUsername("roundtrip-admin")
+	if err != nil {
+		t.Fatalf("get user: %v", err)
+	}
+	if restored.PasswordHash != "$2a$10$hash" {
+		t.Errorf("password hash mismatch: %q", restored.PasswordHash)
+	}
+
+	// Assert API keys.
+	keys, err := st.ListAPIKeysByUser(restored.ID)
+	if err != nil {
+		t.Fatalf("list api keys: %v", err)
+	}
+	if len(keys) != 1 || keys[0].KeyHash != "apikeyhash" {
+		t.Errorf("api keys after roundtrip: %+v", keys)
+	}
+
+	// Assert webhooks.
+	webhooks, err := st.ListWebhooks()
+	if err != nil {
+		t.Fatalf("list webhooks: %v", err)
+	}
+	if len(webhooks) != 1 || webhooks[0].Name != "rt-slack" {
+		t.Errorf("webhooks after roundtrip: %+v", webhooks)
+	}
+
+	// Assert registries.
+	regs, err := st.ListRegistries()
+	if err != nil {
+		t.Fatalf("list registries: %v", err)
+	}
+	if len(regs) != 1 || regs[0].ID != reg.ID || regs[0].UsernameEnc != "encuser-rt" {
+		t.Errorf("registries after roundtrip: %+v", regs)
+	}
+
+	// Assert db_backup_config.
+	cfg, err := st.GetDBBackupConfig()
+	if err != nil {
+		t.Fatalf("GetDBBackupConfig: %v", err)
+	}
+	if cfg["schedule"] != "0 5 * * *" {
+		t.Errorf("db_backup_config schedule: %q", cfg["schedule"])
+	}
+
+	// Assert alert rules.
+	rules, err := st.ListAlertRules(&app.ID)
+	if err != nil {
+		t.Fatalf("list alert rules: %v", err)
+	}
+	if len(rules) != 1 || rules[0].Metric != "cpu" || rules[0].Threshold != 75 {
+		t.Errorf("alert rules after roundtrip: %+v", rules)
+	}
+
+	// Assert backup configs.
+	cfgs, err := st.ListBackupConfigs(&app.ID)
+	if err != nil {
+		t.Fatalf("list backup configs: %v", err)
+	}
+	if len(cfgs) != 1 || cfgs[0].TargetConfigJSON != "enc-vol" {
+		t.Errorf("backup configs after roundtrip: %+v", cfgs)
+	}
+
+	// Assert access grants.
+	access, err := st.ListAccessForApp(app.ID)
+	if err != nil {
+		t.Fatalf("list access: %v", err)
+	}
+	if len(access) != 1 || access[0] != "roundtrip-admin" {
+		t.Errorf("access after roundtrip: %+v", access)
+	}
+}
+
 // contains is a simple substring check.
 func contains(s, sub string) bool {
 	return len(sub) > 0 && len(s) >= len(sub) && (s == sub || len(s) > 0 && stringContains(s, sub))
