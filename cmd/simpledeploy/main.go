@@ -457,6 +457,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("[configsync] imported global sidecar into empty DB")
 	}
 
+	// Prune sidecar files for apps that no longer exist in the DB (e.g. from
+	// prior delete cycles before this feature existed).
+	if pruned, err := syncer.PruneOrphanSidecars(); err != nil {
+		log.Printf("[configsync] prune orphan sidecars: %v", err)
+	} else if len(pruned) > 0 {
+		log.Printf("[configsync] pruned orphan sidecars for: %v", pruned)
+	}
+
 	// Install mutation hook so future mutations update sidecars.
 	db.SetMutationHook(func(scope store.MutationScope, slug string) {
 		switch scope {
@@ -725,6 +733,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if gitSyncer != nil {
 		srv.SetGitSync(gitSyncer)
 	}
+	srv.SetConfigSync(syncer)
 
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)
