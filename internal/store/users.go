@@ -490,6 +490,27 @@ func (s *Store) UpsertUserByUsername(u *User) error {
 	return nil
 }
 
+// UpdateUserFromRedacted updates display_name, email, and role for an existing user,
+// leaving password_hash untouched. If the user does not exist, creates them with an
+// empty password_hash (they cannot log in until an admin sets a password).
+func (s *Store) UpdateUserFromRedacted(username, role, displayName, email string) error {
+	// Attempt insert first; on conflict only update the three non-secret fields.
+	err := s.db.QueryRow(`
+		INSERT INTO users (username, password_hash, role, display_name, email)
+		VALUES (?, '', ?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			role         = excluded.role,
+			display_name = excluded.display_name,
+			email        = excluded.email
+		RETURNING id
+	`, username, role, displayName, email).Scan(new(int64))
+	if err != nil {
+		return fmt.Errorf("UpdateUserFromRedacted %q: %w", username, err)
+	}
+	s.fireHook(ScopeGlobal, "")
+	return nil
+}
+
 // UpsertAPIKey inserts or updates an API key by key_hash.
 // Used by configsync ImportGlobal.
 func (s *Store) UpsertAPIKey(username, keyHash, name string, expiresAt *time.Time) error {

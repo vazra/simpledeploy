@@ -445,6 +445,34 @@ func (s *Store) UpsertWebhookByName(w *Webhook) error {
 	return nil
 }
 
+// UpsertWebhookFromRedacted updates type if webhook exists; inserts with empty URL if new.
+// Preserves URL, headers_json, and template_override on update.
+func (s *Store) UpsertWebhookFromRedacted(name, kind string) error {
+	var existing Webhook
+	var tmpl, hdrs sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, name, type, url, template_override, headers_json, created_at
+		FROM webhooks WHERE name = ?
+	`, name).Scan(&existing.ID, &existing.Name, &existing.Type, &existing.URL, &tmpl, &hdrs, &existing.CreatedAt)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("UpsertWebhookFromRedacted lookup %q: %w", name, err)
+	}
+	if err == sql.ErrNoRows {
+		w := &Webhook{Name: name, Type: kind, URL: ""}
+		if err := s.CreateWebhook(w); err != nil {
+			return fmt.Errorf("UpsertWebhookFromRedacted insert %q: %w", name, err)
+		}
+		return nil
+	}
+	// Update type only; leave URL/headers/template untouched.
+	_, err = s.db.Exec(`UPDATE webhooks SET type = ? WHERE id = ?`, kind, existing.ID)
+	if err != nil {
+		return fmt.Errorf("UpsertWebhookFromRedacted update %q: %w", name, err)
+	}
+	s.fireHook(ScopeGlobal, "")
+	return nil
+}
+
 // DeleteAlertRulesForApp deletes all alert rules for the given app.
 // Used by configsync ImportAppSidecar for full-replace semantics.
 func (s *Store) DeleteAlertRulesForApp(appID int64) error {

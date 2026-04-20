@@ -121,6 +121,24 @@ func (s *Store) UpsertRegistryByID(r *Registry) error {
 	return nil
 }
 
+// UpsertRegistryFromRedacted updates name+url if the registry exists; inserts with
+// empty encrypted credentials if new. Preserves username_enc/password_enc on update.
+func (s *Store) UpsertRegistryFromRedacted(id, name, url string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO registries (id, name, url, username_enc, password_enc)
+		VALUES (?, ?, ?, '', '')
+		ON CONFLICT(id) DO UPDATE SET
+			name       = excluded.name,
+			url        = excluded.url,
+			updated_at = datetime('now')
+	`, id, name, url)
+	if err != nil {
+		return fmt.Errorf("UpsertRegistryFromRedacted %q: %w", id, err)
+	}
+	s.fireHook(ScopeGlobal, "")
+	return nil
+}
+
 func (s *Store) DeleteRegistry(id string) error {
 	res, err := s.db.Exec(`DELETE FROM registries WHERE id = ?`, id)
 	if err != nil {
