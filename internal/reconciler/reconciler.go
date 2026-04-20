@@ -334,6 +334,77 @@ func (r *Reconciler) AppServices(ctx context.Context, slug string) ([]deployer.S
 	return r.deployer.Status(ctx, slug)
 }
 
+// RefreshStatuses polls every non-stopped, non-error app's container state
+// and updates app.Status when it diverges from reality. Catches crash loops
+// that develop after the post-deploy stabilization window has closed.
+//
+// Skips apps that are currently being deployed (the deploy flow already
+// owns the status field for the duration of its run).
+func (r *Reconciler) RefreshStatuses(ctx context.Context) {
+	apps, err := r.store.ListApps()
+	if err != nil {
+		log.Printf("[reconciler] refresh: list apps: %v", err)
+		return
+	}
+	for _, app := range apps {
+		if app.Status == "stopped" || app.Status == "error" {
+			continue
+		}
+		if r.IsDeploying(app.Slug) {
+			continue
+		}
+		services, err := r.deployer.Status(ctx, app.Slug)
+		if err != nil {
+			continue
+		}
+		newStatus := classifyStatus(services)
+		if newStatus == "" || newStatus == app.Status {
+			continue
+		}
+		if err := r.store.UpdateAppStatus(app.Slug, newStatus); err != nil {
+			log.Printf("[reconciler] refresh %s: update status %q: %v", app.Slug, newStatus, err)
+			continue
+		}
+		log.Printf("[reconciler] %s: status %s -> %s", app.Slug, app.Status, newStatus)
+	}
+}
+
+// classifyStatus maps a snapshot of compose ps output to an app status.
+// Returns "" when there are no services to classify (caller should leave
+// the existing status alone, e.g. during a teardown race).
+func classifyStatus(services []deployer.ServiceStatus) string {
+	if len(services) == 0 {
+		return ""
+	}
+	hasRunning := false
+	hasUnstable := false
+	hasStopped := false
+	for _, s := range services {
+		switch s.State {
+		case "running":
+			if s.Health == "unhealthy" {
+				hasUnstable = true
+			} else {
+				hasRunning = true
+			}
+		case "restarting":
+			hasUnstable = true
+		case "exited", "dead", "removing":
+			hasStopped = true
+		}
+	}
+	if hasUnstable {
+		return "unstable"
+	}
+	if hasRunning && hasStopped {
+		return "degraded"
+	}
+	if hasRunning {
+		return "running"
+	}
+	return "stopped"
+}
+
 func (r *Reconciler) CancelOne(ctx context.Context, slug string) error {
 	cfg, err := r.loadAppConfig(slug)
 	if err != nil {

@@ -457,6 +457,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Periodically reassess every running app's container health so that
+	// crash-loops or unhealthy containers that develop after the post-deploy
+	// stabilization window flip the app status to "unstable" without waiting
+	// for the next user action.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				rec.RefreshStatuses(ctx)
+			}
+		}
+	}()
+
 	go collector.Run(ctx, 10*time.Second)
 	go writer.Run(ctx, 10*time.Second)
 	go rollup.Run(ctx)

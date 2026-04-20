@@ -327,3 +327,39 @@ func TestWatcherTriggersReconcile(t *testing.T) {
 		t.Error("expected Deploy:watched after watcher triggered reconcile")
 	}
 }
+
+func TestClassifyStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		svcs []deployer.ServiceStatus
+		want string
+	}{
+		{"no services -> blank", nil, ""},
+		{"all running healthy", []deployer.ServiceStatus{
+			{Service: "web", State: "running", Health: "healthy"},
+			{Service: "db", State: "running"},
+		}, "running"},
+		{"any restarting", []deployer.ServiceStatus{
+			{Service: "web", State: "restarting"},
+			{Service: "db", State: "running"},
+		}, "unstable"},
+		{"any unhealthy", []deployer.ServiceStatus{
+			{Service: "web", State: "running", Health: "unhealthy"},
+		}, "unstable"},
+		{"running + exited -> degraded", []deployer.ServiceStatus{
+			{Service: "web", State: "running"},
+			{Service: "worker", State: "exited"},
+		}, "degraded"},
+		{"all exited -> stopped", []deployer.ServiceStatus{
+			{Service: "web", State: "exited"},
+		}, "stopped"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := classifyStatus(c.svcs)
+			if got != c.want {
+				t.Errorf("classifyStatus(%+v) = %q, want %q", c.svcs, got, c.want)
+			}
+		})
+	}
+}
