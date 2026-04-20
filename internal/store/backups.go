@@ -328,6 +328,15 @@ func (s *Store) DeleteBackupConfig(id int64) error {
 	return nil
 }
 
+// DeleteBackupConfigsForApp deletes all backup configs for the given app.
+// Used by configsync ImportAppSidecar for full-replace semantics.
+func (s *Store) DeleteBackupConfigsForApp(appID int64) error {
+	if _, err := s.db.Exec(`DELETE FROM backup_configs WHERE app_id = ?`, appID); err != nil {
+		return fmt.Errorf("delete backup configs for app %d: %w", appID, err)
+	}
+	return nil
+}
+
 func (s *Store) CreateBackupRun(configID int64) (*BackupRun, error) {
 	var r BackupRun
 	r.BackupConfigID = configID

@@ -389,6 +389,53 @@ func (s *Store) ListAlertHistory(ruleID *int64, limit int) ([]AlertHistory, erro
 	return hist, rows.Err()
 }
 
+// UpsertWebhookByName inserts or updates a webhook by name.
+// If a webhook with this name already exists it is updated in-place.
+// Used by configsync ImportGlobal.
+func (s *Store) UpsertWebhookByName(w *Webhook) error {
+	var existing Webhook
+	var tmpl, hdrs sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, name, type, url, template_override, headers_json, created_at
+		FROM webhooks WHERE name = ?
+	`, w.Name).Scan(&existing.ID, &existing.Name, &existing.Type, &existing.URL, &tmpl, &hdrs, &existing.CreatedAt)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("upsert webhook lookup %q: %w", w.Name, err)
+	}
+	if err == sql.ErrNoRows {
+		// Insert new.
+		w2 := &Webhook{Name: w.Name, Type: w.Type, URL: w.URL, TemplateOverride: w.TemplateOverride, HeadersJSON: w.HeadersJSON}
+		if err := s.CreateWebhook(w2); err != nil {
+			return fmt.Errorf("upsert webhook insert %q: %w", w.Name, err)
+		}
+		w.ID = w2.ID
+		return nil
+	}
+	// Update existing.
+	w.ID = existing.ID
+	w2 := &Webhook{ID: existing.ID, Name: w.Name, Type: w.Type, URL: w.URL, TemplateOverride: w.TemplateOverride, HeadersJSON: w.HeadersJSON}
+	if err := s.UpdateWebhook(w2); err != nil {
+		return fmt.Errorf("upsert webhook update %q: %w", w.Name, err)
+	}
+	return nil
+}
+
+// DeleteAlertRulesForApp deletes all alert rules for the given app.
+// Used by configsync ImportAppSidecar for full-replace semantics.
+func (s *Store) DeleteAlertRulesForApp(appID int64) error {
+	rules, err := s.ListAlertRules(&appID)
+	if err != nil {
+		return fmt.Errorf("list alert rules for app %d: %w", appID, err)
+	}
+	for _, r := range rules {
+		_ = s.ResolveAlertsByRule(r.ID)
+	}
+	if _, err := s.db.Exec(`DELETE FROM alert_rules WHERE app_id = ?`, appID); err != nil {
+		return fmt.Errorf("delete alert rules for app %d: %w", appID, err)
+	}
+	return nil
+}
+
 func (s *Store) ClearAlertHistory(resolvedOnly bool) error {
 	var q string
 	if resolvedOnly {

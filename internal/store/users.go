@@ -379,3 +379,131 @@ func (s *Store) GetUserAppSlugs(userID int64) ([]string, error) {
 	return slugs, rows.Err()
 }
 
+// ListUsersWithHashes returns all users including password_hash, ordered by username.
+// Used by configsync to export full user records to disk.
+func (s *Store) ListUsersWithHashes() ([]User, error) {
+	rows, err := s.db.Query(`
+		SELECT id, username, password_hash, role, display_name, email, created_at
+		FROM users ORDER BY username
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list users with hashes: %w", err)
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// ListAccessForApp returns usernames of users with explicit access to appID.
+// Used by configsync to export access grants to disk.
+func (s *Store) ListAccessForApp(appID int64) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT u.username
+		FROM user_app_access uaa
+		JOIN users u ON u.id = uaa.user_id
+		WHERE uaa.app_id = ?
+		ORDER BY u.username
+	`, appID)
+	if err != nil {
+		return nil, fmt.Errorf("list access for app: %w", err)
+	}
+	defer rows.Close()
+
+	var usernames []string
+	for rows.Next() {
+		var username string
+		if err := rows.Scan(&username); err != nil {
+			return nil, fmt.Errorf("scan username: %w", err)
+		}
+		usernames = append(usernames, username)
+	}
+	return usernames, rows.Err()
+}
+
+// ReplaceAppAccess atomically replaces all access grants for appID with the given usernames.
+// Users that do not exist in the DB are silently skipped.
+// Used by configsync ImportAppSidecar.
+func (s *Store) ReplaceAppAccess(appID int64, usernames []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM user_app_access WHERE app_id = ?`, appID); err != nil {
+		return fmt.Errorf("delete app access: %w", err)
+	}
+	for _, username := range usernames {
+		var userID int64
+		err := tx.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&userID)
+		if err == sql.ErrNoRows {
+			continue // silently skip missing users
+		}
+		if err != nil {
+			return fmt.Errorf("lookup user %q: %w", username, err)
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO user_app_access (user_id, app_id) VALUES (?, ?)`, userID, appID); err != nil {
+			return fmt.Errorf("grant access for %q: %w", username, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// UpsertUserByUsername inserts or updates a user by username.
+// Used by configsync ImportGlobal.
+func (s *Store) UpsertUserByUsername(u *User) error {
+	err := s.db.QueryRow(`
+		INSERT INTO users (username, password_hash, role, display_name, email)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			password_hash = excluded.password_hash,
+			role          = excluded.role,
+			display_name  = excluded.display_name,
+			email         = excluded.email
+		RETURNING id
+	`, u.Username, u.PasswordHash, u.Role, u.DisplayName, u.Email).Scan(&u.ID)
+	if err != nil {
+		return fmt.Errorf("upsert user %q: %w", u.Username, err)
+	}
+	return nil
+}
+
+// UpsertAPIKey inserts or updates an API key by (username, name).
+// Used by configsync ImportGlobal.
+func (s *Store) UpsertAPIKey(username, keyHash, name string, expiresAt *time.Time) error {
+	var userID int64
+	err := s.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&userID)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("upsert api key: user %q not found", username)
+	}
+	if err != nil {
+		return fmt.Errorf("upsert api key: lookup user %q: %w", username, err)
+	}
+
+	var ea interface{}
+	if expiresAt != nil {
+		ea = *expiresAt
+	}
+	// key_hash is the natural unique key; if it already exists, update name/expires_at.
+	_, err = s.db.Exec(`
+		INSERT INTO api_keys (user_id, key_hash, name, expires_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(key_hash) DO UPDATE SET
+			user_id    = excluded.user_id,
+			name       = excluded.name,
+			expires_at = excluded.expires_at
+	`, userID, keyHash, name, ea)
+	if err != nil {
+		return fmt.Errorf("upsert api key %q/%q: %w", username, name, err)
+	}
+	return nil
+}
+

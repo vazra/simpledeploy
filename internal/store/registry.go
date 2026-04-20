@@ -95,6 +95,25 @@ func (s *Store) UpdateRegistry(id, name, url, usernameEnc, passwordEnc string) e
 	return nil
 }
 
+// UpsertRegistryByID inserts or updates a registry by its string ID.
+// Used by configsync ImportGlobal to restore encrypted registry credentials.
+func (s *Store) UpsertRegistryByID(r *Registry) error {
+	_, err := s.db.Exec(`
+		INSERT INTO registries (id, name, url, username_enc, password_enc)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name         = excluded.name,
+			url          = excluded.url,
+			username_enc = excluded.username_enc,
+			password_enc = excluded.password_enc,
+			updated_at   = datetime('now')
+	`, r.ID, r.Name, r.URL, r.UsernameEnc, r.PasswordEnc)
+	if err != nil {
+		return fmt.Errorf("upsert registry %q: %w", r.ID, err)
+	}
+	return nil
+}
+
 func (s *Store) DeleteRegistry(id string) error {
 	res, err := s.db.Exec(`DELETE FROM registries WHERE id = ?`, id)
 	if err != nil {
