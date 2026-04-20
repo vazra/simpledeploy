@@ -154,3 +154,119 @@ func TestLoad_InvalidMode(t *testing.T) {
 		t.Error("expected error for invalid tls mode, got nil")
 	}
 }
+
+func TestGitSyncConfig_Parses(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+master_secret: "s3cr3t"
+tls:
+  mode: "off"
+gitsync:
+  enabled: true
+  remote: "git@github.com:owner/repo.git"
+  branch: "prod"
+  author_name: "Bot"
+  author_email: "bot@example.com"
+  poll_interval: 120s
+  webhook_secret: "whsec"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	gs := cfg.GitSync
+	if !gs.Enabled {
+		t.Error("expected GitSync.Enabled=true")
+	}
+	if gs.Remote != "git@github.com:owner/repo.git" {
+		t.Errorf("Remote=%q", gs.Remote)
+	}
+	if gs.Branch != "prod" {
+		t.Errorf("Branch=%q, want prod", gs.Branch)
+	}
+	if gs.AuthorName != "Bot" {
+		t.Errorf("AuthorName=%q, want Bot", gs.AuthorName)
+	}
+	if gs.PollInterval != 120*1e9 {
+		t.Errorf("PollInterval=%v, want 120s", gs.PollInterval)
+	}
+	if gs.WebhookSecret != "whsec" {
+		t.Errorf("WebhookSecret=%q, want whsec", gs.WebhookSecret)
+	}
+}
+
+func TestGitSyncConfig_Defaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+master_secret: "s3cr3t"
+tls:
+  mode: "off"
+gitsync:
+  enabled: true
+  remote: "https://github.com/owner/repo.git"
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	gs := cfg.GitSync
+	if gs.Branch != "main" {
+		t.Errorf("Branch=%q, want main", gs.Branch)
+	}
+	if gs.AuthorName != "SimpleDeploy" {
+		t.Errorf("AuthorName=%q, want SimpleDeploy", gs.AuthorName)
+	}
+	if gs.AuthorEmail != "bot@simpledeploy.local" {
+		t.Errorf("AuthorEmail=%q, want bot@simpledeploy.local", gs.AuthorEmail)
+	}
+	if gs.PollInterval != 60*1e9 {
+		t.Errorf("PollInterval=%v, want 60s", gs.PollInterval)
+	}
+}
+
+func TestGitSyncConfig_MissingRemote(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+master_secret: "s3cr3t"
+tls:
+  mode: "off"
+gitsync:
+  enabled: true
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for enabled gitsync with empty remote")
+	}
+}
+
+func TestGitSyncConfig_DisabledNoRemote(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+master_secret: "s3cr3t"
+tls:
+  mode: "off"
+gitsync:
+  enabled: false
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// disabled + no remote should be fine
+	_, err := Load(path)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}

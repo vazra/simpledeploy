@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -23,6 +24,21 @@ type Config struct {
 	TrustedProxies []string        `yaml:"trusted_proxies"`
 	LogBufferSize  int             `yaml:"log_buffer_size"`
 	PublicHost     string          `yaml:"public_host"`
+	GitSync        GitSyncConfig   `yaml:"gitsync"`
+}
+
+// GitSyncConfig controls optional git-backed config sync.
+type GitSyncConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	Remote        string        `yaml:"remote"`
+	Branch        string        `yaml:"branch"`
+	AuthorName    string        `yaml:"author_name"`
+	AuthorEmail   string        `yaml:"author_email"`
+	SSHKeyPath    string        `yaml:"ssh_key_path"`
+	HTTPSUsername string        `yaml:"https_username"`
+	HTTPSToken    string        `yaml:"https_token"`
+	PollInterval  time.Duration `yaml:"poll_interval"`
+	WebhookSecret string        `yaml:"webhook_secret"`
 }
 
 type TLSConfig struct {
@@ -75,6 +91,24 @@ func DefaultConfig() *Config {
 	}
 }
 
+func (c *Config) applyGitSyncDefaults() {
+	if !c.GitSync.Enabled {
+		return
+	}
+	if c.GitSync.Branch == "" {
+		c.GitSync.Branch = "main"
+	}
+	if c.GitSync.AuthorName == "" {
+		c.GitSync.AuthorName = "SimpleDeploy"
+	}
+	if c.GitSync.AuthorEmail == "" {
+		c.GitSync.AuthorEmail = "bot@simpledeploy.local"
+	}
+	if c.GitSync.PollInterval == 0 {
+		c.GitSync.PollInterval = 60 * time.Second
+	}
+}
+
 func (c *Config) Validate() error {
 	switch c.TLS.Mode {
 	case "", "auto", "custom", "off", "local":
@@ -86,6 +120,9 @@ func (c *Config) Validate() error {
 	}
 	if c.ManagementPort != 0 && (c.ManagementPort < 1 || c.ManagementPort > 65535) {
 		return fmt.Errorf("management_port must be 1-65535")
+	}
+	if c.GitSync.Enabled && c.GitSync.Remote == "" {
+		return fmt.Errorf("gitsync.remote is required when gitsync.enabled is true")
 	}
 	return nil
 }
@@ -100,6 +137,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.applyGitSyncDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
