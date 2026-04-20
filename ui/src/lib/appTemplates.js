@@ -282,8 +282,11 @@ export const appTemplates = [
           restart: 'unless-stopped',
           volumes: ['web-content:/usr/share/nginx/html:ro'],
           deploy: limits('0.25', '128M'),
+          // TCP probe rather than HTTP fetch: an empty content volume makes
+          // nginx return 403 for / which would mark wget-based checks as
+          // unhealthy even though nginx is fine.
           healthcheck: {
-            test: ['CMD', 'wget', '-qO-', 'http://localhost/'],
+            test: ['CMD-SHELL', 'nc -z 127.0.0.1 80'],
             interval: '30s',
             timeout: '5s',
             retries: 3,
