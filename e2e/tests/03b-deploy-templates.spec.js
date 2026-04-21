@@ -74,9 +74,11 @@ test.describe('Deploy via Templates', () => {
     await cleanupApp(slug);
   });
 
-  test('deploy via Node API + Postgres template propagates backup label', { timeout: 1_200_000 }, async ({ page }) => {
+  test('deploy via Node API + Postgres template propagates backup label', async ({ page }) => {
     // Deploy pulls node:20-alpine + postgres:16-alpine; on slow networks
     // this can exceed 5 min end-to-end, so we give it a generous budget.
+    // test.setTimeout extends the default (360s) for this test only.
+    test.setTimeout(1_200_000);
     const slug = 'e2e-node-tpl';
 
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
