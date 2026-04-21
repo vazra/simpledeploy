@@ -47,6 +47,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 		Compose string `json:"compose"`
 		Source  string `json:"source"`
+		Force   bool   `json:"force"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -64,7 +65,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	// Collision handling: never clobber an existing app.
 	// Manual flow: reject and ask user to delete first.
 	// Template flow: suggest a free candidate name (foo-2..foo-50).
-	if s.store != nil {
+	if s.store != nil && !body.Force {
 		if _, err := s.store.GetAppBySlug(body.Name); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)

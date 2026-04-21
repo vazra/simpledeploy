@@ -264,7 +264,12 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		if existing != nil {
 			policies, _ = existing["policies"].([]interface{})
 		}
+		seen := map[string]bool{}
 		for _, domain := range localTLSDomains {
+			if seen[domain] {
+				continue
+			}
+			seen[domain] = true
 			policies = append(policies, map[string]interface{}{
 				"subjects": []string{domain},
 				"issuers": []interface{}{

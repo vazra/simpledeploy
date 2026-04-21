@@ -136,6 +136,12 @@ test.describe('Deploy Apps', () => {
     const names = (list.data || []).map((a) => a.Name || a.name);
     expect(names).toContain('collide-tpl');
     expect(names).toContain('collide-tpl-2');
+
+    // Clean up: leaving these apps behind pollutes the shared proxy with
+    // local-TLS endpoints, which breaks later plain-HTTP tests.
+    for (const slug of ['collide-tpl', 'collide-tpl-2']) {
+      await apiRequest('DELETE', `/api/apps/${slug}`);
+    }
   });
 
   test('manual deploy with existing name shows inline error and does not overwrite', async ({ page }) => {

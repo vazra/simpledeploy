@@ -212,7 +212,7 @@
       await saveEnv()
     }
     const encoded = encodeBase64(currentYaml)
-    const res = await api.deploy(slug, encoded)
+    const res = await api.deploy(slug, encoded, 'update', true)
     saving = false
     showDiff = false
     if (!res.error) {

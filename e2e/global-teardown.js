@@ -14,8 +14,12 @@ export default async function globalTeardown() {
     try { process.kill(state.pid, 'SIGKILL'); } catch {}
   } catch {}
 
-  for (const dir of [state.dataDir, state.appsDir]) {
-    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  if (!process.env.SIMPLEDEPLOY_KEEP) {
+    for (const dir of [state.dataDir, state.appsDir]) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  } else {
+    console.log('[e2e] Keeping data dir:', state.dataDir, 'apps:', state.appsDir);
   }
   try { rmSync(state.configPath, { force: true }); } catch {}
   try { rmSync(STATE_FILE, { force: true }); } catch {}

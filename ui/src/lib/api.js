@@ -97,7 +97,7 @@ export const api = {
   listApps: () => request('GET', '/apps'),
   getApp: (slug) => request('GET', `/apps/${slug}`),
   removeApp: (slug) => requestWithToast('DELETE', `/apps/${slug}`, null, 'App removed'),
-  deploy: (name, compose, source = 'manual') => request('POST', '/apps/deploy', { name, compose, source }),
+  deploy: (name, compose, source = 'manual', force = false) => request('POST', '/apps/deploy', { name, compose, source, force }),
   getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
   restartApp: (slug) => request('POST', `/apps/${slug}/restart`),
