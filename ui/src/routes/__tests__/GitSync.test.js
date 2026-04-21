@@ -52,18 +52,24 @@ beforeEach(() => {
   apiMock.gitStatus.mockResolvedValue({ data: null, error: null, status: 200 });
 });
 
+async function openConfig(utils) {
+  const btn = await utils.findByRole('button', { name: 'Configure' });
+  await fireEvent.click(btn);
+}
+
 describe('GitSync config form', () => {
-  it('renders Configuration card on load', async () => {
-    const { findByText } = render(GitSync);
-    expect(await findByText('Configuration')).toBeInTheDocument();
+  it('renders Configure button on load', async () => {
+    const utils = render(GitSync);
+    expect(await utils.findByRole('button', { name: 'Configure' })).toBeInTheDocument();
   });
 
-  it('shows fields when "Enable Git Sync" is toggled on', async () => {
-    const { findByLabelText, getByLabelText } = render(GitSync);
-    const toggle = await findByLabelText('Enable Git Sync');
+  it('opens config modal and shows fields when "Enable Git Sync" is toggled on', async () => {
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const toggle = await utils.findByLabelText('Enable Git Sync');
     await fireEvent.click(toggle);
     await waitFor(() => {
-      expect(getByLabelText('Remote URL *')).toBeInTheDocument();
+      expect(utils.getByLabelText('Remote URL *')).toBeInTheDocument();
     });
   });
 
@@ -76,12 +82,12 @@ describe('GitSync config form', () => {
     });
     apiMock.gitConfigUpdate.mockResolvedValueOnce({ data: { Enabled: true }, error: null, status: 200 });
 
-    const { findByLabelText, getByRole } = render(GitSync);
-    // Wait for form to render - toggle should exist and be checked
-    const toggle = await findByLabelText('Enable Git Sync');
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const toggle = await utils.findByLabelText('Enable Git Sync');
     await waitFor(() => expect(toggle.checked).toBe(true));
 
-    const saveBtn = getByRole('button', { name: 'Save' });
+    const saveBtn = utils.getByRole('button', { name: 'Save' });
     await fireEvent.click(saveBtn);
 
     await waitFor(() => expect(apiMock.gitConfigUpdate).toHaveBeenCalledTimes(1));
@@ -90,15 +96,15 @@ describe('GitSync config form', () => {
   });
 
   it('shows webhook_secret input when enabled', async () => {
-    // cfg has enabled=true so form fields appear immediately
     apiMock.gitConfig.mockResolvedValue({
       data: { ...baseCfg, enabled: true, remote: 'git@github.com:o/r.git', webhook_secret_set: true },
       error: null,
       status: 200,
     });
-    const { container } = render(GitSync);
+    const utils = render(GitSync);
+    await openConfig(utils);
     await waitFor(() => {
-      expect(container.querySelector('#git-webhook-secret')).toBeTruthy();
+      expect(utils.container.querySelector('#git-webhook-secret')).toBeTruthy();
     });
   });
 
@@ -108,31 +114,31 @@ describe('GitSync config form', () => {
       error: null,
       status: 200,
     });
-    const { findByLabelText, container } = render(GitSync);
-    // Wait for form to load
-    await waitFor(() => container.querySelector('#git-webhook-secret'));
-    const httpsRadio = await findByLabelText('HTTPS token');
+    const utils = render(GitSync);
+    await openConfig(utils);
+    await waitFor(() => utils.container.querySelector('#git-webhook-secret'));
+    const httpsRadio = await utils.findByLabelText('HTTPS token');
     await fireEvent.click(httpsRadio);
     await waitFor(() => {
-      expect(container.querySelector('#git-https-token')).toBeTruthy();
+      expect(utils.container.querySelector('#git-https-token')).toBeTruthy();
     });
   });
 
   it('shows error message on failed save', async () => {
-    // Use enabled=true cfg so no toggle needed
     apiMock.gitConfig.mockResolvedValue({
       data: { ...baseCfg, enabled: true, remote: 'file:///tmp/bare.git' },
       error: null,
       status: 200,
     });
     apiMock.gitConfigUpdate.mockResolvedValueOnce({ data: null, error: 'remote is required when enabled', status: 400 });
-    const { findByLabelText, findByText, getByRole } = render(GitSync);
-    const toggle = await findByLabelText('Enable Git Sync');
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const toggle = await utils.findByLabelText('Enable Git Sync');
     await waitFor(() => expect(toggle.checked).toBe(true));
-    const saveBtn = getByRole('button', { name: 'Save' });
+    const saveBtn = utils.getByRole('button', { name: 'Save' });
     await fireEvent.click(saveBtn);
     await waitFor(() => expect(apiMock.gitConfigUpdate).toHaveBeenCalled());
-    expect(await findByText('remote is required when enabled')).toBeInTheDocument();
+    expect(await utils.findByText('remote is required when enabled')).toBeInTheDocument();
   });
 });
 
@@ -198,8 +204,8 @@ describe('GitSync status', () => {
   it('does not show status section when Git Sync is disabled', async () => {
     apiMock.gitStatus.mockResolvedValue({ data: null, error: null, status: 200 });
     apiMock.gitConfig.mockResolvedValue({ data: { ...baseCfg, enabled: false }, error: null, status: 200 });
-    const { findByText, queryByText } = render(GitSync);
-    await findByText('Configuration');
+    const { findByRole, queryByText } = render(GitSync);
+    await findByRole('button', { name: 'Configure' });
     expect(queryByText('Sync Status')).toBeNull();
   });
 
@@ -218,11 +224,12 @@ describe('GitSync toggle checkboxes', () => {
       error: null,
       status: 200,
     });
-    const { findByText } = render(GitSync);
-    expect(await findByText('Poll for remote changes')).toBeInTheDocument();
-    expect(await findByText('Auto-push local changes')).toBeInTheDocument();
-    expect(await findByText('Auto-apply remote changes')).toBeInTheDocument();
-    expect(await findByText('Enable webhook endpoint')).toBeInTheDocument();
+    const utils = render(GitSync);
+    await openConfig(utils);
+    expect(await utils.findByText('Poll for remote changes')).toBeInTheDocument();
+    expect(await utils.findByText('Auto-push local changes')).toBeInTheDocument();
+    expect(await utils.findByText('Auto-apply remote changes')).toBeInTheDocument();
+    expect(await utils.findByText('Enable webhook endpoint')).toBeInTheDocument();
   });
 
   it('hides poll interval input when poll_enabled is false', async () => {
@@ -231,10 +238,11 @@ describe('GitSync toggle checkboxes', () => {
       error: null,
       status: 200,
     });
-    const { container, findByText } = render(GitSync);
-    await findByText('Poll for remote changes');
+    const utils = render(GitSync);
+    await openConfig(utils);
+    await utils.findByText('Poll for remote changes');
     await waitFor(() => {
-      expect(container.querySelector('#git-poll')).toBeNull();
+      expect(utils.container.querySelector('#git-poll')).toBeNull();
     });
   });
 
@@ -246,11 +254,12 @@ describe('GitSync toggle checkboxes', () => {
     });
     apiMock.gitConfigUpdate.mockResolvedValueOnce({ data: { Enabled: true }, error: null, status: 200 });
 
-    const { findByLabelText, getByRole } = render(GitSync);
-    const toggle = await findByLabelText('Enable Git Sync');
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const toggle = await utils.findByLabelText('Enable Git Sync');
     await waitFor(() => expect(toggle.checked).toBe(true));
 
-    const saveBtn = getByRole('button', { name: 'Save' });
+    const saveBtn = utils.getByRole('button', { name: 'Save' });
     await fireEvent.click(saveBtn);
 
     await waitFor(() => expect(apiMock.gitConfigUpdate).toHaveBeenCalledTimes(1));

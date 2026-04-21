@@ -3,6 +3,7 @@
   import Layout from '../components/Layout.svelte'
   import Button from '../components/Button.svelte'
   import Skeleton from '../components/Skeleton.svelte'
+  import FormModal from '../components/FormModal.svelte'
   import { api } from '../lib/api.js'
 
   let status = $state(null)
@@ -40,6 +41,7 @@
   let fWebhookEnabled = $state(true)
 
   let applying = $state(false)
+  let showConfig = $state(false)
 
   function timeAgo(isoStr) {
     if (!isoStr) return 'never'
@@ -132,7 +134,7 @@
       return
     }
     cfgSuccess = true
-    setTimeout(() => { cfgSuccess = false }, 3000)
+    setTimeout(() => { cfgSuccess = false; showConfig = false }, 800)
     await loadConfig()
     await load()
   }
@@ -176,9 +178,16 @@
 </script>
 
 <Layout>
-  <div class="mb-6">
-    <h1 class="text-xl font-semibold tracking-tight text-text-primary">Git Sync</h1>
-    <p class="text-sm text-text-muted mt-1">Mirror your app config to a Git repository</p>
+  <div class="mb-6 flex items-start justify-between gap-4">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight text-text-primary">Git Sync</h1>
+      <p class="text-sm text-text-muted mt-1">Mirror your app config to a Git repository</p>
+    </div>
+    {#if !notAdmin && !cfgLoading}
+      <Button size="sm" variant="secondary" onclick={() => { showConfig = true }}>
+        Configure
+      </Button>
+    {/if}
   </div>
 
   {#if loading && cfgLoading}
@@ -192,10 +201,8 @@
     </div>
 
   {:else}
-    <!-- Configuration card -->
-    <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-4">
-      <h2 class="text-sm font-medium text-text-primary mb-4">Configuration</h2>
-
+    <!-- Configuration modal -->
+    <FormModal open={showConfig} title="Git Sync configuration" onclose={() => { showConfig = false }}>
       {#if cfgLoading}
         <Skeleton type="card" count={1} />
       {:else}
@@ -207,21 +214,25 @@
           </label>
 
           {#if fEnabled}
-            <!-- Remote URL -->
-            <div>
-              <label class="block text-xs text-text-muted mb-1" for="git-remote">Remote URL <span class="text-red-400">*</span></label>
-              <input
-                id="git-remote"
-                type="text"
-                bind:value={fRemote}
-                required
-                placeholder="git@github.com:owner/repo.git"
-                class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-            </div>
+            <!-- Section: Repository -->
+            <section class="space-y-4 pt-2">
+              <header>
+                <h3 class="text-sm font-semibold text-text-primary">Repository</h3>
+                <p class="text-xs text-text-muted mt-0.5">Where your app config is mirrored.</p>
+              </header>
 
-            <!-- Branch + Poll interval -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs text-text-muted mb-1" for="git-remote">Remote URL <span class="text-red-400">*</span></label>
+                <input
+                  id="git-remote"
+                  type="text"
+                  bind:value={fRemote}
+                  required
+                  placeholder="git@github.com:owner/repo.git"
+                  class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              </div>
+
               <div>
                 <label class="block text-xs text-text-muted mb-1" for="git-branch">Branch</label>
                 <input
@@ -232,31 +243,68 @@
                   class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
                 />
               </div>
-              {#if fPollEnabled}
-              <div>
-                <label class="block text-xs text-text-muted mb-1" for="git-poll">Poll interval (seconds)</label>
-                <input
-                  id="git-poll"
-                  type="number"
-                  bind:value={fPollInterval}
-                  min="5"
-                  placeholder="60"
-                  class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-                />
-              </div>
-              {/if}
-            </div>
 
-            <!-- Behaviour toggles -->
-            <div class="space-y-2.5">
-              <p class="text-xs text-text-muted font-medium">Sync behaviour</p>
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input type="checkbox" bind:checked={fPollEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
-                <span class="text-sm text-text-primary">
-                  Poll for remote changes
-                  <span class="block text-xs text-text-muted font-normal">Check the remote every N seconds.</span>
-                </span>
-              </label>
+              <div>
+                <p class="text-xs text-text-muted mb-2">Authentication</p>
+                <div class="flex flex-wrap gap-4 text-sm">
+                  {#each [['none','None (public repo)'],['ssh','SSH key'],['https','HTTPS token']] as [val, label]}
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" bind:group={fAuthMethod} value={val} class="accent-accent" />
+                      <span class="text-text-secondary">{label}</span>
+                    </label>
+                  {/each}
+                </div>
+
+                {#if fAuthMethod === 'ssh'}
+                  <div class="mt-3">
+                    <label class="block text-xs text-text-muted mb-1" for="git-ssh-key">SSH key path</label>
+                    <input
+                      id="git-ssh-key"
+                      type="text"
+                      bind:value={fSSHKeyPath}
+                      placeholder="/run/secrets/git_ssh_key"
+                      class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                {:else if fAuthMethod === 'https'}
+                  <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs text-text-muted mb-1" for="git-https-user">HTTPS username</label>
+                      <input
+                        id="git-https-user"
+                        type="text"
+                        bind:value={fHTTPSUsername}
+                        placeholder="git"
+                        class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-text-muted mb-1" for="git-https-token">
+                        HTTPS token
+                        {#if cfg?.https_token_set && fHTTPSToken === ''}
+                          <span class="ml-1 inline-flex items-center rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-400">configured</span>
+                        {/if}
+                      </label>
+                      <input
+                        id="git-https-token"
+                        type="password"
+                        bind:value={fHTTPSToken}
+                        placeholder={cfg?.https_token_set ? 'Leave blank to keep existing' : 'Token or password'}
+                        class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                      />
+                    </div>
+                  </div>
+                {/if}
+              </div>
+            </section>
+
+            <!-- Section: Sync behaviour -->
+            <section class="space-y-3 pt-4 border-t border-border/40">
+              <header>
+                <h3 class="text-sm font-semibold text-text-primary">Sync behaviour</h3>
+                <p class="text-xs text-text-muted mt-0.5">Control how local and remote changes flow.</p>
+              </header>
+
               <label class="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" bind:checked={fAutoPushEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
                 <span class="text-sm text-text-primary">
@@ -264,6 +312,7 @@
                   <span class="block text-xs text-text-muted font-normal">Commit and push sidecars whenever they change.</span>
                 </span>
               </label>
+
               <label class="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" bind:checked={fAutoApplyEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
                 <span class="text-sm text-text-primary">
@@ -271,6 +320,28 @@
                   <span class="block text-xs text-text-muted font-normal">Pull and apply remote commits automatically. When off, shows a pending indicator and waits for manual apply.</span>
                 </span>
               </label>
+
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" bind:checked={fPollEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
+                <span class="text-sm text-text-primary">
+                  Poll for remote changes
+                  <span class="block text-xs text-text-muted font-normal">Check the remote on a fixed interval.</span>
+                </span>
+              </label>
+              {#if fPollEnabled}
+                <div class="pl-7">
+                  <label class="block text-xs text-text-muted mb-1" for="git-poll">Poll interval (seconds)</label>
+                  <input
+                    id="git-poll"
+                    type="number"
+                    bind:value={fPollInterval}
+                    min="5"
+                    placeholder="60"
+                    class="w-40 rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                </div>
+              {/if}
+
               <label class="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" bind:checked={fWebhookEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
                 <span class="text-sm text-text-primary">
@@ -278,82 +349,28 @@
                   <span class="block text-xs text-text-muted font-normal">Accept push notifications at /api/git/webhook. Disable to reject all webhook calls.</span>
                 </span>
               </label>
-            </div>
-
-            <!-- Auth method -->
-            <div>
-              <p class="text-xs text-text-muted mb-2">Authentication</p>
-              <div class="flex gap-4 text-sm">
-                {#each [['none','None (public repo)'],['ssh','SSH key'],['https','HTTPS token']] as [val, label]}
-                  <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" bind:group={fAuthMethod} value={val} class="accent-accent" />
-                    <span class="text-text-secondary">{label}</span>
-                  </label>
-                {/each}
-              </div>
-            </div>
-
-            {#if fAuthMethod === 'ssh'}
-              <div>
-                <label class="block text-xs text-text-muted mb-1" for="git-ssh-key">SSH key path</label>
-                <input
-                  id="git-ssh-key"
-                  type="text"
-                  bind:value={fSSHKeyPath}
-                  placeholder="/run/secrets/git_ssh_key"
-                  class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-                />
-              </div>
-            {:else if fAuthMethod === 'https'}
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-xs text-text-muted mb-1" for="git-https-user">HTTPS username</label>
-                  <input
-                    id="git-https-user"
-                    type="text"
-                    bind:value={fHTTPSUsername}
-                    placeholder="git"
-                    class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label class="block text-xs text-text-muted mb-1" for="git-https-token">
-                    HTTPS token
-                    {#if cfg?.https_token_set && fHTTPSToken === ''}
+              {#if fWebhookEnabled}
+                <div class="pl-7">
+                  <label class="block text-xs text-text-muted mb-1" for="git-webhook-secret">
+                    Webhook secret
+                    {#if cfg?.webhook_secret_set && fWebhookSecret === ''}
                       <span class="ml-1 inline-flex items-center rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-400">configured</span>
                     {/if}
                   </label>
                   <input
-                    id="git-https-token"
+                    id="git-webhook-secret"
                     type="password"
-                    bind:value={fHTTPSToken}
-                    placeholder={cfg?.https_token_set ? 'Leave blank to keep existing' : 'Token or password'}
+                    bind:value={fWebhookSecret}
+                    placeholder={cfg?.webhook_secret_set ? 'Leave blank to keep existing' : 'Optional HMAC secret for push webhook'}
                     class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
                   />
+                  <p class="text-xs text-text-muted mt-1">Used to verify GitHub/GitLab push webhook signatures.</p>
                 </div>
-              </div>
-            {/if}
+              {/if}
+            </section>
 
-            <!-- Webhook secret -->
-            <div>
-              <label class="block text-xs text-text-muted mb-1" for="git-webhook-secret">
-                Webhook secret
-                {#if cfg?.webhook_secret_set && fWebhookSecret === ''}
-                  <span class="ml-1 inline-flex items-center rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-400">configured</span>
-                {/if}
-              </label>
-              <input
-                id="git-webhook-secret"
-                type="password"
-                bind:value={fWebhookSecret}
-                placeholder={cfg?.webhook_secret_set ? 'Leave blank to keep existing' : 'Optional HMAC secret for push webhook'}
-                class="w-full rounded-lg border border-border bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-              <p class="text-xs text-text-muted mt-1">Used to verify GitHub/GitLab push webhook signatures.</p>
-            </div>
-
-            <!-- Advanced (author) -->
-            <div>
+            <!-- Section: Advanced -->
+            <section class="pt-4 border-t border-border/40">
               <button
                 type="button"
                 onclick={() => { showAdvanced = !showAdvanced }}
@@ -385,7 +402,7 @@
                   </div>
                 </div>
               {/if}
-            </div>
+            </section>
           {/if}
 
           {#if cfgError}
@@ -407,7 +424,14 @@
           </div>
         </form>
       {/if}
-    </div>
+    </FormModal>
+
+    {#if !cfgLoading && !status?.Enabled}
+      <div class="bg-surface-2 rounded-xl p-6 shadow-sm border border-border/50 mb-4">
+        <p class="text-sm text-text-secondary mb-3">Git Sync is not configured yet.</p>
+        <Button size="sm" onclick={() => { showConfig = true }}>Configure Git Sync</Button>
+      </div>
+    {/if}
 
     <!-- Status section (only when enabled) -->
     {#if !loading && status?.Enabled}
