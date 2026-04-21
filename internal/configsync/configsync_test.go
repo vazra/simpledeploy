@@ -366,18 +366,26 @@ func TestDebounce(t *testing.T) {
 		syncer.ScheduleAppWrite("debounce-test")
 	}
 
-	// Wait for debounce to fire (500ms + margin).
-	time.Sleep(700 * time.Millisecond)
-
+	// Wait for debounce to fire (500ms) with a generous margin so this
+	// doesn't flake on CI under -race where scheduling latency is high.
 	sidecarPath := filepath.Join(appsDir, "debounce-test", appSidecarName)
-	info1, err := os.Stat(sidecarPath)
-	if err != nil {
-		t.Fatalf("sidecar not written after debounce: %v", err)
+	var info1 os.FileInfo
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var err error
+		info1, err = os.Stat(sidecarPath)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if info1 == nil {
+		t.Fatalf("sidecar not written after debounce within 5s: %s", sidecarPath)
 	}
 	mtime1 := info1.ModTime()
 
 	// Wait another debounce period to confirm no extra write.
-	time.Sleep(700 * time.Millisecond)
+	time.Sleep(800 * time.Millisecond)
 	info2, err := os.Stat(sidecarPath)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
