@@ -132,14 +132,31 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	if dataDir == "" {
 		dataDir = "."
 	}
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dataDir, &stat); err == nil {
-		res.DiskTotal = stat.Blocks * uint64(stat.Bsize)
-		res.DiskAvail = stat.Bavail * uint64(stat.Bsize)
-		res.DiskUsed = res.DiskTotal - (stat.Bfree * uint64(stat.Bsize))
-		if res.DiskTotal > 0 {
-			res.DiskUsedPct = float64(res.DiskUsed) / float64(res.DiskTotal) * 100
+	// Prefer appsDir (typically a host bind mount) over the server's data dir,
+	// which on Docker Desktop macOS lands on overlayfs and reports inflated sizes.
+	candidates := []string{s.appsDir, dataDir}
+	for _, p := range candidates {
+		if p == "" {
+			continue
 		}
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs(p, &stat); err != nil {
+			continue
+		}
+		// POSIX: f_blocks counts in f_frsize units, not f_bsize (which is the
+		// optimal transfer size and may be much larger, e.g. 1 MB over virtiofs).
+		unit := statfsBlockSize(&stat)
+		total := stat.Blocks * unit
+		// Sanity cap: overlay/fuse filesystems sometimes report absurd sizes.
+		// Skip anything over 1 PB and fall back to the next candidate.
+		if total == 0 || total > 1<<50 {
+			continue
+		}
+		res.DiskTotal = total
+		res.DiskAvail = stat.Bavail * unit
+		res.DiskUsed = total - (stat.Bfree * unit)
+		res.DiskUsedPct = float64(res.DiskUsed) / float64(total) * 100
+		break
 	}
 	res.RAMTotal, res.RAMUsed, res.RAMAvail = ramStats()
 
