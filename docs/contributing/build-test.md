@@ -19,15 +19,17 @@ description: Make targets and test commands for building, running, and verifying
 | `make ui` | Vite dev server only |
 | `make api-non-hmr` | Build + run with `config.dev.yaml`, no reloader |
 | `make clean` | Remove `bin/` and `cmd/simpledeploy/ui_dist/` |
-| `make hooks-install` | Enable git hooks from `.githooks/` (pre-push: vet + build + short tests + vitest) |
+| `make hooks-install` | Enable git hooks from `.githooks/` (pre-push: vet + lint + build + short tests + vitest) |
 
 ## Git hooks
 
 After cloning, run `make hooks-install` once. This points `core.hooksPath` at `.githooks/` and enables:
 
-- `pre-push`: `go vet ./...`, `go build ./...`, `go test -short ./...`, and `ui` vitest if `ui/node_modules` exists.
+- `pre-push`: `go vet ./...`, `golangci-lint run ./...`, `go build ./...`, `go test -short ./...`, and `ui` vitest if `ui/node_modules` exists.
 
-Bypass with `git push --no-verify` or `SIMPLEDEPLOY_SKIP_HOOKS=1 git push`.
+`golangci-lint` is required (mirrors CI). Install: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4`. Skip just the lint step with `SIMPLEDEPLOY_SKIP_LINT=1 git push`.
+
+Bypass all hooks with `git push --no-verify` or `SIMPLEDEPLOY_SKIP_HOOKS=1 git push`.
 
 ## Go tests
 

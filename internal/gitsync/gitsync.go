@@ -559,8 +559,6 @@ func (g *Syncer) initFresh() error {
 		}
 
 		// Check if remote has commits on the branch; refuse to push if so.
-		refs, lsErr := repo.References()
-		_ = refs
 		remoteHasCommits, lsErr := g.remoteHasBranch()
 		if lsErr != nil {
 			// Can't reach remote - that's ok; leave for operator to handle.

@@ -16,7 +16,7 @@ make e2e-headed # E2E with visible browser window
 make e2e-report # open last E2E HTML report
 make e2e-templates # deploy every app template (on-demand, ~30-60 min)
 make clean      # Remove build artifacts
-make hooks-install # Install git pre-push hook (vet + build + short tests + vitest)
+make hooks-install # Install git pre-push hook (vet + lint + build + short tests + vitest)
 ```
 
 ## Project Structure
@@ -99,7 +99,7 @@ go test ./internal/store/ -run TestUpsert  # specific test
 Full browser-based test suite that builds the binary, starts a real server with Docker, deploys actual compose apps, and exercises every UI flow.
 
 ```bash
-make e2e               # full E2E suite, ~20 min
+make e2e               # full E2E suite, ~25 min
 make e2e-lite          # skips slow specs (13b, 27, 28, 29b), ~6-8 min
 make e2e-mirror        # full suite via GHCR image mirror (no Docker Hub rate limits)
 make e2e-lite-mirror   # lite suite via GHCR image mirror
@@ -127,11 +127,12 @@ Rule of thumb: only fall back to `make e2e-lite` when you cannot identify the mi
 
 **Template validation:** `00-template-images.spec.js` runs in every mode and validates every image in `appTemplates.js`/`serviceTemplates.js` resolves via `docker manifest inspect`. `templates-deploy-all.spec.js` runs only under `E2E_TEMPLATES=1` (via `make e2e-templates` or the `templates.yml` GitHub workflow, which triggers on changes to template files) and deploys every app template end-to-end.
 
-**Requirements:** Docker daemon running, Go toolchain, Node.js. Full suite ~20 min, lite ~6-8 min.
+**Requirements:** Docker daemon running, Go toolchain, Node.js. Full suite ~25 min, lite ~6-8 min.
 
 `e2e-lite` sets `E2E_LITE=1`, which makes `playwright.config.js` apply `testIgnore` to skip the heaviest specs: DB strategy matrix (MySQL/Mongo/Redis/SQLite), S3 backup roundtrip, webhook delivery timing, and private registry deploy. Good for fast local iteration; CI should keep running the full suite.
 
 **Structure:**
+
 ```
 e2e/
   playwright.config.js     # serial, 1 worker, chromium, 2min timeout
@@ -165,6 +166,7 @@ e2e/
 ```
 
 **How tests work:**
+
 - Tests run serially in numbered order. State builds up: setup creates admin, deploy creates apps, later tests use those apps.
 - Each test gets a fresh browser context (isolated cookies) but shares server state.
 - The server starts with TLS off, high rate limits (10k req/min), and temp data/apps dirs.
@@ -172,6 +174,7 @@ e2e/
 - Cleanup tests remove all apps at the end.
 
 **Writing new E2E tests:**
+
 - Add a new numbered spec file in `e2e/tests/` (maintains execution order).
 - Use `loginAsAdmin(page)` from `helpers/auth.js` in `beforeEach` for authenticated tests.
 - Use `getState().baseURL` for the server URL. Hash-based routing: `${baseURL}/#/path`.
@@ -181,6 +184,7 @@ e2e/
 - For modals/dialogs, scope to `page.getByRole('dialog')`.
 
 **Common pitfalls:**
+
 - `getByText('foo')` matches substrings case-sensitively. Use `{ exact: true }` when needed.
 - Don't run individual test files in isolation (they depend on prior tests' server state).
 - Docker image pulls can be slow on first run. Deploy test timeout is 180s.

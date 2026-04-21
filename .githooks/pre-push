@@ -9,17 +9,16 @@ fi
 echo "[pre-push] go vet"
 go vet ./...
 
-# golangci-lint mirrors CI's check. Use the repo's .golangci.yml; if the
-# binary isn't installed locally, skip with a note (don't block pushes on
-# first-time contributors). Skippable via SIMPLEDEPLOY_SKIP_LINT=1 when
-# iterating fast.
+# golangci-lint mirrors CI's check. Use the repo's .golangci.yml.
+# Skippable via SIMPLEDEPLOY_SKIP_LINT=1 when iterating fast.
 if [ -z "$SIMPLEDEPLOY_SKIP_LINT" ]; then
-  if command -v golangci-lint >/dev/null 2>&1; then
-    echo "[pre-push] golangci-lint"
-    golangci-lint run ./...
-  else
-    echo "[pre-push] golangci-lint not installed - skipping (install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4)"
+  if ! command -v golangci-lint >/dev/null 2>&1; then
+    echo "[pre-push] golangci-lint not installed. Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4"
+    echo "[pre-push] (bypass with SIMPLEDEPLOY_SKIP_LINT=1 or --no-verify)"
+    exit 1
   fi
+  echo "[pre-push] golangci-lint"
+  golangci-lint run ./...
 fi
 
 echo "[pre-push] go build"

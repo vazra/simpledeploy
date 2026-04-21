@@ -589,7 +589,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 			log.Printf("[gitsync] start failed (continuing without git sync): %v", startErr)
 			gitSyncer = nil
 		} else {
-			defer gitSyncer.Stop()
+			defer func() { _ = gitSyncer.Stop() }()
 		}
 	}
 
@@ -1767,7 +1767,7 @@ func runGitSyncNow(cmd *cobra.Command, args []string) error {
 	if err := gs.Start(cmd.Context()); err != nil {
 		return fmt.Errorf("start gitsync: %w", err)
 	}
-	defer gs.Stop()
+	defer func() { _ = gs.Stop() }()
 	if err := gs.SyncNow(cmd.Context()); err != nil {
 		return fmt.Errorf("sync-now: %w", err)
 	}
