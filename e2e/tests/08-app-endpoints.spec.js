@@ -109,7 +109,7 @@ test.describe('Endpoints - Functional', () => {
     ]);
     expect(res.ok).toBe(true);
 
-    const r = await waitForProxyNotNginx('nginx-test.local', 40_000);
+    const r = await waitForProxyNotNginx('nginx-test.local', 20_000);
     expect(r.body || '').not.toContain('Welcome to nginx');
   });
 

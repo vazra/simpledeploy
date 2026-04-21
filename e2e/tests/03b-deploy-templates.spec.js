@@ -132,7 +132,11 @@ test.describe('Deploy via Templates', () => {
     // in its empty volume by design (Unstable), and on slow CI runners
     // the pull may be slow enough to land in Failed. Bumped timeout to
     // cover slow Docker Hub pulls of node:20-alpine + postgres:16-alpine.
-    await expect(dialog.getByText(/^(Deployed|Unstable|Failed)$/)).toBeVisible({ timeout: 1_080_000 });
+    // Use a testid + data-deploy-status attr so we're resilient to whitespace
+    // and icon siblings inside the badge span (regex getByText was silently
+    // not matching "Unstable" despite the text being rendered).
+    const statusBadge = dialog.getByTestId('deploy-status');
+    await expect(statusBadge).toHaveAttribute('data-deploy-status', /^(success|unstable|failed)$/, { timeout: 1_080_000 });
 
     // Navigate to the app's Backups tab and confirm it renders.
     await dialog.getByRole('button', { name: 'View App' }).click();

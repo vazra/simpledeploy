@@ -36,6 +36,7 @@ func (m *mockReconciler) ListDeployEvents(_ context.Context, _ string) ([]store.
 	return nil, nil
 }
 func (m *mockReconciler) Reconcile(_ context.Context) error                      { return nil }
+func (m *mockReconciler) RefreshRoutes(_ context.Context) error                  { return nil }
 func (m *mockReconciler) CancelOne(_ context.Context, _ string) error            { return nil }
 func (m *mockReconciler) IsDeploying(_ string) bool                              { return false }
 func (m *mockReconciler) SubscribeDeployLog(_ string) (<-chan deployer.OutputLine, func(), bool) {

@@ -57,7 +57,7 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 	s.EnqueueGitCommit([]string{app.ComposePath}, "access:"+slug)
 
 	if s.reconciler != nil {
-		go func() { _ = s.reconciler.Reconcile(context.Background()) }()
+		go func() { _ = s.reconciler.RefreshRoutes(context.Background()) }()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

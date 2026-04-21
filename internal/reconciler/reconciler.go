@@ -151,6 +151,36 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+// RefreshRoutes re-parses the compose files on disk and reloads the proxy
+// routes without redeploying containers. Used after endpoint/access label
+// changes where only routing needs to change. Also updates the stored
+// compose hash so a subsequent Reconcile doesn't falsely redeploy.
+func (r *Reconciler) RefreshRoutes(ctx context.Context) error {
+	desired, err := r.scanAppsDir()
+	if err != nil {
+		return fmt.Errorf("scan apps dir: %w", err)
+	}
+	for slug, cfg := range desired {
+		hash, hashErr := hashFile(cfg.ComposePath)
+		if hashErr != nil || hash == "" {
+			continue
+		}
+		existing, err := r.store.GetAppBySlug(slug)
+		if err != nil || existing.ComposeHash == hash {
+			continue
+		}
+		existing.ComposeHash = hash
+		existing.ComposePath = cfg.ComposePath
+		if err := r.store.UpsertApp(existing, nil); err != nil {
+			log.Printf("[reconciler] RefreshRoutes: update hash %s: %v", slug, err)
+		}
+	}
+	if r.proxy != nil {
+		r.updateProxyRoutes(desired)
+	}
+	return nil
+}
+
 func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
 	var routes []proxy.Route
 	for _, app := range apps {

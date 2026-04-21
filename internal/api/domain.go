@@ -45,7 +45,10 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 	s.EnqueueGitCommit([]string{app.ComposePath}, "endpoints:"+slug)
 
 	if s.reconciler != nil {
-		go func() { _ = s.reconciler.Reconcile(context.Background()) }()
+		// Endpoint changes are label-only: refresh proxy routes directly
+		// without triggering a full compose redeploy (which would recreate
+		// containers and block Caddy from dropping stale routes for 10s+).
+		go func() { _ = s.reconciler.RefreshRoutes(context.Background()) }()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

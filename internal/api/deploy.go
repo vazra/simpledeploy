@@ -33,6 +33,7 @@ type reconciler interface {
 	ListVersions(ctx context.Context, slug string) ([]store.ComposeVersion, error)
 	ListDeployEvents(ctx context.Context, slug string) ([]store.DeployEvent, error)
 	Reconcile(ctx context.Context) error
+	RefreshRoutes(ctx context.Context) error
 	CancelOne(ctx context.Context, slug string) error
 	IsDeploying(slug string) bool
 	SubscribeDeployLog(slug string) (<-chan deployer.OutputLine, func(), bool)

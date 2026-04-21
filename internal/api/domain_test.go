@@ -30,6 +30,12 @@ func (c *captureCtxReconciler) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+func (c *captureCtxReconciler) RefreshRoutes(ctx context.Context) error {
+	c.gotCtx <- ctx
+	<-c.release
+	return nil
+}
+
 func TestHandleUpdateEndpoints_ReconcileCtxNotCancelled(t *testing.T) {
 	srv, s := newTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
