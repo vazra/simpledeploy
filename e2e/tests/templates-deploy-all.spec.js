@@ -9,7 +9,7 @@
 // "Deployed" pill, then delete the app via API before the next template.
 
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { getState, TEST_ADMIN } from '../helpers/auth.js';
 import { apiLogin, apiRequest } from '../helpers/api.js';
 import { appTemplates } from '../../ui/src/lib/appTemplates.js';
 
@@ -57,13 +57,10 @@ async function fillVariable(dialog, v, tpl) {
   await input.fill(value);
 }
 
+// Auth is injected via storageState from globalSetup; each test uses a
+// unique slug so they are safe to run in parallel (workers>1) within a
+// shard. Shards are orchestrated by `--shard=X/N` from the CI matrix.
 test.describe('Deploy every template (E2E_TEMPLATES=1)', () => {
-  test.describe.configure({ mode: 'serial' });
-
-  test.beforeEach(async ({ page }) => {
-    await loginAsAdmin(page);
-  });
-
   for (const tpl of appTemplates) {
     test(`deploy template "${tpl.name}"`, async ({ page }) => {
       // Budget per template: pulls + boot of multi-service stacks.
