@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+import { join } from 'path';
 
 // Git-sync spec requires E2E_GITSYNC=1: spawns isolated server + bare git repo.
 const GITSYNC_SPEC = '**/26b-gitsync.spec.js';
@@ -20,12 +21,13 @@ const LITE_SKIP = [
 const TEMPLATES_SPEC = '**/templates-deploy-all.spec.js';
 const TEMPLATES_ONLY = process.env.E2E_TEMPLATES === '1';
 
+// Templates mode pre-creates the admin via API in globalSetup and drives
+// every test off a shared storageState, so 01-setup.spec.js (which tests
+// the no-admin-yet setup UI) MUST be excluded: its negative-path cases
+// would break once the admin exists.
 export default defineConfig({
   testDir: './tests',
-  // In templates-only mode, restrict to admin setup + the deploy-all spec.
-  testMatch: TEMPLATES_ONLY
-    ? ['**/01-setup.spec.js', TEMPLATES_SPEC]
-    : undefined,
+  testMatch: TEMPLATES_ONLY ? [TEMPLATES_SPEC] : undefined,
   testIgnore: TEMPLATES_ONLY
     ? undefined
     : [
@@ -33,8 +35,8 @@ export default defineConfig({
         ...(process.env.E2E_GITSYNC !== '1' ? [GITSYNC_SPEC] : []),
         ...(process.env.E2E_LITE === '1' ? LITE_SKIP : []),
       ],
-  fullyParallel: false,
-  workers: 1,
+  fullyParallel: TEMPLATES_ONLY,
+  workers: TEMPLATES_ONLY ? 2 : 1,
   retries: 0,
   reporter: [['html', { open: 'never' }], ['list']],
   // 360s covers the worst case: multi-service deploy pulling several
@@ -49,7 +51,17 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        browserName: 'chromium',
+        ...(TEMPLATES_ONLY
+          ? { storageState: join(import.meta.dirname, '.auth', 'admin.json') }
+          : {}),
+      },
+    },
+  ],
   globalSetup: './global-setup.js',
   globalTeardown: './global-teardown.js',
 });

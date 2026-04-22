@@ -3,3 +3,4 @@ playwright-report/
 test-results/
 .e2e-state.json
 blob-report/
+.auth/

@@ -25,8 +25,20 @@ concurrency:
 
 jobs:
   deploy-all:
+    # Shard the ~20-template matrix across parallel runners. Each shard
+    # builds its own binary, runs its own server, and pre-pulls only the
+    # images its subset of tests will need. Playwright's --shard=X/N is
+    # deterministic, so coverage is identical to a single-runner run.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
+    env:
+      TOTAL_SHARDS: 4
+      E2E_USE_MIRROR: '1'
+      SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX: 'ghcr.io/vazra/simpledeploy-mirror/'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v6
@@ -42,16 +54,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
         run: echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-      # Route template pulls through our GHCR mirror to avoid Docker Hub
-      # pull rate limits. The mirror-images workflow populates GHCR on
-      # the same triggers as this one; bootstrap with `gh workflow run
-      # mirror-images.yml` before first use or after a long gap.
-      - run: make e2e-templates
+      - name: Install e2e deps
+        run: cd e2e && npm ci && npx playwright install chromium
+      # Pre-pull the images this shard will actually use so per-test
+      # `docker compose pull` is a near-no-op. Non-fatal if one misses;
+      # compose falls back at deploy time.
+      - name: Pre-pull template images for this shard
         env:
-          E2E_USE_MIRROR: '1'
+          SHARD: ${{ matrix.shard }}
+        run: node e2e/scripts/prepull-templates.mjs --shard=${SHARD}/${TOTAL_SHARDS}
+      - name: Run template deploy tests
+        env:
+          E2E_TEMPLATES: '1'
+          SHARD: ${{ matrix.shard }}
+        run: cd e2e && npx playwright test --shard=${SHARD}/${TOTAL_SHARDS}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: templates-playwright-report
+          name: templates-playwright-report-shard-${{ matrix.shard }}
           path: e2e/playwright-report/
           retention-days: 14
