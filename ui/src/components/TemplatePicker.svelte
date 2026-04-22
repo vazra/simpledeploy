@@ -281,7 +281,12 @@
             class="relative text-left bg-surface-3/50 border border-border/30 rounded-lg px-4 py-3 cursor-pointer hover:border-accent/50 transition-colors min-h-[140px] flex flex-col"
             aria-label="Use template {t.name}"
           >
-            {#if t.advanced}
+            {#if t.requiresCode}
+              <span
+                class="absolute top-2 right-2 text-[10px] font-medium bg-accent/15 text-accent px-1.5 py-0.5 rounded"
+                title="Scaffold: you supply the app code before it can serve anything."
+              >Bring your own code</span>
+            {:else if t.advanced}
               <span
                 class="absolute top-2 right-2 text-[10px] font-medium bg-warning/15 text-warning px-1.5 py-0.5 rounded"
                 title="Requires extra configuration after deploy."
@@ -329,6 +334,11 @@
           <p class="text-xs text-text-muted mt-0.5">{selected.description}</p>
         </div>
       </div>
+      {#if selected.requiresCode}
+        <div class="mt-2 text-xs bg-accent/10 border border-accent/30 text-text-primary rounded px-3 py-2">
+          <strong>Bring your own code.</strong> This is a starter scaffold — the app volume is empty on first deploy, so the service won't serve anything until you upload your code into it. See the notes at the bottom of this page for where to put your files.
+        </div>
+      {/if}
     </div>
 
     <!-- Access mode selector -->

@@ -615,6 +615,24 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	}
 	r.store.CreateDeployEvent(slug, action, nil, result.Output)
 
+	// Re-resolve proxy routes now that containers are up and attached to
+	// the public network. The pre-deploy watcher-triggered Reconcile ran
+	// updateProxyRoutes before containers had IPs on the shared network,
+	// so its routes fell back to Docker DNS names, unreachable from the
+	// host-native Caddy. Scan-and-reroute only; do NOT touch compose
+	// hashes here (that would mask the "compose changed" signal for the
+	// next Reconcile and prevent legitimate redeploys).
+	if result.Err == nil && r.proxy != nil {
+		go func() {
+			desired, err := r.scanAppsDir()
+			if err != nil {
+				log.Printf("[reconciler] post-deploy route refresh scan for %s: %v", slug, err)
+				return
+			}
+			r.updateProxyRoutes(desired)
+		}()
+	}
+
 	if result.Err != nil {
 		return fmt.Errorf("deploy: %w", result.Err)
 	}
