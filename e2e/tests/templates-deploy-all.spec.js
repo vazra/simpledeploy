@@ -39,7 +39,10 @@ function slugFor(tpl) {
 // (minio, mailpit, docker-registry) get distinct Host headers and don't
 // conflict in the Caddy route table.
 function domainForVar(tpl, varKey) {
-  return `${varKey}.${slugFor(tpl)}.local`;
+  // Domain validation rejects underscores, so normalize var keys like
+  // `console_domain`/`smtp_domain`/`ui_domain` into hyphenated labels.
+  const safe = varKey.replace(/_/g, '-');
+  return `${safe}.${slugFor(tpl)}.local`;
 }
 
 function valueForVar(tpl, v) {

@@ -71,13 +71,15 @@ export const templateProbes = {
     ],
   },
   'pgadmin': {
+    // pgAdmin returns 302 to /login when unauthed.
     probes: [
-      { path: '/', statusMin: 200, statusMax: 200, bodyIncludes: 'pgAdmin', timeoutMs: 120_000 },
+      { path: '/', statusMin: 200, statusMax: 302, timeoutMs: 120_000 },
     ],
   },
   'n8n-postgres': {
+    // n8n redirects / to /setup on first boot.
     probes: [
-      { path: '/', statusMin: 200, statusMax: 200, bodyIncludes: 'n8n' },
+      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 120_000 },
     ],
   },
   'vaultwarden': {
@@ -86,8 +88,9 @@ export const templateProbes = {
     ],
   },
   'umami-postgres': {
+    // Umami returns a 302 to /login with an empty body on first load.
     probes: [
-      { path: '/', statusMin: 200, statusMax: 399, bodyIncludes: 'Umami', timeoutMs: 120_000 },
+      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 120_000 },
     ],
   },
 
