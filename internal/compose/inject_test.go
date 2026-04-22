@@ -61,6 +61,37 @@ func TestInjectSharedNetworkIdempotent(t *testing.T) {
 	}
 }
 
+// Regression: endpoint-bearing services joining simpledeploy-public must
+// also stay on `default` so intra-stack DNS (e.g. an app reaching its db)
+// keeps working. Confirmed live in tpl-ci-repro: the pre-fix injected
+// variant produced `getaddrinfo EAI_AGAIN db` and the app healthcheck
+// never passed.
+func TestInjectSharedNetworkPreservesDefaultForDepServices(t *testing.T) {
+	src := []byte(`services:
+  app:
+    image: myapp
+    labels:
+      simpledeploy.endpoints.0.domain: example.com
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres
+`)
+	out, _, err := InjectSharedNetwork(src, networkName)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	s := string(out)
+	// The app must list BOTH default and simpledeploy-public.
+	if !strings.Contains(s, "- default") {
+		t.Errorf("app service missing `- default` after injection:\n%s", s)
+	}
+	if !strings.Contains(s, "- simpledeploy-public") {
+		t.Errorf("app service missing `- simpledeploy-public` after injection:\n%s", s)
+	}
+}
+
 func TestInjectSharedNetworkNoEndpointUntouched(t *testing.T) {
 	src := []byte(`services:
   db:

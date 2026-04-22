@@ -76,21 +76,23 @@ export const templateProbes = {
       { path: '/', statusMin: 200, statusMax: 302, timeoutMs: 120_000 },
     ],
   },
-  // n8n + postgres routinely stays in healthcheck "starting" state past 4
-  // minutes on GitHub Actions runners (schema migrations + first-boot
-  // bootstrap). Reachability probing is flaky at that budget; the wizard-
-  // deploy success still verifies the template's compose is valid.
-  'n8n-postgres':  { probe: null, reason: 'Slow first-boot: n8n stays healthcheck=starting past probe window on CI' },
+  'n8n-postgres': {
+    // n8n redirects / to /setup on first boot.
+    probes: [
+      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 180_000 },
+    ],
+  },
   'vaultwarden': {
     probes: [
       { path: '/', statusMin: 200, statusMax: 200, bodyIncludes: 'Vaultwarden' },
     ],
   },
-  // Umami + postgres crash-loops on first boot in the SimpleDeploy
-  // environment (observed as service state=restarting). Raw docker compose
-  // runs it fine, so this is environmental (likely a race between Prisma
-  // migrations and the healthcheck). Wizard-deploy is still asserted.
-  'umami-postgres': { probe: null, reason: 'Crash-loops on first boot in CI; works under raw docker compose' },
+  'umami-postgres': {
+    // Umami redirects / to /login with an empty body on first load.
+    probes: [
+      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 180_000 },
+    ],
+  },
 
   'authelia':      { probe: null, reason: 'Advanced: requires configuration.yml + users_database.yml in authelia-config volume before boot' },
 
