@@ -321,10 +321,11 @@ export const appTemplates = [
     name: 'Node API + Postgres',
     icon: '🟢',
     category: 'dev-tools',
-    description: 'Node.js API with a Postgres database.',
+    description: 'Node.js API with a Postgres database. Scaffold: you supply the app code.',
     tags: ['node', 'api', 'postgres', 'javascript'],
     nameSuggestion: 'node-api',
     advanced: false,
+    requiresCode: true,
     variables: [
       domainVar,
       {
@@ -401,10 +402,11 @@ export const appTemplates = [
     name: 'Go REST API',
     icon: '🐹',
     category: 'dev-tools',
-    description: 'Go HTTP service behind the proxy with rate limiting.',
+    description: 'Go HTTP service behind the proxy with rate limiting. Scaffold: you supply the compiled binary.',
     tags: ['go', 'golang', 'api', 'rest'],
     nameSuggestion: 'go-api',
     advanced: false,
+    requiresCode: true,
     variables: [domainVar],
     compose: {
       services: {
@@ -451,10 +453,11 @@ export const appTemplates = [
     name: 'API + Worker + Redis',
     icon: '🔴',
     category: 'dev-tools',
-    description: 'Node API with a background worker and Redis queue.',
+    description: 'Node API with a background worker and Redis queue. Scaffold: you supply the app code.',
     tags: ['node', 'redis', 'worker', 'queue'],
     nameSuggestion: 'worker-app',
     advanced: false,
+    requiresCode: true,
     variables: [domainVar],
     compose: {
       services: {
