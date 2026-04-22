@@ -174,13 +174,24 @@ func indexOf(s string, b byte) int {
 
 // attachServiceNetwork appends the network name to the service's networks
 // block. Handles missing/short-form/map-form variants. Returns true if changed.
+//
+// Critically, when we're CREATING the networks block (the service had none
+// before), we also list `default` so the service stays on the project's
+// default bridge network — otherwise intra-stack DNS (e.g. an `api` service
+// reaching its `db`) breaks, because Compose drops the implicit default
+// attachment as soon as a service specifies `networks:` explicitly.
+// When the service already declared `networks:` we trust the author's list
+// and only append our shared network (no implicit `default` added).
 func attachServiceNetwork(svc *yaml.Node, name string) bool {
 	nets := mappingValue(svc, "networks")
 	if nets == nil {
 		key := &yaml.Node{Kind: yaml.ScalarNode, Value: "networks"}
 		val := &yaml.Node{
-			Kind:    yaml.SequenceNode,
-			Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: name}},
+			Kind: yaml.SequenceNode,
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Value: "default"},
+				{Kind: yaml.ScalarNode, Value: name},
+			},
 		}
 		svc.Content = append(svc.Content, key, val)
 		return true
