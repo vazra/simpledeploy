@@ -7,6 +7,7 @@ import {
   injectHighCPUWindow,
   insertMetricPoint,
   getAppId,
+  replaceMetricsAtomic,
 } from '../helpers/db.js';
 
 // -----------------------------------------------------------------------------
@@ -19,8 +20,9 @@ import {
 test.describe('Alerts - Webhook Payload Formats', () => {
   test.describe.configure({ mode: 'serial' });
 
-  // Evaluator ticks every 30s. Allow 2 cycles before giving up.
-  const EVAL_WAIT_MS = 75_000;
+  // e2e server runs the evaluator every 2s (SIMPLEDEPLOY_ALERT_EVAL_INTERVAL).
+  // A handful of cycles is plenty; 20s is a generous ceiling.
+  const EVAL_WAIT_MS = 20_000;
   const APP_SLUG = 'e2e-nginx';
   const DURATION_SEC = 60;
   const THRESHOLD = 80;
@@ -50,20 +52,17 @@ test.describe('Alerts - Webhook Payload Formats', () => {
   }
 
   // Continuously re-inject high/low CPU points so the evaluator always sees a
-  // fresh breach window (mirrors the refresher in 13-alerts.spec.js).
+  // fresh breach window. Atomic DELETE+INSERT so the faster e2e evaluator
+  // tick (2s) can't see an empty window and flip firing->resolve->refire.
   function startMetricRefresher(slug, high) {
     let stopped = false;
     const tick = () => {
       if (stopped) return;
       try {
-        sqliteExec(
-          `DELETE FROM metrics WHERE app_id = (SELECT id FROM apps WHERE slug='${slug}') AND container_id != 'e2e-fake';`,
-        );
-        if (high) {
-          injectHighCPUWindow(slug, 120, INJECTED_CPU);
-        } else {
-          injectLowCPUWindow(slug, 5);
-        }
+        replaceMetricsAtomic(slug, {
+          cpu: high ? INJECTED_CPU : 5,
+          memoryMb: high ? 100 : 50,
+        });
       } catch (_) { /* transient lock errors ignored */ }
     };
     tick();

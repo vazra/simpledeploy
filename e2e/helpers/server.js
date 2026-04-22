@@ -78,10 +78,20 @@ export async function startServer(binPath, overrides = {}) {
     mirrorEnv.SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX =
       process.env.SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX || 'ghcr.io/vazra/simpledeploy-mirror/';
   }
+  // Turn the knobs down for e2e: production tickers are tuned for low load;
+  // the tests need to observe state transitions quickly to stay under the
+  // 360s test-level budget.
+  const fastEnv = {
+    SIMPLEDEPLOY_METRICS_FLUSH_INTERVAL: '1s',
+    SIMPLEDEPLOY_REQUEST_METRICS_FLUSH_INTERVAL: '1s',
+    SIMPLEDEPLOY_ALERT_EVAL_INTERVAL: '2s',
+    SIMPLEDEPLOY_STATUS_REFRESH_INTERVAL: '5s',
+    SIMPLEDEPLOY_STABILIZE_TIMEOUT: '10s',
+  };
   const proc = spawn(binPath, ['serve', '--config', configPath], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS: '1', ...mirrorEnv },
+    env: { ...process.env, SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS: '1', ...fastEnv, ...mirrorEnv },
   });
 
   proc.stdout.pipe(logStream);

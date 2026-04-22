@@ -50,8 +50,9 @@ test.describe('Metrics - Functional', () => {
       } catch {}
     }
 
-    // Wait for metrics collection interval + request metrics flush.
-    await new Promise((r) => setTimeout(r, 45_000));
+    // Wait for a couple of metrics + request-stats flush cycles. e2e runs
+    // both at 1s (SIMPLEDEPLOY_*_FLUSH_INTERVAL), so 5s is ample.
+    await new Promise((r) => setTimeout(r, 5_000));
 
     const rows = sqliteQuery(
       "SELECT COUNT(*) AS c FROM metrics WHERE app_id=(SELECT id FROM apps WHERE slug='e2e-nginx')",

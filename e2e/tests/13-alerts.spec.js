@@ -8,6 +8,7 @@ import {
   injectHighCPUWindow,
   insertMetricPoint,
   getAppId,
+  replaceMetricsAtomic,
 } from '../helpers/db.js';
 
 test.describe('Alerts & Webhooks', () => {
@@ -148,15 +149,14 @@ test.describe('Alerts - Functional Dispatch', () => {
     const tick = () => {
       if (stopped) return;
       try {
-        // delete any points the real collector wrote (near-current ts)
-        sqliteExec(
-          `DELETE FROM metrics WHERE app_id = (SELECT id FROM apps WHERE slug='${slug}') AND container_id != 'e2e-fake';`,
-        );
-        if (high) {
-          injectHighCPUWindow(slug, 120, 95);
-        } else {
-          injectLowCPUWindow(slug, 5);
-        }
+        // Single transaction: DELETE the real collector's points AND the
+        // previous injected window, then INSERT the fresh window. Non-atomic
+        // delete+insert would let a fast evaluator tick (2s) see an empty
+        // window, resolve the alert, then re-fire on the next tick.
+        replaceMetricsAtomic(slug, {
+          cpu: high ? 95 : 5,
+          memoryMb: high ? 100 : 50,
+        });
       } catch (e) {
         // ignore transient sqlite lock errors
       }
@@ -311,12 +311,14 @@ test.describe('Alerts - Functional Dispatch', () => {
         EVAL_WAIT_MS,
       );
 
-      // Keep the breach active for ~2 more evaluator cycles and count fires.
-      await new Promise((r) => setTimeout(r, 65_000));
+      // Keep the breach active through a few evaluator cycles and count fires.
+      // With the e2e 2s evaluator tick, 15s is plenty to prove "no re-fire".
+      await new Promise((r) => setTimeout(r, 15_000));
       const fires = receiver.received.filter(
         (r) => r.body && r.body.status === 'firing' && r.body.metric === 'cpu_pct',
       );
-      expect(fires.length, `expected exactly 1 fire event, got ${fires.length}`).toBe(1);
+      const times = fires.map((f) => f.at).join(',');
+      expect(fires.length, `expected exactly 1 fire event, got ${fires.length} (at: ${times})`).toBe(1);
     } finally {
       stopRefresh();
     }
@@ -351,8 +353,8 @@ test.describe('Alerts - Functional Dispatch', () => {
     const stopRefresh = startMetricRefresher(APP_SLUG, true);
 
     try {
-      // Wait across at least 2 evaluator ticks.
-      await new Promise((r) => setTimeout(r, 65_000));
+      // e2e evaluator tick is 2s; 15s is ~7 ticks, enough to prove no fire.
+      await new Promise((r) => setTimeout(r, 15_000));
       const cpuHits = receiver.received.filter(
         (r) => r.body && r.body.metric === 'cpu_pct',
       );

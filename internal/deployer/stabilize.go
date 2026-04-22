@@ -4,14 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 )
 
 // StabilizeTimeout is the max time we wait for containers to settle after
-// `docker compose up -d` returns. Configurable for tests.
-var StabilizeTimeout = 30 * time.Second
+// `docker compose up -d` returns. Configurable for tests; also overridable
+// at process start via SIMPLEDEPLOY_STABILIZE_TIMEOUT (e.g. "5s" for e2e).
+var StabilizeTimeout = func() time.Duration {
+	if v := os.Getenv("SIMPLEDEPLOY_STABILIZE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return 30 * time.Second
+}()
 
 // stabilize polls the project's container states until all are running and
 // healthchecks (if any) pass, or until StabilizeTimeout elapses.

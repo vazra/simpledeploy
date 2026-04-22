@@ -137,13 +137,15 @@ func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployRe
 	}
 
 	project := "simpledeploy-" + app.Name
+	// Use `compose restart` (in-place restart of existing containers) rather
+	// than `up -d --force-recreate`: it preserves container identity, skips
+	// a pull/recreate/reattach cycle, and is what the UI "Restart" button
+	// semantically means. Deploy/rollback paths still recreate.
 	args := []string{
 		"compose",
 		"-f", app.ComposePath,
 		"-p", project,
-		"up", "-d",
-		"--force-recreate",
-		"--remove-orphans",
+		"restart",
 	}
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
 	output := strings.TrimSpace(stdout + "\n" + stderr)

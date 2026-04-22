@@ -62,3 +62,27 @@ export function injectHighCPUWindow(appSlug, durationSec = 120, cpuPct = 95) {
     });
   }
 }
+
+// Atomic replace: delete collector-written points for a slug and insert a
+// fresh window in one transaction. Needed when a fast evaluator tick (2s in
+// e2e) would otherwise land between DELETE and the first INSERT and flip the
+// alert rule to resolved -> re-fire on the next tick.
+export function replaceMetricsAtomic(appSlug, { cpu, memoryMb, tsSec, count = 10, stepSec = 10 }) {
+  const appId = getAppId(appSlug);
+  const mem = Math.round((memoryMb || 0) * 1024 * 1024);
+  const now = tsSec || Math.floor(Date.now() / 1000);
+  const rows = [];
+  for (let i = 0; i < count; i++) {
+    const ts = now - (i * stepSec);
+    rows.push(`(${appId}, 'e2e-fake', ${ts}, 'raw', ${cpu}, ${mem}, ${mem * 4})`);
+  }
+  const sql = [
+    'BEGIN IMMEDIATE;',
+    `DELETE FROM metrics WHERE app_id=${appId} AND container_id != 'e2e-fake';`,
+    `DELETE FROM metrics WHERE app_id=${appId} AND container_id = 'e2e-fake';`,
+    `INSERT INTO metrics (app_id, container_id, ts, tier, cpu_pct, mem_bytes, mem_limit) VALUES ${rows.join(', ')};`,
+    'COMMIT;',
+  ].join(' ');
+  sqliteExec(sql);
+  return appId;
+}

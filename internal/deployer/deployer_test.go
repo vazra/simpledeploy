@@ -87,15 +87,15 @@ func TestNewFailsWhenComposeUnavailable(t *testing.T) {
 	}
 }
 
-func TestRestartCallsForceRecreate(t *testing.T) {
+func TestRestartCallsComposeRestart(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
 	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
 	if result := d.Restart(context.Background(), app); result.Err != nil {
 		t.Fatalf("Restart: %v", result.Err)
 	}
-	if !mock.HasCall("docker", "compose", "up", "--force-recreate") {
-		t.Errorf("expected --force-recreate, got: %+v", mock.Calls)
+	if !mock.HasCall("docker", "compose", "restart") {
+		t.Errorf("expected compose restart, got: %+v", mock.Calls)
 	}
 }
 

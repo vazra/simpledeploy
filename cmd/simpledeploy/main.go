@@ -347,6 +347,19 @@ func main() {
 	}
 }
 
+// envDuration returns the duration parsed from env var `name`, or `def` if
+// unset or invalid. Used to let e2e/tests dial down production polling
+// intervals without changing production defaults.
+func envDuration(name string, def time.Duration) time.Duration {
+	if v := os.Getenv(name); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+		log.Printf("[config] invalid %s=%q, using default %s", name, v, def)
+	}
+	return def
+}
+
 func scanAndTee(r *os.File, orig *os.File, buf *logbuf.Buffer) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
@@ -614,7 +627,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// stabilization window flip the app status to "unstable" without waiting
 	// for the next user action.
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(envDuration("SIMPLEDEPLOY_STATUS_REFRESH_INTERVAL", 30*time.Second))
 		defer ticker.Stop()
 		for {
 			select {
@@ -626,10 +639,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	go collector.Run(ctx, 10*time.Second)
-	go writer.Run(ctx, 10*time.Second)
+	metricsFlush := envDuration("SIMPLEDEPLOY_METRICS_FLUSH_INTERVAL", 10*time.Second)
+	reqFlush := envDuration("SIMPLEDEPLOY_REQUEST_METRICS_FLUSH_INTERVAL", 5*time.Second)
+	go collector.Run(ctx, metricsFlush)
+	go writer.Run(ctx, metricsFlush)
 	go rollup.Run(ctx)
-	go reqWriter.Run(ctx, 5*time.Second)
+	go reqWriter.Run(ctx, reqFlush)
 	go reqRollup.Run(ctx)
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -653,7 +668,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		dispatcher = alerts.NewWebhookDispatcher()
 	}
 	evaluator := alerts.NewEvaluator(db, db, db, dispatcher)
-	go evaluator.Run(ctx, 30*time.Second)
+	go evaluator.Run(ctx, envDuration("SIMPLEDEPLOY_ALERT_EVAL_INTERVAL", 30*time.Second))
 
 	count, _ := db.UserCount()
 	if count == 0 {
