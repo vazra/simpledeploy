@@ -10,6 +10,8 @@ on:
       - 'ui/src/lib/serviceTemplates.js'
       - 'e2e/tests/templates-deploy-all.spec.js'
       - 'e2e/tests/00-template-images.spec.js'
+      - 'e2e/helpers/template-probes.js'
+      - 'internal/compose/inject.go'
   push:
     branches: [main]
     paths:
@@ -17,6 +19,8 @@ on:
       - 'ui/src/lib/serviceTemplates.js'
       - 'e2e/tests/templates-deploy-all.spec.js'
       - 'e2e/tests/00-template-images.spec.js'
+      - 'e2e/helpers/template-probes.js'
+      - 'internal/compose/inject.go'
   workflow_dispatch:
 
 concurrency:
