@@ -111,7 +111,10 @@ test.describe('Deploy every template (E2E_TEMPLATES=1)', () => {
       // The point of this spec is that the deploy round-trip wired through
       // the wizard, not that every template's default config produces a
       // perfectly healthy app.
-      await expect(dialog.getByText(/^(Deployed|Unstable|Failed)$/)).toBeVisible({
+      // Use data-deploy-status attr; getByText(regex) does not match a span
+      // with SVG+text children reliably.
+      const statusBadge = dialog.getByTestId('deploy-status');
+      await expect(statusBadge).toHaveAttribute('data-deploy-status', /^(success|unstable|failed)$/, {
         timeout: 540_000,
       });
 
