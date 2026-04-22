@@ -77,9 +77,11 @@ export const templateProbes = {
     ],
   },
   'n8n-postgres': {
-    // n8n redirects / to /setup on first boot.
+    // n8n + postgres: postgres init + n8n schema migrations on first boot
+    // routinely take 2-3 minutes before the HTTP server starts accepting
+    // connections. Caddy returns 502 during that window.
     probes: [
-      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 120_000 },
+      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 240_000 },
     ],
   },
   'vaultwarden': {
@@ -88,9 +90,11 @@ export const templateProbes = {
     ],
   },
   'umami-postgres': {
-    // Umami returns a 302 to /login with an empty body on first load.
+    // Umami + postgres: Prisma migrations run on first boot and take 2-3
+    // minutes before the Next.js server accepts connections. Returns a
+    // 302 to /login once ready.
     probes: [
-      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 120_000 },
+      { path: '/', statusMin: 200, statusMax: 399, timeoutMs: 240_000 },
     ],
   },
 
