@@ -244,72 +244,6 @@ func (s *Server) handlePruneRequestMetrics(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(pruneResponse{Deleted: n, Message: fmt.Sprintf("Deleted %d request_metrics[%s] rows older than %d days", n, req.Tier, req.Days)})
 }
 
-func (s *Server) handleAuditLog(w http.ResponseWriter, r *http.Request) {
-	if requireRole(w, r, "super_admin") == nil {
-		return
-	}
-	limit := 100
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-	}
-	var entries []audit.Event
-	if s.audit != nil {
-		entries = s.audit.Recent(limit)
-	}
-	if entries == nil {
-		entries = []audit.Event{}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
-}
-
-func (s *Server) handleClearAuditLog(w http.ResponseWriter, r *http.Request) {
-	if requireRole(w, r, "super_admin") == nil {
-		return
-	}
-	if s.audit != nil {
-		s.audit.Clear()
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleUpdateAuditConfig(w http.ResponseWriter, r *http.Request) {
-	if requireRole(w, r, "super_admin") == nil {
-		return
-	}
-	var body struct {
-		MaxSize int `json:"max_size"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-	if body.MaxSize < 10 || body.MaxSize > 10000 {
-		http.Error(w, "max_size must be between 10 and 10000", http.StatusBadRequest)
-		return
-	}
-	if s.audit != nil {
-		s.audit.Resize(body.MaxSize)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleGetAuditConfig(w http.ResponseWriter, r *http.Request) {
-	if requireRole(w, r, "super_admin") == nil {
-		return
-	}
-	maxSize := 500
-	if s.audit != nil {
-		maxSize = s.audit.MaxSize()
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"max_size": maxSize})
-}
-
 func (s *Server) handleVacuumDB(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.VacuumDB(); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
@@ -555,14 +489,12 @@ func (s *Server) handleSetPublicHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.audit != nil {
-		caller := GetAuthUser(r)
-		var uname string
-		if caller != nil {
-			uname = caller.Username
-		}
-		s.audit.Log(audit.Event{Type: "public_host_updated", Username: uname, Detail: host, Success: true})
-	}
+	after, _ := json.Marshal(map[string]any{"host": host})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "public_host_changed",
+		After:    after,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"public_host": host})

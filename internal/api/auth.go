@@ -48,9 +48,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			s.lockout.RecordFailure("user:" + req.Username)
 			s.lockout.RecordFailure("ip:" + ip)
 		}
-		if s.audit != nil {
-			s.audit.Log(audit.Event{Type: "login_failed", Username: req.Username, IP: ip})
-		}
+		_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+			Category: "auth",
+			Action:   "login_failed",
+		})
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -71,9 +72,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.lockout.RecordSuccess("ip:" + ip)
 	}
 
-	if s.audit != nil {
-		s.audit.Log(audit.Event{Type: "login", Username: user.Username, IP: ip, Success: true})
-	}
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "auth",
+		Action:   "login_succeeded",
+	})
 
 	secure := s.tlsMode != "off"
 	sameSite := http.SameSiteStrictMode

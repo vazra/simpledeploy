@@ -163,14 +163,11 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	if s.audit != nil {
-		caller := GetAuthUser(r)
-		name := ""
-		if caller != nil {
-			name = caller.Username
-		}
-		s.audit.Log(audit.Event{Type: "deploy", Username: name, Detail: body.Name, Success: true})
-	}
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "deploy",
+		Action:   "deploy_succeeded",
+		AppSlug:  body.Name,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

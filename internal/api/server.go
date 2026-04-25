@@ -48,7 +48,7 @@ type Server struct {
 	appsDir         string
 	reconciler      reconciler
 	lockout         *auth.LoginLockout
-	audit           *audit.Logger
+	audit           *audit.Recorder
 	trustedProxies  []string
 	masterSecret    string
 	buildVersion    string
@@ -103,8 +103,8 @@ func (s *Server) SetBackupScheduler(sched *backup.Scheduler) {
 // SetLockout sets the login lockout tracker.
 func (s *Server) SetLockout(l *auth.LoginLockout) { s.lockout = l }
 
-// SetAudit sets the audit logger.
-func (s *Server) SetAudit(a *audit.Logger) { s.audit = a }
+// SetAudit sets the audit recorder.
+func (s *Server) SetAudit(a *audit.Recorder) { s.audit = a }
 
 // SetLogBuffer sets the log buffer for system log streaming.
 func (s *Server) SetLogBuffer(lb *logbuf.Buffer) { s.logBuf = lb }
@@ -316,11 +316,6 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePruneMetrics))))
 	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePruneRequestMetrics))))
 	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleVacuumDB))))
-	s.mux.Handle("GET /api/system/audit-log", s.authMiddleware(http.HandlerFunc(s.handleAuditLog)))
-	s.mux.Handle("DELETE /api/system/audit-log", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleClearAuditLog))))
-	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleGetAuditConfig)))
-	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleUpdateAuditConfig))))
-
 	// Public host (sslip.io quick-domain helper)
 	s.mux.Handle("GET /api/system/public-host", s.authMiddleware(http.HandlerFunc(s.handleGetPublicHost)))
 	s.mux.Handle("PUT /api/system/public-host", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleSetPublicHost))))

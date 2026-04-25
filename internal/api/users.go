@@ -133,9 +133,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if s.audit != nil {
-		s.audit.Log(audit.Event{Type: "password_changed", Username: authUser.Username, Success: true})
-	}
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "auth",
+		Action:   "password_changed",
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -183,10 +184,12 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if s.audit != nil {
-		caller := GetAuthUser(r)
-		s.audit.Log(audit.Event{Type: "user_created", Username: caller.Username, Detail: body.Username + " (" + body.Role + ")", Success: true})
-	}
+	after, _ := json.Marshal(map[string]any{"username": body.Username, "role": body.Role})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "user_added",
+		After:    after,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(toUserResponse(u))
@@ -267,9 +270,12 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if s.audit != nil {
-		s.audit.Log(audit.Event{Type: "user_updated", Username: caller.Username, Detail: user.Username, Success: true})
-	}
+	after, _ := json.Marshal(map[string]any{"username": user.Username, "role": user.Role})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "user_changed",
+		After:    after,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(toUserResponse(user))
 }
@@ -292,10 +298,12 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if s.audit != nil {
-		caller := GetAuthUser(r)
-		s.audit.Log(audit.Event{Type: "user_deleted", Username: caller.Username, Detail: fmt.Sprintf("user_id=%d", id), Success: true})
-	}
+	before, _ := json.Marshal(map[string]any{"username": fmt.Sprintf("user_id=%d", id)})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "user_removed",
+		Before:   before,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -398,9 +406,12 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if s.audit != nil {
-		s.audit.Log(audit.Event{Type: "apikey_created", Username: user.Username, Detail: body.Name, Success: true})
-	}
+	after, _ := json.Marshal(map[string]any{"name": body.Name, "username": user.Username})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "apikey_added",
+		After:    after,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]any{
@@ -430,9 +441,12 @@ func (s *Server) handleDeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if s.audit != nil {
-		s.audit.Log(audit.Event{Type: "apikey_deleted", Username: user.Username, Detail: fmt.Sprintf("key_id=%d", id), Success: true})
-	}
+	before, _ := json.Marshal(map[string]any{"name": fmt.Sprintf("key_id=%d", id), "username": user.Username})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "apikey_removed",
+		Before:   before,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
