@@ -42,6 +42,7 @@ func renderComposeChanged(before, after []byte) (string, string) {
 		default:
 			diffs = append(diffs, svcDiffs(name, bs, as)...)
 		}
+		// firstSvc takes the first service in sorted order; cheap and stable for a single target hint.
 		if firstSvc == "" {
 			firstSvc = name
 		}

@@ -54,3 +54,21 @@ func TestComposeEnvDiff(t *testing.T) {
 		t.Errorf("missing env C added: %q", s)
 	}
 }
+
+func TestComposeReplicasChange(t *testing.T) {
+	before := []byte(`{"services":{"web":{"image":"x","replicas":1}}}`)
+	after := []byte(`{"services":{"web":{"image":"x","replicas":3}}}`)
+	s, _ := Render("compose", "changed", before, after)
+	if !strings.Contains(s, "replicas 1 → 3") {
+		t.Errorf("expected replicas diff in summary, got %q", s)
+	}
+}
+
+func TestComposeEnvRemoved(t *testing.T) {
+	before := []byte(`{"services":{"web":{"image":"x","env":{"A":"1","B":"2"}}}}`)
+	after := []byte(`{"services":{"web":{"image":"x","env":{"A":"1"}}}}`)
+	s, _ := Render("compose", "changed", before, after)
+	if !strings.Contains(s, "env B removed") {
+		t.Errorf("expected env B removed in summary, got %q", s)
+	}
+}
