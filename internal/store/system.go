@@ -1,8 +1,10 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 )
 
 // DBStats holds aggregate counts for the system info endpoint.
@@ -46,6 +48,37 @@ func (s *Store) GetDBStats() (DBStats, error) {
 func (s *Store) VacuumDB() error {
 	_, err := s.db.Exec("VACUUM")
 	return err
+}
+
+// GetAuditRetentionDays returns the configured audit log retention in days.
+// Returns 365 if not set.
+func (s *Store) GetAuditRetentionDays(ctx context.Context) (int, error) {
+	var val string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM db_backup_config WHERE key = 'audit_retention_days'`).Scan(&val)
+	if err == sql.ErrNoRows {
+		return 365, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get audit_retention_days: %w", err)
+	}
+	days, err := strconv.Atoi(val)
+	if err != nil {
+		return 365, nil
+	}
+	return days, nil
+}
+
+// SetAuditRetentionDays persists the audit log retention in days.
+func (s *Store) SetAuditRetentionDays(ctx context.Context, days int) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO db_backup_config (key, value) VALUES ('audit_retention_days', ?)`,
+		strconv.Itoa(days),
+	)
+	if err != nil {
+		return fmt.Errorf("set audit_retention_days: %w", err)
+	}
+	return nil
 }
 
 // TierStat holds the row count for a single tier in a time-series table.
