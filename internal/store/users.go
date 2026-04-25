@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -361,6 +362,26 @@ func (s *Store) UpdatePassword(id int64, newHash string) error {
 	}
 	s.fireHook(ScopeGlobal, "")
 	return nil
+}
+
+// AccessibleAppIDs returns the app IDs the user has explicit access grants for.
+// Does NOT include super_admin bypass; callers must check role separately.
+func (s *Store) AccessibleAppIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT app_id FROM user_app_access WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("accessible app ids: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan app id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // GetUserAppSlugs returns the list of app slugs accessible to the given user.

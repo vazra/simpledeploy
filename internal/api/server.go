@@ -336,6 +336,15 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateRegistry)))
 	s.mux.Handle("DELETE /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteRegistry)))
 
+	// Activity / audit log
+	s.mux.Handle("GET /api/activity/recent", s.authMiddleware(http.HandlerFunc(s.handleRecentActivity)))
+	s.mux.Handle("GET /api/activity/{id}", s.authMiddleware(http.HandlerFunc(s.handleGetActivity)))
+	s.mux.Handle("GET /api/activity", s.authMiddleware(http.HandlerFunc(s.handleListActivity)))
+	s.mux.Handle("DELETE /api/activity", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePurgeActivity))))
+	s.mux.Handle("GET /api/apps/{slug}/activity", s.authMiddleware(http.HandlerFunc(s.handleAppActivity)))
+	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleGetAuditConfig)))
+	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePutAuditConfig))))
+
 	// Git sync
 	s.mux.Handle("GET /api/git/status", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGitStatusSafe))))
 	s.mux.Handle("POST /api/git/sync-now", s.authMiddleware(s.superAdminMiddleware(s.rateLimitMiddleware(http.HandlerFunc(s.handleGitSyncNowSafe)))))

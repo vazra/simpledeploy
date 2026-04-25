@@ -1,0 +1,206 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/vazra/simpledeploy/internal/store"
+)
+
+// parseLimit parses "limit" query param, clamped to [1, max], defaulting to def.
+func parseLimit(r *http.Request, def, max int) int {
+	s := r.URL.Query().Get("limit")
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return def
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
+
+// parseBefore parses the "before" cursor (entry ID) from query params.
+func parseBefore(r *http.Request) int64 {
+	s := r.URL.Query().Get("before")
+	if s == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// parseCategories splits the "categories" query param on commas.
+func parseCategories(r *http.Request) []string {
+	s := r.URL.Query().Get("categories")
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, c := range strings.Split(s, ",") {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// buildNonAdminFilter populates AllowedAppIDs for a non-super_admin caller.
+// When empty, ListActivity returns only app_id IS NULL rows (system/auth entries).
+// This is intentional: non-admins without any app grants still see global auth events.
+func (s *Server) buildNonAdminFilter(r *http.Request, f *store.ActivityFilter) error {
+	user := GetAuthUser(r)
+	ids, err := s.store.AccessibleAppIDs(r.Context(), user.ID)
+	if err != nil {
+		return err
+	}
+	if ids == nil {
+		ids = []int64{} // empty slice = only app_id IS NULL rows
+	}
+	f.AllowedAppIDs = ids
+	return nil
+}
+
+func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
+	user := GetAuthUser(r)
+	f := store.ActivityFilter{
+		Limit:      parseLimit(r, 50, 200),
+		Before:     parseBefore(r),
+		Categories: parseCategories(r),
+	}
+	if slug := r.URL.Query().Get("app"); slug != "" {
+		f.AppSlug = slug
+	}
+	if user.Role != "super_admin" {
+		if err := s.buildNonAdminFilter(r, &f); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	entries, next, err := s.store.ListActivity(r.Context(), f)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []store.AuditEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"entries": entries, "next_before": next})
+}
+
+func (s *Server) handleAppActivity(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	app, err := s.store.GetAppBySlug(slug)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if !s.checkAppAccessByID(w, r, app.ID) {
+		return
+	}
+	f := store.ActivityFilter{
+		AppID:      &app.ID,
+		Categories: parseCategories(r),
+		Limit:      parseLimit(r, 50, 200),
+		Before:     parseBefore(r),
+	}
+	entries, next, err := s.store.ListActivity(r.Context(), f)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []store.AuditEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"entries": entries, "next_before": next})
+}
+
+func (s *Server) handleRecentActivity(w http.ResponseWriter, r *http.Request) {
+	user := GetAuthUser(r)
+	f := store.ActivityFilter{Limit: parseLimit(r, 8, 50)}
+	if user.Role != "super_admin" {
+		if err := s.buildNonAdminFilter(r, &f); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	entries, _, err := s.store.ListActivity(r.Context(), f)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []store.AuditEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"entries": entries})
+}
+
+func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	e, err := s.store.GetActivity(r.Context(), id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	// Non-admin: verify access if entry is scoped to an app.
+	if e.AppID != nil {
+		if !s.checkAppAccessByID(w, r, *e.AppID) {
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(e)
+}
+
+func (s *Server) handleGetAuditConfig(w http.ResponseWriter, r *http.Request) {
+	days, err := s.store.GetAuditRetentionDays(r.Context())
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"retention_days": days})
+}
+
+func (s *Server) handlePutAuditConfig(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RetentionDays int `json:"retention_days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if body.RetentionDays < 1 {
+		http.Error(w, "retention_days must be >= 1", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.SetAuditRetentionDays(r.Context(), body.RetentionDays); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handlePurgeActivity(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.PurgeAudit(r.Context()); err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
