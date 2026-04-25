@@ -98,11 +98,30 @@ func (s *Server) handlePutEnv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	envPath := filepath.Join(filepath.Dir(app.ComposePath), ".env")
+
+	// Capture before-keys for audit (key-only; values are not logged to avoid
+	// leaking secrets into the audit trail).
+	var beforeKeys []string
+	if oldVars, err := parseEnvFile(envPath); err == nil {
+		for _, v := range oldVars {
+			beforeKeys = append(beforeKeys, v.Key)
+		}
+	}
+
 	if err := writeEnvFile(envPath, vars); err != nil {
 		http.Error(w, "failed to write .env", http.StatusInternalServerError)
 		return
 	}
 	s.EnqueueGitCommit([]string{envPath}, "env:"+slug)
+
+	afterKeys := make([]string, 0, len(vars))
+	for _, v := range vars {
+		afterKeys = append(afterKeys, v.Key)
+	}
+	s.recordAudit(r, app, "env", "changed",
+		map[string]any{"keys": beforeKeys},
+		map[string]any{"keys": afterKeys},
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"ok"}`))

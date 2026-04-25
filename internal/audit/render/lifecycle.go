@@ -13,6 +13,13 @@ func init() {
 	register("lifecycle", "started", renderLifecycleStarted)
 	register("lifecycle", "restarted", renderLifecycleRestarted)
 	register("lifecycle", "scaled", renderLifecycleScaled)
+	register("lifecycle", "image_pulled", renderLifecycleImagePulled)
+}
+
+func renderLifecycleImagePulled(before, after []byte) (string, string) {
+	var a lifecycleView
+	_ = json.Unmarshal(after, &a)
+	return fmt.Sprintf("Images pulled for %q", a.Name), a.Name
 }
 
 type lifecycleView struct {

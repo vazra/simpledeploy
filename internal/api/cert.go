@@ -70,6 +70,9 @@ func (s *Server) handleUploadCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Audit: record only domain; never log cert/key bodies.
+	s.recordAudit(r, app, "endpoint", "cert_uploaded", nil, map[string]any{"domain": domain})
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -95,6 +98,8 @@ func (s *Server) handleDeleteCert(w http.ResponseWriter, r *http.Request) {
 
 	os.Remove(certPath)
 	os.Remove(keyPath)
+
+	s.recordAudit(r, app, "endpoint", "cert_removed", map[string]any{"domain": domain}, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

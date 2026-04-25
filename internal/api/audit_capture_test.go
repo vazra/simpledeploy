@@ -1,14 +1,22 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -460,6 +468,140 @@ func TestAuditComposeDiffOnRestore(t *testing.T) {
 	if afterImage != "nginx:2" {
 		t.Errorf("After image = %v, want nginx:2", afterImage)
 	}
+}
+
+func TestAuditEnvChanged(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing .env so before-keys are non-empty.
+	envPath := filepath.Join(dir, ".env")
+	if err := os.WriteFile(envPath, []byte("OLD_KEY=oldval\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertApp(&store.App{Name: "envapp", Slug: "envapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := authedRequest(t, http.MethodPut, "/api/apps/envapp/env",
+		[]map[string]string{{"key": "NEW_KEY", "value": "supersecret"}},
+		cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("env status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	e := findFullAuditEntry(t, s, "env", "changed")
+	if e == nil {
+		t.Fatal("no env/changed audit row found")
+	}
+	if e.AppSlug != "envapp" {
+		t.Errorf("app_slug = %q, want envapp", e.AppSlug)
+	}
+	// Ensure secret value is NOT stored in audit JSON.
+	if e.AfterJSON != nil && strings.Contains(string(e.AfterJSON), "supersecret") {
+		t.Errorf("env audit leaked value: %s", e.AfterJSON)
+	}
+	// AfterJSON should contain the new key name.
+	if e.AfterJSON == nil || !strings.Contains(string(e.AfterJSON), "NEW_KEY") {
+		t.Errorf("AfterJSON missing key: %s", e.AfterJSON)
+	}
+}
+
+func TestAuditAccessIPListChanged(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertApp(&store.App{Name: "ipapp", Slug: "ipapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := authedRequest(t, http.MethodPut, "/api/apps/ipapp/access",
+		map[string]string{"allow": "10.0.0.0/8,192.168.1.5"}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("access status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	e := findAuditEntry(t, s, "access", "iplist_changed")
+	if e == nil {
+		t.Fatal("no access/iplist_changed audit row found")
+	}
+	if e.AppSlug != "ipapp" {
+		t.Errorf("app_slug = %q, want ipapp", e.AppSlug)
+	}
+}
+
+func TestAuditCertUploaded(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertApp(&store.App{Name: "certapp", Slug: "certapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate a self-signed cert + key for the test.
+	certPEM, keyPEM := genTestCertPEM(t)
+
+	req := authedRequest(t, http.MethodPut, "/api/apps/certapp/certs/foo.example.com",
+		map[string]string{"cert": certPEM, "key": keyPEM}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("cert status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	e := findFullAuditEntry(t, s, "endpoint", "cert_uploaded")
+	if e == nil {
+		t.Fatal("no endpoint/cert_uploaded audit row found")
+	}
+	if e.AppSlug != "certapp" {
+		t.Errorf("app_slug = %q, want certapp", e.AppSlug)
+	}
+	// Verify cert/key bodies are NOT logged.
+	if e.AfterJSON != nil {
+		body := string(e.AfterJSON)
+		if strings.Contains(body, "BEGIN CERTIFICATE") || strings.Contains(body, "BEGIN PRIVATE KEY") || strings.Contains(body, "BEGIN RSA") {
+			t.Errorf("audit leaked cert/key payload: %s", body)
+		}
+	}
+}
+
+func genTestCertPEM(t *testing.T) (certPEM, keyPEM string) {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("gen key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "foo.example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
+	}
+	certBuf := &bytes.Buffer{}
+	pem.Encode(certBuf, &pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyBuf := &bytes.Buffer{}
+	pem.Encode(keyBuf, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+	return certBuf.String(), keyBuf.String()
 }
 
 func TestAuditLifecycleRemoved(t *testing.T) {

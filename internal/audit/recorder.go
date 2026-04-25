@@ -35,6 +35,7 @@ var syncEligibleCategories = map[string]bool{
 	"webhook":  true,
 	"registry": true,
 	"access":   true,
+	"env":      true,
 }
 
 var syncEligibleLifecycleActions = map[string]bool{

@@ -10,7 +10,7 @@
   let categories = $state([])
   let loading = $state(false)
 
-  const allCats = ['compose', 'endpoint', 'backup', 'alert', 'webhook', 'registry', 'access', 'deploy', 'lifecycle']
+  const allCats = ['compose', 'env', 'endpoint', 'backup', 'alert', 'webhook', 'registry', 'access', 'deploy', 'lifecycle']
 
   async function load(reset = false) {
     loading = true

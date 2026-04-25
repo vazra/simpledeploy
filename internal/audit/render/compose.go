@@ -9,6 +9,17 @@ import (
 
 func init() {
 	register("compose", "changed", renderComposeChanged)
+	register("compose", "version_removed", renderComposeVersionRemoved)
+}
+
+type composeVersionView struct {
+	Version int `json:"version"`
+}
+
+func renderComposeVersionRemoved(before, after []byte) (string, string) {
+	var b composeVersionView
+	_ = json.Unmarshal(before, &b)
+	return fmt.Sprintf("Compose version %d removed", b.Version), ""
 }
 
 type composeView struct {

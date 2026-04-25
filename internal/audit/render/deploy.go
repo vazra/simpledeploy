@@ -9,6 +9,20 @@ func init() {
 	register("deploy", "deploy_succeeded", renderDeploySucceeded)
 	register("deploy", "deploy_failed", renderDeployFailed)
 	register("deploy", "rollback", renderDeployRollback)
+	register("deploy", "cancelled", renderDeployCancelled)
+}
+
+type deployCancelView struct {
+	Name string `json:"name"`
+}
+
+func renderDeployCancelled(before, after []byte) (string, string) {
+	var a deployCancelView
+	_ = json.Unmarshal(after, &a)
+	if a.Name == "" {
+		return "Deploy cancelled", ""
+	}
+	return fmt.Sprintf("Deploy cancelled for %q", a.Name), a.Name
 }
 
 type deployView struct {

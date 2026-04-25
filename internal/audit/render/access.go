@@ -9,6 +9,41 @@ func init() {
 	register("access", "added", renderAccessAdded)
 	register("access", "removed", renderAccessRemoved)
 	register("access", "changed", renderAccessChanged)
+	register("access", "iplist_changed", renderAccessIPListChanged)
+}
+
+type ipListView struct {
+	Allow []string `json:"allow"`
+}
+
+func renderAccessIPListChanged(before, after []byte) (string, string) {
+	var b, a ipListView
+	_ = json.Unmarshal(before, &b)
+	_ = json.Unmarshal(after, &a)
+
+	beforeSet := map[string]struct{}{}
+	for _, e := range b.Allow {
+		beforeSet[e] = struct{}{}
+	}
+	afterSet := map[string]struct{}{}
+	for _, e := range a.Allow {
+		afterSet[e] = struct{}{}
+	}
+	added, removed := 0, 0
+	for k := range afterSet {
+		if _, ok := beforeSet[k]; !ok {
+			added++
+		}
+	}
+	for k := range beforeSet {
+		if _, ok := afterSet[k]; !ok {
+			removed++
+		}
+	}
+	if added == 0 && removed == 0 {
+		return "IP allowlist updated", ""
+	}
+	return fmt.Sprintf("IP allowlist: %d entries added, %d removed", added, removed), ""
 }
 
 type accessView struct {

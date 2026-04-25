@@ -10,6 +10,24 @@ func init() {
 	register("endpoint", "added", renderEndpointAdded)
 	register("endpoint", "removed", renderEndpointRemoved)
 	register("endpoint", "changed", renderEndpointChanged)
+	register("endpoint", "cert_uploaded", renderEndpointCertUploaded)
+	register("endpoint", "cert_removed", renderEndpointCertRemoved)
+}
+
+type certView struct {
+	Domain string `json:"domain"`
+}
+
+func renderEndpointCertUploaded(before, after []byte) (string, string) {
+	var a certView
+	_ = json.Unmarshal(after, &a)
+	return fmt.Sprintf("TLS certificate uploaded for %s", a.Domain), a.Domain
+}
+
+func renderEndpointCertRemoved(before, after []byte) (string, string) {
+	var b certView
+	_ = json.Unmarshal(before, &b)
+	return fmt.Sprintf("TLS certificate removed for %s", b.Domain), b.Domain
 }
 
 type endpointView struct {

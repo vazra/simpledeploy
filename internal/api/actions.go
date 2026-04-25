@@ -90,6 +90,13 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(os.Stderr, "pull %s: %v\n", slug, err)
 		}
 	}()
+	afterJSON, _ := json.Marshal(map[string]any{"name": slug})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "lifecycle",
+		Action:   "image_pulled",
+		AppSlug:  slug,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
@@ -208,10 +215,29 @@ func (s *Server) handleDeleteVersion(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid version id", http.StatusBadRequest)
 		return
 	}
+	// Capture version number + app for audit before deletion.
+	var beforeJSON []byte
+	var appID *int64
+	var appSlug string
+	if v, err := s.store.GetComposeVersion(id); err == nil && v != nil {
+		beforeJSON, _ = json.Marshal(map[string]any{"version": v.Version})
+		if a, err := s.store.GetAppByID(v.AppID); err == nil && a != nil {
+			aid := a.ID
+			appID = &aid
+			appSlug = a.Slug
+		}
+	}
 	if err := s.store.DeleteComposeVersion(id); err != nil {
 		httpError(w, err, http.StatusNotFound)
 		return
 	}
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "compose",
+		Action:   "version_removed",
+		AppID:    appID,
+		AppSlug:  appSlug,
+		Before:   beforeJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

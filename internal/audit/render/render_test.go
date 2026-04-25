@@ -546,3 +546,96 @@ func TestSystemPublicHostChanged(t *testing.T) {
 		t.Errorf("expected empty target, got %q", target)
 	}
 }
+
+// --- env ---
+
+func TestEnvChangedAddedRemoved(t *testing.T) {
+	before := []byte(`{"keys":["A","B"]}`)
+	after := []byte(`{"keys":["A","C"]}`)
+	s, _ := Render("env", "changed", before, after)
+	if !strings.Contains(s, "added C") {
+		t.Errorf("expected added C: %q", s)
+	}
+	if !strings.Contains(s, "removed B") {
+		t.Errorf("expected removed B: %q", s)
+	}
+	// Values must never appear in summary.
+	if strings.Contains(s, "secret") {
+		t.Errorf("summary leaked value: %q", s)
+	}
+}
+
+func TestEnvChangedNoOp(t *testing.T) {
+	before := []byte(`{"keys":["A"]}`)
+	after := []byte(`{"keys":["A"]}`)
+	s, _ := Render("env", "changed", before, after)
+	if !strings.Contains(s, "updated") {
+		t.Errorf("expected fallback updated: %q", s)
+	}
+}
+
+// --- access iplist_changed ---
+
+func TestAccessIPListChanged(t *testing.T) {
+	before := []byte(`{"allow":["1.1.1.1","2.2.2.2"]}`)
+	after := []byte(`{"allow":["1.1.1.1","3.3.3.3","4.4.4.4"]}`)
+	s, _ := Render("access", "iplist_changed", before, after)
+	if !strings.Contains(s, "2 entries added") || !strings.Contains(s, "1 removed") {
+		t.Errorf("unexpected summary: %q", s)
+	}
+}
+
+// --- endpoint cert ---
+
+func TestEndpointCertUploaded(t *testing.T) {
+	s, target := Render("endpoint", "cert_uploaded", nil, []byte(`{"domain":"foo.example.com"}`))
+	if !strings.Contains(s, "uploaded") || !strings.Contains(s, "foo.example.com") {
+		t.Errorf("unexpected: %q", s)
+	}
+	if target != "foo.example.com" {
+		t.Errorf("target=%q", target)
+	}
+}
+
+func TestEndpointCertRemoved(t *testing.T) {
+	s, target := Render("endpoint", "cert_removed", []byte(`{"domain":"foo.example.com"}`), nil)
+	if !strings.Contains(s, "removed") || !strings.Contains(s, "foo.example.com") {
+		t.Errorf("unexpected: %q", s)
+	}
+	if target != "foo.example.com" {
+		t.Errorf("target=%q", target)
+	}
+}
+
+// --- lifecycle image_pulled ---
+
+func TestLifecycleImagePulled(t *testing.T) {
+	s, target := Render("lifecycle", "image_pulled", nil, []byte(`{"name":"myapp"}`))
+	if !strings.Contains(s, "Images pulled") || !strings.Contains(s, "myapp") {
+		t.Errorf("unexpected: %q", s)
+	}
+	if target != "myapp" {
+		t.Errorf("target=%q", target)
+	}
+}
+
+// --- compose version_removed ---
+
+func TestComposeVersionRemoved(t *testing.T) {
+	s, _ := Render("compose", "version_removed", []byte(`{"version":7}`), nil)
+	if !strings.Contains(s, "version 7 removed") {
+		t.Errorf("unexpected: %q", s)
+	}
+}
+
+// --- deploy cancelled ---
+
+func TestDeployCancelled(t *testing.T) {
+	s, target := Render("deploy", "cancelled", nil, []byte(`{"name":"myapp"}`))
+	if !strings.Contains(s, "cancelled") || !strings.Contains(s, "myapp") {
+		t.Errorf("unexpected: %q", s)
+	}
+	if target != "myapp" {
+		t.Errorf("target=%q", target)
+	}
+}

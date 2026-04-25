@@ -9,8 +9,23 @@ import (
 	"os"
 	"strings"
 
+	"github.com/vazra/simpledeploy/internal/compose"
 	"gopkg.in/yaml.v3"
 )
+
+// parseAllowList splits a comma-separated allowlist into a slice of trimmed entries.
+func parseAllowList(allow string) []string {
+	if allow == "" {
+		return nil
+	}
+	var out []string
+	for _, e := range strings.Split(allow, ",") {
+		if t := strings.TrimSpace(e); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 type accessRequest struct {
 	Allow string `json:"allow"`
@@ -50,6 +65,14 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Capture old allowlist for audit before-snapshot.
+	var oldAllow string
+	if app.ComposePath != "" {
+		if parsed, err := compose.ParseFile(app.ComposePath, slug); err == nil {
+			oldAllow = parsed.AccessAllow
+		}
+	}
+
 	if err := updateComposeAccessAllow(app.ComposePath, req.Allow); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
@@ -59,6 +82,11 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 	if s.reconciler != nil {
 		go func() { _ = s.reconciler.RefreshRoutes(context.Background()) }()
 	}
+
+	s.recordAudit(r, app, "access", "iplist_changed",
+		map[string]any{"allow": parseAllowList(oldAllow)},
+		map[string]any{"allow": parseAllowList(req.Allow)},
+	)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "allow": req.Allow})
