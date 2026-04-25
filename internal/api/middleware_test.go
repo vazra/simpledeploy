@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -178,6 +179,91 @@ func TestAppAccessAuthorizedUser(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
+}
+
+func TestAuditCtxFromAuth(t *testing.T) {
+	t.Run("cookie/JWT sets source=ui", func(t *testing.T) {
+		srv, _ := newMiddlewareTestServer(t)
+
+		token, err := srv.jwt.Generate(1, "admin", "super_admin")
+		if err != nil {
+			t.Fatalf("generate token: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: token})
+
+		var captured audit.Ctx
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured = audit.From(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		w := httptest.NewRecorder()
+		srv.authMiddleware(handler).ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if captured.ActorName != "admin" {
+			t.Errorf("ActorName = %q, want %q", captured.ActorName, "admin")
+		}
+		if captured.ActorSource != "ui" {
+			t.Errorf("ActorSource = %q, want %q", captured.ActorSource, "ui")
+		}
+		if captured.ActorUserID == nil || *captured.ActorUserID != 1 {
+			t.Errorf("ActorUserID = %v, want 1", captured.ActorUserID)
+		}
+		if captured.IP == "" {
+			t.Error("IP is empty, want non-empty")
+		}
+	})
+
+	t.Run("API key sets source=api", func(t *testing.T) {
+		srv, s := newMiddlewareTestServer(t)
+		srv.SetMasterSecret("test-master-secret")
+
+		user, err := s.CreateUser("eve", "hash", "admin", "", "")
+		if err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+
+		plaintext, hash, err := auth.GenerateAPIKey("test-master-secret")
+		if err != nil {
+			t.Fatalf("generate api key: %v", err)
+		}
+		if _, err := s.CreateAPIKey(user.ID, hash, "test-key"); err != nil {
+			t.Fatalf("create api key: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Authorization", "Bearer "+plaintext)
+
+		var captured audit.Ctx
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			captured = audit.From(r.Context())
+			w.WriteHeader(http.StatusOK)
+		})
+
+		w := httptest.NewRecorder()
+		srv.authMiddleware(handler).ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if captured.ActorName != "eve" {
+			t.Errorf("ActorName = %q, want %q", captured.ActorName, "eve")
+		}
+		if captured.ActorSource != "api" {
+			t.Errorf("ActorSource = %q, want %q", captured.ActorSource, "api")
+		}
+		if captured.ActorUserID == nil || *captured.ActorUserID != user.ID {
+			t.Errorf("ActorUserID = %v, want %d", captured.ActorUserID, user.ID)
+		}
+		if captured.IP == "" {
+			t.Error("IP is empty, want non-empty")
+		}
+	})
 }
 
 func TestAppAccessUnauthorizedUser(t *testing.T) {

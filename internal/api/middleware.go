@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 )
 
@@ -42,7 +43,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					return
 				}
 				r = setAuthUser(r, &AuthUser{ID: user.ID, Username: user.Username, Role: user.Role})
-				next.ServeHTTP(w, r)
+				uid := user.ID
+				ctx := audit.With(r.Context(), audit.Ctx{
+					ActorUserID: &uid,
+					ActorName:   user.Username,
+					ActorSource: "api",
+					IP:          auth.RealIP(r, s.trustedProxies),
+				})
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 		}
@@ -59,7 +67,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					return
 				}
 				r = setAuthUser(r, &AuthUser{ID: user.ID, Username: user.Username, Role: user.Role})
-				next.ServeHTTP(w, r)
+				uid := user.ID
+				ctx := audit.With(r.Context(), audit.Ctx{
+					ActorUserID: &uid,
+					ActorName:   user.Username,
+					ActorSource: "ui",
+					IP:          auth.RealIP(r, s.trustedProxies),
+				})
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 		}
