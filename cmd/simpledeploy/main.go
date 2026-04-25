@@ -661,6 +661,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	auditPruner := audit.NewPruner(db, 6*time.Hour)
+	go auditPruner.Loop(ctx)
+
 	var dispatcher *alerts.WebhookDispatcher
 	if os.Getenv("SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS") == "1" {
 		dispatcher = alerts.NewWebhookDispatcherAllowPrivate()
