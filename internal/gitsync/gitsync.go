@@ -699,7 +699,15 @@ func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 		return
 	}
 	if st.IsClean() {
+		// Nothing to commit; leave pending audit rows for the next actual push.
 		return
+	}
+
+	// Capture pending audit IDs before the push so any rows written concurrently
+	// during the push window are not stamped with this commit's SHA.
+	var pendingIDs []int64
+	if g.st != nil {
+		pendingIDs, _ = g.st.PendingSyncAuditIDs(ctx)
 	}
 
 	msg := buildCommitMessage("chore(simpledeploy): sync config", req.reason)
@@ -711,15 +719,27 @@ func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 	})
 	if err != nil {
 		log.Printf("[gitsync] commit: %v", err)
+		if g.st != nil && len(pendingIDs) > 0 {
+			_ = g.st.MarkSyncFailed(ctx, pendingIDs, err.Error())
+		}
 		return
 	}
 	g.updateHeadSHA()
 
-	if err := g.doPushWithRetry(); err != nil {
-		log.Printf("[gitsync] push: %v", err)
-		g.setError(err.Error())
+	if pushErr := g.doPushWithRetry(); pushErr != nil {
+		log.Printf("[gitsync] push: %v", pushErr)
+		g.setError(pushErr.Error())
+		if g.st != nil && len(pendingIDs) > 0 {
+			_ = g.st.MarkSyncFailed(ctx, pendingIDs, pushErr.Error())
+		}
 	} else {
 		g.clearError()
+		if g.st != nil && len(pendingIDs) > 0 {
+			g.mu.Lock()
+			sha := g.headSHA
+			g.mu.Unlock()
+			_ = g.st.MarkSyncSynced(ctx, pendingIDs, sha)
+		}
 	}
 }
 

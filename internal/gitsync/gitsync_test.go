@@ -1406,6 +1406,236 @@ func TestApplyPendingWithAutoApplyEnabled(t *testing.T) {
 	}
 }
 
+// TestGitsyncStampsAuditRowsOnSuccess: after a successful commit+push, pending
+// audit rows are marked synced with the commit SHA.
+func TestGitsyncStampsAuditRowsOnSuccess(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+	writeFile(t, filepath.Join(appsDir, "_global.yml"), "version: 1\n")
+
+	// Build syncer with an explicit store so we can inspect audit rows.
+	st := openStore(t)
+	cfg := Config{
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0,
+		PollEnabled:      false,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
+	}
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Insert two pending audit rows.
+	id1, err := st.RecordAudit(ctx, store.AuditEntry{
+		ActorSource:  "ui",
+		Category:     "compose",
+		Action:       "changed",
+		Summary:      "updated compose",
+		SyncEligible: true,
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit 1: %v", err)
+	}
+	id2, err := st.RecordAudit(ctx, store.AuditEntry{
+		ActorSource:  "ui",
+		Category:     "endpoint",
+		Action:       "added",
+		Summary:      "added endpoint",
+		SyncEligible: true,
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit 2: %v", err)
+	}
+
+	// Modify a tracked file and enqueue a commit.
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3.9'\n")
+	prevSHA := s.Status().HeadSHA
+	s.EnqueueCommit(nil, "stamp-test")
+	drainCommits(t, s, 5*time.Second)
+	newSHA := waitForHeadUpdate(t, s, prevSHA, 5*time.Second)
+
+	// Both rows must be marked synced with the new SHA.
+	e1, err := st.GetActivity(ctx, id1)
+	if err != nil {
+		t.Fatalf("GetActivity id1: %v", err)
+	}
+	e2, err := st.GetActivity(ctx, id2)
+	if err != nil {
+		t.Fatalf("GetActivity id2: %v", err)
+	}
+
+	if e1.SyncStatus == nil || *e1.SyncStatus != "synced" {
+		t.Errorf("e1 SyncStatus = %v, want synced", e1.SyncStatus)
+	}
+	if e2.SyncStatus == nil || *e2.SyncStatus != "synced" {
+		t.Errorf("e2 SyncStatus = %v, want synced", e2.SyncStatus)
+	}
+	if e1.SyncCommitSHA == "" {
+		t.Error("e1 SyncCommitSHA is empty")
+	}
+	if e1.SyncCommitSHA != newSHA {
+		t.Errorf("e1 SyncCommitSHA = %q, want %q", e1.SyncCommitSHA, newSHA)
+	}
+	if e2.SyncCommitSHA != newSHA {
+		t.Errorf("e2 SyncCommitSHA = %q, want %q", e2.SyncCommitSHA, newSHA)
+	}
+}
+
+// TestGitsyncStampsAuditRowsOnFailure: when the push fails, pending audit rows
+// are marked failed with the error message.
+func TestGitsyncStampsAuditRowsOnFailure(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	// Build syncer manually with a bad remote so push always fails.
+	st := openStore(t)
+	cfg := Config{
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0,
+		PollEnabled:      false,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
+	}
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Start succeeds with the real remote (initial commit + push).
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Now point the remote at an unreachable path so subsequent pushes fail.
+	if out, err := gitExec(appsDir, "remote", "set-url", "origin", "file:///nonexistent/path/does/not/exist"); err != nil {
+		t.Fatalf("remote set-url: %v\n%s", err, out)
+	}
+	// Also update the in-memory config so doPush uses the bad URL.
+	s.cfg.Remote = "file:///nonexistent/path/does/not/exist"
+
+	// Insert a pending audit row.
+	id1, err := st.RecordAudit(ctx, store.AuditEntry{
+		ActorSource:  "ui",
+		Category:     "compose",
+		Action:       "changed",
+		Summary:      "will fail push",
+		SyncEligible: true,
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+
+	// Modify a tracked file and enqueue; the push will fail.
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: 'push-fail'\n")
+	s.EnqueueCommit(nil, "failure-stamp-test")
+	drainCommits(t, s, 5*time.Second)
+	// Give worker time to finish processing.
+	time.Sleep(200 * time.Millisecond)
+
+	e1, err := st.GetActivity(ctx, id1)
+	if err != nil {
+		t.Fatalf("GetActivity: %v", err)
+	}
+	if e1.SyncStatus == nil || *e1.SyncStatus != "failed" {
+		t.Errorf("SyncStatus = %v, want failed", e1.SyncStatus)
+	}
+	if e1.SyncError == "" {
+		t.Error("SyncError is empty on push failure")
+	}
+}
+
+// TestGitsyncNoStampWhenNothingToCommit: if the working tree is clean, no pending
+// audit rows are stamped (they wait for the next actual push).
+func TestGitsyncNoStampWhenNothingToCommit(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	st := openStore(t)
+	cfg := Config{
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0,
+		PollEnabled:      false,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
+	}
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Insert a pending audit row.
+	id1, err := st.RecordAudit(ctx, store.AuditEntry{
+		ActorSource:  "ui",
+		Category:     "compose",
+		Action:       "changed",
+		Summary:      "no file change",
+		SyncEligible: true,
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+
+	// Enqueue a commit without modifying any file (tree is clean).
+	s.EnqueueCommit(nil, "no-op")
+	drainCommits(t, s, 3*time.Second)
+	time.Sleep(200 * time.Millisecond)
+
+	// Row must still be pending (not stamped).
+	e1, err := st.GetActivity(ctx, id1)
+	if err != nil {
+		t.Fatalf("GetActivity: %v", err)
+	}
+	if e1.SyncStatus == nil || *e1.SyncStatus != "pending" {
+		t.Errorf("SyncStatus = %v, want pending (no commit happened)", e1.SyncStatus)
+	}
+}
+
 // ---- helpers ----
 
 type countingReconciler struct {
