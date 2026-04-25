@@ -294,11 +294,19 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot delete yourself", http.StatusBadRequest)
 		return
 	}
+	// Capture user details before deletion for accurate audit record.
+	var deletedUsername, deletedRole string
+	if u, err := s.store.GetUserByID(id); err == nil {
+		deletedUsername = u.Username
+		deletedRole = u.Role
+	} else {
+		deletedUsername = fmt.Sprintf("user_id=%d", id)
+	}
 	if err := s.store.DeleteUser(id); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	before, _ := json.Marshal(map[string]any{"username": fmt.Sprintf("user_id=%d", id)})
+	before, _ := json.Marshal(map[string]any{"username": deletedUsername, "role": deletedRole})
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category: "system",
 		Action:   "user_removed",

@@ -48,7 +48,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			s.lockout.RecordFailure("user:" + req.Username)
 			s.lockout.RecordFailure("ip:" + ip)
 		}
-		_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		failCtx := audit.With(r.Context(), audit.Ctx{
+			ActorName:   req.Username,
+			ActorSource: "ui",
+			IP:          ip,
+		})
+		_, _ = s.audit.Record(failCtx, audit.RecordReq{
 			Category: "auth",
 			Action:   "login_failed",
 		})
@@ -72,7 +77,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.lockout.RecordSuccess("ip:" + ip)
 	}
 
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+	okCtx := audit.With(r.Context(), audit.Ctx{
+		ActorUserID: &user.ID,
+		ActorName:   req.Username,
+		ActorSource: "ui",
+		IP:          ip,
+	})
+	_, _ = s.audit.Record(okCtx, audit.RecordReq{
 		Category: "auth",
 		Action:   "login_succeeded",
 	})
