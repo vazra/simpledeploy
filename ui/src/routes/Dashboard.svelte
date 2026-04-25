@@ -9,6 +9,7 @@
   import Button from '../components/Button.svelte'
   import DeployWizard from '../components/DeployWizard.svelte'
   import QuickDeployStrip from '../components/QuickDeployStrip.svelte'
+  import RecentActivityCard from '../components/RecentActivityCard.svelte'
   import { api } from '../lib/api.js'
   import { appTemplates } from '../lib/appTemplates.js'
   import { connection } from '../lib/stores/connection.svelte.js'
@@ -414,6 +415,9 @@
             </div>
           {/if}
         </div>
+
+        <!-- Recent Activity -->
+        <RecentActivityCard />
       </div>
     </div>
 
