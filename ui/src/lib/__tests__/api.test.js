@@ -165,6 +165,83 @@ describe('api', () => {
     }
   });
 
+  it('listActivity builds URL with categories and limit', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    await api.listActivity({ categories: ['compose'], limit: 10 });
+    const url = fetchMock.mock.calls[0][0];
+    expect(url).toContain('categories=compose');
+    expect(url).toContain('limit=10');
+    expect(url).toMatch(/^\/api\/activity\?/);
+  });
+
+  it('listActivity omits app and before when not set', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    await api.listActivity({ limit: 5 });
+    const url = fetchMock.mock.calls[0][0];
+    expect(url).not.toContain('app=');
+    expect(url).not.toContain('before=');
+    expect(url).toContain('limit=5');
+  });
+
+  it('listActivity includes app and before when set', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    await api.listActivity({ app: 'myapp', before: 99, limit: 20 });
+    const url = fetchMock.mock.calls[0][0];
+    expect(url).toContain('app=myapp');
+    expect(url).toContain('before=99');
+    expect(url).toContain('limit=20');
+  });
+
+  it('listAppActivity builds URL for a specific app', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    await api.listAppActivity('my-app', { categories: ['deploy', 'backup'], limit: 25 });
+    const url = fetchMock.mock.calls[0][0];
+    expect(url).toBe('/api/apps/my-app/activity?categories=deploy%2Cbackup&limit=25');
+  });
+
+  it('listRecentActivity uses default limit of 8', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    await api.listRecentActivity();
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/activity/recent?limit=8');
+  });
+
+  it('listRecentActivity accepts a custom limit', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse([]));
+    await api.listRecentActivity(15);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/activity/recent?limit=15');
+  });
+
+  it('getActivity fetches a single activity entry by id', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 7 }));
+    const res = await api.getActivity(7);
+    expect(res.data).toEqual({ id: 7 });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/activity/7');
+  });
+
+  it('purgeActivity sends DELETE to /activity', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({}));
+    await api.purgeActivity();
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/activity');
+    expect(opts.method).toBe('DELETE');
+  });
+
+  it('getAuditConfig GET /system/audit-config', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ retention_days: 30 }));
+    const res = await api.getAuditConfig();
+    expect(res.data).toEqual({ retention_days: 30 });
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/system/audit-config');
+  });
+
+  it('putAuditConfig PUT /system/audit-config with body', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({}));
+    await api.putAuditConfig({ retention_days: 60 });
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/system/audit-config');
+    expect(opts.method).toBe('PUT');
+    expect(JSON.parse(opts.body)).toEqual({ retention_days: 60 });
+  });
+
   it('systemLogsWs returns a WebSocket pointing at process-logs/stream', () => {
     const origWS = global.WebSocket;
     const ctor = vi.fn();

@@ -252,6 +252,28 @@ export const api = {
   systemSetBackupConfig: (cfg) => request('POST', '/system/backup/config', cfg),
   systemBackupRuns: () => request('GET', '/system/backup/runs'),
 
+  // Activity / Changelog
+  listActivity: ({ app, categories = [], before = 0, limit = 50 } = {}) => {
+    const params = new URLSearchParams()
+    if (app) params.set('app', app)
+    if (categories.length) params.set('categories', categories.join(','))
+    if (before) params.set('before', before)
+    params.set('limit', limit)
+    return request('GET', `/activity?${params}`)
+  },
+  listAppActivity: (slug, { categories = [], before = 0, limit = 50 } = {}) => {
+    const params = new URLSearchParams()
+    if (categories.length) params.set('categories', categories.join(','))
+    if (before) params.set('before', before)
+    params.set('limit', limit)
+    return request('GET', `/apps/${slug}/activity?${params}`)
+  },
+  listRecentActivity: (limit = 8) => request('GET', `/activity/recent?limit=${limit}`),
+  getActivity: (id) => request('GET', `/activity/${id}`),
+  getAuditConfig: () => request('GET', '/system/audit-config'),
+  putAuditConfig: (body) => request('PUT', '/system/audit-config', body),
+  purgeActivity: () => request('DELETE', '/activity'),
+
   // Git Sync
   gitStatus: () => request('GET', '/git/status'),
   gitSyncNow: () => requestWithToast('POST', '/git/sync-now', null, 'Sync triggered'),
