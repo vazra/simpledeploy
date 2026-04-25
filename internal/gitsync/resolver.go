@@ -82,17 +82,17 @@ func dbBoolDefault(kv map[string]string, key string, def bool) bool {
 
 func yamlToConfig(y *appcfg.GitSyncConfig, appsDir string) *Config {
 	cfg := &Config{
-		Enabled:          y.Enabled,
-		Remote:           y.Remote,
-		Branch:           y.Branch,
-		AppsDir:          appsDir,
-		AuthorName:       y.AuthorName,
-		AuthorEmail:      y.AuthorEmail,
-		SSHKeyPath:       y.SSHKeyPath,
-		HTTPSUsername:    y.HTTPSUsername,
-		HTTPSToken:       y.HTTPSToken,
-		PollInterval:     y.PollInterval,
-		WebhookSecret:    y.WebhookSecret,
+		Enabled:       y.Enabled,
+		Remote:        y.Remote,
+		Branch:        y.Branch,
+		AppsDir:       appsDir,
+		AuthorName:    y.AuthorName,
+		AuthorEmail:   y.AuthorEmail,
+		SSHKeyPath:    y.SSHKeyPath,
+		HTTPSUsername: y.HTTPSUsername,
+		HTTPSToken:    y.HTTPSToken,
+		PollInterval:  y.PollInterval,
+		WebhookSecret: y.WebhookSecret,
 		// YAML path has no toggle fields; all default to true.
 		PollEnabled:      true,
 		AutoPushEnabled:  true,

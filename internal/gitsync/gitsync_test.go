@@ -826,9 +826,9 @@ func TestStatusRecentCommits(t *testing.T) {
 // TestBotCommitParsing is a table-driven unit test for isBotCommit.
 func TestBotCommitParsing(t *testing.T) {
 	cases := []struct {
-		name    string
-		msg     string
-		want    bool
+		name string
+		msg  string
+		want bool
 	}{
 		{
 			name: "trailer on last line",

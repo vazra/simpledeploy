@@ -7,11 +7,11 @@ const Version = 1
 
 // AppSidecar is the per-app YAML sidecar written to {apps_dir}/{slug}/simpledeploy.yml.
 type AppSidecar struct {
-	Version     int               `yaml:"version"`
-	App         AppMeta           `yaml:"app"`
-	AlertRules  []AlertRuleEntry  `yaml:"alert_rules,omitempty"`
+	Version       int                 `yaml:"version"`
+	App           AppMeta             `yaml:"app"`
+	AlertRules    []AlertRuleEntry    `yaml:"alert_rules,omitempty"`
 	BackupConfigs []BackupConfigEntry `yaml:"backup_configs,omitempty"`
-	Access      []AccessEntry     `yaml:"access,omitempty"`
+	Access        []AccessEntry       `yaml:"access,omitempty"`
 }
 
 // AppMeta holds identifying info about the app.
@@ -52,12 +52,12 @@ type AccessEntry struct {
 
 // GlobalSidecar is the global YAML sidecar written to {data_dir}/config.yml.
 type GlobalSidecar struct {
-	Version        int                    `yaml:"version"`
-	Users          []UserEntry            `yaml:"users,omitempty"`
-	APIKeys        []APIKeyEntry          `yaml:"api_keys,omitempty"`
-	Registries     []RegistryEntry        `yaml:"registries,omitempty"`
-	Webhooks       []WebhookEntry         `yaml:"webhooks,omitempty"`
-	DBBackupConfig map[string]string      `yaml:"db_backup_config,omitempty"`
+	Version        int               `yaml:"version"`
+	Users          []UserEntry       `yaml:"users,omitempty"`
+	APIKeys        []APIKeyEntry     `yaml:"api_keys,omitempty"`
+	Registries     []RegistryEntry   `yaml:"registries,omitempty"`
+	Webhooks       []WebhookEntry    `yaml:"webhooks,omitempty"`
+	DBBackupConfig map[string]string `yaml:"db_backup_config,omitempty"`
 }
 
 // UserEntry mirrors store.User with password hash.

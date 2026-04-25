@@ -140,8 +140,8 @@ func TestPruneMetrics(t *testing.T) {
 
 	now := time.Now().Unix()
 	points := []metrics.MetricPoint{
-		{AppID: &appID, ContainerID: "c1", Tier: metrics.TierRaw, Ts: now - 7200},  // 2h ago
-		{AppID: &appID, ContainerID: "c1", Tier: metrics.TierRaw, Ts: now - 3600},  // 1h ago
+		{AppID: &appID, ContainerID: "c1", Tier: metrics.TierRaw, Ts: now - 7200}, // 2h ago
+		{AppID: &appID, ContainerID: "c1", Tier: metrics.TierRaw, Ts: now - 3600}, // 1h ago
 		{AppID: &appID, ContainerID: "c1", Tier: metrics.TierRaw, Ts: now},
 	}
 	if err := s.InsertMetrics(points); err != nil {
@@ -576,4 +576,3 @@ func TestPruneMetricsMultipleTiers(t *testing.T) {
 		t.Errorf("1m tier count = %d, want 2", count1m)
 	}
 }
-

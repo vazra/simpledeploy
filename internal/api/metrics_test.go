@@ -18,16 +18,16 @@ func TestSystemMetricsEndpoint(t *testing.T) {
 	now := time.Now().Unix()
 	pts := []metrics.MetricPoint{
 		{
-			AppID:    nil,
-			CPUPct:   12.5,
-			MemBytes: 1048576,
-			MemLimit: 4194304,
-			NetRx:    1024,
-			NetTx:    512,
-			DiskRead: 0,
+			AppID:     nil,
+			CPUPct:    12.5,
+			MemBytes:  1048576,
+			MemLimit:  4194304,
+			NetRx:     1024,
+			NetTx:     512,
+			DiskRead:  0,
 			DiskWrite: 0,
-			Ts:       now - 30*60,
-			Tier:     metrics.TierRaw,
+			Ts:        now - 30*60,
+			Tier:      metrics.TierRaw,
 		},
 	}
 	if err := st.InsertMetrics(pts); err != nil {

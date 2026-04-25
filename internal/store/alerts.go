@@ -18,15 +18,15 @@ type Webhook struct {
 }
 
 type AlertRule struct {
-	ID          int64    `json:"id"`
-	AppID       *int64   `json:"app_id"`
-	AppSlug     string   `json:"app_slug,omitempty"`
-	Metric      string   `json:"metric"`
-	Operator    string   `json:"operator"`
-	Threshold   float64  `json:"threshold"`
-	DurationSec int      `json:"duration_sec"`
-	WebhookID   int64    `json:"webhook_id"`
-	Enabled     bool     `json:"enabled"`
+	ID          int64     `json:"id"`
+	AppID       *int64    `json:"app_id"`
+	AppSlug     string    `json:"app_slug,omitempty"`
+	Metric      string    `json:"metric"`
+	Operator    string    `json:"operator"`
+	Threshold   float64   `json:"threshold"`
+	DurationSec int       `json:"duration_sec"`
+	WebhookID   int64     `json:"webhook_id"`
+	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

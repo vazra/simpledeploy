@@ -11,7 +11,7 @@ type AuditEmitter interface {
 
 // DeployAuditEvent is the payload passed to AuditEmitter.RecordDeploy.
 type DeployAuditEvent struct {
-	AppID            int64  // 0 when unknown (deployer layer has no DB access)
+	AppID            int64 // 0 when unknown (deployer layer has no DB access)
 	AppSlug          string
 	Action           string // "deploy_succeeded", "deploy_failed", "rollback"
 	Version          int

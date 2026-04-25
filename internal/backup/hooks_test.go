@@ -9,8 +9,8 @@ import (
 )
 
 type mockExecutor struct {
-	calls   []mockCall
-	failOn  map[string]error // "type:service" -> error
+	calls  []mockCall
+	failOn map[string]error // "type:service" -> error
 }
 
 type mockCall struct {

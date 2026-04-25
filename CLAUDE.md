@@ -54,10 +54,11 @@ ui/                   Svelte SPA (Vite build)
 - **Log ring buffer.** Process stdout/stderr captured via `os.Pipe` into `logbuf.Buffer`, streamed to UI via WebSocket. Size configurable via `log_buffer_size` (default 500).
 - **DB backup via VACUUM INTO.** WAL-safe consistent snapshots. Compact mode strips metrics/request_stats before download.
 - **Image mirror.** When `SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX` env var is set (e.g. `ghcr.io/vazra/simpledeploy-mirror/`), the server rewrites docker.io-bound image refs in compose files at deploy/rollback/restore time. Used by E2E (`make e2e-mirror`) to avoid Docker Hub pull rate limits, but also usable for local dev. Mirror is populated by `.github/workflows/mirror-images.yml`, which runs on changes to template JS files or e2e fixtures. See `internal/mirror/`.
+- **Audit recording.** All mutating store/handler/deployer paths emit a row to `audit_log` via `audit.Recorder` in the same tx as the change. Pre-rendered summaries via `internal/audit/render`. Sync-eligible categories get stamped by gitsync worker after push. Retention configurable in days (default 365); pruner runs every 6h.
 
 ## Database
 
-SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 18 migrations:
+SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations/`. Currently 20 migrations:
 
 1. apps table
 2. app_labels
@@ -77,6 +78,8 @@ SQLite at `{data_dir}/simpledeploy.db`. Migrations in `internal/store/migrations
 16. indexes (alert_history, backup_runs)
 17. alert_history.rule_id nullable (gitsync conflict alerts)
 18. gitsync_config (DB-authoritative git sync configuration)
+19. apps_status_unstable (transient status tracking)
+20. audit_log (unified activity feed: per-app + global, sync-status-tracked) + audit_config (retention setting)
 
 ## Testing
 

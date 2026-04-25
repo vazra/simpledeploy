@@ -9,13 +9,13 @@ import (
 
 // DBStats holds aggregate counts for the system info endpoint.
 type DBStats struct {
-	Apps         int64 `json:"apps"`
-	Users        int64 `json:"users"`
-	Metrics      int64 `json:"metrics"`
+	Apps           int64 `json:"apps"`
+	Users          int64 `json:"users"`
+	Metrics        int64 `json:"metrics"`
 	RequestMetrics int64 `json:"request_metrics"`
-	AlertRules   int64 `json:"alert_rules"`
-	BackupRuns   int64 `json:"backup_runs"`
-	MigrationVer int64 `json:"migration_version"`
+	AlertRules     int64 `json:"alert_rules"`
+	BackupRuns     int64 `json:"backup_runs"`
+	MigrationVer   int64 `json:"migration_version"`
 }
 
 // GetDBStats returns aggregate row counts and the current migration version.

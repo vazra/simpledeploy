@@ -15,8 +15,8 @@ func composeAuditView(yamlText string) []byte {
 	}
 	var raw struct {
 		Services map[string]struct {
-			Image       string `yaml:"image"`
-			Environment any    `yaml:"environment"`
+			Image       string   `yaml:"image"`
+			Environment any      `yaml:"environment"`
 			Ports       []string `yaml:"ports"`
 			Deploy      struct {
 				Replicas int `yaml:"replicas"`

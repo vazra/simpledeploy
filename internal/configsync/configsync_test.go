@@ -555,7 +555,7 @@ func TestImportGlobalIfEmpty_empty(t *testing.T) {
 	// Write global sidecar with one user.
 	sidecar := GlobalSidecar{
 		Version: Version,
-		Users: []UserEntry{{Username: "admin", PasswordHash: "$2a$10$hash", Role: "admin"}},
+		Users:   []UserEntry{{Username: "admin", PasswordHash: "$2a$10$hash", Role: "admin"}},
 	}
 	if err := atomicWriteYAML(filepath.Join(dataDir, globalSidecar), sidecar); err != nil {
 		t.Fatalf("write sidecar: %v", err)
@@ -592,7 +592,7 @@ func TestImportGlobalIfEmpty_nonempty(t *testing.T) {
 	// Write sidecar with a different user.
 	sidecar := GlobalSidecar{
 		Version: Version,
-		Users: []UserEntry{{Username: "recovered", PasswordHash: "$2a$10$hash", Role: "admin"}},
+		Users:   []UserEntry{{Username: "recovered", PasswordHash: "$2a$10$hash", Role: "admin"}},
 	}
 	if err := atomicWriteYAML(filepath.Join(dataDir, globalSidecar), sidecar); err != nil {
 		t.Fatalf("write sidecar: %v", err)

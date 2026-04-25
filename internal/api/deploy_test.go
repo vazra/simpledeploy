@@ -18,13 +18,13 @@ import (
 
 type mockReconciler struct{}
 
-func (m *mockReconciler) DeployOne(_ context.Context, _, _ string) error                         { return nil }
-func (m *mockReconciler) RemoveOne(_ context.Context, _ string) error                            { return nil }
-func (m *mockReconciler) RestartOne(_ context.Context, _ string) error                           { return nil }
-func (m *mockReconciler) StopOne(_ context.Context, _ string) error                              { return nil }
-func (m *mockReconciler) StartOne(_ context.Context, _ string) error                             { return nil }
-func (m *mockReconciler) PullOne(_ context.Context, _ string) error                              { return nil }
-func (m *mockReconciler) ScaleOne(_ context.Context, _ string, _ map[string]int) error           { return nil }
+func (m *mockReconciler) DeployOne(_ context.Context, _, _ string) error               { return nil }
+func (m *mockReconciler) RemoveOne(_ context.Context, _ string) error                  { return nil }
+func (m *mockReconciler) RestartOne(_ context.Context, _ string) error                 { return nil }
+func (m *mockReconciler) StopOne(_ context.Context, _ string) error                    { return nil }
+func (m *mockReconciler) StartOne(_ context.Context, _ string) error                   { return nil }
+func (m *mockReconciler) PullOne(_ context.Context, _ string) error                    { return nil }
+func (m *mockReconciler) ScaleOne(_ context.Context, _ string, _ map[string]int) error { return nil }
 func (m *mockReconciler) AppServices(_ context.Context, _ string) ([]deployer.ServiceStatus, error) {
 	return nil, nil
 }
@@ -35,10 +35,10 @@ func (m *mockReconciler) ListVersions(_ context.Context, _ string) ([]store.Comp
 func (m *mockReconciler) ListDeployEvents(_ context.Context, _ string) ([]store.DeployEvent, error) {
 	return nil, nil
 }
-func (m *mockReconciler) Reconcile(_ context.Context) error                      { return nil }
-func (m *mockReconciler) RefreshRoutes(_ context.Context) error                  { return nil }
-func (m *mockReconciler) CancelOne(_ context.Context, _ string) error            { return nil }
-func (m *mockReconciler) IsDeploying(_ string) bool                              { return false }
+func (m *mockReconciler) Reconcile(_ context.Context) error           { return nil }
+func (m *mockReconciler) RefreshRoutes(_ context.Context) error       { return nil }
+func (m *mockReconciler) CancelOne(_ context.Context, _ string) error { return nil }
+func (m *mockReconciler) IsDeploying(_ string) bool                   { return false }
 func (m *mockReconciler) SubscribeDeployLog(_ string) (<-chan deployer.OutputLine, func(), bool) {
 	return nil, nil, false
 }

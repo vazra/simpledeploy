@@ -66,8 +66,8 @@ func validateWebhookURL(rawURL string) error {
 
 // blockedWebhookHeaders are headers that cannot be overridden via webhook config.
 var blockedWebhookHeaders = map[string]bool{
-	"host":           true,
-	"content-length": true,
+	"host":              true,
+	"content-length":    true,
 	"transfer-encoding": true,
 }
 

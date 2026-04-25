@@ -115,7 +115,7 @@ func TestAggregateRequestMetrics(t *testing.T) {
 	defer rows.Close()
 
 	type result struct {
-		count, errorCount int64
+		count, errorCount      int64
 		avgLatency, maxLatency float64
 	}
 	var results []result

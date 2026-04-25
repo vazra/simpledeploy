@@ -29,11 +29,11 @@ type AuditEntry struct {
 	// SyncEligible is input-only: set it before calling RecordAudit to request
 	// sync tracking (stored as sync_status='pending'). It is NOT a stored column
 	// and is never populated on read; inspect SyncStatus directly instead.
-	SyncEligible     bool
-	SyncStatus       *string
-	SyncCommitSHA    string
-	SyncError        string
-	CreatedAt        time.Time
+	SyncEligible  bool
+	SyncStatus    *string
+	SyncCommitSHA string
+	SyncError     string
+	CreatedAt     time.Time
 }
 
 // ActivityFilter controls which rows ListActivity returns.

@@ -6,17 +6,17 @@ import (
 )
 
 type AlertEvent struct {
-	AppName   string
-	AppSlug   string
-	Metric    string
-	MetricDisplay string // human-friendly metric name
-	Value     float64
-	ValueDisplay string // human-friendly value (e.g. "26.3 GB")
-	Threshold float64
+	AppName          string
+	AppSlug          string
+	Metric           string
+	MetricDisplay    string // human-friendly metric name
+	Value            float64
+	ValueDisplay     string // human-friendly value (e.g. "26.3 GB")
+	Threshold        float64
 	ThresholdDisplay string // human-friendly threshold
-	Operator  string
-	Status    string // "firing", "resolved"
-	FiredAt   time.Time
+	Operator         string
+	Status           string // "firing", "resolved"
+	FiredAt          time.Time
 }
 
 var metricDisplayNames = map[string]string{
@@ -64,12 +64,12 @@ func (b BackupAlertEvent) ToAlertEvent() AlertEvent {
 		metricDisplay = "Backup Missed"
 	}
 	return AlertEvent{
-		AppName:      b.AppName,
-		Metric:       b.EventType,
+		AppName:       b.AppName,
+		Metric:        b.EventType,
 		MetricDisplay: metricDisplay,
-		ValueDisplay: b.Message,
-		Status:       "firing",
-		FiredAt:      b.FiredAt,
+		ValueDisplay:  b.Message,
+		Status:        "firing",
+		FiredAt:       b.FiredAt,
 	}
 }
 

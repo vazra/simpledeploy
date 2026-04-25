@@ -563,4 +563,3 @@ func (s *Store) UpsertAPIKey(username, keyHash, name string, expiresAt *time.Tim
 	s.fireHook(ScopeGlobal, "")
 	return nil
 }
-

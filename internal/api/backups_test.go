@@ -17,12 +17,12 @@ func TestCreateBackupConfig(t *testing.T) {
 
 	cookie := superAdminCookie(t, srv.jwt)
 	body, _ := json.Marshal(map[string]interface{}{
-		"strategy":          "postgres",
-		"target":            "local",
-		"schedule_cron":     "0 2 * * *",
+		"strategy":           "postgres",
+		"target":             "local",
+		"schedule_cron":      "0 2 * * *",
 		"target_config_json": "",
-		"retention_mode":    "count",
-		"retention_count":   5,
+		"retention_mode":     "count",
+		"retention_count":    5,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/myapp/backups/configs", bytes.NewReader(body))
 	req.AddCookie(cookie)

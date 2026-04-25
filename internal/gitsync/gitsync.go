@@ -135,9 +135,9 @@ type syncReq struct {
 
 // CommitInfo is a summary of a single commit for the status endpoint.
 type CommitInfo struct {
-	SHA         string    // full SHA
-	ShortSHA    string    // first 7 chars
-	Subject     string    // first line of message
+	SHA         string // full SHA
+	ShortSHA    string // first 7 chars
+	Subject     string // first line of message
 	AuthorName  string
 	AuthorEmail string
 	When        time.Time

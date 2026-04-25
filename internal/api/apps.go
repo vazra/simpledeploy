@@ -44,8 +44,8 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 
 	type appResponse struct {
 		store.App
-		Deploying bool                    `json:"deploying"`
-		Labels    map[string]string       `json:"Labels,omitempty"`
+		Deploying bool                     `json:"deploying"`
+		Labels    map[string]string        `json:"Labels,omitempty"`
 		Endpoints []compose.EndpointConfig `json:"endpoints"`
 	}
 	resp := appResponse{

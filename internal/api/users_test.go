@@ -386,4 +386,3 @@ func TestRevokeAPIKey(t *testing.T) {
 		t.Errorf("status = %q, want ok", resp["status"])
 	}
 }
-

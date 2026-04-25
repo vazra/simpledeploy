@@ -38,34 +38,34 @@ func httpError(w http.ResponseWriter, err error, code int) {
 }
 
 type Server struct {
-	mux             *http.ServeMux
-	port            int
-	store           *store.Store
-	jwt             *auth.JWTManager
-	rateLimiter     *auth.RateLimiter
-	backupScheduler *backup.Scheduler
-	docker          docker.Client
-	appsDir         string
-	reconciler      reconciler
-	lockout         *auth.LoginLockout
-	audit           *audit.Recorder
-	trustedProxies  []string
-	masterSecret    string
-	buildVersion    string
-	buildCommit     string
-	buildDate       string
-	dbPath          string
-	logBuf          *logbuf.Buffer
-	dbBackupCron        *cron.Cron
-	webhookDispatcher   *alerts.WebhookDispatcher
-	startedAt           time.Time
-	tlsMode             string
-	dataDir             string
-	cfg                 *config.Config
-	cfgPath             string
-	deploymentMode      deployment.Mode
-	gs                  *gitsync.Syncer
-	cs                  *configsync.Syncer
+	mux               *http.ServeMux
+	port              int
+	store             *store.Store
+	jwt               *auth.JWTManager
+	rateLimiter       *auth.RateLimiter
+	backupScheduler   *backup.Scheduler
+	docker            docker.Client
+	appsDir           string
+	reconciler        reconciler
+	lockout           *auth.LoginLockout
+	audit             *audit.Recorder
+	trustedProxies    []string
+	masterSecret      string
+	buildVersion      string
+	buildCommit       string
+	buildDate         string
+	dbPath            string
+	logBuf            *logbuf.Buffer
+	dbBackupCron      *cron.Cron
+	webhookDispatcher *alerts.WebhookDispatcher
+	startedAt         time.Time
+	tlsMode           string
+	dataDir           string
+	cfg               *config.Config
+	cfgPath           string
+	deploymentMode    deployment.Mode
+	gs                *gitsync.Syncer
+	cs                *configsync.Syncer
 }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {

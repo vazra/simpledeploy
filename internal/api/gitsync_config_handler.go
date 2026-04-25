@@ -117,8 +117,8 @@ type gitConfigRequest struct {
 	PollIntervalSeconds int     `json:"poll_interval_seconds"`
 	SSHKeyPath          string  `json:"ssh_key_path"`
 	HTTPSUsername       string  `json:"https_username"`
-	WebhookSecret       *string `json:"webhook_secret"`  // nil=unchanged, ""=clear, "x"=set
-	HTTPSToken          *string `json:"https_token"`     // same
+	WebhookSecret       *string `json:"webhook_secret"` // nil=unchanged, ""=clear, "x"=set
+	HTTPSToken          *string `json:"https_token"`    // same
 
 	// Behaviour toggles (optional; absent=true for backwards-compat).
 	PollEnabled      *bool `json:"poll_enabled"`

@@ -38,21 +38,21 @@ func (s *Server) handleDockerInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"server_version":    info.ServerVersion,
-		"os":                info.OperatingSystem,
-		"arch":              info.Architecture,
-		"kernel":            info.KernelVersion,
-		"cpus":              info.NCPU,
-		"memory":            info.MemTotal,
-		"containers":        info.Containers,
+		"server_version":     info.ServerVersion,
+		"os":                 info.OperatingSystem,
+		"arch":               info.Architecture,
+		"kernel":             info.KernelVersion,
+		"cpus":               info.NCPU,
+		"memory":             info.MemTotal,
+		"containers":         info.Containers,
 		"containers_running": info.ContainersRunning,
 		"containers_paused":  info.ContainersPaused,
 		"containers_stopped": info.ContainersStopped,
-		"images":            info.Images,
-		"storage_driver":    info.Driver,
-		"docker_root_dir":   info.DockerRootDir,
-		"logging_driver":    info.LoggingDriver,
-		"logging_options":   readDaemonLogOpts(),
+		"images":             info.Images,
+		"storage_driver":     info.Driver,
+		"docker_root_dir":    info.DockerRootDir,
+		"logging_driver":     info.LoggingDriver,
+		"logging_options":    readDaemonLogOpts(),
 	})
 }
 

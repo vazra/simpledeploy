@@ -160,7 +160,9 @@ func TestMutationHook_GlobalEntities(t *testing.T) {
 
 	// UpdateProfile, UpdateUserRole, UpdatePassword — need a live user.
 	u2, _ := s.CreateUser("bob", "hash", "admin", "", "")
-	rec.mu.Lock(); rec.calls = nil; rec.mu.Unlock()
+	rec.mu.Lock()
+	rec.calls = nil
+	rec.mu.Unlock()
 
 	if err := s.UpdateProfile(u2.ID, "Bob", "b@x.com"); err != nil {
 		t.Fatalf("UpdateProfile: %v", err)
@@ -327,7 +329,9 @@ func TestMutationHook_AppEntities(t *testing.T) {
 
 	// GrantAppAccess / RevokeAppAccess / ReplaceAppAccess
 	u, _ := s.CreateUser("dave", "hash", "admin", "", "")
-	rec.mu.Lock(); rec.calls = nil; rec.mu.Unlock()
+	rec.mu.Lock()
+	rec.calls = nil
+	rec.mu.Unlock()
 
 	if err := s.GrantAppAccess(u.ID, appID); err != nil {
 		t.Fatalf("GrantAppAccess: %v", err)
