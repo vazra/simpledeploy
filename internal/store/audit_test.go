@@ -135,10 +135,18 @@ func TestListActivityAllowedApps(t *testing.T) {
 	appID1 := int64(1)
 	appID2 := int64(2)
 
+	// Insert a user for FK constraint on actor_user_id.
+	u, err := s.CreateUser("testactor", "hash", "admin", "", "")
+	if err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
+	actorID := u.ID
+
 	entries := []AuditEntry{
 		{AppID: &appID1, AppSlug: "app1", ActorSource: "api", Category: "deploy", Action: "start", Summary: "app1 event"},
 		{AppID: &appID2, AppSlug: "app2", ActorSource: "api", Category: "deploy", Action: "start", Summary: "app2 event"},
 		{ActorSource: "system", Category: "system", Action: "audit", Summary: "system event"},
+		{ActorUserID: &actorID, ActorSource: "api", Category: "auth", Action: "login", Summary: "auth event actor99"},
 	}
 	for _, e := range entries {
 		if _, err := s.RecordAudit(ctx, e); err != nil {
@@ -146,7 +154,7 @@ func TestListActivityAllowedApps(t *testing.T) {
 		}
 	}
 
-	// AllowedAppIDs=[1] -> app1 rows + system (app_id IS NULL)
+	// Admin path (no ActorUserID): AllowedAppIDs=[1] -> app1 rows + all app_id IS NULL rows
 	got, _, err := s.ListActivity(ctx, ActivityFilter{
 		AllowedAppIDs: []int64{1},
 		Limit:         50,
@@ -154,8 +162,8 @@ func TestListActivityAllowedApps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListActivity allowed=[1]: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("allowed=[1]: got %d, want 2", len(got))
+	if len(got) != 3 { // app1 + system + auth
+		t.Errorf("allowed=[1] admin: got %d, want 3", len(got))
 	}
 	for _, e := range got {
 		if e.AppID != nil && *e.AppID != 1 {
@@ -163,7 +171,7 @@ func TestListActivityAllowedApps(t *testing.T) {
 		}
 	}
 
-	// AllowedAppIDs=[] -> only app_id IS NULL
+	// Admin path: AllowedAppIDs=[] -> only app_id IS NULL
 	got2, _, err := s.ListActivity(ctx, ActivityFilter{
 		AllowedAppIDs: []int64{},
 		Limit:         50,
@@ -171,11 +179,115 @@ func TestListActivityAllowedApps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListActivity allowed=[]: %v", err)
 	}
-	if len(got2) != 1 {
-		t.Errorf("allowed=[]: got %d, want 1", len(got2))
+	if len(got2) != 2 { // system + auth
+		t.Errorf("allowed=[] admin: got %d, want 2", len(got2))
 	}
-	if got2[0].AppID != nil {
-		t.Errorf("expected app_id IS NULL, got %d", *got2[0].AppID)
+	for _, e := range got2 {
+		if e.AppID != nil {
+			t.Errorf("expected app_id IS NULL, got %d", *e.AppID)
+		}
+	}
+
+	// Non-admin path (ActorUserID set): AllowedAppIDs=[1] -> app1 + own auth events only (no system)
+	got3, _, err := s.ListActivity(ctx, ActivityFilter{
+		AllowedAppIDs: []int64{1},
+		ActorUserID:   &actorID,
+		Limit:         50,
+	})
+	if err != nil {
+		t.Fatalf("ListActivity non-admin allowed=[1]: %v", err)
+	}
+	if len(got3) != 2 { // app1 + auth event for actor99
+		t.Errorf("allowed=[1] non-admin: got %d, want 2", len(got3))
+	}
+	for _, e := range got3 {
+		if e.Category == "system" {
+			t.Error("non-admin should not see system events")
+		}
+	}
+
+	// Non-admin path: AllowedAppIDs=[] -> only own auth events
+	got4, _, err := s.ListActivity(ctx, ActivityFilter{
+		AllowedAppIDs: []int64{},
+		ActorUserID:   &actorID,
+		Limit:         50,
+	})
+	if err != nil {
+		t.Fatalf("ListActivity non-admin allowed=[]: %v", err)
+	}
+	if len(got4) != 1 {
+		t.Errorf("allowed=[] non-admin: got %d, want 1", len(got4))
+	}
+	if got4[0].Category != "auth" {
+		t.Errorf("expected auth category, got %q", got4[0].Category)
+	}
+}
+
+func TestListActivityNonAdminAuthScoping(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Insert users for FK constraint.
+	uA, err := s.CreateUser("usera", "hash", "admin", "", "")
+	if err != nil {
+		t.Fatalf("create userA: %v", err)
+	}
+	uB, err := s.CreateUser("userb", "hash", "admin", "", "")
+	if err != nil {
+		t.Fatalf("create userB: %v", err)
+	}
+	userA := uA.ID
+	userB := uB.ID
+
+	// Auth events for two different users + a system event.
+	_, err = s.RecordAudit(ctx, AuditEntry{ActorUserID: &userA, ActorSource: "api", Category: "auth", Action: "login", Summary: "userA login"})
+	if err != nil {
+		t.Fatalf("RecordAudit userA: %v", err)
+	}
+	_, err = s.RecordAudit(ctx, AuditEntry{ActorUserID: &userB, ActorSource: "api", Category: "auth", Action: "login", Summary: "userB login"})
+	if err != nil {
+		t.Fatalf("RecordAudit userB: %v", err)
+	}
+	_, err = s.RecordAudit(ctx, AuditEntry{ActorSource: "system", Category: "system", Action: "start", Summary: "system boot"})
+	if err != nil {
+		t.Fatalf("RecordAudit system: %v", err)
+	}
+
+	// userA non-admin with no app access should see only their own auth event.
+	got, _, err := s.ListActivity(ctx, ActivityFilter{
+		AllowedAppIDs: []int64{},
+		ActorUserID:   &userA,
+		Limit:         50,
+	})
+	if err != nil {
+		t.Fatalf("ListActivity userA: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("userA: got %d entries, want 1", len(got))
+	}
+	if len(got) == 1 {
+		if got[0].Summary != "userA login" {
+			t.Errorf("userA: got summary %q, want 'userA login'", got[0].Summary)
+		}
+		if got[0].Category != "auth" {
+			t.Errorf("userA: got category %q, want 'auth'", got[0].Category)
+		}
+	}
+
+	// userB should see only their own auth event, not userA's.
+	got2, _, err := s.ListActivity(ctx, ActivityFilter{
+		AllowedAppIDs: []int64{},
+		ActorUserID:   &userB,
+		Limit:         50,
+	})
+	if err != nil {
+		t.Fatalf("ListActivity userB: %v", err)
+	}
+	if len(got2) != 1 {
+		t.Errorf("userB: got %d entries, want 1", len(got2))
+	}
+	if len(got2) == 1 && got2[0].Summary != "userB login" {
+		t.Errorf("userB: got summary %q, want 'userB login'", got2[0].Summary)
 	}
 }
 

@@ -54,9 +54,9 @@ func parseCategories(r *http.Request) []string {
 	return out
 }
 
-// buildNonAdminFilter populates AllowedAppIDs for a non-super_admin caller.
-// When empty, ListActivity returns only app_id IS NULL rows (system/auth entries).
-// This is intentional: non-admins without any app grants still see global auth events.
+// buildNonAdminFilter populates AllowedAppIDs and ActorUserID for a non-super_admin caller.
+// Non-admins see entries for their accessible apps plus their own auth events only.
+// System category entries are admin-only.
 func (s *Server) buildNonAdminFilter(r *http.Request, f *store.ActivityFilter) error {
 	user := GetAuthUser(r)
 	ids, err := s.store.AccessibleAppIDs(r.Context(), user.ID)
@@ -64,9 +64,10 @@ func (s *Server) buildNonAdminFilter(r *http.Request, f *store.ActivityFilter) e
 		return err
 	}
 	if ids == nil {
-		ids = []int64{} // empty slice = only app_id IS NULL rows
+		ids = []int64{} // empty slice = only auth self-rows
 	}
 	f.AllowedAppIDs = ids
+	f.ActorUserID = &user.ID
 	return nil
 }
 

@@ -44,6 +44,7 @@ type ActivityFilter struct {
 	Before        int64
 	Limit         int
 	AllowedAppIDs []int64 // nil = unrestricted; empty slice = only system (app_id IS NULL) rows
+	ActorUserID   *int64  // when set with AllowedAppIDs, restricts the app_id IS NULL branch to own auth events
 }
 
 // nullableInt returns nil for nil pointer, else the value as any for SQL binding.
@@ -286,14 +287,31 @@ func (s *Store) ListActivity(ctx context.Context, f ActivityFilter) (entries []A
 		}
 	}
 	if f.AllowedAppIDs != nil {
-		if len(f.AllowedAppIDs) == 0 {
-			conds = append(conds, "app_id IS NULL")
+		if f.ActorUserID != nil {
+			// Non-admin scope: only own auth events for app_id IS NULL rows.
+			if len(f.AllowedAppIDs) == 0 {
+				conds = append(conds, "(app_id IS NULL AND category = 'auth' AND actor_user_id = ?)")
+				args = append(args, *f.ActorUserID)
+			} else {
+				placeholders := strings.Repeat("?,", len(f.AllowedAppIDs))
+				placeholders = placeholders[:len(placeholders)-1]
+				conds = append(conds, "(app_id IN ("+placeholders+") OR (app_id IS NULL AND category = 'auth' AND actor_user_id = ?))")
+				for _, id := range f.AllowedAppIDs {
+					args = append(args, id)
+				}
+				args = append(args, *f.ActorUserID)
+			}
 		} else {
-			placeholders := strings.Repeat("?,", len(f.AllowedAppIDs))
-			placeholders = placeholders[:len(placeholders)-1]
-			conds = append(conds, "(app_id IS NULL OR app_id IN ("+placeholders+"))")
-			for _, id := range f.AllowedAppIDs {
-				args = append(args, id)
+			// Admin/legacy scope: app_id IS NULL rows unrestricted.
+			if len(f.AllowedAppIDs) == 0 {
+				conds = append(conds, "app_id IS NULL")
+			} else {
+				placeholders := strings.Repeat("?,", len(f.AllowedAppIDs))
+				placeholders = placeholders[:len(placeholders)-1]
+				conds = append(conds, "(app_id IS NULL OR app_id IN ("+placeholders+"))")
+				for _, id := range f.AllowedAppIDs {
+					args = append(args, id)
+				}
 			}
 		}
 	}

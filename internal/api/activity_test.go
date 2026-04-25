@@ -105,43 +105,85 @@ func TestActivityListGlobal_Admin(t *testing.T) {
 	}
 }
 
-// TestActivityListScopedNonAdmin verifies non-admin sees only entries for their apps + system entries.
+// TestActivityListScopedNonAdmin verifies non-admin sees only entries for their apps + own auth events.
+// System events and other users' auth events must be invisible.
 func TestActivityListScopedNonAdmin(t *testing.T) {
 	srv, st := newTestServer(t)
 	appA := seedApp(t, st, "app-a")
 	appB := seedApp(t, st, "app-b")
-	uid := int64(1)
+	adminUID := int64(1)
+
+	// Create user1 first so we can get its ID for auth event seeding.
+	hash, err := auth.HashPassword("pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user1, err := st.CreateUser("user1", hash, "admin", "", "")
+	if err != nil {
+		t.Fatalf("create user1: %v", err)
+	}
+	if err := st.GrantAppAccess(user1.ID, appA); err != nil {
+		t.Fatalf("grant access: %v", err)
+	}
 
 	seedAudit(t, st, store.AuditEntry{AppID: &appA, AppSlug: "app-a", Category: "deploy", Action: "deploy", Summary: "app-a entry"})
 	seedAudit(t, st, store.AuditEntry{AppID: &appB, AppSlug: "app-b", Category: "deploy", Action: "deploy", Summary: "app-b entry"})
-	seedAudit(t, st, store.AuditEntry{ActorUserID: &uid, Category: "auth", Action: "login", Summary: "auth entry"})
+	// Auth event belonging to user1 (should be visible to user1).
+	seedAudit(t, st, store.AuditEntry{ActorUserID: &user1.ID, Category: "auth", Action: "login", Summary: "user1 auth entry"})
+	// Auth event belonging to admin (should NOT be visible to user1).
+	seedAudit(t, st, store.AuditEntry{ActorUserID: &adminUID, Category: "auth", Action: "login", Summary: "admin auth entry"})
+	// System event (should NOT be visible to user1).
+	seedAudit(t, st, store.AuditEntry{Category: "system", Action: "start", Summary: "system entry"})
 
-	// user has access to appA only
-	cookie := makeUserCookie(t, srv, st, "user1", appA)
-	w := doRequest(t, srv, http.MethodGet, "/api/activity", cookie)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	json.NewDecoder(w.Body).Decode(&resp)
-	entries := resp["entries"].([]any)
-
-	// should see app-a entry + auth entry, NOT app-b entry
-	for _, raw := range entries {
-		e := raw.(map[string]any)
-		if e["Summary"] == "app-b entry" {
-			t.Error("non-admin should not see app-b entry")
+	// Log in as user1.
+	w := postJSON(t, srv, "/api/auth/login", map[string]string{"username": "user1", "password": "pass"})
+	var cookie *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "session" {
+			cookie = c
 		}
 	}
-	found := false
+	if cookie == nil {
+		t.Fatal("no session cookie for user1")
+	}
+
+	resp := doRequest(t, srv, http.MethodGet, "/api/activity", cookie)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", resp.Code, resp.Body.String())
+	}
+	var body map[string]any
+	json.NewDecoder(resp.Body).Decode(&body)
+	entries := body["entries"].([]any)
+
+	var summaries []string
 	for _, raw := range entries {
 		e := raw.(map[string]any)
-		if e["Summary"] == "app-a entry" {
-			found = true
+		summaries = append(summaries, e["Summary"].(string))
+	}
+
+	// Must see app-a entry and own auth event.
+	mustSee := []string{"app-a entry", "user1 auth entry"}
+	for _, want := range mustSee {
+		found := false
+		for _, s := range summaries {
+			if s == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("user1 should see %q; got: %v", want, summaries)
 		}
 	}
-	if !found {
-		t.Error("non-admin should see app-a entry")
+
+	// Must NOT see app-b, admin auth, or system events.
+	mustNotSee := []string{"app-b entry", "admin auth entry", "system entry"}
+	for _, bad := range mustNotSee {
+		for _, s := range summaries {
+			if s == bad {
+				t.Errorf("user1 should not see %q; got: %v", bad, summaries)
+			}
+		}
 	}
 }
 
