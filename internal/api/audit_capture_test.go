@@ -406,6 +406,62 @@ func TestAuditComposeDiffOnDeploy(t *testing.T) {
 	}
 }
 
+func TestAuditComposeDiffOnRedeployRename(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+
+	dir := t.TempDir()
+	srv.SetAppsDir(dir)
+	srv.SetReconciler(&mockReconciler{})
+
+	// Initial deploy with service "web".
+	first := base64.StdEncoding.EncodeToString([]byte("services:\n  web:\n    image: nginx:1.25\n"))
+	req := authedRequest(t, http.MethodPost, "/api/apps/deploy",
+		map[string]any{"name": "renameapp", "compose": first}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("first deploy status = %d, body: %s", w.Code, w.Body.String())
+	}
+
+	// Redeploy renaming "web" to "api".
+	second := base64.StdEncoding.EncodeToString([]byte("services:\n  api:\n    image: nginx:1.25\n"))
+	req = authedRequest(t, http.MethodPost, "/api/apps/deploy",
+		map[string]any{"name": "renameapp", "compose": second, "force": true}, cookie)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("redeploy status = %d, body: %s", w.Code, w.Body.String())
+	}
+
+	// Find the most recent compose/changed; expect Before with web and After with api.
+	entries, _, err := s.ListActivity(context.Background(), store.ActivityFilter{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var latest *store.AuditEntry
+	for i := range entries {
+		if entries[i].Category == "compose" && entries[i].Action == "changed" {
+			full, err := s.GetActivity(context.Background(), entries[i].ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if latest == nil || full.ID > latest.ID {
+				e := full
+				latest = &e
+			}
+		}
+	}
+	if latest == nil {
+		t.Fatal("no compose/changed entries found")
+	}
+	if latest.BeforeJSON == nil {
+		t.Fatal("redeploy compose/changed BeforeJSON is nil; rename diff not captured")
+	}
+	if !strings.Contains(latest.Summary, "web removed") || !strings.Contains(latest.Summary, "api added") {
+		t.Errorf("summary should mention web removed and api added; got %q", latest.Summary)
+	}
+}
+
 func TestAuditComposeDiffOnRestore(t *testing.T) {
 	srv, s, cookie := newAuditTestServer(t)
 

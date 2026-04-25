@@ -138,6 +138,9 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	composePath := filepath.Join(appDir, "docker-compose.yml")
+	// Capture old compose for audit Before snapshot before overwriting.
+	// Read unconditionally; missing file (truly new app) yields nil bytes.
+	oldComposeData, _ := os.ReadFile(composePath)
 	if err := os.WriteFile(composePath, composeData, 0644); err != nil {
 		http.Error(w, "failed to write compose file", http.StatusInternalServerError)
 		return
@@ -187,12 +190,16 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit compose/changed with actual diff snapshot so the renderer can show
-	// field-level changes. The compose file was just written to disk; old content
-	// is not available on the initial create path, so Before is nil for new apps.
+	// field-level changes. Before is nil for brand-new apps.
+	var beforeView []byte
+	if len(oldComposeData) > 0 {
+		beforeView = composeAuditView(string(oldComposeData))
+	}
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		AppSlug:  body.Name,
 		Category: "compose",
 		Action:   "changed",
+		Before:   beforeView,
 		After:    composeAuditView(string(composeData)),
 	})
 
