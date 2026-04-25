@@ -229,10 +229,6 @@ export const api = {
   systemPruneMetrics: (days, tier) => request('POST', '/system/prune/metrics', { days, tier }),
   systemPruneRequestStats: (days, tier) => request('POST', '/system/prune/request-stats', { days, tier }),
   systemVacuum: () => request('POST', '/system/vacuum'),
-  systemAuditLog: (limit = 200) => request('GET', `/system/audit-log?limit=${limit}`),
-  systemClearAuditLog: () => request('DELETE', '/system/audit-log'),
-  systemAuditConfig: () => request('GET', '/system/audit-config'),
-  systemUpdateAuditConfig: (maxSize) => request('PUT', '/system/audit-config', { max_size: maxSize }),
   systemLogs: (limit = 500) => request('GET', `/system/process-logs?limit=${limit}`),
   systemBackupDownload: (compact = false) => {
     const url = `/api/system/backup/download?compact=${compact}`
