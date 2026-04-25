@@ -26,6 +26,9 @@ type AuditEntry struct {
 	AfterJSON        []byte
 	Error            string
 	ComposeVersionID *int64
+	// SyncEligible is input-only: set it before calling RecordAudit to request
+	// sync tracking (stored as sync_status='pending'). It is NOT a stored column
+	// and is never populated on read; inspect SyncStatus directly instead.
 	SyncEligible     bool
 	SyncStatus       *string
 	SyncCommitSHA    string
@@ -154,7 +157,6 @@ func scanAudit(s auditScanner) (AuditEntry, error) {
 	if syncStatus.Valid {
 		v := syncStatus.String
 		e.SyncStatus = &v
-		e.SyncEligible = true
 	}
 	if syncCommitSHA.Valid {
 		e.SyncCommitSHA = syncCommitSHA.String

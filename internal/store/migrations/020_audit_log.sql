@@ -23,3 +23,8 @@ CREATE TABLE audit_log (
 CREATE INDEX idx_audit_app_created ON audit_log(app_id, created_at DESC);
 CREATE INDEX idx_audit_created ON audit_log(created_at DESC);
 CREATE INDEX idx_audit_sync_pending ON audit_log(sync_status) WHERE sync_status = 'pending';
+
+CREATE TABLE audit_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);

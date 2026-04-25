@@ -55,7 +55,7 @@ func (s *Store) VacuumDB() error {
 func (s *Store) GetAuditRetentionDays(ctx context.Context) (int, error) {
 	var val string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT value FROM db_backup_config WHERE key = 'audit_retention_days'`).Scan(&val)
+		`SELECT value FROM audit_config WHERE key = 'retention_days'`).Scan(&val)
 	if err == sql.ErrNoRows {
 		return 365, nil
 	}
@@ -72,7 +72,7 @@ func (s *Store) GetAuditRetentionDays(ctx context.Context) (int, error) {
 // SetAuditRetentionDays persists the audit log retention in days.
 func (s *Store) SetAuditRetentionDays(ctx context.Context, days int) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO db_backup_config (key, value) VALUES ('audit_retention_days', ?)`,
+		`INSERT OR REPLACE INTO audit_config (key, value) VALUES ('retention_days', ?)`,
 		strconv.Itoa(days),
 	)
 	if err != nil {
