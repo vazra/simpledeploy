@@ -23,15 +23,16 @@ journalctl -u simpledeploy -p err              # errors only
 
 For long-term retention, set `SystemMaxUse=2G` in `/etc/systemd/journald.conf` or ship to Loki/CloudWatch via `journalbeat`/`vector`.
 
-### Audit log
+### Activity & audit log
 
-Security-relevant events (login, deploy, user CRUD, API key CRUD) are written as JSON and kept in a 500-entry ring buffer.
+Every config change, deploy outcome, auth event, and system action is recorded in the persistent activity log. View it at System → Audit Log (global) or on the per-app Activity tab.
 
 ```
-GET /api/system/audit-log?limit=100
+GET /api/activity?limit=100
+GET /api/apps/{slug}/activity?limit=50
 ```
 
-For longer retention, scrape the endpoint on a cron and append to your SIEM. The same events also appear on stderr, so journald already captures them.
+Default retention is 365 days. See [Activity & Audit Log](/operations/security-audit/) for retention configuration and export options.
 
 ### Health endpoint
 
@@ -111,7 +112,7 @@ See [Alert webhooks](/guides/alerts/webhooks/) and [Alert rules](/guides/alerts/
 ## Securing the monitoring surface
 
 <Aside type="danger">
-Never expose `/api/*` to the public internet without authentication. Anyone hitting `/api/system/audit-log` or `/api/apps/*` without a valid session or API key gets `401`, but that still leaks existence and timing. Put the management UI behind a VPN or restrict by source IP if possible.
+Never expose `/api/*` to the public internet without authentication. Anyone hitting `/api/activity` or `/api/apps/*` without a valid session or API key gets `401`, but that still leaks existence and timing. Put the management UI behind a VPN or restrict by source IP if possible.
 </Aside>
 
 The `/api/health` endpoint is safe to expose publicly. Everything else requires auth.

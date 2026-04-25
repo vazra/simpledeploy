@@ -92,8 +92,9 @@ Do not skip backup *restore* testing. An untested backup is not a backup.
 
 ## Audit
 
-- [ ] Audit log endpoint reachable: `GET /api/system/audit-log`
-- [ ] Plan to export/archive audit log if you need >500 events of history
+- [ ] Activity log reachable: `GET /api/activity?limit=10`
+- [ ] Retention set to match your compliance requirement (default 365 days; `0` = forever)
+- [ ] Plan to export entries before retention window if you need archival evidence
 - [ ] Quarterly review of accounts and API keys (delete stale ones)
 
 ## Capacity

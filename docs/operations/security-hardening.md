@@ -184,52 +184,17 @@ trusted_proxies:
 
 When the direct connection comes from a trusted proxy, the client IP is extracted from `X-Forwarded-For` (rightmost untrusted entry). Without this config, `RemoteAddr` is used directly.
 
-## Audit Logging
+## Activity & Audit Logging
 
-All security-relevant events are logged as structured JSON to stderr and kept in a 500-entry ring buffer accessible via the API.
+Every security-relevant action is captured in the persistent activity log: auth events (`login`, `login_failed`, `password_changed`), user and API key CRUD, deploy outcomes, and all config changes. Entries are stored in SQLite with configurable retention (default 365 days).
 
-### Logged Events
-
-| Event | When |
-|-------|------|
-| `login` | Successful authentication |
-| `login_failed` | Failed authentication attempt |
-| `user_created` | New user account created |
-| `user_deleted` | User account removed |
-| `apikey_created` | New API key generated |
-| `apikey_deleted` | API key revoked |
-| `deploy` | Application deployment triggered |
-
-### Viewing Audit Logs
-
-Via API (super_admin only):
+View the log at System → Audit Log or via:
 
 ```
-GET /api/system/audit-log?limit=100
+GET /api/activity?categories=auth,system&limit=100
 ```
 
-Returns JSON array of events, newest last:
-
-```json
-[
-  {
-    "timestamp": "2026-04-11T10:30:00Z",
-    "type": "login",
-    "username": "admin",
-    "ip": "203.0.113.10",
-    "success": true
-  },
-  {
-    "timestamp": "2026-04-11T10:31:00Z",
-    "type": "deploy",
-    "username": "admin",
-    "detail": "myapp",
-    "success": true
-  }
-]
-```
-
-Audit logs are also written to stderr in the same JSON format (one line per event), so they integrate with any log aggregation system (journald, Loki, CloudWatch, etc.).
+See [Activity & Audit Log](/operations/security-audit/) for the full event list, retention configuration, and export.
 
 ## CLI Security
 

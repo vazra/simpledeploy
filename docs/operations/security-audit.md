@@ -1,190 +1,100 @@
 ---
-title: Security audit
-description: Findings from the 2026-04-10 full-codebase security audit, including fixes applied and accepted risks.
+title: Activity & Audit Log
+description: Per-app and global activity feed tracking every config change, deploy outcome, auth event, and system action in SimpleDeploy.
 ---
 
-**Date:** 2026-04-10
-**Auditor:** Security Review (Automated)
-**Scope:** Full codebase - auth, API, store, deployer, docker, proxy, backup, alerts, UI
-**Status:** 27 of 28 fixed, 1 won't-fix (#10 CSRF, #14 template override - SameSite/admin-only sufficient)
+import { Aside } from '@astrojs/starlight/components';
 
-Legend: [FIXED] = patched, [OPEN] = not yet addressed
+The activity log is a persistent, queryable record of everything that changes in SimpleDeploy: who did what, when, and for which app.
 
----
+## Where to find it
 
-## CRITICAL
+| Surface | Location |
+|---------|----------|
+| Per-app feed | App detail page, **Activity** tab |
+| Global feed | System → **Audit Log** |
+| Recent activity | Dashboard home card |
 
-### 1. [FIXED] Hardcoded Default JWT Secret
+## What gets captured
 
-- **Location:** `cmd/simpledeploy/main.go:304-307`
-- **Issue:** Falls back to `"simpledeploy-default-secret"` when `master_secret` is empty. Attacker can forge JWTs for any user/role.
-- **Fix:** Refuse to start without `master_secret`, or auto-generate and persist a random one.
+| Category | Events |
+|----------|--------|
+| `compose` | Services added/removed, image/env/ports/replicas/labels changed |
+| `endpoint` | Endpoints added/removed, TLS settings, advanced settings |
+| `backup` | Backup config created/changed/removed |
+| `alert` | Alert rules created/changed/removed |
+| `webhook` | Webhooks created/changed/removed |
+| `registry` | Registry credentials added/removed |
+| `access` | User app-access grants and revocations |
+| `deploy` | Deploy succeeded, deploy failed (with error), rollback |
+| `lifecycle` | App created, stopped, started, restarted, scaled, removed |
+| `auth` | Login success/failure, password change (global only) |
+| `system` | User CRUD, API key CRUD, public-host change, git sync config, retention settings (global only) |
 
-### 2. [FIXED] WebSocket Accepts All Origins
+Each entry shows: actor, source (UI / API / CLI / git sync / system), timestamp, and a human-readable summary. For config changes, before and after values are stored as structured JSON and visible via the expand chevron on each row.
 
-- **Location:** `internal/api/logs.go:16-18`
-- **Issue:** `CheckOrigin` returns `true` unconditionally. Enables Cross-Site WebSocket Hijacking on `/api/apps/{slug}/logs` and `/api/apps/{slug}/deploy-logs`.
-- **Fix:** Validate `Origin` header against configured domain.
+## Sync status badges
 
-### 3. [FIXED] Path Traversal in App Name
+Entries for config-change categories (`compose`, `endpoint`, `backup`, `alert`, `webhook`, `registry`, `access`) carry a sync badge when [git sync](/operations/git-sync/) is enabled:
 
-- **Location:** `internal/api/deploy.go:59`
-- **Issue:** `body.Name` used directly in `filepath.Join(s.appsDir, body.Name)` with no validation. Names like `../../etc/cron.d` escape the apps directory.
-- **Fix:** Validate app names against `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`.
+| Badge | Meaning |
+|-------|---------|
+| Synced | Change committed and pushed to the git remote |
+| Pending | Waiting for the next sync cycle |
+| Sync failed | Commit or push failed; see git sync error details |
 
-### 4. [FIXED] No Compose File Content Validation
+Runtime-only events (`deploy`, `auth`, `system`, `lifecycle` start/stop/scale) are never committed to git and show no badge.
 
-- **Location:** `internal/api/deploy.go:53-73`
-- **Issue:** User-supplied compose YAML is written and executed without checking for `privileged: true`, `network_mode: host`, dangerous capabilities, or sensitive host mounts.
-- **Fix:** Parse and validate compose file before writing. Reject dangerous directives.
+## Retention
 
-### 5. [FIXED] SSRF via Webhook URLs
+Default: **365 days**. Set to `0` to keep entries forever.
 
-- **Location:** `internal/alerts/webhook.go:49`
-- **Issue:** No validation of webhook URL. Can target cloud metadata endpoints, localhost, or `file://` URIs.
-- **Fix:** Validate URL scheme (https only), resolve DNS, reject private/reserved IP ranges.
+Super-admins can adjust retention on the System → Audit Log page or via the API:
 
----
+```bash
+curl -X PUT https://manage.example.com/api/system/audit-config \
+  -H "Authorization: Bearer $SD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"retention_days": 180}'
+```
 
-## HIGH
+A background pruner runs nightly and removes entries older than the configured threshold.
 
-### 6. [FIXED] API Key Expiry Never Checked
+## Super-admin capabilities
 
-- **Location:** `internal/api/middleware.go:33-41`
-- **Issue:** `expires_at` column exists but middleware never checks it. Expired keys work forever.
-- **Fix:** Add `time.Now().After(*keyRecord.ExpiresAt)` check.
+Super-admins can:
 
-### 7. [FIXED] Any User Can Delete Any API Key (IDOR)
+- Adjust retention days (UI or API).
+- Purge all entries via the **Purge activity log** button on System → Audit Log (or `DELETE /api/activity`).
 
-- **Location:** `internal/api/users.go:208-225`
-- **Issue:** Deletes by `id` without verifying ownership. User A can delete User B's keys.
-- **Fix:** Verify `keyRecord.UserID == user.ID` before deletion.
+## Authorization
 
-### 8. [FIXED] Missing `Secure` Flag on Session Cookie
+| Role | Visible entries |
+|------|----------------|
+| Super-admin / Admin | All entries across all apps and system events |
+| Non-admin | Entries for apps they have access to, plus their own `auth` events |
 
-- **Location:** `internal/api/auth.go:55-61`
-- **Issue:** JWT sent in cleartext over HTTP.
-- **Fix:** Add `Secure: true`.
+## Privacy
 
-### 9. [FIXED] Logout Cookie Missing Security Attributes
+Registry credentials are **never** stored in audit JSON. Before/after snapshots for `registry` entries record only the registry name and host, not the password or token.
 
-- **Location:** `internal/api/auth.go:71-75`
-- **Issue:** Only sets `Name` and `MaxAge: -1`. Browser may not match original cookie.
-- **Fix:** Mirror all attributes from login cookie.
+## API endpoints
 
-### 10. [WONTFIX] No CSRF Protection
+```
+GET  /api/apps/{slug}/activity   # per-app feed, cursor-paginated
+GET  /api/activity               # global feed
+GET  /api/activity/recent        # dashboard mini-feed (8 entries)
+GET  /api/activity/{id}          # single entry with full before/after JSON
+GET  /api/system/audit-config    # current retention setting (super-admin)
+PUT  /api/system/audit-config    # update retention (super-admin)
+DELETE /api/activity             # purge all entries (super-admin)
+```
 
-- **Issue:** No CSRF tokens on state-changing endpoints. `SameSite=Strict` helps but doesn't cover older browsers.
-- **Decision:** SameSite=Strict sufficient. API key auth (Bearer) is inherently CSRF-safe. All modern browsers support SameSite.
+Query params for list endpoints: `categories=compose,deploy`, `app=<slug>`, `limit=50`, `before=<id>` (cursor).
 
-### 11. [FIXED] Missing Security Response Headers
+<!-- TODO: screenshot of Activity tab -->
 
-- **Location:** `internal/api/server.go`
-- **Issue:** No `X-Frame-Options`, `X-Content-Type-Options`, `Content-Security-Policy`, `Strict-Transport-Security`.
-- **Fix:** Add security headers middleware.
+## See also
 
-### 12. [FIXED] Backup Files World-Readable
-
-- **Location:** `internal/backup/local.go:22-25`
-- **Issue:** `os.Create` uses default permissions (0666 & ~umask).
-- **Fix:** Use `os.OpenFile` with `0600`.
-
-### 13. [FIXED] Webhook Header Injection
-
-- **Location:** `internal/alerts/webhook.go:55-62`
-- **Issue:** User-controlled headers can override `Host`, `Authorization`, etc.
-- **Fix:** Whitelist allowed header names.
-
-### 14. [WONTFIX] Template Override in Webhooks
-
-- **Location:** `internal/alerts/webhook.go:39`
-- **Issue:** `text/template` with user-supplied template. Combined with SSRF, allows crafting arbitrary request bodies.
-- **Decision:** SSRF is now blocked. Only super_admins can set template overrides. Accepted risk for a trusted role.
-
----
-
-## MEDIUM
-
-### 15. [FIXED] SQL String Concatenation for Table Name
-
-- **Location:** `internal/store/system.go:65`
-- **Issue:** `table` parameter concatenated into SQL. Currently internal-only but fragile.
-- **Fix:** Whitelist with `switch` statement.
-
-### 16. [FIXED] User Enumeration via Timing
-
-- **Location:** `internal/api/auth.go:33-41`
-- **Issue:** Missing user returns fast; wrong password returns after bcrypt (~250ms).
-- **Fix:** Always run bcrypt with a dummy hash on user-not-found.
-
-### 17. [FIXED] Weak Key Derivation for Encryption
-
-- **Location:** `internal/auth/crypto.go:57-59`
-- **Issue:** Single SHA-256 pass is not a proper KDF.
-- **Fix:** Use `pbkdf2.Key()` or `argon2.IDKey()`.
-
-### 18. [FIXED] No Account Lockout
-
-- **Issue:** No tracking of failed login attempts per username.
-- **Fix:** Progressive lockout after 10 failures (1m, 2m, 4m... 30m cap). Tracks per-username and per-IP.
-
-### 19. [FIXED] Rate Limiter Ineffective Behind Proxy
-
-- **Location:** `internal/api/auth.go:14-16`
-- **Issue:** Uses `r.RemoteAddr` only. Behind proxy, all requests share one IP.
-- **Fix:** Added `trusted_proxies` config. `auth.RealIP()` extracts real client IP from X-Forwarded-For when behind trusted proxy.
-
-### 20. [FIXED] Error Messages Leak Internal Details
-
-- **Issue:** ~67 instances of `http.Error(w, err.Error(), ...)` across API layer.
-- **Fix:** Log errors server-side, return generic messages to clients.
-
-### 21. [FIXED] Dynamic SQL in Metrics Aggregation
-
-- **Location:** `internal/store/metrics.go:126-143`, `internal/store/reqstats.go:100-123`
-- **Issue:** `fmt.Sprintf` inserts bucket into SQL. Whitelist-validated but fragile.
-- **Fix:** Validate tier in store functions.
-
-### 22. [FIXED] CLI Credentials in Shell History
-
-- **Location:** `cmd/simpledeploy/main.go`
-- **Issue:** `--password` and `--username` flags visible in shell history and `ps`.
-- **Fix:** `--password` now optional. Reads from `SD_PASSWORD` env var or prompts securely via stdin (no echo).
-
-### 23. [FIXED] Path Traversal in Backup Filenames
-
-- **Location:** `internal/backup/local.go:21,34,42`
-- **Issue:** `filename` from DB used in `filepath.Join` without validation.
-- **Fix:** Validate filename contains no path separators or `..`.
-
-### 24. [FIXED] No Cookie MaxAge on Login
-
-- **Location:** `internal/api/auth.go:55-61`
-- **Issue:** Session cookie has no explicit expiry. Browser-dependent behavior.
-- **Fix:** Set `MaxAge` to match JWT expiry (24h).
-
----
-
-## LOW
-
-### 25. [FIXED] API Key Hash Unsalted
-
-- **Location:** `internal/auth/apikey.go:21-25`
-- **Issue:** SHA-256 without salt. Keys are random so low practical risk.
-- **Fix:** Switched to HMAC-SHA256 keyed by master_secret. DB theft without master_secret makes hashes useless.
-
-### 26. [FIXED] No Audit Logging
-
-- **Issue:** No logging of login attempts, role changes, deployments, API key operations.
-- **Fix:** Structured JSON audit log to stderr with in-memory ring buffer (500 entries). GET /api/system/audit-log endpoint (super_admin only). Events: login, login_failed, user_created, user_deleted, apikey_created, apikey_deleted, deploy.
-
-### 27. [FIXED] XSS Risk in DataTable Component
-
-- **Location:** `ui/src/components/DataTable.svelte:23`
-- **Issue:** `{@html col.render(row)}` renders unsanitized HTML.
-- **Fix:** Replaced `{@html}` with `{}` text interpolation (Svelte auto-escapes).
-
-### 28. [FIXED] Database File Permissions Not Set
-
-- **Location:** `internal/store/store.go`
-- **Issue:** SQLite file created with default permissions. Should be `0600`.
+- [Git sync](/operations/git-sync/) - how config changes flow to a git remote.
+- [Security hardening](/operations/security-hardening/) - login rate limits, account lockout, and other controls that generate auth events.

@@ -45,6 +45,9 @@ tls:
 # Secret for encrypting stored credentials and signing JWTs
 master_secret: "change-me-to-a-random-string"
 
+# Activity log retention in days (0 = keep forever, default 365)
+audit_retention_days: 365
+
 # Metrics collection and retention
 metrics:
   tiers:
@@ -102,6 +105,7 @@ git_sync:
 | `tls.mode` | string | `auto` | TLS mode: `auto`, `custom`, `off`, `local` |
 | `tls.email` | string | - | ACME email (required for auto TLS) |
 | `master_secret` | string | **required** | Encryption/signing key |
+| `audit_retention_days` | int | `365` | Activity log retention in days; `0` = keep forever |
 | `metrics.tiers` | list | see above | Metrics rollup tiers |
 | `ratelimit.requests` | int | `200` | Default requests per window |
 | `ratelimit.window` | string | `60s` | Rate limit time window |
