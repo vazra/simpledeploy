@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/alerts"
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -25,6 +26,16 @@ func (s *Server) handleListWebhooks(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(whs)
+}
+
+// webhookAuditJSON builds the webhookView JSON shape for audit records.
+func webhookAuditJSON(name, url, whType string) []byte {
+	b, _ := json.Marshal(map[string]any{
+		"name":   name,
+		"url":    url,
+		"events": []string{whType},
+	})
+	return b
 }
 
 func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +69,12 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	afterJSON := webhookAuditJSON(wh.Name, wh.URL, wh.Type)
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "webhook",
+		Action:   "added",
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(wh)
@@ -69,9 +86,18 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	existing, _ := s.store.GetWebhook(id)
 	if err := s.store.DeleteWebhook(id); err != nil {
 		httpError(w, err, http.StatusNotFound)
 		return
+	}
+	if existing != nil {
+		beforeJSON := webhookAuditJSON(existing.Name, existing.URL, existing.Type)
+		_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+			Category: "webhook",
+			Action:   "removed",
+			Before:   beforeJSON,
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -83,6 +109,7 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	existing, _ := s.store.GetWebhook(id)
 	var req struct {
 		Name             string `json:"name"`
 		Type             string `json:"type"`
@@ -114,6 +141,17 @@ func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusNotFound)
 		return
 	}
+	var beforeJSON []byte
+	if existing != nil {
+		beforeJSON = webhookAuditJSON(existing.Name, existing.URL, existing.Type)
+	}
+	afterJSON := webhookAuditJSON(wh.Name, wh.URL, wh.Type)
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "webhook",
+		Action:   "changed",
+		Before:   beforeJSON,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(wh)
 }
@@ -208,6 +246,18 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rules)
 }
 
+// alertRuleAuditJSON builds the alertView JSON shape for audit records.
+// The alertView.Name field is synthesised from metric+operator+threshold.
+func alertRuleAuditJSON(r *store.AlertRule) []byte {
+	name := fmt.Sprintf("%s %s %.4g", r.Metric, r.Operator, r.Threshold)
+	b, _ := json.Marshal(map[string]any{
+		"name":      name,
+		"metric":    r.Metric,
+		"threshold": r.Threshold,
+	})
+	return b
+}
+
 func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AppID       *int64  `json:"app_id"`
@@ -244,6 +294,18 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	var appID *int64
+	if req.AppID != nil {
+		appID = req.AppID
+	}
+	afterJSON := alertRuleAuditJSON(rule)
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "alert",
+		Action:   "added",
+		AppID:    appID,
+		AppSlug:  rule.AppSlug,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(rule)
@@ -254,6 +316,17 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
+	}
+	// Load existing rule for before-snapshot.
+	var existing *store.AlertRule
+	if rules, err := s.store.ListAlertRules(nil); err == nil {
+		for i := range rules {
+			if rules[i].ID == id {
+				r2 := rules[i]
+				existing = &r2
+				break
+			}
+		}
 	}
 	var req struct {
 		AppID       *int64  `json:"app_id"`
@@ -289,6 +362,23 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusNotFound)
 		return
 	}
+	var beforeJSON []byte
+	if existing != nil {
+		beforeJSON = alertRuleAuditJSON(existing)
+	}
+	afterJSON := alertRuleAuditJSON(rule)
+	var appID *int64
+	if req.AppID != nil {
+		appID = req.AppID
+	}
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "alert",
+		Action:   "changed",
+		AppID:    appID,
+		AppSlug:  appSlug,
+		Before:   beforeJSON,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rule)
 }
@@ -299,9 +389,34 @@ func (s *Server) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	// Load existing rule for before-snapshot.
+	var existing *store.AlertRule
+	if rules, err := s.store.ListAlertRules(nil); err == nil {
+		for i := range rules {
+			if rules[i].ID == id {
+				r2 := rules[i]
+				existing = &r2
+				break
+			}
+		}
+	}
 	if err := s.store.DeleteAlertRule(id); err != nil {
 		httpError(w, err, http.StatusNotFound)
 		return
+	}
+	if existing != nil {
+		beforeJSON := alertRuleAuditJSON(existing)
+		var appID *int64
+		if existing.AppID != nil {
+			appID = existing.AppID
+		}
+		_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+			Category: "alert",
+			Action:   "removed",
+			AppID:    appID,
+			AppSlug:  existing.AppSlug,
+			Before:   beforeJSON,
+		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

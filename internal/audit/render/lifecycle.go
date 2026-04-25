@@ -11,6 +11,7 @@ func init() {
 	register("lifecycle", "removed", renderLifecycleRemoved)
 	register("lifecycle", "stopped", renderLifecycleStopped)
 	register("lifecycle", "started", renderLifecycleStarted)
+	register("lifecycle", "restarted", renderLifecycleRestarted)
 	register("lifecycle", "scaled", renderLifecycleScaled)
 }
 
@@ -49,6 +50,12 @@ func renderLifecycleStarted(before, after []byte) (string, string) {
 	var a lifecycleView
 	_ = json.Unmarshal(after, &a)
 	return fmt.Sprintf("App %q started", a.Name), a.Name
+}
+
+func renderLifecycleRestarted(before, after []byte) (string, string) {
+	var a lifecycleView
+	_ = json.Unmarshal(after, &a)
+	return fmt.Sprintf("App %q restarted", a.Name), a.Name
 }
 
 func renderLifecycleScaled(before, after []byte) (string, string) {

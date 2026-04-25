@@ -184,6 +184,17 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load app state before removal for audit before-snapshot.
+	var beforeJSON []byte
+	if s.store != nil {
+		if app, err := s.store.GetAppBySlug(slug); err == nil {
+			beforeJSON, _ = json.Marshal(map[string]any{
+				"name":   app.Name,
+				"status": app.Status,
+			})
+		}
+	}
+
 	if s.reconciler != nil {
 		if err := s.reconciler.RemoveOne(r.Context(), slug); err != nil {
 			httpError(w, err, http.StatusInternalServerError)
@@ -202,6 +213,13 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to remove app directory", http.StatusInternalServerError)
 		return
 	}
+
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "lifecycle",
+		Action:   "removed",
+		AppSlug:  slug,
+		Before:   beforeJSON,
+	})
 
 	w.WriteHeader(http.StatusOK)
 }

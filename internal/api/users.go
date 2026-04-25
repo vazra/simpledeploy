@@ -341,6 +341,18 @@ func (s *Server) handleGrantAccess(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	var afterJSON []byte
+	if u, err := s.store.GetUserByID(userID); err == nil {
+		afterJSON, _ = json.Marshal(map[string]any{"username": u.Username, "role": u.Role})
+	}
+	appID := app.ID
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "access",
+		Action:   "added",
+		AppID:    &appID,
+		AppSlug:  app.Slug,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -360,10 +372,23 @@ func (s *Server) handleRevokeAccess(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
+	// Load user before-state for audit.
+	var beforeJSON []byte
+	if u, err := s.store.GetUserByID(userID); err == nil {
+		beforeJSON, _ = json.Marshal(map[string]any{"username": u.Username, "role": u.Role})
+	}
 	if err := s.store.RevokeAppAccess(userID, app.ID); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	appID := app.ID
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "access",
+		Action:   "removed",
+		AppID:    &appID,
+		AppSlug:  app.Slug,
+		Before:   beforeJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -18,11 +19,19 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reconciler not configured", http.StatusInternalServerError)
 		return
 	}
+	ctx := r.Context()
 	go func() {
 		if err := s.reconciler.RestartOne(context.Background(), slug); err != nil {
 			fmt.Fprintf(os.Stderr, "restart %s: %v\n", slug, err)
 		}
 	}()
+	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "status": "restarting"})
+	_, _ = s.audit.Record(ctx, audit.RecordReq{
+		Category: "lifecycle",
+		Action:   "restarted",
+		AppSlug:  slug,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
@@ -38,6 +47,13 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "status": "stopped"})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "lifecycle",
+		Action:   "stopped",
+		AppSlug:  slug,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -52,6 +68,13 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "status": "running"})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "lifecycle",
+		Action:   "started",
+		AppSlug:  slug,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -89,10 +112,30 @@ func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "scales is required", http.StatusBadRequest)
 		return
 	}
+
+	// Capture before/after replica counts for audit.
+	// beforeReplicas: sum of current values in the incoming scale map (not live state,
+	// since ServiceStatus has no Replicas field). We use 0 as unknown before-state.
+	var afterReplicas int
+	for _, v := range body.Scales {
+		afterReplicas += v
+	}
+
 	if err := s.reconciler.ScaleOne(r.Context(), slug, body.Scales); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+
+	beforeJSON, _ := json.Marshal(map[string]any{"name": slug, "replicas": 0})
+	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "replicas": afterReplicas})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "lifecycle",
+		Action:   "scaled",
+		AppSlug:  slug,
+		Before:   beforeJSON,
+		After:    afterJSON,
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

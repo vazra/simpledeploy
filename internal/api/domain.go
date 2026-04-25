@@ -8,9 +8,24 @@ import (
 	"os"
 	"strings"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"gopkg.in/yaml.v3"
 )
+
+// endpointViewJSON builds an endpointView JSON for a single endpoint (or nil).
+func endpointViewJSON(ep *compose.EndpointConfig) []byte {
+	if ep == nil {
+		return nil
+	}
+	tls := ep.TLS != "" && ep.TLS != "off"
+	b, _ := json.Marshal(map[string]any{
+		"host": ep.Domain,
+		"tls":  tls,
+		"path": "",
+	})
+	return b
+}
 
 func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
@@ -18,6 +33,14 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
+	}
+
+	// Load old endpoints for before-snapshot.
+	var oldEndpoints []compose.EndpointConfig
+	if app.ComposePath != "" {
+		if parsed, err := compose.ParseFile(app.ComposePath, slug); err == nil {
+			oldEndpoints = parsed.Endpoints
+		}
 	}
 
 	var endpoints []compose.EndpointConfig
@@ -49,6 +72,56 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 		// without triggering a full compose redeploy (which would recreate
 		// containers and block Caddy from dropping stale routes for 10s+).
 		go func() { _ = s.reconciler.RefreshRoutes(context.Background()) }()
+	}
+
+	// Audit: one row per endpoint using added/removed/changed.
+	// Build lookup maps for old and new by domain.
+	oldByDomain := map[string]compose.EndpointConfig{}
+	for _, ep := range oldEndpoints {
+		oldByDomain[ep.Domain] = ep
+	}
+	newByDomain := map[string]compose.EndpointConfig{}
+	for _, ep := range endpoints {
+		newByDomain[ep.Domain] = ep
+	}
+	appID := app.ID
+	for domain, newEP := range newByDomain {
+		ep := newEP
+		if _, existed := oldByDomain[domain]; existed {
+			oldEP := oldByDomain[domain]
+			beforeJSON := endpointViewJSON(&oldEP)
+			afterJSON := endpointViewJSON(&ep)
+			_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+				Category: "endpoint",
+				Action:   "changed",
+				AppID:    &appID,
+				AppSlug:  slug,
+				Before:   beforeJSON,
+				After:    afterJSON,
+			})
+		} else {
+			afterJSON := endpointViewJSON(&ep)
+			_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+				Category: "endpoint",
+				Action:   "added",
+				AppID:    &appID,
+				AppSlug:  slug,
+				After:    afterJSON,
+			})
+		}
+	}
+	for domain, oldEP := range oldByDomain {
+		ep := oldEP
+		if _, stillExists := newByDomain[domain]; !stillExists {
+			beforeJSON := endpointViewJSON(&ep)
+			_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+				Category: "endpoint",
+				Action:   "removed",
+				AppID:    &appID,
+				AppSlug:  slug,
+				Before:   beforeJSON,
+			})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

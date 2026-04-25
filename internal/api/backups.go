@@ -14,12 +14,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+// backupCfgAuditJSON builds the backupView JSON shape for audit records.
+func backupCfgAuditJSON(cfg *store.BackupConfig) []byte {
+	name := cfg.Strategy + "/" + cfg.Target
+	b, _ := json.Marshal(map[string]any{
+		"name":     name,
+		"schedule": cfg.ScheduleCron,
+		"target":   cfg.Target,
+		"strategy": cfg.Strategy,
+	})
+	return b
+}
 
 func (s *Server) handleListBackupConfigs(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
@@ -78,6 +91,16 @@ func (s *Server) handleCreateBackupConfig(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	appID := app.ID
+	afterJSON := backupCfgAuditJSON(&cfg)
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "backup",
+		Action:   "added",
+		AppID:    &appID,
+		AppSlug:  app.Slug,
+		After:    afterJSON,
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(cfg)
@@ -118,6 +141,7 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 		cfg.TargetConfigJSON = encrypted
 	}
 
+	beforeJSON := backupCfgAuditJSON(existing)
 	if err := s.store.UpdateBackupConfig(&cfg); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
@@ -132,6 +156,21 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+
+	appID := existing.AppID
+	var appSlug string
+	if app, err := s.store.GetAppByID(existing.AppID); err == nil {
+		appSlug = app.Slug
+	}
+	afterJSON := backupCfgAuditJSON(&cfg)
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "backup",
+		Action:   "changed",
+		AppID:    &appID,
+		AppSlug:  appSlug,
+		Before:   beforeJSON,
+		After:    afterJSON,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(cfg)
@@ -163,6 +202,21 @@ func (s *Server) handleDeleteBackupConfig(w http.ResponseWriter, r *http.Request
 		httpError(w, err, http.StatusNotFound)
 		return
 	}
+
+	appID := existing.AppID
+	var appSlug string
+	if app, err := s.store.GetAppByID(existing.AppID); err == nil {
+		appSlug = app.Slug
+	}
+	beforeJSON := backupCfgAuditJSON(existing)
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "backup",
+		Action:   "removed",
+		AppID:    &appID,
+		AppSlug:  appSlug,
+		Before:   beforeJSON,
+	})
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -674,6 +728,8 @@ func (s *Server) handleRestoreComposeVersion(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Write compose content to file, applying optional image mirror.
+	// Before/After JSON left nil: ParseFile requires a real temp file path,
+	// and the render/compose.go renderer has a "Compose updated" fallback for nil.
 	composeData := []byte(ver.Content)
 	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
 		composeData = mirror.RewriteCompose(composeData, prefix)
@@ -682,6 +738,19 @@ func (s *Server) handleRestoreComposeVersion(w http.ResponseWriter, r *http.Requ
 		httpError(w, fmt.Errorf("write compose: %w", err), http.StatusInternalServerError)
 		return
 	}
+
+	appID := app.ID
+	// Before/After are nil: compose parser requires a file path, not in-memory bytes.
+	// The render/compose.go renderer emits "Compose updated (no field-level changes)" for nil.
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category:         "compose",
+		Action:           "changed",
+		AppID:            &appID,
+		AppSlug:          slug,
+		Before:           nil,
+		After:            nil,
+		ComposeVersionID: &id,
+	})
 
 	// Redeploy
 	if s.reconciler != nil {
