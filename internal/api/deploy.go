@@ -63,6 +63,14 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Detect whether this is a brand-new app (for lifecycle/created audit below).
+	isNewApp := true
+	if s.store != nil {
+		if _, err := s.store.GetAppBySlug(body.Name); err == nil {
+			isNewApp = false
+		}
+	}
+
 	// Collision handling: never clobber an existing app.
 	// Manual flow: reject and ask user to delete first.
 	// Template flow: suggest a free candidate name (foo-2..foo-50).
@@ -162,6 +170,31 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	}
+
+	// If this is a brand-new app, emit lifecycle/created before deploy_succeeded
+	// so the activity feed shows "App created" -> "Deploy succeeded" in order.
+	if isNewApp {
+		afterCreate, _ := json.Marshal(map[string]any{
+			"name":     body.Name,
+			"replicas": 1,
+		})
+		_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+			AppSlug:  body.Name,
+			Category: "lifecycle",
+			Action:   "created",
+			After:    afterCreate,
+		})
+	}
+
+	// Emit compose/changed with actual diff snapshot so the renderer can show
+	// field-level changes. The compose file was just written to disk; old content
+	// is not available on the initial create path, so Before is nil for new apps.
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		AppSlug:  body.Name,
+		Category: "compose",
+		Action:   "changed",
+		After:    composeAuditView(string(composeData)),
+	})
 
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category: "deploy",

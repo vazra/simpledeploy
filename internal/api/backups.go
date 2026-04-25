@@ -727,9 +727,13 @@ func (s *Server) handleRestoreComposeVersion(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Capture before-state by reading the current compose file on disk.
+	var oldYAML string
+	if raw, err := os.ReadFile(app.ComposePath); err == nil {
+		oldYAML = string(raw)
+	}
+
 	// Write compose content to file, applying optional image mirror.
-	// Before/After JSON left nil: ParseFile requires a real temp file path,
-	// and the render/compose.go renderer has a "Compose updated" fallback for nil.
 	composeData := []byte(ver.Content)
 	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
 		composeData = mirror.RewriteCompose(composeData, prefix)
@@ -740,15 +744,13 @@ func (s *Server) handleRestoreComposeVersion(w http.ResponseWriter, r *http.Requ
 	}
 
 	appID := app.ID
-	// Before/After are nil: compose parser requires a file path, not in-memory bytes.
-	// The render/compose.go renderer emits "Compose updated (no field-level changes)" for nil.
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category:         "compose",
 		Action:           "changed",
 		AppID:            &appID,
 		AppSlug:          slug,
-		Before:           nil,
-		After:            nil,
+		Before:           composeAuditView(oldYAML),
+		After:            composeAuditView(ver.Content),
 		ComposeVersionID: &id,
 	})
 

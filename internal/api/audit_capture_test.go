@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +61,8 @@ func newAuditTestServer(t *testing.T) (*Server, *store.Store, *http.Cookie) {
 }
 
 // findAuditEntry searches audit_log for a matching category+action.
+// NOTE: ListActivity omits before_json/after_json. Use findFullAuditEntry
+// when you need to assert BeforeJSON/AfterJSON content.
 func findAuditEntry(t *testing.T, s *store.Store, category, action string) *store.AuditEntry {
 	t.Helper()
 	rows, _, err := s.ListActivity(context.Background(), store.ActivityFilter{Limit: 50})
@@ -71,6 +75,21 @@ func findAuditEntry(t *testing.T, s *store.Store, category, action string) *stor
 		}
 	}
 	return nil
+}
+
+// findFullAuditEntry returns the full audit row (including BeforeJSON/AfterJSON)
+// for the first entry matching category+action, using GetActivity.
+func findFullAuditEntry(t *testing.T, s *store.Store, category, action string) *store.AuditEntry {
+	t.Helper()
+	slim := findAuditEntry(t, s, category, action)
+	if slim == nil {
+		return nil
+	}
+	full, err := s.GetActivity(context.Background(), slim.ID)
+	if err != nil {
+		t.Fatalf("GetActivity(%d): %v", slim.ID, err)
+	}
+	return &full
 }
 
 // --- 8.1 Compose ---
@@ -294,6 +313,154 @@ func TestAuditAccessAdded(t *testing.T) {
 }
 
 // --- 8.8 Lifecycle ---
+
+func TestAuditLifecycleCreated(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+
+	dir := t.TempDir()
+	srv.SetAppsDir(dir)
+	srv.SetReconciler(&mockReconciler{})
+
+	composeYAML := "services:\n  web:\n    image: nginx:latest\n"
+	encoded := base64.StdEncoding.EncodeToString([]byte(composeYAML))
+
+	req := authedRequest(t, http.MethodPost, "/api/apps/deploy",
+		map[string]any{
+			"name":    "newapp",
+			"compose": encoded,
+		}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("deploy status = %d, want 202; body: %s", w.Code, w.Body.String())
+	}
+
+	e := findFullAuditEntry(t, s, "lifecycle", "created")
+	if e == nil {
+		t.Fatal("no lifecycle/created audit row found")
+	}
+	if e.AppSlug != "newapp" {
+		t.Errorf("app_slug = %q, want newapp", e.AppSlug)
+	}
+
+	// Verify AfterJSON snapshot contains the app name.
+	if e.AfterJSON == nil {
+		t.Fatal("lifecycle/created AfterJSON is nil")
+	}
+	var after map[string]any
+	if err := json.Unmarshal(e.AfterJSON, &after); err != nil {
+		t.Fatalf("unmarshal AfterJSON: %v", err)
+	}
+	if after["name"] != "newapp" {
+		t.Errorf("AfterJSON[name] = %v, want newapp", after["name"])
+	}
+}
+
+func TestAuditComposeDiffOnDeploy(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+
+	dir := t.TempDir()
+	srv.SetAppsDir(dir)
+	srv.SetReconciler(&mockReconciler{})
+
+	composeYAML := "services:\n  web:\n    image: nginx:1.25\n"
+	encoded := base64.StdEncoding.EncodeToString([]byte(composeYAML))
+
+	req := authedRequest(t, http.MethodPost, "/api/apps/deploy",
+		map[string]any{
+			"name":    "diffapp",
+			"compose": encoded,
+		}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("deploy status = %d, want 202; body: %s", w.Code, w.Body.String())
+	}
+
+	e := findFullAuditEntry(t, s, "compose", "changed")
+	if e == nil {
+		t.Fatal("no compose/changed audit row found")
+	}
+	if e.AfterJSON == nil {
+		t.Fatal("compose/changed AfterJSON is nil; diff not captured")
+	}
+	var after map[string]any
+	if err := json.Unmarshal(e.AfterJSON, &after); err != nil {
+		t.Fatalf("unmarshal AfterJSON: %v", err)
+	}
+	services, ok := after["services"].(map[string]any)
+	if !ok || services["web"] == nil {
+		t.Errorf("compose/changed AfterJSON does not contain 'web' service; got %v", after)
+	}
+	web, _ := services["web"].(map[string]any)
+	if web["image"] != "nginx:1.25" {
+		t.Errorf("image = %v, want nginx:1.25", web["image"])
+	}
+}
+
+func TestAuditComposeDiffOnRestore(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx:1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app := &store.App{Name: "rstapp", Slug: "rstapp", ComposePath: composePath, Status: "running"}
+	if err := s.UpsertApp(app, nil); err != nil {
+		t.Fatal(err)
+	}
+	storedApp, err := s.GetAppBySlug("rstapp")
+	if err != nil {
+		t.Fatalf("get app: %v", err)
+	}
+	newContent := "services:\n  web:\n    image: nginx:2\n"
+	if err := s.CreateComposeVersion(storedApp.ID, newContent, "sha256:def"); err != nil {
+		t.Fatalf("create compose version: %v", err)
+	}
+	versions, err := s.ListComposeVersions(storedApp.ID)
+	if err != nil || len(versions) == 0 {
+		t.Fatalf("list versions: %v (count=%d)", err, len(versions))
+	}
+	versionID := versions[0].ID
+
+	req := authedRequest(t, http.MethodPost,
+		fmt.Sprintf("/api/apps/rstapp/versions/%d/restore", versionID),
+		nil, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("restore status = %d, want 202; body: %s", w.Code, w.Body.String())
+	}
+
+	e := findFullAuditEntry(t, s, "compose", "changed")
+	if e == nil {
+		t.Fatal("no compose/changed audit row found")
+	}
+	if e.BeforeJSON == nil {
+		t.Fatal("compose/changed BeforeJSON is nil; old content not captured")
+	}
+	if e.AfterJSON == nil {
+		t.Fatal("compose/changed AfterJSON is nil; new content not captured")
+	}
+	var before, after map[string]any
+	if err := json.Unmarshal(e.BeforeJSON, &before); err != nil {
+		t.Fatalf("unmarshal BeforeJSON: %v", err)
+	}
+	if err := json.Unmarshal(e.AfterJSON, &after); err != nil {
+		t.Fatalf("unmarshal AfterJSON: %v", err)
+	}
+	beforeSvcs := before["services"].(map[string]any)
+	afterSvcs := after["services"].(map[string]any)
+	beforeImage := beforeSvcs["web"].(map[string]any)["image"]
+	afterImage := afterSvcs["web"].(map[string]any)["image"]
+	if beforeImage != "nginx:1" {
+		t.Errorf("Before image = %v, want nginx:1", beforeImage)
+	}
+	if afterImage != "nginx:2" {
+		t.Errorf("After image = %v, want nginx:2", afterImage)
+	}
+}
 
 func TestAuditLifecycleRemoved(t *testing.T) {
 	srv, s, cookie := newAuditTestServer(t)
