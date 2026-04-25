@@ -29,6 +29,7 @@ const sharedNetworkName = "simpledeploy-public"
 // AppDeployer is the interface the reconciler uses to deploy and remove apps.
 type AppDeployer interface {
 	Deploy(ctx context.Context, app *compose.AppConfig, auths ...deployer.RegistryAuth) deployer.DeployResult
+	RollbackDeploy(ctx context.Context, app *compose.AppConfig, version int, composeVersionID *int64, auths ...deployer.RegistryAuth) deployer.DeployResult
 	Teardown(ctx context.Context, projectName string) error
 	Restart(ctx context.Context, app *compose.AppConfig) deployer.DeployResult
 	Stop(ctx context.Context, projectName string) error
@@ -482,11 +483,55 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 		return fmt.Errorf("parse compose: %w", err)
 	}
 
-	if err := r.deployApp(ctx, slug, cfg); err != nil {
-		return fmt.Errorf("redeploy: %w", err)
+	auths, authErr := r.resolveRegistries(cfg)
+	if authErr != nil {
+		log.Printf("[reconciler] resolve registries for %s rollback: %v", slug, authErr)
+	}
+	cvID := versionID
+	result := r.deployer.RollbackDeploy(ctx, cfg, ver.Version, &cvID, auths...)
+	if result.Skipped {
+		return nil
 	}
 
-	r.store.CreateDeployEvent(slug, "rollback", nil, fmt.Sprintf("rollback to version %d", ver.Version))
+	action := "rollback"
+	status := "running"
+	if result.Err != nil {
+		action = "rollback_failed"
+		status = "error"
+	} else if result.Status == "unstable" {
+		action = "rollback_unstable"
+		status = "unstable"
+	}
+
+	labels := make(map[string]string)
+	for _, svc := range cfg.Services {
+		for k, v := range svc.Labels {
+			if strings.HasPrefix(k, "simpledeploy.") {
+				if _, exists := labels[k]; !exists {
+					labels[k] = v
+				}
+			}
+		}
+	}
+	hash, hashErr := hashFile(cfg.ComposePath)
+	if hashErr != nil {
+		log.Printf("[reconciler] hash %s rollback: %v", cfg.ComposePath, hashErr)
+	}
+	app := &store.App{
+		Name:        slug,
+		Slug:        slug,
+		ComposePath: cfg.ComposePath,
+		Status:      status,
+		Domain:      cfg.PrimaryDomain(),
+		ComposeHash: hash,
+	}
+	if err := r.store.UpsertApp(app, labels); err != nil {
+		return fmt.Errorf("upsert app: %w", err)
+	}
+	r.store.CreateDeployEvent(slug, action, nil, fmt.Sprintf("rollback to version %d: %s", ver.Version, result.Output))
+	if result.Err != nil {
+		return fmt.Errorf("redeploy: %w", result.Err)
+	}
 	return nil
 }
 

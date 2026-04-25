@@ -57,7 +57,12 @@ func (d *Deployer) finishDeploy(ctx context.Context, dl *DeployLog, slug, projec
 type Deployer struct {
 	runner  CommandRunner
 	Tracker *Tracker
+	audit   AuditEmitter
 }
+
+// SetAuditEmitter wires in an AuditEmitter so Deploy/RollbackDeploy emit audit
+// rows. Safe to call after construction; nil-safe at emit time.
+func (d *Deployer) SetAuditEmitter(a AuditEmitter) { d.audit = a }
 
 func New(runner CommandRunner) (*Deployer, error) {
 	d := &Deployer{runner: runner, Tracker: NewTracker()}
@@ -76,7 +81,7 @@ func (d *Deployer) runCmd(ctx context.Context, dl *DeployLog, name string, args 
 	return d.runner.Run(ctx, name, args...)
 }
 
-func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...RegistryAuth) DeployResult {
+func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...RegistryAuth) (result DeployResult) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	dl, fresh := d.Tracker.TrackWithLog(app.Name, cancel)
@@ -85,6 +90,20 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...
 		// docker compose on the same project and orphaning WS subscribers.
 		return DeployResult{Skipped: true}
 	}
+
+	defer func() {
+		if d.audit == nil || result.Skipped {
+			return
+		}
+		evt := DeployAuditEvent{AppSlug: app.Name}
+		if result.Err != nil {
+			evt.Action = "deploy_failed"
+			evt.Error = result.Err.Error()
+		} else {
+			evt.Action = "deploy_succeeded"
+		}
+		d.audit.RecordDeploy(ctx, evt)
+	}()
 
 	project := "simpledeploy-" + app.Name
 	args := []string{
@@ -95,6 +114,59 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...
 		"--remove-orphans",
 	}
 	// Prepend --config <tmpDir> so `docker compose up` picks up registry auth.
+	if len(auths) > 0 {
+		tmpDir, err := writeDockerConfig(auths)
+		if err != nil {
+			d.Tracker.DoneWithLog(app.Name, "deploy_failed")
+			return DeployResult{Err: fmt.Errorf("write docker config: %w", err)}
+		}
+		defer os.RemoveAll(tmpDir)
+		args = append([]string{"--config", tmpDir}, args...)
+	}
+	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
+	output := strings.TrimSpace(stdout + "\n" + stderr)
+	status, services := d.finishDeploy(ctx, dl, app.Name, project, "deploy", err)
+	if err != nil {
+		return DeployResult{Output: output, Err: fmt.Errorf("compose up: %w", err), Status: status, Services: services}
+	}
+	return DeployResult{Output: output, Status: status, Services: services}
+}
+
+// RollbackDeploy redeploys app from its current compose file (already written
+// to disk by the caller) and emits a "rollback" audit event. The version and
+// composeVersionID fields are set by the caller via opts.
+func (d *Deployer) RollbackDeploy(ctx context.Context, app *compose.AppConfig, version int, composeVersionID *int64, auths ...RegistryAuth) (result DeployResult) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	dl, fresh := d.Tracker.TrackWithLog(app.Name, cancel)
+	if !fresh {
+		return DeployResult{Skipped: true}
+	}
+
+	defer func() {
+		if d.audit == nil || result.Skipped {
+			return
+		}
+		evt := DeployAuditEvent{
+			AppSlug:          app.Name,
+			Action:           "rollback",
+			Version:          version,
+			ComposeVersionID: composeVersionID,
+		}
+		if result.Err != nil {
+			evt.Error = result.Err.Error()
+		}
+		d.audit.RecordDeploy(ctx, evt)
+	}()
+
+	project := "simpledeploy-" + app.Name
+	args := []string{
+		"compose",
+		"-f", app.ComposePath,
+		"-p", project,
+		"up", "-d",
+		"--remove-orphans",
+	}
 	if len(auths) > 0 {
 		tmpDir, err := writeDockerConfig(auths)
 		if err != nil {

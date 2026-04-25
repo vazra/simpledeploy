@@ -4,10 +4,31 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
+
+type fakeAudit struct {
+	mu     sync.Mutex
+	events []DeployAuditEvent
+}
+
+func (f *fakeAudit) RecordDeploy(_ context.Context, e DeployAuditEvent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, e)
+}
+
+func (f *fakeAudit) last() (DeployAuditEvent, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.events) == 0 {
+		return DeployAuditEvent{}, false
+	}
+	return f.events[len(f.events)-1], true
+}
 
 func TestDeployCallsComposeUp(t *testing.T) {
 	mock := &MockRunner{}
@@ -203,4 +224,100 @@ func TestStatusCallsComposePs(t *testing.T) {
 	if !mock.HasCall("docker", "compose", "ps", "--format", "json") {
 		t.Errorf("expected compose ps call, got: %+v", mock.Calls)
 	}
+}
+
+func TestDeployEmitsSucceededAudit(t *testing.T) {
+	mock := &MockRunner{}
+	fa := &fakeAudit{}
+	d := &Deployer{runner: mock, audit: fa}
+
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	result := d.Deploy(context.Background(), app)
+	if result.Err != nil {
+		t.Fatalf("Deploy: %v", result.Err)
+	}
+
+	evt, ok := fa.last()
+	if !ok {
+		t.Fatal("expected audit event, got none")
+	}
+	if evt.Action != "deploy_succeeded" {
+		t.Errorf("expected deploy_succeeded, got %q", evt.Action)
+	}
+	if evt.AppSlug != "myapp" {
+		t.Errorf("expected AppSlug myapp, got %q", evt.AppSlug)
+	}
+	if evt.Error != "" {
+		t.Errorf("expected no error in event, got %q", evt.Error)
+	}
+}
+
+func TestDeployEmitsFailedAudit(t *testing.T) {
+	mock := &MockRunner{Err: fmt.Errorf("compose boom")}
+	fa := &fakeAudit{}
+	d := &Deployer{runner: mock, audit: fa}
+
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	result := d.Deploy(context.Background(), app)
+	if result.Err == nil {
+		t.Fatal("expected error from Deploy")
+	}
+
+	evt, ok := fa.last()
+	if !ok {
+		t.Fatal("expected audit event, got none")
+	}
+	if evt.Action != "deploy_failed" {
+		t.Errorf("expected deploy_failed, got %q", evt.Action)
+	}
+	if evt.AppSlug != "myapp" {
+		t.Errorf("expected AppSlug myapp, got %q", evt.AppSlug)
+	}
+	if !strings.Contains(evt.Error, "compose boom") {
+		t.Errorf("expected error to contain 'compose boom', got %q", evt.Error)
+	}
+}
+
+func TestRollbackDeployEmitsRollbackAudit(t *testing.T) {
+	mock := &MockRunner{}
+	fa := &fakeAudit{}
+	d := &Deployer{runner: mock, audit: fa}
+
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	cvID := int64(42)
+	result := d.RollbackDeploy(context.Background(), app, 3, &cvID)
+	if result.Err != nil {
+		t.Fatalf("RollbackDeploy: %v", result.Err)
+	}
+
+	evt, ok := fa.last()
+	if !ok {
+		t.Fatal("expected audit event, got none")
+	}
+	if evt.Action != "rollback" {
+		t.Errorf("expected rollback, got %q", evt.Action)
+	}
+	if evt.AppSlug != "myapp" {
+		t.Errorf("expected AppSlug myapp, got %q", evt.AppSlug)
+	}
+	if evt.Version != 3 {
+		t.Errorf("expected Version 3, got %d", evt.Version)
+	}
+	if evt.ComposeVersionID == nil || *evt.ComposeVersionID != 42 {
+		t.Errorf("expected ComposeVersionID 42, got %v", evt.ComposeVersionID)
+	}
+}
+
+func TestDeployNoAuditPanicsWithNilEmitter(t *testing.T) {
+	// Nil emitter must not panic.
+	mock := &MockRunner{}
+	d := &Deployer{runner: mock} // audit is nil
+
+	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Deploy panicked with nil audit emitter: %v", r)
+		}
+	}()
+	d.Deploy(context.Background(), app)
 }

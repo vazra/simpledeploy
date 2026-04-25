@@ -26,6 +26,13 @@ func (m *mockDeployer) Deploy(_ context.Context, app *compose.AppConfig, _ ...de
 	return deployer.DeployResult{}
 }
 
+func (m *mockDeployer) RollbackDeploy(_ context.Context, app *compose.AppConfig, _ int, _ *int64, _ ...deployer.RegistryAuth) deployer.DeployResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "RollbackDeploy:"+app.Name)
+	return deployer.DeployResult{}
+}
+
 func (m *mockDeployer) Teardown(_ context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

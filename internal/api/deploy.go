@@ -196,12 +196,6 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		After:    composeAuditView(string(composeData)),
 	})
 
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
-		Category: "deploy",
-		Action:   "deploy_succeeded",
-		AppSlug:  body.Name,
-	})
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{

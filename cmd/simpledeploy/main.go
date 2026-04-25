@@ -739,7 +739,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetTLSMode(cfg.TLS.Mode)
 	srv.SetDataDir(cfg.DataDir)
 	srv.SetWebhookDispatcher(dispatcher)
-	srv.SetAudit(audit.NewRecorder(db))
+	auditRec := audit.NewRecorder(db)
+	srv.SetAudit(auditRec)
+	dep.SetAuditEmitter(&api.DeployerAuditAdapter{Rec: auditRec})
 	srv.SetLogBuffer(logBuf)
 	srv.InitDBBackupSchedule()
 	if gitSyncer != nil {
