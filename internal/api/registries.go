@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 )
 
@@ -78,12 +77,7 @@ func (s *Server) handleCreateRegistry(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	afterJSON, _ := json.Marshal(map[string]any{"name": reg.Name, "url": reg.URL})
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
-		Category: "registry",
-		Action:   "added",
-		After:    afterJSON,
-	})
+	s.recordAudit(r, nil, "registry", "added", nil, map[string]any{"name": reg.Name, "url": reg.URL})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(registryResponse{
@@ -127,17 +121,11 @@ func (s *Server) handleUpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	var beforeJSON []byte
+	var beforeVal any
 	if existing != nil {
-		beforeJSON, _ = json.Marshal(map[string]any{"name": existing.Name, "url": existing.URL})
+		beforeVal = map[string]any{"name": existing.Name, "url": existing.URL}
 	}
-	afterJSON, _ := json.Marshal(map[string]any{"name": req.Name, "url": req.URL})
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
-		Category: "registry",
-		Action:   "changed",
-		Before:   beforeJSON,
-		After:    afterJSON,
-	})
+	s.recordAudit(r, nil, "registry", "changed", beforeVal, map[string]any{"name": req.Name, "url": req.URL})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -150,12 +138,7 @@ func (s *Server) handleDeleteRegistry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing != nil {
-		beforeJSON, _ := json.Marshal(map[string]any{"name": existing.Name, "url": existing.URL})
-		_, _ = s.audit.Record(r.Context(), audit.RecordReq{
-			Category: "registry",
-			Action:   "removed",
-			Before:   beforeJSON,
-		})
+		s.recordAudit(r, nil, "registry", "removed", map[string]any{"name": existing.Name, "url": existing.URL}, nil)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

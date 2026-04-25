@@ -9,6 +9,13 @@
   let loading = $state(false)
   let fullEntry = $state(null)
 
+  // Reset cache when the entry ID changes (e.g. row recycled or entry updated).
+  $effect(() => {
+    entry.id
+    expanded = false
+    fullEntry = null
+  })
+
   const greenActions = new Set(['added', 'deploy_succeeded', 'login_succeeded', 'created', 'started'])
   const amberActions = new Set(['changed', 'renamed', 'scaled', 'password_changed', 'restarted', 'rollback', 'public_host_changed'])
   const redActions = new Set(['removed', 'deploy_failed', 'login_failed', 'stopped'])

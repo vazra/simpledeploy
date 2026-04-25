@@ -18,12 +18,20 @@
     }
   }
 
+  function refreshIfVisible() {
+    if (document.visibilityState === 'visible') refresh();
+  }
+
   onMount(() => {
     refresh();
-    timer = setInterval(refresh, 30_000);
+    timer = setInterval(refreshIfVisible, 30_000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
   });
 
-  onDestroy(() => clearInterval(timer));
+  onDestroy(() => {
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', refreshIfVisible);
+  });
 </script>
 
 <div data-testid="recent-activity-card" class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">

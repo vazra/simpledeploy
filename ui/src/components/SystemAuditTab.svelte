@@ -6,7 +6,7 @@
 
   let { isSuperAdmin = false } = $props()
 
-  const allCats = ['auth', 'user', 'app', 'compose', 'deploy', 'backup', 'system', 'endpoint', 'alert', 'webhook', 'registry', 'access']
+  const allCats = ['auth', 'user', 'app', 'compose', 'deploy', 'backup', 'system', 'endpoint', 'alert', 'webhook', 'registry', 'access', 'lifecycle']
 
   let entries = $state([])
   let nextBefore = $state(0)

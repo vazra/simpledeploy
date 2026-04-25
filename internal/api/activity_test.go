@@ -369,6 +369,76 @@ func TestAuditConfigGetSetSuperAdminOnly(t *testing.T) {
 	}
 }
 
+// TestAuditConfigRetentionZero verifies PUT retention_days=0 is accepted (means "forever").
+func TestAuditConfigRetentionZero(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := makeAdminCookie(t, srv)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/system/audit-config",
+		strings.NewReader(`{"retention_days":0}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("PUT retention_days=0: expected 204, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	days, err := st.GetAuditRetentionDays(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if days != 0 {
+		t.Errorf("expected retention_days=0, got %d", days)
+	}
+
+	// GET should also return 0.
+	wGet := doRequest(t, srv, http.MethodGet, "/api/system/audit-config", cookie)
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("GET: expected 200, got %d", wGet.Code)
+	}
+	var cfg map[string]any
+	json.NewDecoder(wGet.Body).Decode(&cfg)
+	if cfg["retention_days"].(float64) != 0 {
+		t.Errorf("GET retention_days: expected 0, got %v", cfg["retention_days"])
+	}
+}
+
+// TestListActivityAppSlugForbiddenNonAdmin verifies non-admin querying an
+// inaccessible app slug via ?app= gets 403.
+func TestListActivityAppSlugForbiddenNonAdmin(t *testing.T) {
+	srv, st := newTestServer(t)
+	seedApp(t, st, "hidden-app")
+
+	// user with no app access
+	cookie := makeUserCookie(t, srv, st, "noapp-user")
+	w := doRequest(t, srv, http.MethodGet, "/api/activity?app=hidden-app", cookie)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for inaccessible app slug, got %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestListActivityAppSlugAllowedNonAdmin verifies non-admin CAN query an app they have access to.
+func TestListActivityAppSlugAllowedNonAdmin(t *testing.T) {
+	srv, st := newTestServer(t)
+	appID := seedApp(t, st, "visible-app")
+	uid := int64(1)
+	seedAudit(t, st, store.AuditEntry{AppID: &appID, AppSlug: "visible-app", Category: "deploy", Action: "deploy_succeeded", Summary: "ok"})
+	seedAudit(t, st, store.AuditEntry{ActorUserID: &uid, Category: "auth", Action: "login", Summary: "admin login"})
+
+	cookie := makeUserCookie(t, srv, st, "visible-user", appID)
+	w := doRequest(t, srv, http.MethodGet, "/api/activity?app=visible-app", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	entries := resp["entries"].([]any)
+	if len(entries) == 0 {
+		t.Error("expected at least one entry for accessible app")
+	}
+}
+
 // TestRecentActivityLimit verifies recent endpoint default limit and max clamp.
 func TestRecentActivityLimit(t *testing.T) {
 	srv, st := newTestServer(t)

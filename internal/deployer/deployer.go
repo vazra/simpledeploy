@@ -84,6 +84,7 @@ func (d *Deployer) runCmd(ctx context.Context, dl *DeployLog, name string, args 
 func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...RegistryAuth) (result DeployResult) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	auditCtx := context.WithoutCancel(ctx)
 	dl, fresh := d.Tracker.TrackWithLog(app.Name, cancel)
 	if !fresh {
 		// Another deploy for this slug is in flight; skip to avoid racing
@@ -102,7 +103,7 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...
 		} else {
 			evt.Action = "deploy_succeeded"
 		}
-		d.audit.RecordDeploy(ctx, evt)
+		d.audit.RecordDeploy(auditCtx, evt)
 	}()
 
 	project := "simpledeploy-" + app.Name
@@ -138,6 +139,7 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...
 func (d *Deployer) RollbackDeploy(ctx context.Context, app *compose.AppConfig, version int, composeVersionID *int64, auths ...RegistryAuth) (result DeployResult) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	auditCtx := context.WithoutCancel(ctx)
 	dl, fresh := d.Tracker.TrackWithLog(app.Name, cancel)
 	if !fresh {
 		return DeployResult{Skipped: true}
@@ -156,7 +158,7 @@ func (d *Deployer) RollbackDeploy(ctx context.Context, app *compose.AppConfig, v
 		if result.Err != nil {
 			evt.Error = result.Err.Error()
 		}
-		d.audit.RecordDeploy(ctx, evt)
+		d.audit.RecordDeploy(auditCtx, evt)
 	}()
 
 	project := "simpledeploy-" + app.Name

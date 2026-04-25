@@ -80,6 +80,19 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	if slug := r.URL.Query().Get("app"); slug != "" {
 		f.AppSlug = slug
+		// Non-admins: verify they can access the requested app slug.
+		if user.Role != "super_admin" {
+			app, err := s.store.GetAppBySlug(slug)
+			if err != nil {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			ok, _ := s.store.HasAppAccessByID(user.ID, app.ID)
+			if !ok {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
 	}
 	if user.Role != "super_admin" {
 		if err := s.buildNonAdminFilter(r, &f); err != nil {
@@ -187,8 +200,8 @@ func (s *Server) handlePutAuditConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if body.RetentionDays < 1 {
-		http.Error(w, "retention_days must be >= 1", http.StatusBadRequest)
+	if body.RetentionDays < 0 {
+		http.Error(w, "retention_days must be >= 0", http.StatusBadRequest)
 		return
 	}
 	if err := s.store.SetAuditRetentionDays(r.Context(), body.RetentionDays); err != nil {
