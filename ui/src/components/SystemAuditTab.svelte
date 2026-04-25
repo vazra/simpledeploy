@@ -83,6 +83,7 @@
   <div class="flex flex-wrap gap-2 items-center">
     {#each allCats as c}
       <button
+        data-testid="activity-filter-{c}"
         class="chip px-3 py-1 rounded-full text-xs font-medium border transition-colors {categories.includes(c) ? 'bg-accent text-white border-accent' : 'bg-surface-2 border-border/50 text-text-secondary hover:text-text-primary hover:border-border'}"
         onclick={() => toggleCat(c)}
       >{c}</button>

@@ -62,7 +62,7 @@
   let syncBadge = $derived(syncBadgeProps(entry.sync_status))
 </script>
 
-<div class="flex items-start gap-3 {compact ? 'py-1.5' : 'py-3'} px-3 bg-surface-1 border border-border/30 rounded-lg hover:bg-surface-2 transition-colors">
+<div data-testid="activity-row" class="flex items-start gap-3 {compact ? 'py-1.5' : 'py-3'} px-3 bg-surface-1 border border-border/30 rounded-lg hover:bg-surface-2 transition-colors">
   {#if !compact}
     <span class="text-base shrink-0 mt-0.5" aria-hidden="true">{categoryIcon(entry.category)}</span>
   {/if}

@@ -26,7 +26,7 @@
   onDestroy(() => clearInterval(timer));
 </script>
 
-<div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
+<div data-testid="recent-activity-card" class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
   <div class="flex items-center justify-between mb-3">
     <h3 class="text-sm font-semibold text-text-primary">Recent Activity</h3>
     <a href="#/system?tab=audit" class="text-xs text-accent hover:underline">View all</a>
