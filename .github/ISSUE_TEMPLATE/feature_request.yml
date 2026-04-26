@@ -1,0 +1,74 @@
+name: Feature request
+description: Suggest a new capability or improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an idea. Help us understand the *use case* before the *solution*, what are you trying to do, and why is the current behavior not enough?
+
+        SimpleDeploy is OSS, the fastest path to a feature is a PR. See [contributing setup](https://github.com/vazra/simpledeploy/blob/main/docs/contributing/setup.md).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched [existing issues and discussions](https://github.com/vazra/simpledeploy/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: This fits SimpleDeploy's scope (single-host, compose-first, simple by default). I read the [FAQ](https://vazra.github.io/simpledeploy/faq/) and [when-to-use](https://vazra.github.io/simpledeploy/start/when-to-use/).
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do? What is painful or impossible today? Concrete scenarios beat abstract requests.
+      placeholder: When I deploy a queue worker, I want X because Y.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work? UI, CLI, compose label, config, all welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, other tools that solve this, related approaches.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who benefits?
+      multiple: true
+      options:
+        - Non-technical users (primary audience)
+        - Self-hosters / hobbyists
+        - Small teams / agencies
+        - CI/CD pipelines
+        - Operators of many apps
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Mockups, links, references, related issues.
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Are you willing to contribute?
+      options:
+        - label: I'd like to implement this and open a PR (mentorship available, ask in the issue).
+        - label: I can help test an implementation.

@@ -66,3 +66,14 @@ Yes. Linux/arm64 and linux/armv7 binaries ship with every release. A Pi 4 with 4
 ## Where are secrets stored?
 
 Registry credentials are AES-256-GCM encrypted with the `master_secret` from your config, stored in the SQLite DB. App env vars are stored as plain text in compose files on disk. Treat the host filesystem as your trust boundary: full-disk encryption, restricted SSH, and don't commit `master_secret` to git.
+
+## How do I report a bug or suggest a feature?
+
+Everything goes through GitHub at [vazra/simpledeploy](https://github.com/vazra/simpledeploy). The dashboard's "Help & feedback" menu (bottom of the sidebar) links to all of it:
+
+- **Bug** [open an issue](https://github.com/vazra/simpledeploy/issues/new?labels=bug) with reproduction steps, version, and relevant logs.
+- **Feature or improvement** [file an enhancement issue](https://github.com/vazra/simpledeploy/issues/new?labels=enhancement) describing the use case.
+- **Question or general feedback** start a thread in [GitHub Discussions](https://github.com/vazra/simpledeploy/discussions).
+- **Fix or improvement** SimpleDeploy is MIT-licensed and PRs are welcome. See [contributing setup](./contributing/setup.md).
+
+If you ship something useful upstream, your name lands in the changelog. Starring the repo also helps others find the project.

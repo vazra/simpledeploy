@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or general feedback
+    url: https://github.com/vazra/simpledeploy/discussions
+    about: For questions, ideas, or open-ended feedback, use Discussions instead of an issue.
+  - name: Documentation
+    url: https://vazra.github.io/simpledeploy/
+    about: Check the docs first, your question may already be answered.

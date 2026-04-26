@@ -1,0 +1,134 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill in every section, incomplete reports usually get closed without action.
+
+        SimpleDeploy is open source (MIT). If you can also send a PR fixing this, even better, see [contributing setup](https://github.com/vazra/simpledeploy/blob/main/docs/contributing/setup.md).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched [existing issues](https://github.com/vazra/simpledeploy/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I am running the latest release (or `main`) and the bug still reproduces.
+          required: true
+        - label: I checked the [docs](https://vazra.github.io/simpledeploy/) and [FAQ](https://vazra.github.io/simpledeploy/faq/).
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences, what is broken?
+      placeholder: Deploys fail when the compose file uses x-extensions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps. Include a minimal compose file or config if relevant.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include exact error messages.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SimpleDeploy version
+      description: Output of `simpledeploy version` (or commit SHA if built from source).
+      placeholder: e.g. v0.12.3 or 6917fbc
+    validations:
+      required: true
+
+  - type: input
+    id: docker
+    attributes:
+      label: Docker version
+      description: Output of `docker version --format '{{.Server.Version}}'`.
+      placeholder: e.g. 27.3.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Host OS / arch
+      options:
+        - Linux x86_64
+        - Linux arm64
+        - Linux armv7
+        - macOS (Docker Desktop)
+        - Windows (Docker Desktop / WSL2)
+        - Other (describe in Additional context)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - Binary release
+        - Built from source
+        - Docker container
+        - Other (describe in Additional context)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Paste server logs around the failure. Redact secrets. Use `simpledeploy logs` or check the System -> Logs tab in the UI.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: compose
+    attributes:
+      label: Compose file (if applicable)
+      description: Minimal compose file that reproduces the bug. Redact secrets.
+      render: yaml
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Screenshots, related issues, anything else useful.
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Are you willing to send a PR?
+      options:
+        - label: I'd like to try fixing this myself and open a PR.
+        - label: I can help test a fix.

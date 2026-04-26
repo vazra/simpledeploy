@@ -2,11 +2,13 @@
   import { onMount } from 'svelte'
   import { sidebarExpanded } from '../lib/stores/sidebar.js'
   import ThemeToggle from './ThemeToggle.svelte'
+  import HelpMenu from './HelpMenu.svelte'
   import { api } from '../lib/api.js'
 
   let { forceExpanded = false } = $props()
   let currentPath = $state(window.location.hash.slice(1) || '/')
   let profile = $state(null)
+  let helpOpen = $state(false)
 
   function initials(name) {
     if (!name) return '?'
@@ -94,6 +96,21 @@
         </span>
       {/if}
     </a>
+    <button
+      onclick={() => (helpOpen = true)}
+      class="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-text-secondary hover:text-text-primary hover:bg-surface-3/30 transition-colors"
+      title={forceExpanded || $sidebarExpanded ? '' : 'Help & feedback'}
+      aria-label="Help and feedback"
+    >
+      <span class="shrink-0">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+        </svg>
+      </span>
+      {#if forceExpanded || $sidebarExpanded}
+        <span class="whitespace-nowrap">Help & feedback</span>
+      {/if}
+    </button>
     <div class="flex items-center justify-center">
       <ThemeToggle />
     </div>
@@ -109,3 +126,7 @@
     </button>
   </div>
 </aside>
+
+{#if helpOpen}
+  <HelpMenu onClose={() => (helpOpen = false)} />
+{/if}
