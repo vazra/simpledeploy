@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 
 	"github.com/vazra/simpledeploy/internal/metrics"
 )
@@ -54,12 +55,26 @@ func insertGaps(points []compactPoint, intervalSec int) []compactPoint {
 	if len(points) < 2 {
 		return points
 	}
-	threshold := int64(float64(intervalSec) * 1.5)
+	// Threshold for "missing data" gaps. Tier interval is the display granularity,
+	// not the collection cadence: real collection may be slower (e.g. 30-60s) than
+	// the tier interval (10s for raw). Using 1.5*tier would flag every normal
+	// sample as a gap and break the line. Use the observed median spacing instead,
+	// floored at 1.5*tier so we still cover the dense case.
+	gaps := make([]int64, 0, len(points)-1)
+	for i := 1; i < len(points); i++ {
+		gaps = append(gaps, points[i].T-points[i-1].T)
+	}
+	sorted := append([]int64(nil), gaps...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	median := sorted[len(sorted)/2]
+	threshold := int64(float64(median) * 2)
+	if min := int64(float64(intervalSec) * 1.5); threshold < min {
+		threshold = min
+	}
 	result := []compactPoint{points[0]}
 	for i := 1; i < len(points); i++ {
-		gap := points[i].T - points[i-1].T
-		if gap > threshold {
-			result = append(result, compactPoint{T: points[i-1].T + int64(intervalSec)})
+		if gaps[i-1] > threshold {
+			result = append(result, compactPoint{T: points[i-1].T + median})
 		}
 		result = append(result, points[i])
 	}

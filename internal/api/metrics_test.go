@@ -183,6 +183,20 @@ func TestGapInsertion(t *testing.T) {
 	}
 }
 
+func TestGapInsertionUsesObservedSpacing(t *testing.T) {
+	// Regression: collector cadence (e.g. ~42s) can be slower than the tier
+	// interval (10s for raw). Threshold must adapt to observed median spacing,
+	// otherwise every normal sample is flagged as a gap and the chart line
+	// breaks completely.
+	points := []compactPoint{
+		{T: 1000}, {T: 1042}, {T: 1085}, {T: 1127}, {T: 1170},
+	}
+	result := insertGaps(points, 10)
+	if len(result) != len(points) {
+		t.Fatalf("got %d points, want %d (no gap markers expected)", len(result), len(points))
+	}
+}
+
 func TestAppMetricsNotFound(t *testing.T) {
 	srv, _, cookie := setupUserTestServer(t)
 
