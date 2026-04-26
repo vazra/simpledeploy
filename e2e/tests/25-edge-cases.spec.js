@@ -17,7 +17,7 @@ test.describe('Edge Cases', () => {
     test('activity log has at least one login event', async () => {
       const res = await apiRequest('GET', '/api/activity');
       expect(res.status).toBe(200);
-      const loginEvents = res.data.entries.filter((e) => e.action === 'login');
+      const loginEvents = res.data.entries.filter((e) => e.action === 'login_succeeded');
       expect(loginEvents.length).toBeGreaterThan(0);
     });
 
