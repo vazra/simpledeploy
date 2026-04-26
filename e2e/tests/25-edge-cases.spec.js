@@ -8,27 +8,27 @@ test.describe('Edge Cases', () => {
   });
 
   test.describe('Audit Log', () => {
-    test('GET /api/system/audit-log returns array', async () => {
-      const res = await apiRequest('GET', '/api/system/audit-log');
+    test('GET /api/activity returns entries array', async () => {
+      const res = await apiRequest('GET', '/api/activity');
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.data)).toBe(true);
+      expect(Array.isArray(res.data?.entries)).toBe(true);
     });
 
-    test('audit log has at least one login event', async () => {
-      const res = await apiRequest('GET', '/api/system/audit-log');
+    test('activity log has at least one login event', async () => {
+      const res = await apiRequest('GET', '/api/activity');
       expect(res.status).toBe(200);
-      const loginEvents = res.data.filter((e) => e.type === 'login');
+      const loginEvents = res.data.entries.filter((e) => e.action === 'login');
       expect(loginEvents.length).toBeGreaterThan(0);
     });
 
-    test('audit log events have required fields', async () => {
-      const res = await apiRequest('GET', '/api/system/audit-log');
+    test('activity log events have required fields', async () => {
+      const res = await apiRequest('GET', '/api/activity');
       expect(res.status).toBe(200);
-      expect(res.data.length).toBeGreaterThan(0);
-      const event = res.data[0];
-      expect(event).toHaveProperty('timestamp');
-      expect(event).toHaveProperty('type');
-      expect(event).toHaveProperty('username');
+      expect(res.data.entries.length).toBeGreaterThan(0);
+      const event = res.data.entries[0];
+      expect(event).toHaveProperty('created_at');
+      expect(event).toHaveProperty('action');
+      expect(event).toHaveProperty('actor_name');
     });
   });
 
