@@ -70,21 +70,23 @@
 </script>
 
 {#if compact}
-  <div data-testid="activity-row" class="flex items-center gap-2 py-1 text-xs leading-tight font-mono">
-    <span class="shrink-0 text-text-muted tabular-nums" title={absTime}>{relTime}</span>
-    <span
-      class="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide {actionVariant(entry.action) === 'success' ? 'bg-emerald-500/10 text-emerald-400 light:bg-emerald-50 light:text-emerald-700' : actionVariant(entry.action) === 'warning' ? 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700' : actionVariant(entry.action) === 'danger' ? 'bg-red-500/10 text-red-400 light:bg-red-50 light:text-red-700' : 'bg-surface-3/60 text-text-secondary'}"
-    >{entry.category}</span>
-    {#if showAppColumn && entry.app_slug}
-      <a href="#/apps/{entry.app_slug}" class="shrink-0 text-accent hover:underline">{entry.app_slug}</a>
-    {/if}
-    <span class="flex-1 min-w-0 truncate text-text-primary font-sans" title={entry.summary}>{entry.summary}</span>
-    {#if syncBadge}
+  <div data-testid="activity-row" class="py-1.5 text-xs leading-tight">
+    <div class="flex items-center gap-2 flex-wrap font-mono">
+      <span class="shrink-0 text-text-muted tabular-nums" title={absTime}>{relTime}</span>
       <span
-        class="shrink-0 text-[10px] {syncBadge.variant === 'success' ? 'text-emerald-400 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'text-amber-400 light:text-amber-700' : 'text-red-400 light:text-red-700'}"
-        title={entry.sync_status === 'synced' ? (entry.sync_commit_sha ? entry.sync_commit_sha.slice(0, 7) : '') : entry.sync_status === 'pending' ? 'Waiting for git sync to push this change.' : (entry.sync_error ?? '')}
-      >{syncBadge.label}</span>
-    {/if}
+        class="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide {actionVariant(entry.action) === 'success' ? 'bg-emerald-500/10 text-emerald-400 light:bg-emerald-50 light:text-emerald-700' : actionVariant(entry.action) === 'warning' ? 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700' : actionVariant(entry.action) === 'danger' ? 'bg-red-500/10 text-red-400 light:bg-red-50 light:text-red-700' : 'bg-surface-3/60 text-text-secondary'}"
+      >{entry.category}</span>
+      {#if showAppColumn && entry.app_slug}
+        <a href="#/apps/{entry.app_slug}" class="shrink-0 text-accent hover:underline">{entry.app_slug}</a>
+      {/if}
+      {#if syncBadge}
+        <span
+          class="shrink-0 text-[10px] ml-auto {syncBadge.variant === 'success' ? 'text-emerald-400 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'text-amber-400 light:text-amber-700' : 'text-red-400 light:text-red-700'}"
+          title={entry.sync_status === 'synced' ? (entry.sync_commit_sha ? entry.sync_commit_sha.slice(0, 7) : '') : entry.sync_status === 'pending' ? 'Waiting for git sync to push this change.' : (entry.sync_error ?? '')}
+        >{syncBadge.label}</span>
+      {/if}
+    </div>
+    <p class="text-text-primary mt-0.5 break-words" title={entry.summary}>{entry.summary}</p>
   </div>
 {:else}
 <div data-testid="activity-row" class="flex items-start gap-3 py-3 px-3 bg-surface-1 border border-border/30 rounded-lg hover:bg-surface-2 transition-colors">
