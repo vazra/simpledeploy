@@ -273,15 +273,23 @@ func (s *Server) handlePutGitConfig(w http.ResponseWriter, r *http.Request) {
 			SSHKeyPath:    req.SSHKeyPath,
 			HTTPSUsername: req.HTTPSUsername,
 		}
-		if req.HTTPSToken != nil && *req.HTTPSToken != "" {
-			probe.HTTPSToken = *req.HTTPSToken
-		} else if existing["https_token_enc"] != "" {
-			if dec, decErr := auth.Decrypt(existing["https_token_enc"], s.masterSecret); decErr == nil {
-				probe.HTTPSToken = dec
+		switch {
+		case req.HTTPSToken == nil:
+			if existing["https_token_enc"] != "" {
+				if dec, decErr := auth.Decrypt(existing["https_token_enc"], s.masterSecret); decErr == nil {
+					probe.HTTPSToken = dec
+				}
 			}
+		case *req.HTTPSToken != "":
+			probe.HTTPSToken = *req.HTTPSToken
 		}
-		if err := gitsync.ValidateRemote(probe); err != nil {
-			http.Error(w, "remote unreachable: "+err.Error(), http.StatusBadRequest)
+		res := gitsync.CheckRemote(probe)
+		if !res.OK {
+			msg, ok := testConnMessages[res.Code]
+			if !ok {
+				msg = testConnMessages["unknown"]
+			}
+			http.Error(w, msg+" ("+res.RawError+")", http.StatusBadRequest)
 			return
 		}
 	}
