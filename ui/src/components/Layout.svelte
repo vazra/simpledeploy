@@ -1,6 +1,7 @@
 <script>
   import Sidebar from './Sidebar.svelte'
   import StatusBar from './StatusBar.svelte'
+  import ActivitySidebar from './ActivitySidebar.svelte'
   import { connection } from '../lib/stores/connection.svelte.js'
 
   let { children } = $props()
@@ -57,6 +58,9 @@
     </div>
     <StatusBar />
   </main>
+
+  <!-- Omnipresent activity sidebar: floating toggle + auto-open on new activity -->
+  <ActivitySidebar />
 </div>
 
 <style>

@@ -44,7 +44,7 @@ test('shows failed deploy error inline', () => {
 });
 
 test('expand chevron toggles raw json', async () => {
-  apiMock.getActivity.mockResolvedValue({ data: { ...baseEntry, before_json: '{"a":1}', after_json: '{"a":2}' } });
+  apiMock.getActivity.mockResolvedValue({ data: { ...baseEntry, before_json: { a: 1 }, after_json: { a: 2 } } });
   const { container } = render(ActivityRow, { entry: baseEntry, expandable: true });
   const btn = container.querySelector('button[aria-label="Show details"]');
   expect(btn).toBeTruthy();

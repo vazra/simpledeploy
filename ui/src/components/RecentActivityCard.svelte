@@ -45,7 +45,7 @@
   {:else if entries.length === 0}
     <p class="text-xs text-text-secondary italic">No activity yet.</p>
   {:else}
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col divide-y divide-border/20">
       {#each entries as e (e.id)}
         <ActivityRow entry={e} compact showAppColumn />
       {/each}
