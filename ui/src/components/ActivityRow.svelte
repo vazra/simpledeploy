@@ -147,13 +147,13 @@
     {#if fullEntry.before_json}
       <div class="px-3 pt-2 pb-1">
         <p class="text-[11px] font-medium text-text-muted mb-1 uppercase tracking-wider">Before</p>
-        <pre class="text-xs font-mono text-text-secondary bg-surface-0 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">{JSON.stringify(JSON.parse(fullEntry.before_json), null, 2)}</pre>
+        <pre class="text-xs font-mono text-text-secondary bg-surface-0 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">{JSON.stringify(fullEntry.before_json, null, 2)}</pre>
       </div>
     {/if}
     {#if fullEntry.after_json}
       <div class="px-3 pt-1 pb-2">
         <p class="text-[11px] font-medium text-text-muted mb-1 uppercase tracking-wider">After</p>
-        <pre class="text-xs font-mono text-text-secondary bg-surface-0 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">{JSON.stringify(JSON.parse(fullEntry.after_json), null, 2)}</pre>
+        <pre class="text-xs font-mono text-text-secondary bg-surface-0 rounded p-2 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap">{JSON.stringify(fullEntry.after_json, null, 2)}</pre>
       </div>
     {/if}
   </div>

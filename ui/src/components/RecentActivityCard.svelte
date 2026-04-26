@@ -9,8 +9,8 @@
 
   async function refresh() {
     try {
-      const res = await api.listRecentActivity(8);
-      entries = res?.entries || [];
+      const { data } = await api.listRecentActivity(8);
+      entries = data?.entries || [];
     } catch (e) {
       // soft-fail; keep previous entries
     } finally {

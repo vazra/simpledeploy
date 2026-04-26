@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,29 +12,29 @@ import (
 
 // AuditEntry represents a single row in the audit_log table.
 type AuditEntry struct {
-	ID               int64
-	AppID            *int64
-	AppSlug          string
-	ActorUserID      *int64
-	ActorName        string
-	ActorSource      string
-	IP               string
-	Category         string
-	Action           string
-	Target           string
-	Summary          string
-	BeforeJSON       []byte
-	AfterJSON        []byte
-	Error            string
-	ComposeVersionID *int64
+	ID               int64      `json:"id"`
+	AppID            *int64     `json:"app_id"`
+	AppSlug          string     `json:"app_slug"`
+	ActorUserID      *int64     `json:"actor_user_id"`
+	ActorName        string     `json:"actor_name"`
+	ActorSource      string     `json:"actor_source"`
+	IP               string     `json:"ip"`
+	Category         string     `json:"category"`
+	Action           string     `json:"action"`
+	Target           string     `json:"target"`
+	Summary          string     `json:"summary"`
+	BeforeJSON       json.RawMessage `json:"before_json,omitempty"`
+	AfterJSON        json.RawMessage `json:"after_json,omitempty"`
+	Error            string     `json:"error,omitempty"`
+	ComposeVersionID *int64     `json:"compose_version_id"`
 	// SyncEligible is input-only: set it before calling RecordAudit to request
 	// sync tracking (stored as sync_status='pending'). It is NOT a stored column
 	// and is never populated on read; inspect SyncStatus directly instead.
-	SyncEligible  bool
-	SyncStatus    *string
-	SyncCommitSHA string
-	SyncError     string
-	CreatedAt     time.Time
+	SyncEligible  bool      `json:"-"`
+	SyncStatus    *string   `json:"sync_status"`
+	SyncCommitSHA string    `json:"sync_commit_sha,omitempty"`
+	SyncError     string    `json:"sync_error,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // ActivityFilter controls which rows ListActivity returns.

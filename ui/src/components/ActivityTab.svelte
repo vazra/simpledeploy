@@ -16,9 +16,10 @@
     loading = true
     try {
       if (reset) { entries = []; nextBefore = 0 }
-      const res = await api.listAppActivity(slug, { categories, before: nextBefore })
-      entries = reset ? (res.entries || []) : [...entries, ...(res.entries || [])]
-      nextBefore = res.next_before || 0
+      const { data } = await api.listAppActivity(slug, { categories, before: nextBefore })
+      const next = data || {}
+      entries = reset ? (next.entries || []) : [...entries, ...(next.entries || [])]
+      nextBefore = next.next_before || 0
     } finally {
       loading = false
     }

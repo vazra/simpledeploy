@@ -17,7 +17,7 @@ const defaultEntries = [
 
 beforeEach(() => {
   apiMock.listAppActivity.mockReset();
-  apiMock.listAppActivity.mockResolvedValue({ entries: defaultEntries, next_before: 0 });
+  apiMock.listAppActivity.mockResolvedValue({ data: { entries: defaultEntries, next_before: 0 } });
 });
 
 describe('ActivityTab', () => {
@@ -29,7 +29,7 @@ describe('ActivityTab', () => {
   });
 
   test('shows empty state', async () => {
-    apiMock.listAppActivity.mockResolvedValueOnce({ entries: [], next_before: 0 });
+    apiMock.listAppActivity.mockResolvedValueOnce({ data: { entries: [], next_before: 0 } });
     render(ActivityTab, { slug: 'app1' });
     await waitFor(() => expect(screen.getByText(/No activity yet/)).toBeTruthy());
   });

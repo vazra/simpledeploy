@@ -66,9 +66,15 @@ test.describe('Activity changelog', () => {
     // Wait for at least one row
     await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
 
-    // At least one of the deployed test app slugs should appear
-    const main = page.locator('main');
-    await expect(main.getByText(/e2e-nginx|e2e-multi/).first()).toBeVisible();
+    // Filter to non-auth categories so app-scoped rows surface above the
+    // login noise on page one.
+    await page.locator('[data-testid="activity-filter-lifecycle"]').click();
+    await page.locator('[data-testid="activity-filter-compose"]').click();
+
+    // After filtering, at least one row should reference a deployed app slug.
+    const rows = page.locator('[data-testid="activity-row"]');
+    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+    await expect(rows.filter({ hasText: /e2e-nginx|e2e-multi|e2e-postgres/ }).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('global audit filter chips are present', async ({ page }) => {
@@ -96,5 +102,65 @@ test.describe('Activity changelog', () => {
   test('failed deploy entry shows error inline', async ({ page }) => {
     // Trigger requires API setup to inject a bad compose; covered by Go unit tests in deployer
     test.skip(true, 'Failed-deploy trigger requires nontrivial API plumbing; covered by Go unit tests in deployer');
+  });
+
+  test('expand chevron loads full entry detail', async ({ page }) => {
+    const state = getState();
+    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
+    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
+
+    // Find the first row that has expandable detail (compose entries have After JSON).
+    const composeRow = page.locator('[data-testid="activity-row"]').filter({ hasText: /compose/i }).first();
+    await expect(composeRow).toBeVisible({ timeout: 10_000 });
+    await composeRow.locator('button[aria-label="Show details"]').click();
+
+    // After expand, an "After" label should appear within the activity panel.
+    await expect(page.locator('main').getByText(/^After$/i).first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('sync status badge appears on sync-eligible entries', async ({ page }) => {
+    const state = getState();
+    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
+    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
+
+    // At least one row exists
+    await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
+
+    // Compose/lifecycle entries are sync-eligible. Locate a row with a sync badge
+    // (text or aria-label containing "synced" or "pending").
+    const rowsWithBadge = page.locator('[data-testid="activity-row"]').filter({ hasText: /pending|synced/i });
+    await expect(rowsWithBadge.first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('env vars edit appears as env/changed row in per-app feed', async ({ page, request }) => {
+    const state = getState();
+    const cookies = await page.context().cookies();
+    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+
+    // Edit env vars via API to create an env/changed audit row
+    const r = await request.put(`${state.baseURL}/api/apps/e2e-nginx/env`, {
+      data: [{ key: 'AUDIT_TEST', value: 'hello' }],
+      headers: { Cookie: cookieHeader, 'Content-Type': 'application/json' },
+      ignoreHTTPSErrors: true,
+    });
+    expect(r.status()).toBeLessThan(300);
+
+    // Navigate to activity tab and confirm the env entry surfaces
+    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
+    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
+
+    const envRows = page.locator('[data-testid="activity-row"]').filter({ hasText: /env/i });
+    await expect(envRows.first()).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('audit retention config form is visible to super-admin', async ({ page }) => {
+    const state = getState();
+    await page.goto(`${state.baseURL}/#/system`);
+    await page.locator('button').filter({ hasText: 'Audit Log' }).click();
+
+    // The retention input + save button should be present (e2eadmin is super-admin in setup)
+    const retentionInput = page.locator('input[type="number"]').first();
+    await expect(retentionInput).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole('button', { name: /^Save$/ })).toBeVisible();
   });
 });

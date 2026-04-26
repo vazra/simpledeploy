@@ -15,10 +15,12 @@ beforeEach(() => {
 describe('RecentActivityCard', () => {
   test('renders entries', async () => {
     apiMock.listRecentActivity.mockResolvedValue({
-      entries: [
-        { id: 1, category: 'compose', action: 'changed', summary: 'A change', actor_name: 'Ameen', created_at: new Date().toISOString() },
-        { id: 2, category: 'deploy', action: 'deploy_succeeded', summary: 'A deploy', actor_name: 'Ameen', created_at: new Date().toISOString() },
-      ],
+      data: {
+        entries: [
+          { id: 1, category: 'compose', action: 'changed', summary: 'A change', actor_name: 'Ameen', created_at: new Date().toISOString() },
+          { id: 2, category: 'deploy', action: 'deploy_succeeded', summary: 'A deploy', actor_name: 'Ameen', created_at: new Date().toISOString() },
+        ],
+      },
     });
     render(RecentActivityCard);
     await waitFor(() => expect(screen.getByText(/A change/)).toBeTruthy());
@@ -26,13 +28,13 @@ describe('RecentActivityCard', () => {
   });
 
   test('renders empty state', async () => {
-    apiMock.listRecentActivity.mockResolvedValue({ entries: [] });
+    apiMock.listRecentActivity.mockResolvedValue({ data: { entries: [] } });
     render(RecentActivityCard);
     await waitFor(() => expect(screen.getByText(/No activity yet/)).toBeTruthy());
   });
 
   test('view-all link points to System Audit', async () => {
-    apiMock.listRecentActivity.mockResolvedValue({ entries: [] });
+    apiMock.listRecentActivity.mockResolvedValue({ data: { entries: [] } });
     const { container } = render(RecentActivityCard);
     await waitFor(() => {
       const link = container.querySelector('a');

@@ -122,8 +122,11 @@ func (s *Server) handleAppActivity(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAppAccessByID(w, r, app.ID) {
 		return
 	}
+	// Filter by slug so rows recorded with only AppSlug (when AppID was not
+	// available at handler time) are included. Slug is unique among live apps.
+	_ = app
 	f := store.ActivityFilter{
-		AppID:      &app.ID,
+		AppSlug:    slug,
 		Categories: parseCategories(r),
 		Limit:      parseLimit(r, 50, 200),
 		Before:     parseBefore(r),

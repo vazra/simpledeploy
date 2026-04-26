@@ -158,7 +158,7 @@ func TestActivityListScopedNonAdmin(t *testing.T) {
 	var summaries []string
 	for _, raw := range entries {
 		e := raw.(map[string]any)
-		summaries = append(summaries, e["Summary"].(string))
+		summaries = append(summaries, e["summary"].(string))
 	}
 
 	// Must see app-a entry and own auth event.
@@ -205,8 +205,8 @@ func TestActivityCategoryFilter(t *testing.T) {
 	entries := resp["entries"].([]any)
 	for _, raw := range entries {
 		e := raw.(map[string]any)
-		if e["Category"] != "auth" {
-			t.Errorf("expected only auth entries, got category %q", e["Category"])
+		if e["category"] != "auth" {
+			t.Errorf("expected only auth entries, got category %q", e["category"])
 		}
 	}
 }
@@ -233,7 +233,7 @@ func TestActivityPaginationCursor(t *testing.T) {
 	entries := resp["entries"].([]any)
 	for _, raw := range entries {
 		e := raw.(map[string]any)
-		gotID := int64(e["ID"].(float64))
+		gotID := int64(e["id"].(float64))
 		if gotID >= before {
 			t.Errorf("cursor: got entry id %d >= before %d", gotID, before)
 		}
@@ -279,10 +279,10 @@ func TestGetActivityIncludesBeforeAfter(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&e)
 
 	// BeforeJSON and AfterJSON should be present (non-nil)
-	if e["BeforeJSON"] == nil {
+	if e["before_json"] == nil {
 		t.Error("BeforeJSON should be present in single-entry response")
 	}
-	if e["AfterJSON"] == nil {
+	if e["after_json"] == nil {
 		t.Error("AfterJSON should be present in single-entry response")
 	}
 }
