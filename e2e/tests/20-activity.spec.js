@@ -163,4 +163,33 @@ test.describe('Activity changelog', () => {
     await expect(retentionInput).toBeVisible({ timeout: 5_000 });
     await expect(page.getByRole('button', { name: /^Save$/ })).toBeVisible();
   });
+
+  test('super-admin can purge all activity', async ({ page, request }) => {
+    const state = getState();
+    await page.goto(`${state.baseURL}/#/system`);
+    await page.locator('button').filter({ hasText: 'Audit Log' }).click();
+
+    // Activity should exist before purge
+    await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
+
+    // Click "Purge all activity" then confirm
+    await page.getByRole('button', { name: /Purge all activity/i }).click();
+    await page.getByRole('button', { name: /Yes, purge all/i }).click();
+
+    // After purge, the API directly should report empty (a fresh login event may be
+    // recorded by subsequent traffic, so don't rely on the UI showing zero rows).
+    const cookies = await page.context().cookies();
+    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    // Wait briefly for the purge to settle.
+    await page.waitForTimeout(500);
+    const r = await request.get(`${state.baseURL}/api/activity?limit=200`, {
+      headers: { Cookie: cookieHeader },
+      ignoreHTTPSErrors: true,
+    });
+    expect(r.status()).toBe(200);
+    const body = await r.json();
+    // After a successful purge there should be far fewer entries than the pre-purge state.
+    // A few new auth/system rows may have been recorded during the purge round-trip.
+    expect((body.entries || []).length).toBeLessThan(5);
+  });
 });
