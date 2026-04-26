@@ -1,0 +1,73 @@
+---
+const repo = "vazra/simpledeploy";
+---
+
+<a
+  class="sd-star-btn"
+  href={`https://github.com/${repo}`}
+  target="_blank"
+  rel="noopener"
+  aria-label="Star SimpleDeploy on GitHub"
+>
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor">
+    <path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z" />
+  </svg>
+  <span class="sd-star-label">Star</span>
+  <span class="sd-star-count" data-repo={repo} aria-hidden="true"></span>
+</a>
+
+<style>
+  .sd-star-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-text);
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+    text-decoration: none;
+    line-height: 1;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  }
+  .sd-star-btn:hover {
+    background: var(--sl-color-gray-5);
+    border-color: var(--sl-color-accent);
+    transform: translateY(-1px);
+  }
+  .sd-star-btn svg {
+    color: #f1c40f;
+  }
+  .sd-star-count:empty {
+    display: none;
+  }
+  .sd-star-count {
+    padding-left: 0.4rem;
+    border-left: 1px solid var(--sl-color-gray-4);
+    color: var(--sl-color-text-accent);
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+
+<script>
+  (async () => {
+    const el = document.querySelector(".sd-star-count");
+    if (!el) return;
+    const repo = el.getAttribute("data-repo");
+    if (!repo) return;
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}`, {
+        headers: { Accept: "application/vnd.github+json" },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const count = data.stargazers_count;
+      if (typeof count !== "number") return;
+      el.textContent = count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
+    } catch {
+      // network/offline: silently skip count, button still works
+    }
+  })();
+</script>

@@ -1,0 +1,14 @@
+SimpleDeploy
+Copyright (c) 2025 Vazra and SimpleDeploy contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+It bundles or depends on third-party open source software, including but not
+limited to:
+
+- Caddy (Apache-2.0)
+- Go standard library and modules listed in go.sum (various OSI-approved licenses)
+- Svelte, Vite, and frontend dependencies listed in ui/package.json (MIT and similar)
+- Astro Starlight and documentation dependencies in docs-site/package.json (MIT and similar)
+
+Refer to each dependency's repository for its full license text.

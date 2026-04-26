@@ -2,10 +2,13 @@
 
 [![CI](https://github.com/vazra/simpledeploy/actions/workflows/ci.yml/badge.svg)](https://github.com/vazra/simpledeploy/actions/workflows/ci.yml)
 [![Release](https://github.com/vazra/simpledeploy/releases/latest/badge.svg)](https://github.com/vazra/simpledeploy/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/vazra/simpledeploy?style=social)](https://github.com/vazra/simpledeploy/stargazers)
 
 Lightweight deployment manager for Docker Compose apps. Single binary with built-in reverse proxy, automatic TLS, metrics, backups, alerts, and a web dashboard.
 
 Designed for small VPS instances. Targets ~60MB RAM for 10-20 apps.
+
+> If SimpleDeploy is useful to you, please [star us on GitHub](https://github.com/vazra/simpledeploy) - it helps other self-hosters find the project.
 
 ## Install
 
@@ -165,4 +168,4 @@ simpledeploy (single process)
 
 ## License
 
-MIT
+MIT - see [LICENSE](LICENSE) and [NOTICE](NOTICE).

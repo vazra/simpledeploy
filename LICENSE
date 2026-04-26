@@ -1,13 +1,4 @@
----
-title: "License"
-description: "SimpleDeploy is released under the MIT License."
----
-
-SimpleDeploy is open source software, released under the **MIT License**.
-
-The full license text is available in the [LICENSE](https://github.com/vazra/simpledeploy/blob/main/LICENSE) file at the root of the repository, and is reproduced below.
-
-## MIT License
+MIT License
 
 Copyright (c) 2025 Vazra and SimpleDeploy contributors
 
@@ -28,12 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-## Third-party software
-
-SimpleDeploy bundles and depends on third-party open source software.
-See the [NOTICE](https://github.com/vazra/simpledeploy/blob/main/NOTICE) file for an overview, and `go.sum`, `ui/package.json`, and `docs-site/package.json` for full dependency lists.
-
-## Trademarks
-
-"SimpleDeploy" and the SimpleDeploy logo are unregistered marks of the project maintainers. The MIT License does not grant permission to use these marks. You may state factually that your project uses or integrates with SimpleDeploy.

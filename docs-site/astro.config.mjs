@@ -30,6 +30,9 @@ export default defineConfig({
         baseUrl: `${githubRepo}/edit/main/docs-site/`,
       },
       customCss: ["./src/styles/custom.css"],
+      components: {
+        SocialIcons: "./src/components/SocialIconsWithStar.astro",
+      },
       plugins: [
         starlightImageZoom(),
         starlightBlog({
@@ -142,8 +145,12 @@ export default defineConfig({
           link: "/changelog/",
         },
         {
-          label: "License",
-          link: "/license/",
+          label: "Legal",
+          items: [
+            { label: "License", link: "/license/" },
+            { label: "Privacy Policy", link: "/legal/privacy/" },
+            { label: "Terms of Use", link: "/legal/terms/" },
+          ],
         },
       ],
     }),
