@@ -53,7 +53,7 @@ Once an app is deployed, its detail page has tabs for:
 - **Overview**: services, status, resource usage at a glance.
 - **Logs**: live stream, follow toggle, per-service filter.
 - **Metrics**: CPU, memory, request rate, latency charts.
-- **Config**: edit the compose file in-browser, redeploy.
+- **Config**: edit the compose file in-browser, redeploy. Use **Export** to download the current compose YAML.
 - **Endpoints**: domains, TLS status, advanced proxy settings.
 - **Versions**: every deploy attempt with timestamp and result.
 - **Backups**: schedule and history.
