@@ -18,6 +18,7 @@
   const featuredIds = ['nginx-static', 'gitea-postgres', 'uptime-kuma', 'vaultwarden', 'n8n-postgres', 'minio']
 
   let apps = $state([])
+  let gitSyncStatus = $state(null)
   let cpuHistory = $state([])
   let memHistory = $state([])
   let memRawHistory = $state([])
@@ -51,13 +52,15 @@
     loading = true
     loadError = false
 
-    const [appsRes, metricsRes, histRes, rulesRes, dockerRes] = await Promise.all([
+    const [appsRes, metricsRes, histRes, rulesRes, dockerRes, gitRes] = await Promise.all([
       api.listApps(),
       api.systemMetrics(timeRange),
       api.alertHistory(),
       api.listAlertRules(),
       api.dockerInfo(),
+      api.gitStatus(),
     ])
+    gitSyncStatus = gitRes.data || null
     if (dockerRes.data?.memory) hostMemory = dockerRes.data.memory
 
     if (appsRes.error) {
@@ -240,6 +243,16 @@
     </div>
   {:else}
     <div class="animate-fade-in-up">
+    {#if gitSyncStatus?.Enabled && gitSyncStatus?.LastSyncError}
+      <div class="mb-4 flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm light:bg-red-50 light:border-red-200">
+        <span class="text-red-400 light:text-red-700 shrink-0 mt-0.5" aria-hidden="true">⚠</span>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-red-400 light:text-red-700">Git sync is failing</div>
+          <div class="mt-0.5 text-text-secondary break-all">{gitSyncStatus.LastSyncError}</div>
+        </div>
+        <a href="#/git-sync" class="shrink-0 text-xs text-accent hover:underline self-center">Open Git Sync →</a>
+      </div>
+    {/if}
     <!-- System Health -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
       <StatCard

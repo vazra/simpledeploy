@@ -264,6 +264,28 @@ func (s *Server) handlePutGitConfig(w http.ResponseWriter, r *http.Request) {
 		kvs["https_token_enc"] = enc
 	}
 
+	// Validate remote reachability+auth before persisting so the user gets
+	// immediate feedback instead of silent push failures later.
+	if req.Enabled {
+		probe := gitsync.Config{
+			Remote:        req.Remote,
+			Branch:        req.Branch,
+			SSHKeyPath:    req.SSHKeyPath,
+			HTTPSUsername: req.HTTPSUsername,
+		}
+		if req.HTTPSToken != nil && *req.HTTPSToken != "" {
+			probe.HTTPSToken = *req.HTTPSToken
+		} else if existing["https_token_enc"] != "" {
+			if dec, decErr := auth.Decrypt(existing["https_token_enc"], s.masterSecret); decErr == nil {
+				probe.HTTPSToken = dec
+			}
+		}
+		if err := gitsync.ValidateRemote(probe); err != nil {
+			http.Error(w, "remote unreachable: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	if err := s.store.SetGitSyncConfig(kvs); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return

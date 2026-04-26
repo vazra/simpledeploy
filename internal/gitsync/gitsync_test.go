@@ -1636,6 +1636,70 @@ func TestGitsyncNoStampWhenNothingToCommit(t *testing.T) {
 	}
 }
 
+// TestGitsyncNoStampWhenOnlyUntrackedNoise: worktree has untracked files
+// (e.g. docker volume artefacts) but no allowed file changed. Pending audit
+// rows must remain pending instead of being marked failed by a doomed commit.
+func TestGitsyncNoStampWhenOnlyUntrackedNoise(t *testing.T) {
+	appsDir := makeAppsDir(t)
+	bareDir := makeBareRemote(t)
+
+	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: '3'\n")
+
+	st := openStore(t)
+	cfg := Config{
+		Enabled:          true,
+		Remote:           "file://" + bareDir,
+		Branch:           "main",
+		AppsDir:          appsDir,
+		AuthorName:       "Test",
+		AuthorEmail:      "test@test.local",
+		PollInterval:     0,
+		PollEnabled:      false,
+		AutoPushEnabled:  true,
+		AutoApplyEnabled: true,
+		WebhookEnabled:   true,
+	}
+	s, err := New(cfg, st, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer s.Stop()
+
+	// Drop an untracked, non-allowed file in the worktree (simulates docker
+	// volume / generated artefacts). IsClean() will return false because of it.
+	writeFile(t, filepath.Join(appsDir, "app1", "stray.log"), "noise\n")
+
+	id, err := st.RecordAudit(ctx, store.AuditEntry{
+		ActorSource:  "ui",
+		Category:     "registry",
+		Action:       "added",
+		Summary:      "registry add (no file change)",
+		SyncEligible: true,
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+
+	s.EnqueueCommit(nil, "noop-with-untracked-noise")
+	drainCommits(t, s, 3*time.Second)
+	time.Sleep(200 * time.Millisecond)
+
+	e, err := st.GetActivity(ctx, id)
+	if err != nil {
+		t.Fatalf("GetActivity: %v", err)
+	}
+	if e.SyncStatus == nil || *e.SyncStatus != "pending" {
+		t.Errorf("SyncStatus = %v, want pending (untracked-only worktree must not mark failed)", e.SyncStatus)
+	}
+}
+
 // ---- helpers ----
 
 type countingReconciler struct {

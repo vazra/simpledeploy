@@ -82,8 +82,8 @@
     {#if syncBadge}
       {' '}<span
         aria-label={syncBadge.label}
-        class="inline-block align-baseline text-[11px] leading-none {syncBadge.variant === 'success' ? 'text-emerald-400 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'text-amber-400 light:text-amber-700' : 'text-red-400 light:text-red-700'}"
-        title={entry.sync_status === 'synced' ? `synced${entry.sync_commit_sha ? ' · ' + entry.sync_commit_sha.slice(0, 7) : ''}` : entry.sync_status === 'pending' ? 'Waiting for git sync to push this change.' : `sync failed${entry.sync_error ? ' · ' + entry.sync_error : ''}`}
+        class="inline-block align-baseline text-[11px] leading-none cursor-help {syncBadge.variant === 'success' ? 'text-emerald-400 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'text-amber-400 light:text-amber-700' : 'text-red-400 light:text-red-700'}"
+        title={entry.sync_status === 'synced' ? `Synced to git${entry.sync_commit_sha ? ' · ' + entry.sync_commit_sha.slice(0, 7) : ''}` : entry.sync_status === 'pending' ? 'Waiting for git sync to push this change.' : `Git sync failed${entry.sync_error ? ': ' + entry.sync_error : '. Check System → Git Sync.'}`}
       >{entry.sync_status === 'synced' ? '✓' : entry.sync_status === 'pending' ? '⏳' : '✗'}</span>
     {/if}
     {' '}<span class="text-text-muted tabular-nums" title={absTime}>· {relTime}</span>
@@ -104,8 +104,8 @@
 
       {#if syncBadge}
         <span
-          class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide {syncBadge.variant === 'success' ? 'bg-emerald-500/10 text-emerald-400 light:bg-emerald-50 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700' : 'bg-red-500/10 text-red-400 light:bg-red-50 light:text-red-700'}"
-          title={entry.sync_status === 'synced' ? (entry.sync_commit_sha ? entry.sync_commit_sha.slice(0, 7) : '') : entry.sync_status === 'pending' ? 'Waiting for git sync to push this change.' : (entry.sync_error ?? '')}
+          class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium tracking-wide cursor-help {syncBadge.variant === 'success' ? 'bg-emerald-500/10 text-emerald-400 light:bg-emerald-50 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700' : 'bg-red-500/10 text-red-400 light:bg-red-50 light:text-red-700'}"
+          title={entry.sync_status === 'synced' ? `Synced to git${entry.sync_commit_sha ? ' · ' + entry.sync_commit_sha.slice(0, 7) : ''}` : entry.sync_status === 'pending' ? 'Waiting for git sync to push this change.' : `Git sync failed${entry.sync_error ? ': ' + entry.sync_error : '. Check System → Git Sync.'}`}
         >
           {syncBadge.label}
         </span>

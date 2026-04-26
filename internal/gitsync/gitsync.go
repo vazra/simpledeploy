@@ -32,6 +32,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/go-git/go-git/v5/storage/memory"
 
 	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -478,11 +479,17 @@ func (g *Syncer) initRepo() error {
 		if r.Config().Name == "origin" {
 			urls := r.Config().URLs
 			if len(urls) > 0 && urls[0] != g.cfg.Remote {
-				return fmt.Errorf(
-					"gitsync: existing repo remote URL %q does not match cfg.Remote %q; "+
-						"update the config or remove .git to re-initialize",
-					urls[0], g.cfg.Remote,
-				)
+				log.Printf("[gitsync] remote URL changed (%q -> %q); rewriting origin in .git/config",
+					urls[0], g.cfg.Remote)
+				if err := repo.DeleteRemote("origin"); err != nil {
+					return fmt.Errorf("gitsync: delete stale origin: %w", err)
+				}
+				if _, err := repo.CreateRemote(&config.RemoteConfig{
+					Name: "origin",
+					URLs: []string{g.cfg.Remote},
+				}); err != nil {
+					return fmt.Errorf("gitsync: recreate origin: %w", err)
+				}
 			}
 		}
 	}
@@ -651,6 +658,20 @@ func (g *Syncer) stageAllowed(wt *git.Worktree) error {
 	return nil
 }
 
+// hasStagedAllowedChanges reports whether any allowed path has a non-Unmodified
+// staging status (i.e. would actually be included in the next commit).
+func hasStagedAllowedChanges(st git.Status) bool {
+	for rel, fs := range st {
+		if fs.Staging == git.Unmodified {
+			continue
+		}
+		if isAllowedPath(rel) {
+			return true
+		}
+	}
+	return false
+}
+
 func isAllowedPath(rel string) bool {
 	base := filepath.Base(rel)
 	depth := len(strings.Split(rel, string(os.PathSeparator)))
@@ -698,7 +719,12 @@ func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 		log.Printf("[gitsync] status: %v", err)
 		return
 	}
-	if st.IsClean() {
+	// Skip when there is nothing staged for an allowed path. Plain IsClean()
+	// returns false whenever the worktree has untracked files (docker volumes,
+	// generated artifacts, etc.) even when no tracked file actually changed,
+	// which used to cause go-git to reject an empty commit and mark every
+	// pending audit row as failed.
+	if !hasStagedAllowedChanges(st) {
 		// Nothing to commit; leave pending audit rows for the next actual push.
 		return
 	}
@@ -1003,9 +1029,21 @@ func (g *Syncer) doPushWithRetry() error {
 	if err == nil {
 		return nil
 	}
-	// Non-fast-forward: fetch + retry once.
-	auth, _ := g.buildAuth()
-	_ = g.repo.Fetch(&git.FetchOptions{RemoteName: "origin", Auth: auth, Force: true})
+	// Non-fast-forward: fetch, rebase server-wins, then push.
+	// Without the rebase the second push hits the same non-ff error
+	// because local HEAD is still behind origin/<branch>.
+	auth, authErr := g.buildAuth()
+	if authErr != nil {
+		return fmt.Errorf("push retry auth: %w (initial push: %v)", authErr, err)
+	}
+	fetchErr := g.repo.Fetch(&git.FetchOptions{RemoteName: "origin", Auth: auth, Force: false})
+	if fetchErr != nil && fetchErr != git.NoErrAlreadyUpToDate {
+		return fmt.Errorf("push retry fetch: %w (initial push: %v)", fetchErr, err)
+	}
+	if _, _, rebaseErr := rebaseServerWins(g.cfg.AppsDir, g.cfg.branch()); rebaseErr != nil {
+		return fmt.Errorf("push retry rebase: %w (initial push: %v)", rebaseErr, err)
+	}
+	g.updateHeadSHA()
 	return g.doPush()
 }
 
@@ -1014,26 +1052,54 @@ func (g *Syncer) buildAuth() (interface {
 	String() string
 	Name() string
 }, error) {
-	remote := g.cfg.Remote
+	return buildAuth(g.cfg)
+}
+
+func buildAuth(cfg Config) (interface {
+	String() string
+	Name() string
+}, error) {
+	remote := cfg.Remote
 	if strings.HasPrefix(remote, "git@") || strings.HasPrefix(remote, "ssh://") {
-		if g.cfg.SSHKeyPath == "" {
+		if cfg.SSHKeyPath == "" {
 			return nil, errors.New("gitsync: SSHKeyPath required for SSH remote")
 		}
-		pubkeys, err := ssh.NewPublicKeysFromFile("git", g.cfg.SSHKeyPath, "")
+		pubkeys, err := ssh.NewPublicKeysFromFile("git", cfg.SSHKeyPath, "")
 		if err != nil {
 			return nil, fmt.Errorf("gitsync: load SSH key: %w", err)
 		}
 		return pubkeys, nil
 	}
-	// HTTPS (or file://)
-	if g.cfg.HTTPSToken != "" {
-		username := g.cfg.HTTPSUsername
+	if cfg.HTTPSToken != "" {
+		username := cfg.HTTPSUsername
 		if username == "" {
 			username = "git"
 		}
-		return &githttp.BasicAuth{Username: username, Password: g.cfg.HTTPSToken}, nil
+		return &githttp.BasicAuth{Username: username, Password: cfg.HTTPSToken}, nil
 	}
 	return &githttp.BasicAuth{}, nil
+}
+
+// ValidateRemote performs an ls-remote against cfg.Remote with the configured
+// auth. Returns a descriptive error when the remote is unreachable, the URL
+// is malformed, or auth is rejected. Used by config-save handlers so the user
+// gets immediate feedback instead of silent push failures later.
+func ValidateRemote(cfg Config) error {
+	if cfg.Remote == "" {
+		return errors.New("remote is required")
+	}
+	auth, err := buildAuth(cfg)
+	if err != nil {
+		return err
+	}
+	rem := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{cfg.Remote},
+	})
+	if _, err := rem.List(&git.ListOptions{Auth: auth}); err != nil {
+		return fmt.Errorf("ls-remote %s: %w", cfg.Remote, err)
+	}
+	return nil
 }
 
 func (g *Syncer) updateHeadSHA() {

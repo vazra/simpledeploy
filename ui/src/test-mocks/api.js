@@ -80,6 +80,7 @@ export function makeApiMock(overrides = {}) {
     updateRegistry: vi.fn(async () => ok({})),
     deleteRegistry: vi.fn(async () => ok({})),
     dockerInfo: vi.fn(async () => ok({ server_version: '24', compose_version: '2.21' })),
+    gitStatus: vi.fn(async () => ok({ Enabled: false })),
     dockerDiskUsage: vi.fn(async () => ok({})),
     dockerImages: vi.fn(async () => ok([])),
     dockerRemoveImage: vi.fn(async () => ok({})),
