@@ -245,6 +245,31 @@ test.describe('Git sync: roundtrip + conflict', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Test 0: Test-connection endpoint happy path
+  // -------------------------------------------------------------------------
+
+  test('Test-connection endpoint reports OK against the bare repo', async () => {
+    const res = await api('POST', '/api/git/test-connection', {
+      remote: `file://${bareRepoPath}`,
+      branch: 'main',
+    });
+    expect(res.ok, `test-connection failed: ${JSON.stringify(res.data)}`).toBe(true);
+    expect(res.data.ok).toBe(true);
+    expect(res.data.code).toBe('ok');
+    expect(res.data.branch_found).toBe(true);
+    expect(res.data.message).toMatch(/Connected/i);
+
+    // Branch missing case
+    const missing = await api('POST', '/api/git/test-connection', {
+      remote: `file://${bareRepoPath}`,
+      branch: 'does-not-exist',
+    });
+    expect(missing.ok).toBe(true);
+    expect(missing.data.ok).toBe(false);
+    expect(missing.data.code).toBe('branch_missing');
+  });
+
+  // -------------------------------------------------------------------------
   // Test 1: UI changes commit to remote
   // -------------------------------------------------------------------------
 
