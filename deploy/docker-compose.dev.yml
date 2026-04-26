@@ -25,10 +25,15 @@ services:
       SIMPLEDEPLOY_UPSTREAM_HOST: host.docker.internal
       SIMPLEDEPLOY_HEALTH_PORT: "8500"
       SIMPLEDEPLOY_DEV_MODE: "1"
+      # Match host HOME so ~ expansion in config.dev.yaml resolves to the
+      # same path inside the container as on the host.
+      HOME: ${HOME}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${PWD}:${PWD}
-      - /tmp/simpledeploy-dev:/tmp/simpledeploy-dev
+      # Same-path bind mount so the container reads/writes the host's
+      # ~/.simpledeploy-local-dev directly.
+      - ${HOME}/.simpledeploy-local-dev:${HOME}/.simpledeploy-local-dev
     networks:
       - simpledeploy-public
     command: ["serve", "--config", "${PWD}/config.dev.yaml"]
