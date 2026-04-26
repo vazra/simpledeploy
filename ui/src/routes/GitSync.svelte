@@ -43,6 +43,44 @@
   let applying = $state(false)
   let showConfig = $state(false)
 
+  // Test connection state
+  let testing = $state(false)
+  let testResult = $state(null) // { ok, code, message, branch_found, raw_error }
+  let showRawError = $state(false)
+
+  async function runTest({ usePersistedToken }) {
+    testing = true
+    testResult = null
+    showRawError = false
+    try {
+      const body = {
+        remote: fRemote,
+        branch: fBranch,
+        ssh_key_path: fAuthMethod === 'ssh' ? fSSHKeyPath : '',
+        https_username: fAuthMethod === 'https' ? fHTTPSUsername : '',
+      }
+      if (!usePersistedToken) {
+        body.https_token = fAuthMethod === 'https' ? (fHTTPSToken || '') : ''
+      }
+      const res = await fetch('/api/git/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        testResult = { ok: false, code: 'unknown', message: text || 'Request failed', raw_error: '' }
+        return
+      }
+      testResult = await res.json()
+    } catch (err) {
+      testResult = { ok: false, code: 'network', message: 'Request failed', raw_error: String(err) }
+    } finally {
+      testing = false
+    }
+  }
+
   function timeAgo(isoStr) {
     if (!isoStr) return 'never'
     const diff = Date.now() - new Date(isoStr).getTime()
@@ -412,9 +450,12 @@
             <p class="text-sm text-green-400">Configuration saved.</p>
           {/if}
 
-          <div class="flex gap-2 pt-1">
+          <div class="flex flex-wrap gap-2 pt-1">
             <Button type="submit" size="sm" disabled={cfgSaving}>
               {cfgSaving ? 'Saving...' : 'Save'}
+            </Button>
+            <Button type="button" size="sm" variant="secondary" disabled={!fRemote || testing} onclick={() => runTest({ usePersistedToken: false })}>
+              {testing ? 'Testing...' : 'Test connection'}
             </Button>
             {#if cfg?.source === 'db'}
               <Button type="button" size="sm" variant="secondary" onclick={async () => { await api.gitDisable(); await loadConfig(); await load() }}>
@@ -422,6 +463,25 @@
               </Button>
             {/if}
           </div>
+
+          {#if testResult}
+            {@const cls = testResult.ok
+              ? 'bg-green-500/10 border-green-500/20 text-green-400'
+              : testResult.code === 'branch_missing'
+                ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
+                : 'bg-red-500/10 border-red-500/20 text-red-400'}
+            <div class="rounded-lg border px-3 py-2 text-sm {cls}" role="status" data-testid="gitsync-test-result">
+              <p>{testResult.message}</p>
+              {#if !testResult.ok && testResult.raw_error}
+                <button type="button" class="mt-1 text-xs underline opacity-80 hover:opacity-100" onclick={() => { showRawError = !showRawError }}>
+                  {showRawError ? 'Hide details' : 'Show details'}
+                </button>
+                {#if showRawError}
+                  <pre class="mt-1 whitespace-pre-wrap break-all text-xs opacity-90">{testResult.raw_error}</pre>
+                {/if}
+              {/if}
+            </div>
+          {/if}
         </form>
       {/if}
     </FormModal>
@@ -439,10 +499,34 @@
     <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-4">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h2 class="text-sm font-medium text-text-primary">Sync Status</h2>
-        <Button size="sm" variant="secondary" onclick={syncNow} disabled={syncing}>
-          {syncing ? 'Syncing...' : 'Sync now'}
-        </Button>
+        <div class="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onclick={() => runTest({ usePersistedToken: true })} disabled={testing}>
+            {testing ? 'Testing...' : 'Re-test connection'}
+          </Button>
+          <Button size="sm" variant="secondary" onclick={syncNow} disabled={syncing}>
+            {syncing ? 'Syncing...' : 'Sync now'}
+          </Button>
+        </div>
       </div>
+
+      {#if testResult && !showConfig}
+        {@const cls = testResult.ok
+          ? 'bg-green-500/10 border-green-500/20 text-green-400'
+          : testResult.code === 'branch_missing'
+            ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
+            : 'bg-red-500/10 border-red-500/20 text-red-400'}
+        <div class="mb-4 rounded-lg border px-3 py-2 text-sm {cls}" role="status" data-testid="gitsync-test-result">
+          <p>{testResult.message}</p>
+          {#if !testResult.ok && testResult.raw_error}
+            <button type="button" class="mt-1 text-xs underline opacity-80 hover:opacity-100" onclick={() => { showRawError = !showRawError }}>
+              {showRawError ? 'Hide details' : 'Show details'}
+            </button>
+            {#if showRawError}
+              <pre class="mt-1 whitespace-pre-wrap break-all text-xs opacity-90">{testResult.raw_error}</pre>
+            {/if}
+          {/if}
+        </div>
+      {/if}
 
       {#if status.PendingApply}
         <div class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-4 py-3">
