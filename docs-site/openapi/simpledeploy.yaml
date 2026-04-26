@@ -1735,6 +1735,54 @@ paths:
                 type: array
                 items: { type: object, additionalProperties: true }
 
+  /git/test-connection:
+    post:
+      tags: [system]
+      summary: Probe the configured Git Sync remote without saving.
+      description: |
+        Performs an `ls-remote` against the supplied remote with the supplied
+        credentials and reports whether auth succeeded and whether the branch
+        exists. Always returns 200 with a structured body; failures are
+        classified via the `code` field rather than via HTTP status.
+
+        If `https_token` is omitted (null), the currently stored token (if any)
+        is used. Pass an empty string to probe with no token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [remote]
+              properties:
+                remote: { type: string }
+                branch: { type: string, default: main }
+                ssh_key_path: { type: string }
+                https_username: { type: string }
+                https_token:
+                  type: string
+                  nullable: true
+                  description: null = use stored token; "" = no token; non-empty = use this token.
+      responses:
+        '200':
+          description: Probe completed (success or classified failure).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, code, message, branch_found, raw_error]
+                properties:
+                  ok: { type: boolean }
+                  code:
+                    type: string
+                    enum: [ok, auth_failed, not_found, branch_missing, network, unknown]
+                  message: { type: string }
+                  branch_found: { type: boolean }
+                  raw_error: { type: string }
+        '400': { description: Invalid request body. }
+        '401': { description: Unauthenticated. }
+        '403': { description: Not a super-admin. }
+
 components:
   securitySchemes:
     sessionAuth:
