@@ -4,10 +4,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// expandHome resolves a leading "~" or "~/" to the current user's home dir.
+// Other paths pass through unchanged. Empty input returns "".
+func expandHome(p string) string {
+	if p == "" {
+		return p
+	}
+	if p == "~" {
+		if h, err := os.UserHomeDir(); err == nil {
+			return h
+		}
+		return p
+	}
+	if strings.HasPrefix(p, "~/") {
+		if h, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(h, p[2:])
+		}
+	}
+	return p
+}
 
 type Config struct {
 	DataDir        string          `yaml:"data_dir"`
@@ -137,6 +158,9 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.DataDir = expandHome(cfg.DataDir)
+	cfg.AppsDir = expandHome(cfg.AppsDir)
+	cfg.GitSync.SSHKeyPath = expandHome(cfg.GitSync.SSHKeyPath)
 	cfg.applyGitSyncDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
