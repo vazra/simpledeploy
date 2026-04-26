@@ -180,6 +180,29 @@
     onModeChange(newMode)
   }
 
+  function handleExport() {
+    let yamlStr
+    if (mode === 'visual') {
+      try {
+        yamlStr = yaml.dump(compose, { lineWidth: -1 })
+      } catch {
+        toasts.error('Failed to serialize compose')
+        return
+      }
+    } else {
+      yamlStr = currentYaml
+    }
+    const blob = new Blob([yamlStr], { type: 'text/yaml' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${slug}-docker-compose.yml`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   async function handleSave() {
     let yamlStr
     if (mode === 'visual') {
@@ -271,7 +294,8 @@
     </div>
   {/if}
 
-  <div class="flex justify-end mt-4 pt-3 border-t border-border/30">
+  <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-border/30">
+    <Button variant="ghost" onclick={handleExport} title="Download compose YAML">Export</Button>
     <Button onclick={handleSave} loading={saving} disabled={mode === 'visual' && hasValidationErrors}>Save &amp; Deploy</Button>
   </div>
 
