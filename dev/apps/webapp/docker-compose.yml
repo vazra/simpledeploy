@@ -1,5 +1,5 @@
 services:
-  app:
+  app1:
     image: nginx:alpine
     labels:
       simpledeploy.domain: webapp.localhost
@@ -10,6 +10,9 @@ services:
     depends_on:
       - db
     restart: always
+    networks:
+      - default
+      - simpledeploy-public
   db:
     image: postgres:16-alpine
     environment:
@@ -26,3 +29,7 @@ services:
     restart: unless-stopped
 volumes:
   pgdata: null
+networks:
+  simpledeploy-public:
+    external: true
+    name: simpledeploy-public

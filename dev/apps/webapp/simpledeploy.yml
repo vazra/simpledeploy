@@ -1,0 +1,4 @@
+version: 1
+app:
+  slug: webapp
+  display_name: webapp

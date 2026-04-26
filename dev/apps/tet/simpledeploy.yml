@@ -1,0 +1,4 @@
+version: 1
+app:
+  slug: tet
+  display_name: tet

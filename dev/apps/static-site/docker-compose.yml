@@ -1,0 +1,40 @@
+services:
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - web-content:/usr/share/nginx/html:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - nc -z 127.0.0.1 80
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      simpledeploy.alert.cpu: '80'
+      simpledeploy.alert.memory: '85'
+      simpledeploy.backup.strategy: volume
+      simpledeploy.backup.schedule: 0 3 * * *
+      simpledeploy.backup.target: local
+      simpledeploy.backup.retention: '7'
+      simpledeploy.endpoints.0.domain: static-site.127.0.0.1.sslip.io
+      simpledeploy.endpoints.0.port: '80'
+      simpledeploy.endpoints.0.tls: local
+      simpledeploy.ratelimit.requests: '10'
+      simpledeploy.ratelimit.window: 1m
+      simpledeploy.ratelimit.burst: '20'
+    networks:
+      - simpledeploy-public
+volumes:
+  web-content: {}
+networks:
+  simpledeploy-public:
+    external: true
+    name: simpledeploy-public

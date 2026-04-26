@@ -1,0 +1,139 @@
+services:
+  co:
+    image: datafi.azurecr.io/co:latest
+    container_name: datafi-co
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "50051:50051"
+    environment:
+      GLOBAL_COORDINATOR: "https://co-global.api.home.datafi.us"
+      # --- Local Redis Connection Base64 ---
+      KEYVAL: "eyJraW5kIjoicmVkaXMiLCJhZGRyIjoicmVkaXM6NjM3OSIsInVzZXJuYW1lIjoiZGVmYXVsdCIsInBhc3N3b3JkIjoicHdkIn0="
+
+      # --- Local MinIO (S3-compatible) ---
+      PARQUET_STORAGE: "eyJhbWF6b25TMyI6eyJyZWdpb24iOiJ1cy1lYXN0LTEiLCJhY2Nlc3NLZXlJZCI6Im1pbmlvYWRtaW4iLCJzZWNyZXRBY2Nlc3NLZXkiOiJtaW5pb2FkbWluIiwiYnVja2V0TmFtZSI6ImRhdGFmaS1sb2NhbC1wYXJxdWV0IiwiZW5kcG9pbnQiOiJodHRwOi8vbWluaW86OTAwMCIsImZvcmNlUGF0aFN0eWxlIjp0cnVlfX0="
+      PARQUET_AWS_ACCESS_KEY_ID: "minioadmin"
+      PARQUET_AWS_SECRET_ACCESS_KEY: "minioadmin"
+      PARQUET_AWS_REGION: "us-east-1"
+      PARQUET_BUCKET: "datafi-local-parquet"
+      DOCUMENT_BUCKET: "datafi-local-document"
+
+      # --- Internal service routing ---
+      PARQUET_CONNECTOR_URL: "http://ed:80"
+      CACHE_ENABLED: "false"
+      DISABLE_SSL: "true"
+      EMAIL_FROM: "Name <name@example.com>"
+      EMAIL_CONNECTION_URL: "smtps://user:pass@email-smtp.your-email-provider.com"
+
+      # --- Cloudflare (for document uploads) ---
+      CLOUDFLARE_ACCOUNT_ID: "<REPLACE_CLOUDFLARE_ACCOUNT_ID>"
+      CLOUDFLARE_TOKEN: "<REPLACE_CLOUDFLARE_TOKEN>"
+
+      # --- Token verification ---
+      TOKEN_ISSUER: "https://cognito-idp.us-west-2.amazonaws.com/us-west-2_FDV8RBt3G"
+
+      # --- JWT : Create from https://utils.datafi.dev/jwt-keys ---
+      JWT_KID: "4bc8bf6b-9e7b-4fdc-a74a-e16a38e63c14"
+      JWT_ISS: "http://ed.local.datafi.us"
+      JWT_KEY: "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2QUlCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktZd2dnU2lBZ0VBQW9JQkFRQ3VTZzRWL3A4RVJUNG8KUEVUL3BzdlVmVmpYSlZoWmcxaWxNS24xNXVsNXZtQUFtQ00xczdMNW4rcVE0ZjUxbEtQRVU1dVF4bTZDVGRDOQpmMlFEc2JNNnFoWGJCb1lSd09NYk51WnFFTStSYmRkaVF3MEFWa0dBMjBTdWh4WWZsM2U5VVBHSEphRURXSWlLCkpNOFZ5VUFKeWNaMUptZGU0b05JSXBpbThta0xDQ1lZVndQTjNySmpJb1Rqb3JLU1NLb3E4cVduT3l1S284NFAKdXdsd1JxbStqR1M2eVBQWStOaDltdVpjMlYrQnhRQitzOEZrc0lyVkEwbDBFdzdGbWljTEhiZWJ1YTNoUHJMWApmS0QzSFAzNkRqaG5WR3dlbjhMT0N2QnhwZ2FjdFNWZzlyRURqWml4TXV3MDRoNzF4NnJFb3VSREZHTHdzREc1ClZJRGtSY2xyQWdNQkFBRUNnZ0VBT25MSFNvVDdHdG1Gd01TRmR4NmVtSUg0dXgzaEJSUFJOSVNmV3NHM1pvWjcKZDNlTngwS2VNS3g2WTJBR2o3UHJQN215SDlrTDBsTDZQN0pxL2ZvbjJ2S1RKY0tJVDRmYUlaUkZyU2c2RTlFOApPODIwbkhwUXVUL1BScUF5d1NGd25HSjZ2UkhYYjJIUFdGU0R4aENaa3k3QmlTUDU0bzRmN0o3OWhtOGczdnVzCjE0RnlNRlVmNXdaSjJQSWpoQUtiK0FESFl6UmtLWVA1U3pkVko5aDNTeVZGR3FaenUrdGVVR1RwZTB4MXQ5dkoKNTVEUDI2dnFlMWpCL2lxVktXODhGckJYTUlBN0pvWEZ6K2hmKzh1T0gvOUtMT1FBTWc1ZURjdjA5b0ova2F5cQpiRU9Nem1zdkk5ZjRva1JEUTFFRzlFZWZubVB1dklEV1Irb3BFb2NlWVFLQmdRRGF6Z1JpOEJrNVF4a0tZRE42CjFRcm5XTmc0SlYrdFhGT2NpR1ZudHV2cXVFQUptWVcwSGNsaXJiSFNRdG1EVUZSYllIOCsweHFLN0RxellkekUKNTR4TDYyOHpIQ2czSGRIdG16QnY3VHp6LzRsZGlwdHNaSFFXckdQQXhnY1c3VlkyaENIOGtiYjdIOEZBNUkwQQpPNTRSK1VnWDYweDBEVHJ0enB5dUdCZzArUUtCZ1FETDZzNURrWHdpY0Z3SGpuUWd1SlNoMDQvcXJVNmJIWnZCCm43M09wZm9DQVZSajQrSUJ3bXJvc0FiNEFRelMvTXYzMllVazc3UmFRb2RYZkx6eWg4ako3cU42QjFJbVBsamwKSWFzSDYwcjMrZG1tZzVFVWg2aUR0Z0NFZ2xMQjRnOXNMelMzOW5aMFpHQm11ai9EVjRBZGVTamFUQXVHYkk5awo4UjZNSWZtZWd3S0JnRzRhRVJjQUhwRXo5RnZHUU9Ga1p0STNZTVlQK0c4eDhGanFRYXpJM1RvRmNTUGpmdVk5CnZ1TEs2Sm9YVFlESVlVcUI2a1hnMEpCcmdyWlZYbFF1OStnVUZxYXZXb1V4bWp0b1JoMXNVYW11UXA4eGFqaEcKN0N1a242V1hnR1hIRkFUbXhIdGxqNkFhUUpLNDcwTFl2UmZxU3A3T3BuQVhZRG5lSi9WcTVuTnhBb0dBVnNuZgo4Z2dZa2p2S0gzazAyYnhWbmk2Q0FUcXp5dmNtRkptZFdqZHdHYXhoTTRhSTZZREtxYkJKdHdJVGFEVXB4cG93CnZkQzdyUExGMGFtSWJaejNDMkxpOXd2b25kaEpVM1FwNjl2cjgzREdmc1ZlV1NPSHlFOE5GMWkwU2txaGo4VGoKcGl4aXJCVVFwb2c4blRJL2w4dTZaSGFiTFNKRlFZd1NHVWhZaW1zQ2dZQTMzai9pR0VsMk1iUkFiMitmUUY3Ugo2ZkpIY1lzZnJuNVc2RlJPNnI3MHh6eVphNmVSSjV6NE9ZZzh0aUNoZjhSTVNDd2tFTTBISzVNUTFTNjhtZHI0Ck1vRGlyNGtaV1B0TnJxZnRVREUzNW5Gb0dhK1V2cWw5SktyempNSVBuNG1Db205VFF5bG5TWUtoNm92bzFqWUgKR3JETkVvNVVQb2g5Q0o4T2xiK0tBZz09Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0="
+
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - minio
+      - ed
+    networks:
+      - datafi-local
+
+  ed:
+    image: datafi/es:next
+    container_name: datafi-ed
+    ports:
+      - "8080:80"
+      - "50052:50051"
+    environment:
+      LOG_LEVEL: "INFO"
+      DISABLE_SSL: "true"
+      EDGE_KEY: "pwYAAAAAAAAtLS0tLUJFR0lOIFBSSVZBVEUgS0VZLS0tLS0KTUlJRXZnSUJBREFOQmdrcWhraUc5dzBCQVFFRkFBU0NCS2d3Z2dTa0FnRUFBb0lCQVFDbUowTzdUUjE4eVJibgptM1JJcWdObUpjZ2Yybk1YUWxWT1l0Qko0REdEbXNHSEozbkxBdVRhKzMrZEd3TDJtQ25mOHdjVFR6QmpBMjY0CkFoZ3grdkkwVWx4OHBoNjFjNFF0cXRPRlJqQUN2T1RNSk0wUmlaNlY0bHc0RHBuVnVCeGUwbEtjQjUrWVFEZ0UKMGFxOThrb0ROb2RkMXVaNHd3azdiQTZ2V1JkVkgrcXRndXE1Y0wrdDZXZzNBVHNUUEVJbHdKY1FkZHdDZDhYQQozWVNrUzhpK1l3V1pKVnpmY3YzOTBRNkl2VGJveWlyL1BRK1FrTHlyY0FuamJVUDdrYTZjQ1AxUkMyME9NRTAvCkZtVGZFSTd1UUpkN1g0bk03V29ISys5YldCMWorRzZLaWJsT3gxc3Z1cCt6cGFUdEZsQmdsMHVlVzFnTFNPUkkKSjFxc0FXRTdBZ01CQUFFQ2dnRUFCTUpVMG4xdWVKKzFQQlFSVVhBcjRjQ2lTZnRJQWFTMlFjK3diSi96SmNtegpKN1pqUUM2SWlleUY1cnBGTEVxeEpGelhMb3FTOWJzUzhFcXJFUlRCaHVzaHJXRUFEeTEzQ0pjcDI0UTdwWHNZCm5lK2pQMlhaaml4L2ZMYmxCQ0NlWmhRN0pvU2lESFV4R3VqbDJFUDQzUkpjNytkVER2d2QwYjhTR3B3QUt1d2wKSDBHRFlia3Y5RWZLYyt1OUMrMkJkbHlHQWpsNkQrUGRDeG1UQzBvdERMdDdoNFJHQW5Ja1UwRElaUDFNQ3U4QgpueFVUc3JCaWtEcThWcjRYNENCQk82a2hmNklGR1JNTklRN2lGL05VRk94OHp4NG5sNDVoTytsSHREK1VVWUt6CnF0Yy83blpUbStiNi9BRmg0eU91VkNhS3hhRm9FV0dOZ25PQXMxRERmUUtCZ1FEV2Vwc1JyNmF5Y2RrTzhQajQKbUgzOEE0SEplcHdrc2RUTnF1ZTRyeWx2b1lBbWFjaTIrK0k1STM0U2JVekc5QXVQLzRESFFWZ3RUZDVxVENjUApnbmZXZDB4bWR5SzF6OXlubHpZWmkyM2w4ZlBEZWtrWWJGR0FYYklVdnVVdmg5d3VId0RteHMzbWRQWUwxNVErCnlXWmh5cFA1UXREcVhEWm0waUpDelRSNUR3S0JnUURHVWE5MTNGM2hxcjZzWFo4MWw0Nk90Q3RYZnQrRXR3ck8KT1RKOHJIQkpOdjl0K0hPOHhTZmh1NzBRbzl0bG9OSkNRSEVDb1hHMlpoalVwT0FvTnZ5RkgvdHAvanBaeEl1cgpkYVNLZmNsQUFwQmUzYWhiNmpkTHlrVytJS0JtdnFDeGxWaE52WTdCUmZqNzZwQ1ByNEl1cVB5Z2k2Z3pFajhUCnZ4Mlk4N2RkRlFLQmdDL2tUTUFVUXRyUnhUQXE2czFINzhuWVZxRFF1aEVQakg4b1RIblcweC9VSmpOdHA1NEUKZksxWm1Zc3YwTmNVSTRqUitzV0RkOWNWN2pZNkx2YXRvV2pJVnMwQ2lVT2oySmVya2k3K0RWb3RQc3RGZ1JEdApEdjNrN2lEbngzRm5tdWpKajMvNG9IMTNYSUdrYjd2ZGFQa3BMUVdaditDMUdvaTNIMk5mUXZwTkFvR0JBSUg4CjBKRGtHL1RxUVlnZzVWWHZQTlYwYW1RekdMYVljMUN3Vk5NN0EyNDV5anArZXYza0REdjlIZk5tTTB2dG1XTXIKY2VkVGdvRVhjbmNPaW81UlhEcTF0OGpGaGVHSTNqTklMTTFKblR1RGNyVjdlL3FqRGhOelJUdFZqMDFJN1hMNApmS1NYOXBYZ0UwNnJkSTE1Y0U2OUhManVVUlVJaEtlZ3dQbWI1VGZ4QW9HQkFNdjlSU2doeDcvTGR3Ky8zWm5tCmd4VlVVZkxDM2ZBcU5hNTM2eXl5d3BKN1J5S3dia0hIRjUxUkIvUWQwdUxPUHEySmxVakI4RDBnWXREYW9EdWwKYzJIUE9tcXFCdU9JNDF5SU1UdkJQQ0tvRFRKWmhxM3UvOXQ4VFJ4dU15NFFTMVBXbnF2c0NISVZzZnhBNng5UgpqbjJIQ1B1NkFZMHhPNXd4ZlQ3YmVIb3MKLS0tLS1FTkQgUFJJVkFURSBLRVktLS0tLRAAAAAAAAAAYnNhaTE0cmU5bnVmWVhoaA=="
+
+      # --- Local MinIO (S3-compatible) ---
+      JWT_JWKS: "eyJrZXlzIjpbeyJrdHkiOiJSU0EiLCJraWQiOiI0YmM4YmY2Yi05ZTdiLTRmZGMtYTc0YS1lMTZhMzhlNjNjMTQiLCJ1c2UiOiJzaWciLCJhbGciOiJSUzI1NiIsIm4iOiJya29PRmY2ZkJFVS1LRHhFXzZiTDFIMVkxeVZZV1lOWXBUQ3A5ZWJwZWI1Z0FKZ2pOYk95LVpfcWtPSC1kWlNqeEZPYmtNWnVnazNRdlg5a0E3R3pPcW9WMndhR0VjRGpHemJtYWhEUGtXM1hZa01OQUZaQmdOdEVyb2NXSDVkM3ZWRHhoeVdoQTFpSWlpVFBGY2xBQ2NuR2RTWm5YdUtEU0NLWXB2SnBDd2dtR0ZjRHpkNnlZeUtFNDZLeWtraXFLdktscHpzcmlxUE9EN3NKY0VhcHZveGt1c2p6MlBqWWZacm1YTmxmZ2NVQWZyUEJaTENLMVFOSmRCTU94Wm9uQ3gyM203bXQ0VDZ5MTN5Zzl4ejktZzQ0WjFSc0hwX0N6Z3J3Y2FZR25MVWxZUGF4QTQyWXNUTHNOT0llOWNlcXhLTGtReFJpOExBeHVWU0E1RVhKYXciLCJlIjoiQVFBQiJ9XX0="
+      PARQUET_STORAGE: eyJhbWF6b25TMyI6eyJyZWdpb24iOiJ1cy1lYXN0LTEiLCJhY2Nlc3NLZXlJZCI6Im1pbmlvYWRtaW4iLCJzZWNyZXRBY2Nlc3NLZXkiOiJtaW5pb2FkbWluIiwiYnVja2V0TmFtZSI6ImRhdGFmaS1sb2NhbC1wYXJxdWV0IiwiZW5kcG9pbnQiOiJodHRwOi8vbWluaW86OTAwMCIsImZvcmNlUGF0aFN0eWxlIjp0cnVlfX0=
+    restart: unless-stopped
+    depends_on:
+      - minio
+    networks:
+      - datafi-local
+
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: datafi-redis
+    environment:
+      REDIS_ARGS: "--requirepass pwd"
+    volumes:
+      - redis_data:/data
+    ports:
+      - "16379:6379"
+    restart: unless-stopped
+    networks:
+      - datafi-local
+
+  minio:
+    image: minio/minio:latest
+    container_name: datafi-minio
+    environment:
+      MINIO_ROOT_USER: "minioadmin"
+      MINIO_ROOT_PASSWORD: "minioadmin"
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - datafi-local
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: datafi-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/datafi-local-parquet;
+      mc mb --ignore-existing local/datafi-local-document;
+      echo 'Buckets created successfully';
+      "
+    networks:
+      - datafi-local
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: datafi-redisinsight
+    volumes:
+      - redisinsight_data:/data
+    ports:
+      - "5540:5540"
+    restart: unless-stopped
+    networks:
+      - datafi-local
+
+volumes:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
+  redisinsight_data:
+
+networks:
+  datafi-local:
+    driver: bridge

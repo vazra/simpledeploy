@@ -39,7 +39,7 @@ api-non-hmr: build-go
 # Run simpledeploy in a container locally (Docker Desktop friendly).
 # Endpoint-only apps (no `ports:` published) are reachable on this path because
 # the container joins simpledeploy-public. Stop any native simpledeploy first.
-dev-docker:
+dev-docker: ui-build
 	@if lsof -iTCP:443 -sTCP:LISTEN -nP 2>/dev/null | grep -q simpledep; then \
 	  echo "error: a native simpledeploy is bound to :443. Stop it first."; exit 1; \
 	fi

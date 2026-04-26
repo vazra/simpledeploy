@@ -1,0 +1,4 @@
+version: 1
+app:
+  slug: datafi
+  display_name: datafi

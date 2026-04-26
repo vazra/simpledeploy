@@ -1,0 +1,4 @@
+version: 1
+app:
+  slug: static-site
+  display_name: static-site
