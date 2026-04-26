@@ -458,5 +458,6 @@
     initialTemplateId={quickTemplateId}
     onclose={() => { showDeployPanel = false; quickTemplateId = null }}
     onComplete={() => { showDeployPanel = false; quickTemplateId = null; loadDashboard() }}
+    onAppsChanged={loadDashboard}
   />
 </Layout>

@@ -1,5 +1,6 @@
 <script>
   import { push } from 'svelte-spa-router'
+  import yaml from 'js-yaml'
   import { api } from '../lib/api.js'
   import ConfigTab from './ConfigTab.svelte'
   import EnvEditor from './EnvEditor.svelte'
@@ -10,7 +11,27 @@
 
   let { slug, app, services = [], onAppUpdated } = $props()
 
-  let serviceNames = $derived(services.map(s => s.service || s.name || s).filter(Boolean))
+  // Service names from running containers may exclude failed/stopped services.
+  // Union with services declared in compose so the endpoint dropdown always
+  // lists every defined service, even if it failed to start.
+  let composeServiceNames = $state([])
+  $effect(() => {
+    if (!slug) return
+    api.getCompose(slug).then((res) => {
+      if (res?.error || typeof res?.data !== 'string') return
+      try {
+        const parsed = yaml.load(res.data)
+        composeServiceNames = Object.keys(parsed?.services || {})
+      } catch {
+        composeServiceNames = []
+      }
+    })
+  })
+
+  let serviceNames = $derived(Array.from(new Set([
+    ...services.map(s => s.service || s.name || s).filter(Boolean),
+    ...composeServiceNames,
+  ])))
 
   const initAllowlist = app?.Labels?.['simpledeploy.access.allow'] || ''
 

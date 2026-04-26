@@ -1612,6 +1612,53 @@
     </div>
   </AccordionSection>
 
+  <!-- ======================== SECTION 2: Endpoints ======================== -->
+  <AccordionSection title="Endpoints" expanded={endpoints.length > 0}>
+    {#if serviceNames.length === 0}
+      <p class="text-xs text-text-muted">Add a service first to expose an endpoint.</p>
+    {:else}
+      <p class="text-xs text-text-muted mb-3">Expose a service publicly via a domain. TLS via Let's Encrypt by default.</p>
+      <div class="space-y-2">
+        {#each endpoints as ep, i (i)}
+          <div class="grid grid-cols-12 gap-2 items-start">
+            <div class="col-span-3">
+              <label class="block text-xs text-text-secondary mb-1">Service</label>
+              <select value={ep.service} onchange={(e) => updateEndpoint(i, 'service', e.currentTarget.value)} class={inputCls(`ep.${i}.service`)}>
+                {#each serviceNames as s}
+                  <option value={s}>{s}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="col-span-4">
+              <label class="block text-xs text-text-secondary mb-1">Domain</label>
+              <input type="text" value={ep.domain} placeholder="app.example.com"
+                oninput={(e) => updateEndpoint(i, 'domain', e.currentTarget.value)}
+                class={inputCls(`ep.${i}.domain`)} />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-xs text-text-secondary mb-1">Port</label>
+              <input type="number" value={ep.port} placeholder="80"
+                oninput={(e) => updateEndpoint(i, 'port', e.currentTarget.value)}
+                class={inputCls(`ep.${i}.port`)} />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-xs text-text-secondary mb-1">TLS</label>
+              <select value={ep.tls || 'letsencrypt'} onchange={(e) => updateEndpoint(i, 'tls', e.currentTarget.value)} class={inputCls(`ep.${i}.tls`)}>
+                <option value="letsencrypt">Let's Encrypt</option>
+                <option value="off">Off</option>
+                <option value="internal">Internal</option>
+              </select>
+            </div>
+            <div class="col-span-1 flex items-end h-full">
+              <button type="button" onclick={() => removeEndpoint(i)} class="mt-5 text-xs text-text-muted hover:text-danger transition-colors" aria-label="Remove endpoint">Remove</button>
+            </div>
+          </div>
+        {/each}
+      </div>
+      <button type="button" onclick={addEndpoint} class="mt-3 text-xs text-accent hover:text-accent/80 transition-colors">+ Add endpoint</button>
+    {/if}
+  </AccordionSection>
+
   <!-- ======================== SECTION 3: Rate Limiting ======================== -->
   <AccordionSection title="Rate Limiting" expanded={false}>
     {#if !firstService}

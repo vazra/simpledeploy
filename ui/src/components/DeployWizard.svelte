@@ -8,7 +8,7 @@
   import { appTemplates, categories, applyVars, applyAccessMode, suggestName } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
 
-  let { open = false, onclose = () => {}, onComplete = () => {}, initialTemplateId = null } = $props()
+  let { open = false, onclose = () => {}, onComplete = () => {}, onAppsChanged = () => {}, initialTemplateId = null } = $props()
 
   let step = $state(0)
   const steps = ['Start', 'Configure', 'Review', 'Deploy']
@@ -22,6 +22,20 @@
   // Reset internal state when wizard transitions from closed to open.
   // Without this, reopening after a successful deploy (View App flow calls
   // onComplete but not onclose/resetWizard) leaves step=3 and stale state.
+  // Fire onAppsChanged once per deploy attempt when it reaches a terminal state.
+  // The app row is persisted on POST /apps even if deploy fails, so the dashboard
+  // must refresh on failure too (otherwise the failed app only appears after reload).
+  let lastNotifiedStatus = ''
+  $effect(() => {
+    const s = deployStatus
+    if ((s === 'success' || s === 'failed' || s === 'unstable') && s !== lastNotifiedStatus) {
+      lastNotifiedStatus = s
+      onAppsChanged()
+    } else if (s === 'deploying') {
+      lastNotifiedStatus = ''
+    }
+  })
+
   let wasOpen = false
   $effect(() => {
     if (open && !wasOpen) {
