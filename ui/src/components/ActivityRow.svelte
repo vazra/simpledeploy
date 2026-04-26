@@ -70,22 +70,23 @@
 </script>
 
 {#if compact}
-  <div data-testid="activity-row" class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-xs leading-tight">
-    <span class="shrink-0 text-text-muted tabular-nums font-mono" title={absTime}>{relTime}</span>
-    <span
-      class="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide font-mono {actionVariant(entry.action) === 'success' ? 'bg-emerald-500/10 text-emerald-400 light:bg-emerald-50 light:text-emerald-700' : actionVariant(entry.action) === 'warning' ? 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700' : actionVariant(entry.action) === 'danger' ? 'bg-red-500/10 text-red-400 light:bg-red-50 light:text-red-700' : 'bg-surface-3/60 text-text-secondary'}"
-    >{entry.category}</span>
+  <div data-testid="activity-row" class="py-1 text-xs leading-snug break-words text-text-primary">
     {#if showAppColumn && entry.app_slug}
-      <a href="#/apps/{entry.app_slug}" class="shrink-0 text-accent hover:underline font-mono">{entry.app_slug}</a>
+      <a href="#/apps/{entry.app_slug}" class="text-accent hover:underline font-medium">{entry.app_slug}</a>
+      {' '}
     {/if}
+    <span
+      class="inline-block px-1 py-px rounded text-[10px] uppercase tracking-wide font-medium align-baseline {actionVariant(entry.action) === 'success' ? 'text-emerald-400/90 light:text-emerald-700' : actionVariant(entry.action) === 'warning' ? 'text-amber-400/90 light:text-amber-700' : actionVariant(entry.action) === 'danger' ? 'text-red-400/90 light:text-red-700' : 'text-text-muted'} bg-surface-3/30"
+    >{entry.category}</span>
+    {' '}<span title={entry.summary}>{entry.summary}</span>
     {#if syncBadge}
-      <span
+      {' '}<span
         aria-label={syncBadge.label}
-        class="shrink-0 inline-flex items-center justify-center w-3.5 h-3.5 text-[11px] leading-none {syncBadge.variant === 'success' ? 'text-emerald-400 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'text-amber-400 light:text-amber-700' : 'text-red-400 light:text-red-700'}"
+        class="inline-block align-baseline text-[11px] leading-none {syncBadge.variant === 'success' ? 'text-emerald-400 light:text-emerald-700' : syncBadge.variant === 'warning' ? 'text-amber-400 light:text-amber-700' : 'text-red-400 light:text-red-700'}"
         title={entry.sync_status === 'synced' ? `synced${entry.sync_commit_sha ? ' · ' + entry.sync_commit_sha.slice(0, 7) : ''}` : entry.sync_status === 'pending' ? 'Waiting for git sync to push this change.' : `sync failed${entry.sync_error ? ' · ' + entry.sync_error : ''}`}
       >{entry.sync_status === 'synced' ? '✓' : entry.sync_status === 'pending' ? '⏳' : '✗'}</span>
     {/if}
-    <span class="flex-1 min-w-[10rem] text-text-primary break-words" title={entry.summary}>{entry.summary}</span>
+    {' '}<span class="text-text-muted tabular-nums" title={absTime}>· {relTime}</span>
   </div>
 {:else}
 <div data-testid="activity-row" class="flex items-start gap-3 py-3 px-3 bg-surface-1 border border-border/30 rounded-lg hover:bg-surface-2 transition-colors">
