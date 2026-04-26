@@ -27,7 +27,7 @@ test.describe('Cleanup', () => {
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
 
     // After delete, redirects to dashboard which shows "Applications" heading
-    await expect(page.locator('aside')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible({ timeout: 15_000 });
   });
 
   test('remove multi app', async ({ page }) => {
@@ -49,7 +49,7 @@ test.describe('Cleanup', () => {
       await confirmInput.fill('e2e-multi');
     }
     await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
-    await expect(page.locator('aside')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible({ timeout: 15_000 });
   });
 
   test('remove nginx app', async ({ page }) => {

@@ -25,7 +25,7 @@ export async function login(page, username, password) {
   await page.getByRole('button', { name: 'Sign In' }).waitFor({ timeout: 5_000 });
   await page.getByRole('button', { name: 'Sign In' }).click();
   // Wait for sidebar <aside> to appear (reliable post-login indicator)
-  await page.waitForSelector('aside', { timeout: 15_000 });
+  await page.waitForSelector('aside:not([data-testid="activity-sidebar"])', { timeout: 15_000 });
 }
 
 export async function loginAsAdmin(page) {

@@ -5,7 +5,7 @@ test.describe('Authentication', () => {
   test('login with correct credentials', async ({ page }) => {
     await loginAsAdmin(page);
     // Sidebar should be visible after login
-    await expect(page.locator('aside')).toBeVisible();
+    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible();
   });
 
   test('login with wrong password shows error', async ({ page }) => {
@@ -43,6 +43,6 @@ test.describe('Authentication', () => {
     await loginAsAdmin(page);
     await logout(page);
     await loginAsAdmin(page);
-    await expect(page.locator('aside')).toBeVisible();
+    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible();
   });
 });

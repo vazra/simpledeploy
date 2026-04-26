@@ -9,9 +9,9 @@ test.describe('Dashboard', () => {
   });
 
   test('shows all 3 deployed app cards', async ({ page }) => {
-    await expect(page.getByText('e2e-nginx')).toBeVisible();
-    await expect(page.getByText('e2e-multi')).toBeVisible();
-    await expect(page.getByText('e2e-postgres')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'e2e-nginx', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'e2e-multi', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'e2e-postgres', exact: true })).toBeVisible();
   });
 
   test('app cards show running status', async ({ page }) => {
@@ -26,13 +26,13 @@ test.describe('Dashboard', () => {
 
   test('search filters apps', async ({ page }) => {
     await page.getByPlaceholder(/search/i).fill('nginx');
-    await expect(page.getByText('e2e-nginx')).toBeVisible();
-    await expect(page.getByText('e2e-multi')).not.toBeVisible();
-    await expect(page.getByText('e2e-postgres')).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'e2e-nginx', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'e2e-multi', exact: true })).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'e2e-postgres', exact: true })).not.toBeVisible();
   });
 
   test('clicking app card navigates to app detail', async ({ page }) => {
-    await page.getByText('e2e-nginx').click();
+    await page.getByRole('heading', { name: 'e2e-nginx', exact: true }).click();
     await expect(page).toHaveURL(/apps\/e2e-nginx/);
   });
 });

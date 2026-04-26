@@ -64,7 +64,7 @@ test.describe('System Administration', () => {
   test('audit log tab loads', async ({ page }) => {
     await page.locator('button').filter({ hasText: 'Audit Log' }).click();
     // Audit log section has heading "Audit Log" and table headers or empty state
-    await expect(page.getByText(/Security events|Time|No audit events/i).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/No activity yet|Load more|Retention/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test('logs tab loads', async ({ page }) => {

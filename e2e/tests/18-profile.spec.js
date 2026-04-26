@@ -39,7 +39,7 @@ test.describe('Profile', () => {
 
     await login(page, TEST_ADMIN.username, newPassword);
     // After login, sidebar should be visible
-    await expect(page.locator('aside')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible({ timeout: 5_000 });
 
     await page.goto(`${state.baseURL}/#/profile`);
     await page.locator('#currentPw').fill(newPassword);
