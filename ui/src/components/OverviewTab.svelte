@@ -217,9 +217,9 @@
   </div>
 {/if}
 
-<!-- Recent Activity -->
+<!-- Recent Deployments -->
 <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50">
-  <h3 class="text-sm font-medium text-text-primary mb-4">Recent Activity</h3>
+  <h3 class="text-sm font-medium text-text-primary mb-4">Recent Deployments</h3>
   {#if loading}
     <div class="space-y-2">
       {#each [1, 2, 3] as _}
@@ -227,7 +227,7 @@
       {/each}
     </div>
   {:else if events.length === 0}
-    <p class="text-sm text-text-muted">No recent activity.</p>
+    <p class="text-sm text-text-muted">No recent deployments.</p>
   {:else}
     <div class="space-y-2">
       {#each events as evt}
