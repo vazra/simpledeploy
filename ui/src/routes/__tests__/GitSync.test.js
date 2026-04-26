@@ -271,6 +271,67 @@ describe('GitSync toggle checkboxes', () => {
   });
 });
 
+describe('GitSync test connection', () => {
+  beforeEach(() => {
+    global.fetch = vi.fn();
+  });
+
+  it('shows success banner on ok response', async () => {
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: 'file:///tmp/bare.git' },
+      error: null,
+      status: 200,
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      text: async () => '',
+      json: async () => ({ ok: true, code: 'ok', message: 'Connected. Branch found on remote.', branch_found: true, raw_error: '' }),
+    });
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const btn = await utils.findByRole('button', { name: 'Test connection' });
+    await fireEvent.click(btn);
+    await waitFor(() => {
+      const banner = utils.getByTestId('gitsync-test-result');
+      expect(banner.textContent).toMatch(/Connected/);
+    });
+  });
+
+  it('reveals raw error on click', async () => {
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: 'file:///tmp/bare.git' },
+      error: null,
+      status: 200,
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      text: async () => '',
+      json: async () => ({ ok: false, code: 'auth_failed', message: 'Authentication failed.', branch_found: false, raw_error: 'remote: Unauthorized' }),
+    });
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const btn = await utils.findByRole('button', { name: 'Test connection' });
+    await fireEvent.click(btn);
+    const detailsBtn = await utils.findByRole('button', { name: /show details/i });
+    await fireEvent.click(detailsBtn);
+    await waitFor(() => {
+      expect(utils.getByText(/Unauthorized/)).toBeInTheDocument();
+    });
+  });
+
+  it('disables button when remote is empty', async () => {
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: '' },
+      error: null,
+      status: 200,
+    });
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const btn = await utils.findByRole('button', { name: 'Test connection' });
+    expect(btn).toBeDisabled();
+  });
+});
+
 describe('GitSync pending apply banner', () => {
   it('shows banner when PendingApply is true', async () => {
     const pendingStatus = {
