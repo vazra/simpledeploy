@@ -44,6 +44,11 @@
   const tierLabels = { raw: 'Raw', '1m': '1 min', '5m': '5 min', '1h': '1 hour', '1d': '1 day' }
 
   onMount(() => {
+    const q = window.location.hash.split('?')[1]
+    if (q) {
+      const tab = new URLSearchParams(q).get('tab')
+      if (tab) switchTab(tab)
+    }
     Promise.all([loadInfo(), loadBreakdown(), loadCurrentUser()])
   })
 
