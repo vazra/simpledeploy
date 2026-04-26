@@ -32,7 +32,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
-	"github.com/go-git/go-git/v5/storage/memory"
 
 	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -1088,18 +1087,11 @@ func ValidateRemote(cfg Config) error {
 	if cfg.Remote == "" {
 		return errors.New("remote is required")
 	}
-	auth, err := buildAuth(cfg)
-	if err != nil {
-		return err
+	res := CheckRemote(cfg)
+	if res.OK {
+		return nil
 	}
-	rem := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{
-		Name: "origin",
-		URLs: []string{cfg.Remote},
-	})
-	if _, err := rem.List(&git.ListOptions{Auth: auth}); err != nil {
-		return fmt.Errorf("ls-remote %s: %w", cfg.Remote, err)
-	}
-	return nil
+	return fmt.Errorf("%s: %s", res.Code, res.RawError)
 }
 
 func (g *Syncer) updateHeadSHA() {
