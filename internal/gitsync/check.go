@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -11,6 +13,18 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage/memory"
 )
+
+var userinfoRE = regexp.MustCompile(`(https?)://[^/@\s]+:[^/@\s]+@`)
+
+// scrubSecrets removes the HTTPS token (if non-empty) and any URL userinfo
+// from s, so RawError can be safely shown to operators.
+func scrubSecrets(s string, token string) string {
+	if token != "" {
+		s = strings.ReplaceAll(s, token, "***")
+	}
+	s = userinfoRE.ReplaceAllString(s, "$1://***@")
+	return s
+}
 
 // RemoteCheck is the structured result of a connectivity probe.
 type RemoteCheck struct {
@@ -25,7 +39,7 @@ type RemoteCheck struct {
 // whether auth succeeded and whether cfg.Branch exists on the remote.
 func CheckRemote(cfg Config) RemoteCheck {
 	if cfg.Remote == "" {
-		return RemoteCheck{Code: "unknown", RawError: "remote is required"}
+		return RemoteCheck{Code: "unknown", RawError: scrubSecrets("remote is required", cfg.HTTPSToken)}
 	}
 	branch := cfg.Branch
 	if branch == "" {
@@ -33,7 +47,7 @@ func CheckRemote(cfg Config) RemoteCheck {
 	}
 	auth, err := buildAuth(cfg)
 	if err != nil {
-		return RemoteCheck{Code: "auth_failed", RawError: err.Error()}
+		return RemoteCheck{Code: "auth_failed", RawError: scrubSecrets(err.Error(), cfg.HTTPSToken)}
 	}
 	rem := git.NewRemote(memory.NewStorage(), &config.RemoteConfig{
 		Name: "origin",
@@ -43,7 +57,7 @@ func CheckRemote(cfg Config) RemoteCheck {
 	if err != nil {
 		return RemoteCheck{
 			Code:     classifyRemoteErr(err),
-			RawError: err.Error(),
+			RawError: scrubSecrets(err.Error(), cfg.HTTPSToken),
 		}
 	}
 	target := plumbing.NewBranchReferenceName(branch)
@@ -59,7 +73,7 @@ func CheckRemote(cfg Config) RemoteCheck {
 			Code:        "branch_missing",
 			BranchFound: false,
 			RefCount:    len(refs),
-			RawError:    fmt.Sprintf("branch %q not found on remote", branch),
+			RawError:    scrubSecrets(fmt.Sprintf("branch %q not found on remote", branch), cfg.HTTPSToken),
 		}
 	}
 	return RemoteCheck{
@@ -83,10 +97,6 @@ func classifyRemoteErr(err error) string {
 	}
 	var ne net.Error
 	if errors.As(err, &ne) {
-		return "network"
-	}
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
 		return "network"
 	}
 	return "unknown"

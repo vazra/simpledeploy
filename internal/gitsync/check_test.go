@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,4 +86,18 @@ func TestCheckRemote_BranchPresence(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
+}
+
+func TestCheckRemote_ScrubsToken(t *testing.T) {
+	res := CheckRemote(Config{
+		Remote:     "/tmp/definitely-not-a-real-repo-xyz.git",
+		Branch:     "main",
+		HTTPSToken: "supersecrettoken123",
+	})
+	if res.OK {
+		t.Fatalf("expected failure")
+	}
+	if strings.Contains(res.RawError, "supersecrettoken123") {
+		t.Fatalf("RawError leaked token: %q", res.RawError)
+	}
 }

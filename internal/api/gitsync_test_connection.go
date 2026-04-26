@@ -53,9 +53,18 @@ func (s *Server) handleTestGitConnection(w http.ResponseWriter, r *http.Request)
 	switch {
 	case req.HTTPSToken == nil:
 		if existing["https_token_enc"] != "" {
-			if dec, decErr := auth.Decrypt(existing["https_token_enc"], s.masterSecret); decErr == nil {
-				probe.HTTPSToken = dec
+			dec, decErr := auth.Decrypt(existing["https_token_enc"], s.masterSecret)
+			if decErr != nil {
+				resp := testConnResponse{
+					OK:      false,
+					Code:    "unknown",
+					Message: "Could not decrypt stored token. Re-enter the token to continue.",
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(resp)
+				return
 			}
+			probe.HTTPSToken = dec
 		}
 	case *req.HTTPSToken != "":
 		probe.HTTPSToken = *req.HTTPSToken
