@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -47,11 +48,40 @@ func RunFirstBootSeedIfNeeded(ctx context.Context, db *store.Store, s *Syncer, c
 	if err := s.WriteRedactedGlobal(); err != nil {
 		log.Printf("[fs-auth] write redacted global: %v", err)
 	}
+	_ = ensureGitignore(s.AppsDir(), []string{"*.secrets.yml"})
+	_ = ensureGitignore(s.DataDir(), []string{"secrets.yml"})
 	if err := db.SetMeta(fsSeededKey, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		return err
 	}
 	log.Printf("[fs-auth] first-boot seed complete; FS is now the source of truth")
 	return nil
+}
+
+func ensureGitignore(dir string, lines []string) error {
+	path := filepath.Join(dir, ".gitignore")
+	var existing string
+	if data, err := os.ReadFile(path); err == nil {
+		existing = string(data)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	var add []string
+	for _, l := range lines {
+		if !strings.Contains(existing, l) {
+			add = append(add, l)
+		}
+	}
+	if len(add) == 0 {
+		return nil
+	}
+	block := "\n# simpledeploy: never commit secrets\n" + strings.Join(add, "\n") + "\n"
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(block)
+	return err
 }
 
 // ReconcileDBFromFS scans the apps directory and applies each per-app sidecar

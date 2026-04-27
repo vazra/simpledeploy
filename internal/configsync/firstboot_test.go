@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/store"
@@ -130,5 +131,53 @@ func TestReconcileDBFromFS_AppliesAlertRules(t *testing.T) {
 	}
 	if rules[0].Metric != "cpu" || rules[0].Threshold != 75 || rules[0].WebhookID != wh.ID {
 		t.Fatalf("rule wrong: %+v", rules[0])
+	}
+}
+
+func TestEnsureGitignore_AppendsMissingOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".gitignore")
+
+	if err := ensureGitignore(dir, []string{"*.secrets.yml"}); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	first := string(data)
+	if !strings.Contains(first, "*.secrets.yml") || !strings.Contains(first, "# simpledeploy: never commit secrets") {
+		t.Fatalf("missing block/line: %q", first)
+	}
+
+	if err := ensureGitignore(dir, []string{"*.secrets.yml"}); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	data2, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read2: %v", err)
+	}
+	if string(data2) != first {
+		t.Fatalf("expected idempotent; got %q vs %q", data2, first)
+	}
+
+	dir2 := t.TempDir()
+	path2 := filepath.Join(dir2, ".gitignore")
+	if err := os.WriteFile(path2, []byte("node_modules\n"), 0644); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	if err := ensureGitignore(dir2, []string{"*.secrets.yml"}); err != nil {
+		t.Fatalf("third call: %v", err)
+	}
+	data3, err := os.ReadFile(path2)
+	if err != nil {
+		t.Fatalf("read3: %v", err)
+	}
+	got := string(data3)
+	if !strings.Contains(got, "node_modules") {
+		t.Fatalf("lost node_modules: %q", got)
+	}
+	if !strings.Contains(got, "*.secrets.yml") {
+		t.Fatalf("missing appended line: %q", got)
 	}
 }
