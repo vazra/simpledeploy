@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type BackupConfig struct {
 	ID               int64     `json:"id"`
+	UUID             string    `json:"uuid"`
 	AppID            int64     `json:"app_id"`
 	Strategy         string    `json:"strategy"`
 	Target           string    `json:"target"`
@@ -207,14 +210,17 @@ func splitCSV(s string) []string {
 }
 
 func (s *Store) CreateBackupConfig(cfg *BackupConfig) error {
+	if cfg.UUID == "" {
+		cfg.UUID = uuid.NewString()
+	}
 	err := s.db.QueryRow(`
 		INSERT INTO backup_configs (app_id, strategy, target, schedule_cron, target_config_json,
-			retention_mode, retention_count, retention_days, verify_upload, pre_hooks, post_hooks, paths)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			retention_mode, retention_count, retention_days, verify_upload, pre_hooks, post_hooks, paths, uuid)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at, updated_at
 	`, cfg.AppID, cfg.Strategy, cfg.Target, cfg.ScheduleCron, cfg.TargetConfigJSON,
 		cfg.RetentionMode, cfg.RetentionCount, cfg.RetentionDays, cfg.VerifyUpload,
-		cfg.PreHooks, cfg.PostHooks, cfg.Paths).
+		cfg.PreHooks, cfg.PostHooks, cfg.Paths, cfg.UUID).
 		Scan(&cfg.ID, &cfg.CreatedAt, &cfg.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create backup config: %w", err)
@@ -251,17 +257,20 @@ func (s *Store) UpdateBackupConfig(cfg *BackupConfig) error {
 
 const backupConfigCols = `id, app_id, strategy, target, schedule_cron, target_config_json,
 	retention_mode, retention_count, retention_days, verify_upload,
-	pre_hooks, post_hooks, paths, created_at, updated_at`
+	pre_hooks, post_hooks, paths, created_at, updated_at, uuid`
 
 func scanBackupConfig(row scanner) (BackupConfig, error) {
 	var c BackupConfig
 	var retentionDays sql.NullInt64
 	var verifyUpload int
-	var preHooks, postHooks, paths sql.NullString
+	var preHooks, postHooks, paths, uuidVal sql.NullString
 	if err := row.Scan(&c.ID, &c.AppID, &c.Strategy, &c.Target, &c.ScheduleCron, &c.TargetConfigJSON,
 		&c.RetentionMode, &c.RetentionCount, &retentionDays, &verifyUpload,
-		&preHooks, &postHooks, &paths, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&preHooks, &postHooks, &paths, &c.CreatedAt, &c.UpdatedAt, &uuidVal); err != nil {
 		return BackupConfig{}, err
+	}
+	if uuidVal.Valid {
+		c.UUID = uuidVal.String
 	}
 	if retentionDays.Valid {
 		v := int(retentionDays.Int64)
@@ -335,6 +344,36 @@ func (s *Store) DeleteBackupConfig(id int64) error {
 		s.fireAppHook(appID)
 	}
 	return nil
+}
+
+// BackfillBackupConfigUUIDs assigns a UUID to any backup_configs row whose uuid
+// is null or empty. Returns the number of rows updated.
+func (s *Store) BackfillBackupConfigUUIDs() (int, error) {
+	rows, err := s.db.Query(`SELECT id FROM backup_configs WHERE uuid IS NULL OR uuid = ''`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		u := uuid.NewString()
+		if _, err := s.db.Exec(`UPDATE backup_configs SET uuid = ? WHERE id = ?`, u, id); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // DeleteBackupConfigsForApp deletes all backup configs for the given app.
