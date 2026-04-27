@@ -598,6 +598,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
+	// FS-authoritative seed (only on first boot post-upgrade).
+	if err := configsync.RunFirstBootSeedIfNeeded(ctx, db, syncer, cfg); err != nil {
+		return fmt.Errorf("fs-auth seed: %w", err)
+	}
+	// Reconcile DB cache from FS files (idempotent on every boot).
+	if err := syncer.ReconcileDBFromFS(ctx); err != nil {
+		return fmt.Errorf("fs-auth reload: %w", err)
+	}
+
 	// Start gitsync now that ctx exists.
 	if gitSyncer != nil {
 		if startErr := gitSyncer.Start(ctx); startErr != nil {
