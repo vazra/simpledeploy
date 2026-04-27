@@ -98,6 +98,25 @@
     step = 1
   }
 
+  function handleCommunitySelect({ id, name, compose: composeYaml }) {
+    composeText = composeYaml || ''
+    try {
+      compose = yaml.load(composeText) || { services: {} }
+    } catch {
+      compose = { services: {} }
+    }
+    const slugBase = (name || id || 'app')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'app'
+    appName = suggestName(slugBase, existingAppNames)
+    nameError = ''
+    editorMode = 'yaml'
+    source = 'community'
+    scheduleValidation(composeText)
+    step = 1
+  }
+
   function handleStartUpload() {
     document.getElementById('wizard-start-upload')?.click()
   }
@@ -534,6 +553,7 @@
             {initialTemplateId}
             onapply={handleTemplateApply}
             onblank={handleBlank}
+            oncommunity={handleCommunitySelect}
           />
         {/if}
       {:else if step === 1}

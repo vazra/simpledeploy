@@ -270,3 +270,19 @@ git_sync:
 		t.Fatalf("expected no error, got %v", err)
 	}
 }
+
+func TestLoadConfigRecipesIndexURLDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("master_secret: \"x\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://vazra.github.io/simpledeploy-recipes/index.json"
+	if cfg.RecipesIndexURL != want {
+		t.Errorf("RecipesIndexURL = %q, want %q", cfg.RecipesIndexURL, want)
+	}
+}

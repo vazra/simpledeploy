@@ -24,6 +24,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/gitsync"
 	"github.com/vazra/simpledeploy/internal/logbuf"
+	"github.com/vazra/simpledeploy/internal/recipes"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -66,7 +67,11 @@ type Server struct {
 	deploymentMode    deployment.Mode
 	gs                *gitsync.Syncer
 	cs                *configsync.Syncer
+	recipesCache      *recipes.Cache
 }
+
+// SetRecipesCache enables /api/recipes/community endpoints. nil disables them.
+func (s *Server) SetRecipesCache(c *recipes.Cache) { s.recipesCache = c }
 
 func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.RateLimiter) *Server {
 	s := &Server{
@@ -185,6 +190,11 @@ func (s *Server) routes() {
 		http.HandlerFunc(s.handleListApps)))
 	s.mux.Handle("GET /api/apps/{slug}", s.authMiddleware(
 		s.appAccessMiddleware(http.HandlerFunc(s.handleGetApp))))
+
+	// Community recipes catalog (auth)
+	s.mux.Handle("GET /api/recipes/community", s.authMiddleware(http.HandlerFunc(s.handleListRecipes)))
+	s.mux.Handle("GET /api/recipes/community/file", s.authMiddleware(http.HandlerFunc(s.handleFetchRecipeFile)))
+	s.mux.Handle("GET /api/recipes/community/popularity", s.authMiddleware(http.HandlerFunc(s.handleRecipePopularity)))
 
 	// User management (auth + super_admin)
 	s.mux.Handle("GET /api/users", s.authMiddleware(http.HandlerFunc(s.handleListUsers)))

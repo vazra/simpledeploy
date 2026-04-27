@@ -129,17 +129,57 @@ func gitHead(appsDir string) (string, error) {
 
 // gitExec runs git with the given args in appsDir and returns combined output.
 func gitExec(appsDir string, args ...string) ([]byte, error) {
-	// We must set GIT_AUTHOR_* and GIT_COMMITTER_* for --continue to succeed
-	// on machines without global git config.
 	cmd := exec.Command("git", append([]string{"-C", appsDir}, args...)...)
-	// Inherit the real environment so SSH_AUTH_SOCK etc. are available.
-	// Override values that must be controlled.
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_EDITOR=true", // non-interactive
-	)
+	// Inherit the real environment so SSH_AUTH_SOCK etc. are available, but
+	// strip variables that redirect git's view of "the repository". When this
+	// process runs as (or under) a git hook, GIT_DIR/GIT_WORK_TREE/etc. are
+	// exported into our env and would cause `git init` here to act on the
+	// outer repo instead of appsDir, which is the gitsync test flake we hit
+	// from the pre-push hook.
+	cmd.Env = scrubbedGitEnv()
 	out, err := cmd.CombinedOutput()
 	return out, err
+}
+
+// gitEnvBlocklist names environment variables that point git at a specific
+// repository, index, or worktree. Inheriting any of these into a child `git`
+// process makes it operate on the wrong repo.
+var gitEnvBlocklist = []string{
+	"GIT_DIR",
+	"GIT_INDEX_FILE",
+	"GIT_WORK_TREE",
+	"GIT_PREFIX",
+	"GIT_COMMON_DIR",
+	"GIT_NAMESPACE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+}
+
+// scrubbedGitEnv returns the current process's env with redirector vars
+// removed and the non-interactive overrides we always want.
+func scrubbedGitEnv() []string {
+	skip := make(map[string]struct{}, len(gitEnvBlocklist))
+	for _, k := range gitEnvBlocklist {
+		skip[k] = struct{}{}
+	}
+	src := os.Environ()
+	out := make([]string, 0, len(src)+2)
+	for _, kv := range src {
+		eq := strings.IndexByte(kv, '=')
+		if eq <= 0 {
+			out = append(out, kv)
+			continue
+		}
+		if _, drop := skip[kv[:eq]]; drop {
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out,
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_EDITOR=true",
+	)
+	return out
 }
 
 // isRebaseConflictError returns true if the error message suggests a rebase conflict.

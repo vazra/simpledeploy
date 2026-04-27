@@ -44,8 +44,9 @@ type Config struct {
 	Registries     []string        `yaml:"registries"`
 	TrustedProxies []string        `yaml:"trusted_proxies"`
 	LogBufferSize  int             `yaml:"log_buffer_size"`
-	PublicHost     string          `yaml:"public_host"`
-	GitSync        GitSyncConfig   `yaml:"git_sync"`
+	PublicHost      string          `yaml:"public_host"`
+	RecipesIndexURL string          `yaml:"recipes_index_url"`
+	GitSync         GitSyncConfig   `yaml:"git_sync"`
 }
 
 // GitSyncConfig controls optional git-backed config sync.
@@ -162,6 +163,9 @@ func Load(path string) (*Config, error) {
 	cfg.AppsDir = expandHome(cfg.AppsDir)
 	cfg.GitSync.SSHKeyPath = expandHome(cfg.GitSync.SSHKeyPath)
 	cfg.applyGitSyncDefaults()
+	if cfg.RecipesIndexURL == "" {
+		cfg.RecipesIndexURL = "https://vazra.github.io/simpledeploy-recipes/index.json"
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

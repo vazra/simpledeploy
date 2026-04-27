@@ -71,4 +71,9 @@ describe('TemplatePicker (grid)', () => {
     await fireEvent.click(getByText(/Start with a blank/));
     expect(onblank).toHaveBeenCalled();
   });
+
+  it('shows the "Browse community recipes" button in grid view', () => {
+    const { getByRole } = render(TemplatePicker, { templates, categories });
+    expect(getByRole('button', { name: /browse community recipes/i })).toBeInTheDocument();
+  });
 });
