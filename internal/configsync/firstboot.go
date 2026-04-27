@@ -125,5 +125,36 @@ func (s *Syncer) ReconcileDBFromFS(ctx context.Context) error {
 			log.Printf("[fs-auth] apply global: %v", err)
 		}
 	}
+
+	// Rehydrate archived rows from tombstones if missing from DB.
+	archiveDir := s.ArchiveDir()
+	archEntries, _ := os.ReadDir(archiveDir)
+	for _, e := range archEntries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yml") {
+			continue
+		}
+		slug := strings.TrimSuffix(e.Name(), ".yml")
+		tomb, err := s.ReadTombstone(slug)
+		if err != nil {
+			continue
+		}
+		if _, err := s.store.GetAppBySlug(slug); err != nil {
+			_ = s.store.UpsertApp(&store.App{
+				Slug:   slug,
+				Name:   firstNonEmpty(tomb.App.DisplayName, slug),
+				Status: "stopped",
+			}, nil)
+			_ = s.store.MarkAppArchived(slug, tomb.ArchivedAt)
+		} else {
+			_ = s.store.MarkAppArchived(slug, tomb.ArchivedAt)
+		}
+	}
 	return nil
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

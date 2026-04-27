@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/store"
 	"gopkg.in/yaml.v3"
@@ -131,6 +132,38 @@ func TestReconcileDBFromFS_AppliesAlertRules(t *testing.T) {
 	}
 	if rules[0].Metric != "cpu" || rules[0].Threshold != 75 || rules[0].WebhookID != wh.ID {
 		t.Fatalf("rule wrong: %+v", rules[0])
+	}
+}
+
+func TestReconcileDBFromFS_RehydratesArchivedFromTombstone(t *testing.T) {
+	st := openTestStore(t)
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := New(st, appsDir, dataDir)
+
+	archivedAt := time.Now().UTC().Truncate(time.Second)
+	tomb := &Tombstone{
+		Version:    Version,
+		ArchivedAt: archivedAt,
+		App:        AppMeta{Slug: "old-slug", DisplayName: "Old"},
+	}
+	if err := syncer.writeTombstoneFile("old-slug", tomb); err != nil {
+		t.Fatalf("write tombstone: %v", err)
+	}
+
+	if err := syncer.ReconcileDBFromFS(context.Background()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	got, err := st.GetAppBySlug("old-slug")
+	if err != nil {
+		t.Fatalf("get app: %v", err)
+	}
+	if got.Name != "Old" {
+		t.Fatalf("name: got %q want Old", got.Name)
+	}
+	if !got.ArchivedAt.Valid {
+		t.Fatalf("expected ArchivedAt valid")
 	}
 }
 
