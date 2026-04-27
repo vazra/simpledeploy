@@ -480,6 +480,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Install mutation hook so future mutations update sidecars.
+	// FS-authoritative state writes are eventually consistent: this hook fires
+	// after a successful DB commit and schedules a debounced FS write (500ms).
+	// If the FS write fails, the reconciler watcher (internal/reconciler) re-
+	// applies on the next file edit. Contract: DB success => FS reflects soon.
+	// See docs/operations/state-on-disk.md.
 	db.SetMutationHook(func(scope store.MutationScope, slug string) {
 		switch scope {
 		case store.ScopeApp:
