@@ -301,18 +301,19 @@ func (s *Syncer) buildAppSidecar(slug string) (*AppSidecar, error) {
 	}
 
 	for _, b := range backups {
+		// TODO(fs-auth task 4): repopulate from secrets file (TargetConfigEnc moved to AppSecrets).
 		sidecar.BackupConfigs = append(sidecar.BackupConfigs, BackupConfigEntry{
-			Strategy:        b.Strategy,
-			Target:          b.Target,
-			ScheduleCron:    b.ScheduleCron,
-			TargetConfigEnc: b.TargetConfigJSON,
-			RetentionMode:   b.RetentionMode,
-			RetentionCount:  b.RetentionCount,
-			RetentionDays:   b.RetentionDays,
-			VerifyUpload:    b.VerifyUpload,
-			PreHooks:        b.PreHooks,
-			PostHooks:       b.PostHooks,
-			Paths:           b.Paths,
+			ID:             b.UUID,
+			Strategy:       b.Strategy,
+			Target:         b.Target,
+			ScheduleCron:   b.ScheduleCron,
+			RetentionMode:  b.RetentionMode,
+			RetentionCount: b.RetentionCount,
+			RetentionDays:  b.RetentionDays,
+			VerifyUpload:   b.VerifyUpload,
+			PreHooks:       b.PreHooks,
+			PostHooks:      b.PostHooks,
+			Paths:          b.Paths,
 		})
 	}
 
@@ -350,12 +351,12 @@ func (s *Syncer) WriteGlobal() error {
 	}
 
 	for _, u := range users {
+		// TODO(fs-auth task 4): PasswordHash moved to GlobalSecrets.
 		entry := UserEntry{
-			Username:     u.Username,
-			PasswordHash: u.PasswordHash,
-			Role:         u.Role,
-			DisplayName:  u.DisplayName,
-			Email:        u.Email,
+			Username:    u.Username,
+			Role:        u.Role,
+			DisplayName: u.DisplayName,
+			Email:       u.Email,
 		}
 		sidecar.Users = append(sidecar.Users, entry)
 
@@ -364,9 +365,9 @@ func (s *Syncer) WriteGlobal() error {
 			return fmt.Errorf("WriteGlobal: list api keys for user %s: %w", u.Username, err)
 		}
 		for _, k := range keys {
+			// TODO(fs-auth task 4): KeyHash moved to GlobalSecrets.
 			sidecar.APIKeys = append(sidecar.APIKeys, APIKeyEntry{
 				Username:  u.Username,
-				KeyHash:   k.KeyHash,
 				Name:      k.Name,
 				ExpiresAt: k.ExpiresAt,
 			})
@@ -374,22 +375,19 @@ func (s *Syncer) WriteGlobal() error {
 	}
 
 	for _, r := range registries {
+		// TODO(fs-auth task 4): UsernameEnc/PasswordEnc moved to GlobalSecrets.
 		sidecar.Registries = append(sidecar.Registries, RegistryEntry{
-			ID:          r.ID,
-			Name:        r.Name,
-			URL:         r.URL,
-			UsernameEnc: r.UsernameEnc,
-			PasswordEnc: r.PasswordEnc,
+			ID:   r.ID,
+			Name: r.Name,
+			URL:  r.URL,
 		})
 	}
 
 	for _, w := range webhooks {
+		// TODO(fs-auth task 4): URL/TemplateOverride/HeadersJSON moved to GlobalSecrets.
 		sidecar.Webhooks = append(sidecar.Webhooks, WebhookEntry{
-			Name:             w.Name,
-			Type:             w.Type,
-			URL:              w.URL,
-			TemplateOverride: w.TemplateOverride,
-			HeadersJSON:      w.HeadersJSON,
+			Name: w.Name,
+			Type: w.Type,
 		})
 	}
 
@@ -476,19 +474,20 @@ func (s *Syncer) ImportAppSidecar(data *AppSidecar) error {
 		return fmt.Errorf("ImportAppSidecar: delete backup configs: %w", err)
 	}
 	for _, b := range data.BackupConfigs {
+		// TODO(fs-auth task 4): repopulate TargetConfigJSON from secrets file (correlated by UUID).
 		cfg := &store.BackupConfig{
-			AppID:            app.ID,
-			Strategy:         b.Strategy,
-			Target:           b.Target,
-			ScheduleCron:     b.ScheduleCron,
-			TargetConfigJSON: b.TargetConfigEnc,
-			RetentionMode:    b.RetentionMode,
-			RetentionCount:   b.RetentionCount,
-			RetentionDays:    b.RetentionDays,
-			VerifyUpload:     b.VerifyUpload,
-			PreHooks:         b.PreHooks,
-			PostHooks:        b.PostHooks,
-			Paths:            b.Paths,
+			UUID:           b.ID,
+			AppID:          app.ID,
+			Strategy:       b.Strategy,
+			Target:         b.Target,
+			ScheduleCron:   b.ScheduleCron,
+			RetentionMode:  b.RetentionMode,
+			RetentionCount: b.RetentionCount,
+			RetentionDays:  b.RetentionDays,
+			VerifyUpload:   b.VerifyUpload,
+			PreHooks:       b.PreHooks,
+			PostHooks:      b.PostHooks,
+			Paths:          b.Paths,
 		}
 		if err := s.store.CreateBackupConfig(cfg); err != nil {
 			return fmt.Errorf("ImportAppSidecar: create backup config: %w", err)
@@ -515,12 +514,10 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	}
 
 	for _, w := range data.Webhooks {
+		// TODO(fs-auth task 4): repopulate URL/TemplateOverride/HeadersJSON from GlobalSecrets.
 		wh := &store.Webhook{
-			Name:             w.Name,
-			Type:             w.Type,
-			URL:              w.URL,
-			TemplateOverride: w.TemplateOverride,
-			HeadersJSON:      w.HeadersJSON,
+			Name: w.Name,
+			Type: w.Type,
 		}
 		if err := s.store.UpsertWebhookByName(wh); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert webhook %q: %w", w.Name, err)
@@ -528,12 +525,12 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	}
 
 	for _, u := range data.Users {
+		// TODO(fs-auth task 4): repopulate PasswordHash from GlobalSecrets.
 		user := &store.User{
-			Username:     u.Username,
-			PasswordHash: u.PasswordHash,
-			Role:         u.Role,
-			DisplayName:  u.DisplayName,
-			Email:        u.Email,
+			Username:    u.Username,
+			Role:        u.Role,
+			DisplayName: u.DisplayName,
+			Email:       u.Email,
 		}
 		if err := s.store.UpsertUserByUsername(user); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert user %q: %w", u.Username, err)
@@ -541,18 +538,18 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	}
 
 	for _, k := range data.APIKeys {
-		if err := s.store.UpsertAPIKey(k.Username, k.KeyHash, k.Name, k.ExpiresAt); err != nil {
+		// TODO(fs-auth task 4): repopulate KeyHash from GlobalSecrets; pass empty hash for now.
+		if err := s.store.UpsertAPIKey(k.Username, "", k.Name, k.ExpiresAt); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert api key %q/%q: %w", k.Username, k.Name, err)
 		}
 	}
 
 	for _, r := range data.Registries {
+		// TODO(fs-auth task 4): repopulate UsernameEnc/PasswordEnc from GlobalSecrets.
 		reg := &store.Registry{
-			ID:          r.ID,
-			Name:        r.Name,
-			URL:         r.URL,
-			UsernameEnc: r.UsernameEnc,
-			PasswordEnc: r.PasswordEnc,
+			ID:   r.ID,
+			Name: r.Name,
+			URL:  r.URL,
 		}
 		if err := s.store.UpsertRegistryByID(reg); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert registry %q: %w", r.ID, err)

@@ -31,18 +31,19 @@ type AlertRuleEntry struct {
 }
 
 // BackupConfigEntry mirrors store.BackupConfig without DB IDs.
+// target_config_enc lives in the secrets sidecar, correlated by ID (UUID).
 type BackupConfigEntry struct {
-	Strategy        string `yaml:"strategy"`
-	Target          string `yaml:"target"`
-	ScheduleCron    string `yaml:"schedule_cron"`
-	TargetConfigEnc string `yaml:"target_config_enc"` // stored as-is (encrypted blob)
-	RetentionMode   string `yaml:"retention_mode"`
-	RetentionCount  int    `yaml:"retention_count"`
-	RetentionDays   *int   `yaml:"retention_days"`
-	VerifyUpload    bool   `yaml:"verify_upload"`
-	PreHooks        string `yaml:"pre_hooks,omitempty"`
-	PostHooks       string `yaml:"post_hooks,omitempty"`
-	Paths           string `yaml:"paths,omitempty"`
+	ID             string `yaml:"id"` // UUID, correlates with secrets file entry
+	Strategy       string `yaml:"strategy"`
+	Target         string `yaml:"target"`
+	ScheduleCron   string `yaml:"schedule_cron"`
+	RetentionMode  string `yaml:"retention_mode"`
+	RetentionCount int    `yaml:"retention_count"`
+	RetentionDays  *int   `yaml:"retention_days"`
+	VerifyUpload   bool   `yaml:"verify_upload"`
+	PreHooks       string `yaml:"pre_hooks,omitempty"`
+	PostHooks      string `yaml:"post_hooks,omitempty"`
+	Paths          string `yaml:"paths,omitempty"`
 }
 
 // AccessEntry records a user who has explicit access to this app.
@@ -60,43 +61,41 @@ type GlobalSidecar struct {
 	DBBackupConfig map[string]string `yaml:"db_backup_config,omitempty"`
 }
 
-// UserEntry mirrors store.User with password hash.
+// UserEntry mirrors store.User. Password hash lives in GlobalSecrets.
 type UserEntry struct {
-	Username     string `yaml:"username"`
-	PasswordHash string `yaml:"password_hash"`
-	Role         string `yaml:"role"`
-	DisplayName  string `yaml:"display_name,omitempty"`
-	Email        string `yaml:"email,omitempty"`
+	Username    string `yaml:"username"`
+	Role        string `yaml:"role"`
+	DisplayName string `yaml:"display_name,omitempty"`
+	Email       string `yaml:"email,omitempty"`
 }
 
-// APIKeyEntry mirrors store.APIKeyRecord (key hash preserved, no plaintext).
+// APIKeyEntry mirrors store.APIKeyRecord. Key hash lives in GlobalSecrets.
 type APIKeyEntry struct {
 	Username  string     `yaml:"username"`
-	KeyHash   string     `yaml:"key_hash"`
 	Name      string     `yaml:"name"`
 	ExpiresAt *time.Time `yaml:"expires_at,omitempty"`
 }
 
-// RegistryEntry mirrors store.Registry with encrypted credential blobs.
+// RegistryEntry mirrors store.Registry. Encrypted creds live in GlobalSecrets.
 type RegistryEntry struct {
-	ID          string `yaml:"id"`
-	Name        string `yaml:"name"`
-	URL         string `yaml:"url"`
-	UsernameEnc string `yaml:"username_enc"`
-	PasswordEnc string `yaml:"password_enc"`
+	ID   string `yaml:"id"`
+	Name string `yaml:"name"`
+	URL  string `yaml:"url"`
 }
 
-// WebhookEntry mirrors store.Webhook (URL stored plaintext as in DB).
+// WebhookEntry mirrors store.Webhook. URL/headers/template live in GlobalSecrets.
 type WebhookEntry struct {
-	Name             string `yaml:"name"`
-	Type             string `yaml:"type"`
-	URL              string `yaml:"url"`
-	TemplateOverride string `yaml:"template_override,omitempty"`
-	HeadersJSON      string `yaml:"headers_json,omitempty"`
+	Name string `yaml:"name"`
+	Type string `yaml:"type"`
 }
 
+// DEPRECATED: Redundant with FS-authoritative config.yml (which is already
+// non-secret). Kept for gitsync-pushed snapshot compatibility. Remove once
+// gitsync is migrated to push config.yml directly. See plan
+// docs/superpowers/plans/2026-04-27-fs-authoritative-state.md.
+//
 // RedactedGlobalSidecar is a git-safe view of global config.
-// Stored at {apps_dir}/_global.yml. Contains NO secrets — no password
+// Stored at {apps_dir}/_global.yml. Contains NO secrets: no password
 // hashes, no api-key hashes, no encrypted credentials, no webhook URLs.
 // Used by gitsync for portable config sharing; never used for DR.
 type RedactedGlobalSidecar struct {
