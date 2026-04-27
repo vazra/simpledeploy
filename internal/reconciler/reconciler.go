@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/config"
@@ -50,6 +53,7 @@ type Reconciler struct {
 	masterSecret string
 	resolver     proxy.UpstreamResolver // nil-safe
 	syncer       *configsync.Syncer     // nil means configsync disabled
+	audit        *audit.Recorder        // nil-safe
 }
 
 // New creates a Reconciler. syncer may be nil (disables configsync recovery).
@@ -59,6 +63,11 @@ func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *con
 		secret = cfg.MasterSecret
 	}
 	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret, syncer: syncer}
+}
+
+// SetAuditRecorder wires an audit recorder for archive events. Nil-safe.
+func (r *Reconciler) SetAuditRecorder(rec *audit.Recorder) {
+	r.audit = rec
 }
 
 // SetDockerClient wires a Docker client for container-IP upstream resolution.
@@ -147,11 +156,14 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 	wg.Wait()
 
-	// remove apps no longer on disk
+	// archive apps no longer on disk
 	for _, a := range current {
+		if a.ArchivedAt.Valid {
+			continue // already archived; do nothing
+		}
 		if _, exists := desired[a.Slug]; !exists {
-			if err := r.removeApp(ctx, a.Slug); err != nil {
-				fmt.Fprintf(os.Stderr, "reconciler: remove %s: %v\n", a.Slug, err)
+			if err := r.archiveApp(ctx, a.Slug); err != nil {
+				fmt.Fprintf(os.Stderr, "reconciler: archive %s: %v\n", a.Slug, err)
 			}
 		}
 	}
@@ -702,6 +714,39 @@ func hashFile(path string) (string, error) {
 	}
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:]), nil
+}
+
+// archiveApp runs Teardown, writes the tombstone, marks the row archived, and
+// records an audit entry. Replaces removeApp on the directory-missing branch.
+func (r *Reconciler) archiveApp(ctx context.Context, slug string) error {
+	if err := r.deployer.Teardown(ctx, slug); err != nil {
+		log.Printf("[reconciler] archive teardown %s: %v", slug, err)
+		// continue: still want to mark archived
+	}
+	now := time.Now().UTC()
+	if r.syncer != nil {
+		if err := r.syncer.WriteTombstone(slug, now); err != nil {
+			log.Printf("[reconciler] archive tombstone %s: %v", slug, err)
+		}
+	}
+	if err := r.store.MarkAppArchived(slug, now); err != nil {
+		return fmt.Errorf("mark archived: %w", err)
+	}
+	if r.audit != nil {
+		var appID *int64
+		if app, err := r.store.GetAppBySlug(slug); err == nil {
+			appID = &app.ID
+		}
+		after, _ := json.Marshal(map[string]any{"name": slug})
+		_, _ = r.audit.Record(ctx, audit.RecordReq{
+			AppID:    appID,
+			AppSlug:  slug,
+			Category: "lifecycle",
+			Action:   "archived",
+			After:    after,
+		})
+	}
+	return nil
 }
 
 // removeApp calls deployer.Teardown then deletes the app from the store.

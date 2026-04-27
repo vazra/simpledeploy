@@ -125,10 +125,10 @@ func writeSidecarYAML(path string, v any) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// TestReconcilerRemovesSidecarOnComposeDelete verifies that when a compose file
-// is removed from disk, Reconcile removes the app from the DB and also deletes
-// the per-app sidecar (simpledeploy.yml).
-func TestReconcilerRemovesSidecarOnComposeDelete(t *testing.T) {
+// TestReconcilerArchivesOnComposeDelete verifies that when a compose file
+// is removed from disk, Reconcile archives the app row (sets archived_at)
+// and writes a tombstone instead of deleting.
+func TestReconcilerArchivesOnComposeDelete(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	st, err := store.Open(dbPath)
 	if err != nil {
@@ -175,15 +175,21 @@ func TestReconcilerRemovesSidecarOnComposeDelete(t *testing.T) {
 		t.Fatalf("remove compose: %v", err)
 	}
 
-	// Second reconcile: app should be removed from DB and sidecar deleted.
+	// Second reconcile: app should be archived (row remains, archived_at set,
+	// tombstone written).
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatalf("second Reconcile: %v", err)
 	}
 
-	if _, err := st.GetAppBySlug("webapp"); err == nil {
-		t.Fatal("expected app to be gone from DB after compose deletion, but it still exists")
+	app, err := st.GetAppBySlug("webapp")
+	if err != nil {
+		t.Fatalf("expected app row to remain after archive: %v", err)
 	}
-	if _, err := os.Stat(sidecarPath); err == nil {
-		t.Fatal("expected sidecar to be deleted after compose deletion, but it still exists")
+	if !app.ArchivedAt.Valid {
+		t.Fatal("expected ArchivedAt to be set after archive")
+	}
+	tombPath := filepath.Join(syncer.ArchiveDir(), "webapp.yml")
+	if _, err := os.Stat(tombPath); err != nil {
+		t.Fatalf("expected tombstone at %s: %v", tombPath, err)
 	}
 }

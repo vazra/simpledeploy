@@ -554,6 +554,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg, syncer)
 	rec.SetDockerClient(dc)
+	rec.SetAuditRecorder(audit.NewRecorder(db))
 
 	// Late-bind reconciler pointer for gitsync callback.
 	recRef.Store(rec)

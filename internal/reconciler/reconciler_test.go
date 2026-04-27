@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -113,11 +114,14 @@ func newTestEnv(t *testing.T) (*Reconciler, *mockDeployer, *store.Store, string)
 
 	mock := &mockDeployer{}
 
-	// temp apps dir
+	// temp apps dir + data dir wired to a real configsync.Syncer so
+	// archive paths can write tombstones.
 	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	syncer := configsync.New(st, appsDir, dataDir)
 
 	mockProxy := proxy.NewMockProxy()
-	r := New(st, mock, mockProxy, appsDir, nil, nil)
+	r := New(st, mock, mockProxy, appsDir, nil, syncer)
 	return r, mock, st, appsDir
 }
 
@@ -165,7 +169,7 @@ func TestReconcileNewApp(t *testing.T) {
 	}
 }
 
-func TestReconcileRemoveApp(t *testing.T) {
+func TestReconcileArchivesOnDirRemoval(t *testing.T) {
 	r, mock, st, appsDir := newTestEnv(t)
 	ctx := context.Background()
 
@@ -193,8 +197,71 @@ func TestReconcileRemoveApp(t *testing.T) {
 		t.Error("expected Teardown:rmapp")
 	}
 
-	if _, err := st.GetAppBySlug("rmapp"); err == nil {
-		t.Error("expected app deleted from store")
+	app, err := st.GetAppBySlug("rmapp")
+	if err != nil {
+		t.Fatalf("expected app row to remain after archive: %v", err)
+	}
+	if !app.ArchivedAt.Valid {
+		t.Error("expected ArchivedAt to be set after archive")
+	}
+
+	tombPath := filepath.Join(r.syncer.ArchiveDir(), "rmapp.yml")
+	if _, err := os.Stat(tombPath); err != nil {
+		t.Errorf("expected tombstone at %s: %v", tombPath, err)
+	}
+}
+
+func TestReconcileSkipsAlreadyArchivedApp(t *testing.T) {
+	r, mock, st, appsDir := newTestEnv(t)
+	ctx := context.Background()
+
+	writeComposeFile(t, appsDir, "rmapp")
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(appsDir, "rmapp")); err != nil {
+		t.Fatalf("remove dir: %v", err)
+	}
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+
+	tombPath := filepath.Join(r.syncer.ArchiveDir(), "rmapp.yml")
+	stat1, err := os.Stat(tombPath)
+	if err != nil {
+		t.Fatalf("tombstone missing after archive: %v", err)
+	}
+
+	// snapshot calls; subsequent reconcile should not add new Teardown.
+	mock.mu.Lock()
+	calls1 := append([]string(nil), mock.calls...)
+	mock.mu.Unlock()
+
+	if _, err := st.GetAppBySlug("rmapp"); err != nil {
+		t.Fatalf("app missing: %v", err)
+	}
+
+	// pause to let mtime resolution differ if a write happens.
+	time.Sleep(20 * time.Millisecond)
+
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("third Reconcile: %v", err)
+	}
+
+	mock.mu.Lock()
+	calls2 := append([]string(nil), mock.calls...)
+	mock.mu.Unlock()
+
+	if len(calls2) != len(calls1) {
+		t.Errorf("expected no extra deployer calls; before=%v after=%v", calls1, calls2)
+	}
+
+	stat2, err := os.Stat(tombPath)
+	if err != nil {
+		t.Fatalf("tombstone missing after second reconcile: %v", err)
+	}
+	if !stat1.ModTime().Equal(stat2.ModTime()) {
+		t.Errorf("tombstone mtime changed: %v -> %v", stat1.ModTime(), stat2.ModTime())
 	}
 }
 
