@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -172,6 +173,48 @@ func TestGetAppLabels(t *testing.T) {
 		if got[k] != v {
 			t.Errorf("label[%q] = %q, want %q", k, got[k], v)
 		}
+	}
+}
+
+func TestApp_ArchivedAtRoundtrip(t *testing.T) {
+	s := newTestStore(t)
+
+	app := &App{
+		Name:        "archivable",
+		Slug:        "archivable",
+		ComposePath: "/apps/archivable/docker-compose.yml",
+		Status:      "stopped",
+	}
+	if err := s.UpsertApp(app, nil); err != nil {
+		t.Fatalf("UpsertApp: %v", err)
+	}
+
+	got, err := s.GetAppBySlug("archivable")
+	if err != nil {
+		t.Fatalf("GetAppBySlug: %v", err)
+	}
+	if got.ArchivedAt.Valid {
+		t.Fatalf("expected ArchivedAt invalid on fresh insert, got %v", got.ArchivedAt.Time)
+	}
+
+	if _, err := s.db.Exec(`UPDATE apps SET archived_at = ? WHERE slug = ?`, time.Now().UTC(), "archivable"); err != nil {
+		t.Fatalf("set archived_at: %v", err)
+	}
+
+	got, err = s.GetAppBySlug("archivable")
+	if err != nil {
+		t.Fatalf("GetAppBySlug after archive: %v", err)
+	}
+	if !got.ArchivedAt.Valid {
+		t.Fatalf("expected ArchivedAt valid after update")
+	}
+
+	apps, err := s.ListApps()
+	if err != nil {
+		t.Fatalf("ListApps: %v", err)
+	}
+	if len(apps) != 1 || !apps[0].ArchivedAt.Valid {
+		t.Fatalf("ListApps did not surface ArchivedAt: %+v", apps)
 	}
 }
 

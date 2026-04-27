@@ -16,6 +16,7 @@ type App struct {
 	ComposeHash string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	ArchivedAt  sql.NullTime
 }
 
 // UpsertApp inserts or updates an app by slug and replaces its labels atomically.
@@ -65,11 +66,11 @@ func (s *Store) GetAppByID(id int64) (*App, error) {
 	var a App
 	var domain sql.NullString
 	err := s.db.QueryRow(`
-		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
+		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at, archived_at
 		FROM apps WHERE id = ?
 	`, id).Scan(
 		&a.ID, &a.Name, &a.Slug, &a.ComposePath, &a.Status,
-		&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt,
+		&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt, &a.ArchivedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("app %d not found", id)
@@ -88,11 +89,11 @@ func (s *Store) GetAppBySlug(slug string) (*App, error) {
 	var a App
 	var domain sql.NullString
 	err := s.db.QueryRow(`
-		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
+		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at, archived_at
 		FROM apps WHERE slug = ?
 	`, slug).Scan(
 		&a.ID, &a.Name, &a.Slug, &a.ComposePath, &a.Status,
-		&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt,
+		&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt, &a.ArchivedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("app %q not found", slug)
@@ -109,7 +110,7 @@ func (s *Store) GetAppBySlug(slug string) (*App, error) {
 // ListApps returns all apps ordered by name.
 func (s *Store) ListApps() ([]App, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at
+		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at, archived_at
 		FROM apps ORDER BY name
 	`)
 	if err != nil {
@@ -123,7 +124,7 @@ func (s *Store) ListApps() ([]App, error) {
 		var domain sql.NullString
 		if err := rows.Scan(
 			&a.ID, &a.Name, &a.Slug, &a.ComposePath, &a.Status,
-			&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt,
+			&domain, &a.ComposeHash, &a.CreatedAt, &a.UpdatedAt, &a.ArchivedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan app: %w", err)
 		}
