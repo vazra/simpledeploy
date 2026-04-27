@@ -1,12 +1,14 @@
 package gitsync
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // newWebhookHandler returns a GitHub-compatible webhook handler.
@@ -31,9 +33,13 @@ func newWebhookHandler(g *Syncer) http.Handler {
 			return
 		}
 
-		// Non-blocking: enqueue sync.
+		// Non-blocking: enqueue sync. Use a detached context so the goroutine
+		// is not bound to the request lifecycle (httptest never cancels
+		// r.Context()), and cap it so a stuck worker can't leak forever.
 		go func() {
-			_ = g.SyncNow(r.Context())
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			_ = g.SyncNow(ctx)
 		}()
 
 		w.WriteHeader(http.StatusAccepted)
