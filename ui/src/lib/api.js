@@ -100,6 +100,12 @@ export const api = {
   deploy: (name, compose, source = 'manual', force = false) => request('POST', '/apps/deploy', { name, compose, source, force }),
   getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
+
+  // Community recipes
+  listCommunityRecipes: () => request('GET', '/recipes/community'),
+  fetchCommunityRecipeFile: (id, file = 'compose') =>
+    requestText('GET', `/recipes/community/file?id=${encodeURIComponent(id)}&file=${encodeURIComponent(file)}`),
+
   restartApp: (slug) => request('POST', `/apps/${slug}/restart`),
   stopApp: (slug) => requestWithToast('POST', `/apps/${slug}/stop`, null, 'App stopped'),
   startApp: (slug) => requestWithToast('POST', `/apps/${slug}/start`, null, 'App started'),
