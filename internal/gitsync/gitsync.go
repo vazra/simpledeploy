@@ -497,6 +497,23 @@ func (g *Syncer) initRepo() error {
 	return nil
 }
 
+// openRepoWithRetry calls git.PlainOpen up to attempts times, sleeping delay
+// between tries. Works around macOS APFS visibility lag where `.git` created
+// by a child `git init` process is briefly not seen by a subsequent PlainOpen
+// in the same process under heavy parallel I/O.
+func openRepoWithRetry(dir string, attempts int, delay time.Duration) (*git.Repository, error) {
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		repo, err := git.PlainOpen(dir)
+		if err == nil {
+			return repo, nil
+		}
+		lastErr = err
+		time.Sleep(delay)
+	}
+	return nil, lastErr
+}
+
 func (g *Syncer) initFresh() error {
 	if err := os.MkdirAll(g.cfg.AppsDir, 0700); err != nil {
 		return fmt.Errorf("gitsync: mkdir appsDir: %w", err)
@@ -506,7 +523,10 @@ func (g *Syncer) initFresh() error {
 	if out, err := gitExec(g.cfg.AppsDir, "init", "-b", g.cfg.branch()); err != nil {
 		return fmt.Errorf("gitsync: git init: %w\n%s", err, out)
 	}
-	repo, err := git.PlainOpen(g.cfg.AppsDir)
+	// Under heavy parallel I/O (e.g. full test runs) the .git directory created
+	// by `git init` is occasionally not yet visible to a fresh PlainOpen call.
+	// Retry briefly before giving up.
+	repo, err := openRepoWithRetry(g.cfg.AppsDir, 5, 20*time.Millisecond)
 	if err != nil {
 		return fmt.Errorf("gitsync: open after init: %w", err)
 	}
