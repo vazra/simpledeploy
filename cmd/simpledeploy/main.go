@@ -38,6 +38,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/gitsync"
 	"github.com/vazra/simpledeploy/internal/metrics"
 	"github.com/vazra/simpledeploy/internal/proxy"
+	"github.com/vazra/simpledeploy/internal/recipes"
 	"github.com/vazra/simpledeploy/internal/reconciler"
 	"github.com/vazra/simpledeploy/internal/store"
 	"sync/atomic"
@@ -746,6 +747,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetAudit(auditRec)
 	dep.SetAuditEmitter(&api.DeployerAuditAdapter{Rec: auditRec})
 	srv.SetLogBuffer(logBuf)
+	recipesClient := recipes.NewClient(cfg.RecipesIndexURL, 0)
+	srv.SetRecipesCache(recipes.NewCache(recipesClient, 10*time.Minute))
 	srv.InitDBBackupSchedule()
 	if gitSyncer != nil {
 		srv.SetGitSync(gitSyncer)
