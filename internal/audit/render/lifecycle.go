@@ -14,6 +14,33 @@ func init() {
 	register("lifecycle", "restarted", renderLifecycleRestarted)
 	register("lifecycle", "scaled", renderLifecycleScaled)
 	register("lifecycle", "image_pulled", renderLifecycleImagePulled)
+	register("lifecycle", "archived", renderLifecycleArchived)
+	register("lifecycle", "purged", renderLifecyclePurged)
+}
+
+func renderLifecycleArchived(before, after []byte) (string, string) {
+	var v lifecycleView
+	if len(after) > 0 {
+		_ = json.Unmarshal(after, &v)
+	}
+	if v.Name == "" {
+		_ = json.Unmarshal(before, &v)
+	}
+	return fmt.Sprintf("App %q archived (directory removed from disk)", v.Name), v.Name
+}
+
+func renderLifecyclePurged(before, after []byte) (string, string) {
+	var v lifecycleView
+	if len(after) > 0 {
+		_ = json.Unmarshal(after, &v)
+	}
+	if v.Name == "" {
+		_ = json.Unmarshal(before, &v)
+	}
+	if v.RowsDeleted > 0 {
+		return fmt.Sprintf("App %q purged (%d history rows deleted)", v.Name, v.RowsDeleted), v.Name
+	}
+	return fmt.Sprintf("App %q purged", v.Name), v.Name
 }
 
 func renderLifecycleImagePulled(before, after []byte) (string, string) {
@@ -23,9 +50,10 @@ func renderLifecycleImagePulled(before, after []byte) (string, string) {
 }
 
 type lifecycleView struct {
-	Name     string `json:"name"`
-	Status   string `json:"status"`
-	Replicas int    `json:"replicas"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Replicas    int    `json:"replicas"`
+	RowsDeleted int    `json:"rows_deleted"`
 }
 
 func renderLifecycleCreated(before, after []byte) (string, string) {

@@ -619,6 +619,47 @@ func TestLifecycleImagePulled(t *testing.T) {
 	}
 }
 
+// --- lifecycle archived/purged ---
+
+func TestLifecycleArchived(t *testing.T) {
+	s, target := Render("lifecycle", "archived", []byte(`{"name":"archapp"}`), nil)
+	if !strings.Contains(s, "archapp") || !strings.Contains(s, "archived") {
+		t.Errorf("unexpected summary: %q", s)
+	}
+	if !strings.Contains(s, "directory removed from disk") {
+		t.Errorf("expected directory note in summary: %q", s)
+	}
+	if target != "archapp" {
+		t.Errorf("target=%q", target)
+	}
+}
+
+func TestLifecyclePurgedWithCount(t *testing.T) {
+	s, target := Render("lifecycle", "purged", []byte(`{"name":"oldapp","rows_deleted":42}`), nil)
+	if !strings.Contains(s, "oldapp") || !strings.Contains(s, "purged") {
+		t.Errorf("unexpected summary: %q", s)
+	}
+	if !strings.Contains(s, "42") || !strings.Contains(s, "history rows deleted") {
+		t.Errorf("expected count in summary: %q", s)
+	}
+	if target != "oldapp" {
+		t.Errorf("target=%q", target)
+	}
+}
+
+func TestLifecyclePurgedNoCount(t *testing.T) {
+	s, target := Render("lifecycle", "purged", []byte(`{"name":"oldapp"}`), nil)
+	if !strings.Contains(s, "oldapp") || !strings.Contains(s, "purged") {
+		t.Errorf("unexpected summary: %q", s)
+	}
+	if strings.Contains(s, "history rows deleted") {
+		t.Errorf("did not expect count phrasing without count: %q", s)
+	}
+	if target != "oldapp" {
+		t.Errorf("target=%q", target)
+	}
+}
+
 // --- compose version_removed ---
 
 func TestComposeVersionRemoved(t *testing.T) {
