@@ -235,20 +235,35 @@ func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
 
 // WriteAppSidecar reads the app and its config from the store and writes the sidecar atomically.
 func (s *Syncer) WriteAppSidecar(slug string) error {
+	sidecar, err := s.buildAppSidecar(slug)
+	if err != nil {
+		return fmt.Errorf("WriteAppSidecar %s: %w", slug, err)
+	}
+	path := filepath.Join(s.appsDir, slug, appSidecarName)
+	if err := atomicWriteYAML(path, *sidecar); err != nil {
+		return err
+	}
+	s.callHook(path, "app:"+slug)
+	return nil
+}
+
+// buildAppSidecar reads app + per-app config from the store and returns the
+// AppSidecar struct without writing it to disk. Used by WriteAppSidecar and
+// by tombstone construction in archive.go.
+func (s *Syncer) buildAppSidecar(slug string) (*AppSidecar, error) {
 	app, err := s.store.GetAppBySlug(slug)
 	if err != nil {
-		return fmt.Errorf("WriteAppSidecar %s: get app: %w", slug, err)
+		return nil, fmt.Errorf("get app: %w", err)
 	}
 
 	rules, err := s.store.ListAlertRules(&app.ID)
 	if err != nil {
-		return fmt.Errorf("WriteAppSidecar %s: list alert rules: %w", slug, err)
+		return nil, fmt.Errorf("list alert rules: %w", err)
 	}
 
-	// build webhook name lookup
 	webhooks, err := s.store.ListWebhooks()
 	if err != nil {
-		return fmt.Errorf("WriteAppSidecar %s: list webhooks: %w", slug, err)
+		return nil, fmt.Errorf("list webhooks: %w", err)
 	}
 	webhookByID := make(map[int64]string, len(webhooks))
 	for _, w := range webhooks {
@@ -257,15 +272,15 @@ func (s *Syncer) WriteAppSidecar(slug string) error {
 
 	backups, err := s.store.ListBackupConfigs(&app.ID)
 	if err != nil {
-		return fmt.Errorf("WriteAppSidecar %s: list backup configs: %w", slug, err)
+		return nil, fmt.Errorf("list backup configs: %w", err)
 	}
 
 	accessUsernames, err := s.store.ListAccessForApp(app.ID)
 	if err != nil {
-		return fmt.Errorf("WriteAppSidecar %s: list access: %w", slug, err)
+		return nil, fmt.Errorf("list access: %w", err)
 	}
 
-	sidecar := AppSidecar{
+	sidecar := &AppSidecar{
 		Version: Version,
 		App: AppMeta{
 			Slug:        app.Slug,
@@ -305,12 +320,7 @@ func (s *Syncer) WriteAppSidecar(slug string) error {
 		sidecar.Access = append(sidecar.Access, AccessEntry{Username: u})
 	}
 
-	path := filepath.Join(s.appsDir, slug, appSidecarName)
-	if err := atomicWriteYAML(path, sidecar); err != nil {
-		return err
-	}
-	s.callHook(path, "app:"+slug)
-	return nil
+	return sidecar, nil
 }
 
 // WriteGlobal reads global config from the store and writes the global sidecar atomically.
