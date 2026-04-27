@@ -9,7 +9,11 @@ import (
 )
 
 func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
-	apps, err := s.store.ListApps()
+	opts := store.ListAppsOptions{}
+	if v := r.URL.Query().Get("include_archived"); v == "1" || v == "true" {
+		opts.IncludeArchived = true
+	}
+	apps, err := s.store.ListAppsWithOptions(opts)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return

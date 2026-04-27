@@ -749,13 +749,14 @@ func (r *Reconciler) archiveApp(ctx context.Context, slug string) error {
 	return nil
 }
 
-// removeApp calls deployer.Teardown then deletes the app from the store.
+// removeApp calls deployer.Teardown then purges the app + history from the
+// store. Used only by the API DELETE handler now (the dir-watch path archives).
 func (r *Reconciler) removeApp(ctx context.Context, slug string) error {
 	if err := r.deployer.Teardown(ctx, slug); err != nil {
 		return fmt.Errorf("teardown: %w", err)
 	}
-	if err := r.store.DeleteApp(slug); err != nil {
-		return fmt.Errorf("delete app: %w", err)
+	if err := r.store.PurgeApp(slug); err != nil {
+		return fmt.Errorf("purge app: %w", err)
 	}
 	if r.syncer != nil {
 		if err := r.syncer.DeleteAppSidecar(slug); err != nil {

@@ -218,10 +218,19 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load app state before removal for audit before-snapshot.
+	// Load app state before removal for audit before-snapshot. When the app
+	// row is missing (legacy / dir-only state) we proceed with dir cleanup.
 	var beforeJSON []byte
 	if s.store != nil {
 		if app, err := s.store.GetAppBySlug(slug); err == nil {
+			if app.ArchivedAt.Valid {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error": "app is archived; use POST /api/apps/" + slug + "/purge",
+				})
+				return
+			}
 			beforeJSON, _ = json.Marshal(map[string]any{
 				"name":   app.Name,
 				"status": app.Status,
@@ -248,9 +257,17 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Purge history rows + app row. Tolerate "not found" since the reconciler
+	// (when wired) already removed the app row via store.DeleteApp.
+	if s.store != nil {
+		if err := s.store.PurgeApp(slug); err != nil {
+			log.Printf("[purge] %s: %v", slug, err)
+		}
+	}
+
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category: "lifecycle",
-		Action:   "removed",
+		Action:   "purged",
 		AppSlug:  slug,
 		Before:   beforeJSON,
 	})

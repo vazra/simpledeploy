@@ -233,6 +233,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/apps/deploy", s.authMiddleware(http.HandlerFunc(s.handleDeploy)))
 	s.mux.Handle("POST /api/apps/validate-compose", s.authMiddleware(http.HandlerFunc(s.handleValidateCompose)))
 	s.mux.Handle("DELETE /api/apps/{slug}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRemoveApp))))
+	s.mux.Handle("GET /api/apps/archived", s.authMiddleware(http.HandlerFunc(s.handleListArchived)))
+	s.mux.Handle("POST /api/apps/{slug}/purge", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePurge))))
 	s.mux.Handle("GET /api/apps/{slug}/compose", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetCompose))))
 
 	// App actions

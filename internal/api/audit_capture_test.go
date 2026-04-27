@@ -684,9 +684,9 @@ func TestAuditLifecycleRemoved(t *testing.T) {
 		t.Fatalf("remove status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
 
-	e := findAuditEntry(t, s, "lifecycle", "removed")
+	e := findAuditEntry(t, s, "lifecycle", "purged")
 	if e == nil {
-		t.Fatal("no lifecycle/removed audit row found")
+		t.Fatal("no lifecycle/purged audit row found")
 	}
 	if e.AppSlug != "rmapp" {
 		t.Errorf("app_slug = %q, want rmapp", e.AppSlug)
