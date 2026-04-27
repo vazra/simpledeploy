@@ -165,6 +165,57 @@ func (s *Store) MarkAppArchived(slug string, at time.Time) error {
 	return err
 }
 
+// PurgeApp deletes an app and every related history row (audit, deploy events,
+// compose versions, backups, alerts, labels, access). Use when removing an app
+// for good. Runs in a single transaction.
+func (s *Store) PurgeApp(slug string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var appID int64
+	if err := tx.QueryRow(`SELECT id FROM apps WHERE slug = ?`, slug).Scan(&appID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("app %q not found", slug)
+		}
+		return fmt.Errorf("lookup app id: %w", err)
+	}
+
+	type stmt struct {
+		query string
+		arg   any
+	}
+	statements := []stmt{
+		{`DELETE FROM audit_log WHERE app_id = ? OR app_slug = ?`, nil},
+		{`DELETE FROM deploy_events WHERE app_slug = ?`, slug},
+		{`DELETE FROM backup_runs WHERE backup_config_id IN (SELECT id FROM backup_configs WHERE app_id = ?)`, appID},
+		{`DELETE FROM compose_versions WHERE app_id = ?`, appID},
+		{`DELETE FROM alert_history WHERE app_slug = ? OR rule_id IN (SELECT id FROM alert_rules WHERE app_id = ?)`, nil},
+		{`DELETE FROM backup_configs WHERE app_id = ?`, appID},
+		{`DELETE FROM alert_rules WHERE app_id = ?`, appID},
+		{`DELETE FROM app_labels WHERE app_id = ?`, appID},
+		{`DELETE FROM user_app_access WHERE app_id = ?`, appID},
+		{`DELETE FROM apps WHERE slug = ?`, slug},
+	}
+	for _, st := range statements {
+		var err error
+		switch {
+		case st.query == `DELETE FROM audit_log WHERE app_id = ? OR app_slug = ?`:
+			_, err = tx.Exec(st.query, appID, slug)
+		case st.query == `DELETE FROM alert_history WHERE app_slug = ? OR rule_id IN (SELECT id FROM alert_rules WHERE app_id = ?)`:
+			_, err = tx.Exec(st.query, slug, appID)
+		default:
+			_, err = tx.Exec(st.query, st.arg)
+		}
+		if err != nil {
+			return fmt.Errorf("purge %s: %w", st.query, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // DeleteApp deletes the app with the given slug. Returns an error if not found.
 func (s *Store) DeleteApp(slug string) error {
 	res, err := s.db.Exec(`DELETE FROM apps WHERE slug = ?`, slug)

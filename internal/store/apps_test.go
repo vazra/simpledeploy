@@ -332,6 +332,109 @@ func TestMarkAppArchived(t *testing.T) {
 	}
 }
 
+func TestPurgeApp_CascadesHistory(t *testing.T) {
+	s := newTestStore(t)
+
+	app := &App{
+		Name:        "purgeable",
+		Slug:        "purgeable",
+		ComposePath: "/apps/purgeable/docker-compose.yml",
+		Status:      "stopped",
+	}
+	if err := s.UpsertApp(app, map[string]string{"env": "prod"}); err != nil {
+		t.Fatalf("UpsertApp: %v", err)
+	}
+
+	// user + access
+	res, err := s.db.Exec(`INSERT INTO users (username, password_hash, role) VALUES ('u1','h','admin')`)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	uid, _ := res.LastInsertId()
+	if _, err := s.db.Exec(`INSERT INTO user_app_access (user_id, app_id) VALUES (?, ?)`, uid, app.ID); err != nil {
+		t.Fatalf("insert user_app_access: %v", err)
+	}
+
+	// deploy_events
+	if _, err := s.db.Exec(`INSERT INTO deploy_events (app_slug, action) VALUES (?, 'deploy')`, app.Slug); err != nil {
+		t.Fatalf("insert deploy_events: %v", err)
+	}
+
+	// audit_log
+	if _, err := s.db.Exec(`INSERT INTO audit_log (app_id, app_slug, actor_source, category, action, summary) VALUES (?, ?, 'user', 'app', 'deploy', 'x')`, app.ID, app.Slug); err != nil {
+		t.Fatalf("insert audit_log: %v", err)
+	}
+
+	// compose_versions
+	cvRes, err := s.db.Exec(`INSERT INTO compose_versions (app_id, version, content, hash) VALUES (?, 1, 'c', 'h')`, app.ID)
+	if err != nil {
+		t.Fatalf("insert compose_versions: %v", err)
+	}
+	_ = cvRes
+
+	// backup_configs + backup_runs
+	bcRes, err := s.db.Exec(`INSERT INTO backup_configs (app_id, strategy, target, schedule_cron) VALUES (?, 'volume', 'local', '0 0 * * *')`, app.ID)
+	if err != nil {
+		t.Fatalf("insert backup_configs: %v", err)
+	}
+	bcID, _ := bcRes.LastInsertId()
+	if _, err := s.db.Exec(`INSERT INTO backup_runs (backup_config_id, status) VALUES (?, 'success')`, bcID); err != nil {
+		t.Fatalf("insert backup_runs: %v", err)
+	}
+
+	// alert_rules + alert_history (alert_rules requires webhook_id)
+	whRes, err := s.db.Exec(`INSERT INTO webhooks (name, type, url) VALUES ('w', 'slack', 'http://x')`)
+	if err != nil {
+		t.Fatalf("insert webhook: %v", err)
+	}
+	whID, _ := whRes.LastInsertId()
+	arRes, err := s.db.Exec(`INSERT INTO alert_rules (app_id, metric, operator, threshold, duration_sec, webhook_id) VALUES (?, 'cpu', '>', 50, 60, ?)`, app.ID, whID)
+	if err != nil {
+		t.Fatalf("insert alert_rules: %v", err)
+	}
+	arID, _ := arRes.LastInsertId()
+	if _, err := s.db.Exec(`INSERT INTO alert_history (rule_id, value, app_slug) VALUES (?, 99.0, ?)`, arID, app.Slug); err != nil {
+		t.Fatalf("insert alert_history: %v", err)
+	}
+
+	if err := s.PurgeApp(app.Slug); err != nil {
+		t.Fatalf("PurgeApp: %v", err)
+	}
+
+	checks := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{"apps", `SELECT COUNT(*) FROM apps WHERE slug = ?`, []any{app.Slug}},
+		{"app_labels", `SELECT COUNT(*) FROM app_labels WHERE app_id = ?`, []any{app.ID}},
+		{"user_app_access", `SELECT COUNT(*) FROM user_app_access WHERE app_id = ?`, []any{app.ID}},
+		{"deploy_events", `SELECT COUNT(*) FROM deploy_events WHERE app_slug = ?`, []any{app.Slug}},
+		{"audit_log", `SELECT COUNT(*) FROM audit_log WHERE app_slug = ? OR app_id = ?`, []any{app.Slug, app.ID}},
+		{"compose_versions", `SELECT COUNT(*) FROM compose_versions WHERE app_id = ?`, []any{app.ID}},
+		{"backup_configs", `SELECT COUNT(*) FROM backup_configs WHERE app_id = ?`, []any{app.ID}},
+		{"backup_runs", `SELECT COUNT(*) FROM backup_runs WHERE backup_config_id = ?`, []any{bcID}},
+		{"alert_rules", `SELECT COUNT(*) FROM alert_rules WHERE app_id = ?`, []any{app.ID}},
+		{"alert_history", `SELECT COUNT(*) FROM alert_history WHERE app_slug = ? OR rule_id = ?`, []any{app.Slug, arID}},
+	}
+	for _, c := range checks {
+		var n int
+		if err := s.db.QueryRow(c.query, c.args...).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", c.name, err)
+		}
+		if n != 0 {
+			t.Errorf("%s: rows remaining = %d, want 0", c.name, n)
+		}
+	}
+}
+
+func TestPurgeApp_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.PurgeApp("nonexistent"); err == nil {
+		t.Fatal("expected error for missing app")
+	}
+}
+
 func TestUpdateAppStatus(t *testing.T) {
 	s := newTestStore(t)
 
