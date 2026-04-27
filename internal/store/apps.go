@@ -201,10 +201,10 @@ func (s *Store) PurgeApp(slug string) error {
 	}
 	for _, st := range statements {
 		var err error
-		switch {
-		case st.query == `DELETE FROM audit_log WHERE app_id = ? OR app_slug = ?`:
+		switch st.query {
+		case `DELETE FROM audit_log WHERE app_id = ? OR app_slug = ?`:
 			_, err = tx.Exec(st.query, appID, slug)
-		case st.query == `DELETE FROM alert_history WHERE app_slug = ? OR rule_id IN (SELECT id FROM alert_rules WHERE app_id = ?)`:
+		case `DELETE FROM alert_history WHERE app_slug = ? OR rule_id IN (SELECT id FROM alert_rules WHERE app_id = ?)`:
 			_, err = tx.Exec(st.query, slug, appID)
 		default:
 			_, err = tx.Exec(st.query, st.arg)

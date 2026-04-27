@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/configsync"
@@ -28,8 +27,6 @@ func (s *Server) handleListArchived(w http.ResponseWriter, r *http.Request) {
 		if s.cs != nil {
 			if t, err := s.cs.ReadTombstone(a.Slug); err == nil {
 				entry.Tombstone = t
-			} else if !os.IsNotExist(err) {
-				// Log but tolerate; tombstone stays nil.
 			}
 		}
 		out = append(out, entry)
@@ -64,9 +61,8 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.cs != nil {
-		if err := s.cs.DeleteTombstone(slug); err != nil {
-			// Non-fatal; row is already gone.
-		}
+		// Best-effort; the row is already gone.
+		_ = s.cs.DeleteTombstone(slug)
 	}
 
 	after, _ := json.Marshal(map[string]any{"name": slug})
