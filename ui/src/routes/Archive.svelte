@@ -25,6 +25,14 @@
     expanded[slug] = !expanded[slug]
   }
 
+  function archivedTs(app) {
+    const a = app.ArchivedAt
+    if (!a) return ''
+    if (typeof a === 'string') return a
+    if (a && typeof a === 'object' && a.Valid) return a.Time
+    return ''
+  }
+
   function fmtAbsolute(ts) {
     if (!ts) return ''
     try { return new Date(ts).toLocaleString() } catch { return String(ts) }
@@ -83,27 +91,28 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-border/30">
-          {#each archived as app (app.slug)}
+          {#each archived as app (app.Slug)}
             {@const t = app.tombstone}
+            {@const ts = archivedTs(app)}
             <tr class="hover:bg-surface-hover">
               <td class="py-3 px-4">
-                <div class="font-medium text-text-primary">{app.display_name || app.slug}</div>
-                <div class="text-xs text-text-muted">{app.slug}</div>
+                <div class="font-medium text-text-primary">{app.Name || app.Slug}</div>
+                <div class="text-xs text-text-muted">{app.Slug}</div>
               </td>
-              <td class="py-3 px-4 text-text-secondary">{app.domain || ''}</td>
-              <td class="py-3 px-4 text-text-secondary" title={fmtAbsolute(app.archived_at)}>
-                {fmtRelative(app.archived_at)}
+              <td class="py-3 px-4 text-text-secondary">{app.Domain || ''}</td>
+              <td class="py-3 px-4 text-text-secondary" title={fmtAbsolute(ts)}>
+                {fmtRelative(ts)}
               </td>
               <td class="py-3 px-4">
                 <div class="flex items-center justify-end gap-2">
-                  <Button size="sm" variant="secondary" onclick={() => toggle(app.slug)}>
-                    {expanded[app.slug] ? 'Hide details' : 'Details'}
+                  <Button size="sm" variant="secondary" onclick={() => toggle(app.Slug)}>
+                    {expanded[app.Slug] ? 'Hide details' : 'Details'}
                   </Button>
-                  <Button size="sm" variant="danger" onclick={() => askPurge(app.slug)}>Clean up</Button>
+                  <Button size="sm" variant="danger" onclick={() => askPurge(app.Slug)}>Clean up</Button>
                 </div>
               </td>
             </tr>
-            {#if expanded[app.slug]}
+            {#if expanded[app.Slug]}
               <tr class="bg-surface-1/40">
                 <td colspan="4" class="py-4 px-4">
                   {#if !t}

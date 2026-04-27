@@ -29,10 +29,10 @@ describe('Archive route', () => {
   it('renders archived row and expands tombstone details', async () => {
     listArchived.mockResolvedValueOnce({
       data: [{
-        slug: 'old-app',
-        display_name: 'Old App',
-        domain: 'old.example.com',
-        archived_at: new Date().toISOString(),
+        Slug: 'old-app',
+        Name: 'Old App',
+        Domain: 'old.example.com',
+        ArchivedAt: { Time: new Date().toISOString(), Valid: true },
         tombstone: {
           version: 1,
           archived_at: new Date().toISOString(),
@@ -55,7 +55,7 @@ describe('Archive route', () => {
 
   it('purges via confirm modal', async () => {
     listArchived.mockResolvedValueOnce({
-      data: [{ slug: 'gone', display_name: 'Gone', archived_at: new Date().toISOString(), tombstone: null }],
+      data: [{ Slug: 'gone', Name: 'Gone', ArchivedAt: { Time: new Date().toISOString(), Valid: true }, tombstone: null }],
       error: null,
     });
     listArchived.mockResolvedValueOnce({ data: [], error: null });
