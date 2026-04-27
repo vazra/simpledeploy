@@ -283,6 +283,39 @@ func TestReconcileRedeploysOnChange(t *testing.T) {
 	}
 }
 
+func TestReconcileNormalizesStaleComposePath(t *testing.T) {
+	r, _, st, appsDir := newTestEnv(t)
+	ctx := context.Background()
+
+	writeComposeFile(t, appsDir, "myapp")
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("first Reconcile: %v", err)
+	}
+
+	app, err := st.GetAppBySlug("myapp")
+	if err != nil {
+		t.Fatalf("GetAppBySlug: %v", err)
+	}
+	stale := "/old/apps/myapp/docker-compose.yml"
+	app.ComposePath = stale
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("UpsertApp: %v", err)
+	}
+
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+
+	got, err := st.GetAppBySlug("myapp")
+	if err != nil {
+		t.Fatalf("GetAppBySlug: %v", err)
+	}
+	want := filepath.Join(appsDir, "myapp", "docker-compose.yml")
+	if got.ComposePath != want {
+		t.Errorf("expected ComposePath normalized to %s, got %s", want, got.ComposePath)
+	}
+}
+
 func TestReconcileSkipsUnchanged(t *testing.T) {
 	r, mock, _, appsDir := newTestEnv(t)
 	ctx := context.Background()

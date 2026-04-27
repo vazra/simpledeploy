@@ -108,6 +108,17 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 				log.Printf("[reconciler] hash %s: %v", cfg.ComposePath, hashErr)
 			}
 			needsDeploy = hash != "" && hash != existing.ComposeHash
+			// Normalize stored ComposePath if apps_dir changed under us
+			// (or the row was imported from a different layout). Without
+			// this, API handlers read a stale path and 500.
+			if existing.ComposePath != cfg.ComposePath {
+				existing.ComposePath = cfg.ComposePath
+				if err := r.store.UpsertApp(&existing, nil); err != nil {
+					log.Printf("[reconciler] normalize compose path %s: %v", slug, err)
+				} else {
+					currentMap[slug] = existing
+				}
+			}
 		}
 		if !needsDeploy {
 			continue
