@@ -1,6 +1,7 @@
 <script>
   import { generateSecret, validateVars, countEndpoints, computeQuickTestDomain, isValidIPv4, DEFAULT_ACCESS_MODE } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
+  import CommunityRecipeBrowser from './CommunityRecipeBrowser.svelte'
 
   let {
     templates = [],
@@ -8,7 +9,10 @@
     initialTemplateId = null,
     onapply = () => {},
     onblank = () => {},
+    oncommunity = () => {},
   } = $props()
+
+  let browseOpen = $state(false)
 
   // View state
   let view = $state('grid') // 'grid' | 'vars'
@@ -302,6 +306,19 @@
         {/each}
       </div>
     {/if}
+
+    <!-- Browse community recipes -->
+    <div class="pt-4 border-t border-border/50 text-center">
+      <p class="text-xs text-text-muted mb-2">Need something not listed?</p>
+      <button
+        type="button"
+        onclick={() => (browseOpen = true)}
+        class="px-4 py-2 bg-surface-3/40 hover:bg-surface-3/60 border border-border/50 rounded-lg text-sm text-text-primary inline-flex items-center gap-2 transition-colors"
+      >
+        <span aria-hidden="true">🌐</span>
+        <span>Browse community recipes</span>
+      </button>
+    </div>
 
     <!-- Start blank -->
     <button
@@ -638,3 +655,9 @@
   </div>
   {/if}
 {/snippet}
+
+<CommunityRecipeBrowser
+  open={browseOpen}
+  onclose={() => (browseOpen = false)}
+  onselect={(detail) => { browseOpen = false; oncommunity(detail) }}
+/>
