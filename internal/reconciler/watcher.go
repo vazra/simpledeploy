@@ -3,7 +3,11 @@ package reconciler
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -11,9 +15,18 @@ import (
 
 const debounceDuration = time.Second
 
-// Watch runs an fsnotify watcher on appsDir and reconciles on changes.
-// An initial Reconcile is run immediately. File events are debounced by 1 second.
-// Returns nil when ctx is cancelled.
+// sidecar file basenames recognized by the watcher.
+const (
+	appSidecarBase     = "simpledeploy.yml"
+	appSecretsBase     = "simpledeploy.secrets.yml"
+	globalSidecarBase  = "config.yml"
+	globalSecretsBase  = "secrets.yml"
+)
+
+// Watch runs an fsnotify watcher on appsDir (and dataDir, for global sidecar
+// edits) and reconciles on changes. An initial Reconcile runs immediately.
+// Per-app sidecar edits route to a debounced ApplyAppSidecar call so the DB
+// follows FS-authoritative state. Returns nil when ctx is cancelled.
 func (r *Reconciler) Watch(ctx context.Context) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -22,7 +35,27 @@ func (r *Reconciler) Watch(ctx context.Context) error {
 	defer w.Close()
 
 	if err := w.Add(r.appsDir); err != nil {
-		return fmt.Errorf("watch dir: %w", err)
+		return fmt.Errorf("watch apps dir: %w", err)
+	}
+	// Add each existing app subdir so sidecar edits inside fire events.
+	if entries, err := os.ReadDir(r.appsDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			sub := filepath.Join(r.appsDir, e.Name())
+			if err := w.Add(sub); err != nil {
+				log.Printf("[reconciler] watch %s: %v", sub, err)
+			}
+		}
+	}
+
+	// Watch the data dir for global sidecar edits. Different from appsDir.
+	dataDir := r.dataDirForWatcher()
+	if dataDir != "" && dataDir != r.appsDir {
+		if err := w.Add(dataDir); err != nil {
+			log.Printf("[reconciler] watch data dir %s: %v", dataDir, err)
+		}
 	}
 
 	// initial reconcile
@@ -30,7 +63,53 @@ func (r *Reconciler) Watch(ctx context.Context) error {
 		fmt.Fprintf(os.Stderr, "reconciler: initial reconcile: %v\n", err)
 	}
 
-	var debounce *time.Timer
+	var (
+		mu             sync.Mutex
+		pendingSlugs   = make(map[string]struct{})
+		pendingGlobal  bool
+		reconcileTimer *time.Timer
+		sidecarTimer   *time.Timer
+	)
+
+	flushSidecars := func() {
+		mu.Lock()
+		slugs := pendingSlugs
+		global := pendingGlobal
+		pendingSlugs = make(map[string]struct{})
+		pendingGlobal = false
+		mu.Unlock()
+
+		if r.syncer == nil {
+			return
+		}
+		for slug := range slugs {
+			loaded, err := r.syncer.LoadAppFromFS(slug)
+			if err != nil {
+				log.Printf("[reconciler] watcher LoadAppFromFS %s: %v", slug, err)
+				continue
+			}
+			if loaded == nil || loaded.Sidecar == nil {
+				continue
+			}
+			if err := r.syncer.ApplyAppSidecar(slug, loaded); err != nil {
+				log.Printf("[reconciler] watcher ApplyAppSidecar %s: %v", slug, err)
+				continue
+			}
+			log.Printf("[reconciler] watcher applied app sidecar: %s", slug)
+		}
+		if global {
+			loaded, err := r.syncer.LoadGlobalFromFS()
+			if err != nil {
+				log.Printf("[reconciler] watcher LoadGlobalFromFS: %v", err)
+			} else if loaded != nil && loaded.Sidecar != nil {
+				if err := r.syncer.ApplyGlobalSidecar(loaded); err != nil {
+					log.Printf("[reconciler] watcher ApplyGlobalSidecar: %v", err)
+				} else {
+					log.Printf("[reconciler] watcher applied global sidecar")
+				}
+			}
+		}
+	}
 
 	for {
 		select {
@@ -41,11 +120,59 @@ func (r *Reconciler) Watch(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			_ = event
-			if debounce != nil {
-				debounce.Stop()
+			path := event.Name
+			base := filepath.Base(path)
+
+			// If a new app dir was created at the apps dir root, add it
+			// to the watch set so sidecar edits inside fire events.
+			if event.Op&fsnotify.Create != 0 {
+				if filepath.Dir(path) == r.appsDir {
+					if info, err := os.Stat(path); err == nil && info.IsDir() {
+						if err := w.Add(path); err != nil {
+							log.Printf("[reconciler] watch new app dir %s: %v", path, err)
+						}
+					}
+				}
 			}
-			debounce = time.AfterFunc(debounceDuration, func() {
+
+			// Classify the event.
+			isAppSidecar := false
+			isGlobalSidecar := false
+			var slug string
+			parent := filepath.Dir(path)
+			if parent == dataDir && (base == globalSidecarBase || base == globalSecretsBase) {
+				isGlobalSidecar = true
+			} else if filepath.Dir(parent) == r.appsDir && (base == appSidecarBase || base == appSecretsBase) {
+				isAppSidecar = true
+				slug = filepath.Base(parent)
+			}
+
+			if isAppSidecar && slug != "" {
+				mu.Lock()
+				pendingSlugs[slug] = struct{}{}
+				mu.Unlock()
+				if sidecarTimer != nil {
+					sidecarTimer.Stop()
+				}
+				sidecarTimer = time.AfterFunc(debounceDuration, flushSidecars)
+				continue
+			}
+			if isGlobalSidecar {
+				mu.Lock()
+				pendingGlobal = true
+				mu.Unlock()
+				if sidecarTimer != nil {
+					sidecarTimer.Stop()
+				}
+				sidecarTimer = time.AfterFunc(debounceDuration, flushSidecars)
+				continue
+			}
+
+			// Compose / app dir change: trigger debounced Reconcile.
+			if reconcileTimer != nil {
+				reconcileTimer.Stop()
+			}
+			reconcileTimer = time.AfterFunc(debounceDuration, func() {
 				if err := r.Reconcile(ctx); err != nil {
 					fmt.Fprintf(os.Stderr, "reconciler: reconcile: %v\n", err)
 				}
@@ -58,4 +185,13 @@ func (r *Reconciler) Watch(ctx context.Context) error {
 			fmt.Fprintf(os.Stderr, "reconciler: watcher error: %v\n", err)
 		}
 	}
+}
+
+// dataDirForWatcher returns the data directory the syncer is configured with,
+// or "" if no syncer is wired (configsync disabled).
+func (r *Reconciler) dataDirForWatcher() string {
+	if r.syncer == nil {
+		return ""
+	}
+	return r.syncer.DataDir()
 }

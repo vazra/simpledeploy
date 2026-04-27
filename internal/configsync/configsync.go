@@ -82,6 +82,12 @@ func New(st *store.Store, appsDir, dataDir string) *Syncer {
 	}
 }
 
+// AppsDir returns the apps directory the syncer was configured with.
+func (s *Syncer) AppsDir() string { return s.appsDir }
+
+// DataDir returns the data directory the syncer was configured with.
+func (s *Syncer) DataDir() string { return s.dataDir }
+
 // Close flushes all pending debounced writes and stops all timers.
 // Safe to call multiple times.
 func (s *Syncer) Close() error {
