@@ -107,12 +107,35 @@ func (s *Store) GetAppBySlug(slug string) (*App, error) {
 	return &a, nil
 }
 
-// ListApps returns all apps ordered by name.
+// ListAppsOptions controls archive filtering for list queries.
+type ListAppsOptions struct {
+	IncludeArchived bool
+	OnlyArchived    bool
+}
+
+// ListApps returns all non-archived apps ordered by name.
 func (s *Store) ListApps() ([]App, error) {
-	rows, err := s.db.Query(`
+	return s.ListAppsWithOptions(ListAppsOptions{})
+}
+
+// ListArchivedApps returns only archived apps ordered by name.
+func (s *Store) ListArchivedApps() ([]App, error) {
+	return s.ListAppsWithOptions(ListAppsOptions{OnlyArchived: true})
+}
+
+// ListAppsWithOptions returns apps filtered by archive state.
+func (s *Store) ListAppsWithOptions(opts ListAppsOptions) ([]App, error) {
+	where := "WHERE archived_at IS NULL"
+	if opts.OnlyArchived {
+		where = "WHERE archived_at IS NOT NULL"
+	} else if opts.IncludeArchived {
+		where = ""
+	}
+	query := `
 		SELECT id, name, slug, compose_path, status, domain, compose_hash, created_at, updated_at, archived_at
-		FROM apps ORDER BY name
-	`)
+		FROM apps ` + where + ` ORDER BY name
+	`
+	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("list apps: %w", err)
 	}
@@ -134,6 +157,12 @@ func (s *Store) ListApps() ([]App, error) {
 		apps = append(apps, a)
 	}
 	return apps, rows.Err()
+}
+
+// MarkAppArchived sets archived_at on the app with the given slug.
+func (s *Store) MarkAppArchived(slug string, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE apps SET archived_at = ? WHERE slug = ?`, at.UTC(), slug)
+	return err
 }
 
 // DeleteApp deletes the app with the given slug. Returns an error if not found.

@@ -209,12 +209,126 @@ func TestApp_ArchivedAtRoundtrip(t *testing.T) {
 		t.Fatalf("expected ArchivedAt valid after update")
 	}
 
+	apps, err := s.ListAppsWithOptions(ListAppsOptions{IncludeArchived: true})
+	if err != nil {
+		t.Fatalf("ListAppsWithOptions: %v", err)
+	}
+	if len(apps) != 1 || !apps[0].ArchivedAt.Valid {
+		t.Fatalf("ListAppsWithOptions did not surface ArchivedAt: %+v", apps)
+	}
+}
+
+func TestListApps_ExcludesArchivedByDefault(t *testing.T) {
+	s := newTestStore(t)
+
+	for _, slug := range []string{"keep", "archived"} {
+		if err := s.UpsertApp(&App{
+			Name:        slug,
+			Slug:        slug,
+			ComposePath: "/apps/" + slug + "/docker-compose.yml",
+			Status:      "stopped",
+		}, nil); err != nil {
+			t.Fatalf("UpsertApp %q: %v", slug, err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE apps SET archived_at = ? WHERE slug = ?`, time.Now().UTC(), "archived"); err != nil {
+		t.Fatalf("set archived_at: %v", err)
+	}
+
 	apps, err := s.ListApps()
 	if err != nil {
 		t.Fatalf("ListApps: %v", err)
 	}
-	if len(apps) != 1 || !apps[0].ArchivedAt.Valid {
-		t.Fatalf("ListApps did not surface ArchivedAt: %+v", apps)
+	if len(apps) != 1 {
+		t.Fatalf("len(apps) = %d, want 1", len(apps))
+	}
+	if apps[0].Slug != "keep" {
+		t.Errorf("apps[0].Slug = %q, want keep", apps[0].Slug)
+	}
+}
+
+func TestListAppsWithOptions_IncludeArchived(t *testing.T) {
+	s := newTestStore(t)
+
+	for _, slug := range []string{"keep", "archived"} {
+		if err := s.UpsertApp(&App{
+			Name:        slug,
+			Slug:        slug,
+			ComposePath: "/apps/" + slug + "/docker-compose.yml",
+			Status:      "stopped",
+		}, nil); err != nil {
+			t.Fatalf("UpsertApp %q: %v", slug, err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE apps SET archived_at = ? WHERE slug = ?`, time.Now().UTC(), "archived"); err != nil {
+		t.Fatalf("set archived_at: %v", err)
+	}
+
+	apps, err := s.ListAppsWithOptions(ListAppsOptions{IncludeArchived: true})
+	if err != nil {
+		t.Fatalf("ListAppsWithOptions: %v", err)
+	}
+	if len(apps) != 2 {
+		t.Fatalf("len(apps) = %d, want 2", len(apps))
+	}
+}
+
+func TestListArchivedApps(t *testing.T) {
+	s := newTestStore(t)
+
+	for _, slug := range []string{"keep", "archived"} {
+		if err := s.UpsertApp(&App{
+			Name:        slug,
+			Slug:        slug,
+			ComposePath: "/apps/" + slug + "/docker-compose.yml",
+			Status:      "stopped",
+		}, nil); err != nil {
+			t.Fatalf("UpsertApp %q: %v", slug, err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE apps SET archived_at = ? WHERE slug = ?`, time.Now().UTC(), "archived"); err != nil {
+		t.Fatalf("set archived_at: %v", err)
+	}
+
+	apps, err := s.ListArchivedApps()
+	if err != nil {
+		t.Fatalf("ListArchivedApps: %v", err)
+	}
+	if len(apps) != 1 {
+		t.Fatalf("len(apps) = %d, want 1", len(apps))
+	}
+	if apps[0].Slug != "archived" {
+		t.Errorf("apps[0].Slug = %q, want archived", apps[0].Slug)
+	}
+}
+
+func TestMarkAppArchived(t *testing.T) {
+	s := newTestStore(t)
+
+	app := &App{
+		Name:        "to-archive",
+		Slug:        "to-archive",
+		ComposePath: "/apps/to-archive/docker-compose.yml",
+		Status:      "stopped",
+	}
+	if err := s.UpsertApp(app, nil); err != nil {
+		t.Fatalf("UpsertApp: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := s.MarkAppArchived("to-archive", now); err != nil {
+		t.Fatalf("MarkAppArchived: %v", err)
+	}
+
+	got, err := s.GetAppBySlug("to-archive")
+	if err != nil {
+		t.Fatalf("GetAppBySlug: %v", err)
+	}
+	if !got.ArchivedAt.Valid {
+		t.Fatal("expected ArchivedAt valid after MarkAppArchived")
+	}
+	if delta := got.ArchivedAt.Time.Sub(now); delta < -2*time.Second || delta > 2*time.Second {
+		t.Errorf("ArchivedAt = %v, want near %v", got.ArchivedAt.Time, now)
 	}
 }
 
