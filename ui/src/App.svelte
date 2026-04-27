@@ -12,6 +12,7 @@
   import System from './routes/System.svelte'
   import Profile from './routes/Profile.svelte'
   import GitSync from './routes/GitSync.svelte'
+  import Archive from './routes/Archive.svelte'
 
   const routes = {
     '/login': Login,
@@ -25,6 +26,7 @@
     '/system': System,
     '/profile': Profile,
     '/git-sync': GitSync,
+    '/archive': Archive,
   }
 </script>
 

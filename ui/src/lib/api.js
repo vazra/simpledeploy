@@ -97,6 +97,8 @@ export const api = {
   listApps: () => request('GET', '/apps'),
   getApp: (slug) => request('GET', `/apps/${slug}`),
   removeApp: (slug) => requestWithToast('DELETE', `/apps/${slug}`, null, 'App removed'),
+  listArchived: () => request('GET', '/apps/archived'),
+  purgeApp: (slug) => requestWithToast('POST', `/apps/${slug}/purge`, null, 'App purged'),
   deploy: (name, compose, source = 'manual', force = false) => request('POST', '/apps/deploy', { name, compose, source, force }),
   getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
