@@ -232,6 +232,22 @@ func (s *Store) DeleteApp(slug string) error {
 	return nil
 }
 
+// UpdateAppDisplayName updates the name (display) field of the app with the given slug.
+// No-op if the name already matches. Used by configsync ApplyAppSidecar.
+func (s *Store) UpdateAppDisplayName(slug, name string) error {
+	res, err := s.db.Exec(
+		`UPDATE apps SET name = ?, updated_at = datetime('now') WHERE slug = ? AND name <> ?`,
+		name, slug, name,
+	)
+	if err != nil {
+		return fmt.Errorf("update app name: %w", err)
+	}
+	if _, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	return nil
+}
+
 // UpdateAppStatus updates the status field of the app with the given slug.
 func (s *Store) UpdateAppStatus(slug, status string) error {
 	res, err := s.db.Exec(
