@@ -233,18 +233,53 @@ func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
 	return removed, nil
 }
 
-// WriteAppSidecar reads the app and its config from the store and writes the sidecar atomically.
+// WriteAppSidecar reads the app and its config from the store and writes the
+// sidecar pair atomically. Secrets file (mode 0600) is written FIRST; if that
+// fails, the non-secret sidecar is not written. Non-secret sidecar is mode 0644.
 func (s *Syncer) WriteAppSidecar(slug string) error {
-	sidecar, err := s.buildAppSidecar(slug)
+	sidecar, secrets, err := s.buildAppSidecarPair(slug)
 	if err != nil {
 		return fmt.Errorf("WriteAppSidecar %s: %w", slug, err)
 	}
+	// Always write secrets file first (even if empty) so the pair is consistent.
+	if err := s.WriteAppSecrets(slug, secrets); err != nil {
+		return fmt.Errorf("WriteAppSidecar %s: write secrets: %w", slug, err)
+	}
 	path := filepath.Join(s.appsDir, slug, appSidecarName)
-	if err := atomicWriteYAML(path, *sidecar); err != nil {
+	if err := atomicWriteYAMLMode(path, 0644, *sidecar); err != nil {
 		return err
 	}
 	s.callHook(path, "app:"+slug)
 	return nil
+}
+
+// buildAppSidecarPair returns both the non-secret AppSidecar and the AppSecrets
+// for the slug. Used by WriteAppSidecar; callers that only need the sidecar
+// (archive tombstones) can use buildAppSidecar.
+func (s *Syncer) buildAppSidecarPair(slug string) (*AppSidecar, *AppSecrets, error) {
+	sidecar, err := s.buildAppSidecar(slug)
+	if err != nil {
+		return nil, nil, err
+	}
+	app, err := s.store.GetAppBySlug(slug)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get app for secrets: %w", err)
+	}
+	backups, err := s.store.ListBackupConfigs(&app.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list backup configs for secrets: %w", err)
+	}
+	secrets := &AppSecrets{Version: Version, Slug: slug}
+	for _, b := range backups {
+		if b.TargetConfigJSON == "" {
+			continue
+		}
+		secrets.BackupConfigs = append(secrets.BackupConfigs, BackupSecretsEntry{
+			ID:              b.UUID,
+			TargetConfigEnc: b.TargetConfigJSON,
+		})
+	}
+	return sidecar, secrets, nil
 }
 
 // buildAppSidecar reads app + per-app config from the store and returns the
@@ -301,7 +336,6 @@ func (s *Syncer) buildAppSidecar(slug string) (*AppSidecar, error) {
 	}
 
 	for _, b := range backups {
-		// TODO(fs-auth task 4): repopulate from secrets file (TargetConfigEnc moved to AppSecrets).
 		sidecar.BackupConfigs = append(sidecar.BackupConfigs, BackupConfigEntry{
 			ID:             b.UUID,
 			Strategy:       b.Strategy,
@@ -324,7 +358,9 @@ func (s *Syncer) buildAppSidecar(slug string) (*AppSidecar, error) {
 	return sidecar, nil
 }
 
-// WriteGlobal reads global config from the store and writes the global sidecar atomically.
+// WriteGlobal reads global config from the store and writes the global sidecar
+// pair atomically. Secrets file (mode 0600) is written FIRST; if that fails, the
+// non-secret config.yml is not written. config.yml is mode 0644.
 func (s *Syncer) WriteGlobal() error {
 	users, err := s.store.ListUsersWithHashes()
 	if err != nil {
@@ -346,27 +382,35 @@ func (s *Syncer) WriteGlobal() error {
 		return fmt.Errorf("WriteGlobal: get db backup config: %w", err)
 	}
 
-	sidecar := GlobalSidecar{
-		Version: Version,
-	}
+	sidecar := GlobalSidecar{Version: Version}
+	secrets := &GlobalSecrets{Version: Version}
 
 	for _, u := range users {
-		// TODO(fs-auth task 4): PasswordHash moved to GlobalSecrets.
-		entry := UserEntry{
+		sidecar.Users = append(sidecar.Users, UserEntry{
 			Username:    u.Username,
 			Role:        u.Role,
 			DisplayName: u.DisplayName,
 			Email:       u.Email,
+		})
+		if u.PasswordHash != "" {
+			secrets.Users = append(secrets.Users, UserSecretsEntry{
+				Username:     u.Username,
+				PasswordHash: u.PasswordHash,
+			})
 		}
-		sidecar.Users = append(sidecar.Users, entry)
 
 		keys, err := s.store.ListAPIKeysByUser(u.ID)
 		if err != nil {
 			return fmt.Errorf("WriteGlobal: list api keys for user %s: %w", u.Username, err)
 		}
 		for _, k := range keys {
-			// TODO(fs-auth task 4): KeyHash moved to GlobalSecrets.
 			sidecar.APIKeys = append(sidecar.APIKeys, APIKeyEntry{
+				Username:  u.Username,
+				Name:      k.Name,
+				ExpiresAt: k.ExpiresAt,
+			})
+			secrets.APIKeys = append(secrets.APIKeys, APIKeySecretsEntry{
+				KeyHash:   k.KeyHash,
 				Username:  u.Username,
 				Name:      k.Name,
 				ExpiresAt: k.ExpiresAt,
@@ -375,28 +419,59 @@ func (s *Syncer) WriteGlobal() error {
 	}
 
 	for _, r := range registries {
-		// TODO(fs-auth task 4): UsernameEnc/PasswordEnc moved to GlobalSecrets.
 		sidecar.Registries = append(sidecar.Registries, RegistryEntry{
 			ID:   r.ID,
 			Name: r.Name,
 			URL:  r.URL,
 		})
+		if r.UsernameEnc != "" || r.PasswordEnc != "" {
+			secrets.Registries = append(secrets.Registries, RegistrySecretsEntry{
+				ID:          r.ID,
+				UsernameEnc: r.UsernameEnc,
+				PasswordEnc: r.PasswordEnc,
+			})
+		}
 	}
 
 	for _, w := range webhooks {
-		// TODO(fs-auth task 4): URL/TemplateOverride/HeadersJSON moved to GlobalSecrets.
 		sidecar.Webhooks = append(sidecar.Webhooks, WebhookEntry{
 			Name: w.Name,
 			Type: w.Type,
 		})
+		if w.URL != "" || w.HeadersJSON != "" || w.TemplateOverride != "" {
+			secrets.Webhooks = append(secrets.Webhooks, WebhookSecretsEntry{
+				Name:             w.Name,
+				URL:              w.URL,
+				HeadersJSON:      w.HeadersJSON,
+				TemplateOverride: w.TemplateOverride,
+			})
+		}
 	}
 
+	// Move target_config_enc out of DBBackupConfig (non-secret map) into secrets.
 	if len(dbBackupCfg) > 0 {
-		sidecar.DBBackupConfig = dbBackupCfg
+		nonSecret := make(map[string]string, len(dbBackupCfg))
+		for k, v := range dbBackupCfg {
+			if k == "target_config_enc" {
+				if v != "" {
+					secrets.DBBackup = &DBBackupSecretsEntry{TargetConfigEnc: v}
+				}
+				continue
+			}
+			nonSecret[k] = v
+		}
+		if len(nonSecret) > 0 {
+			sidecar.DBBackupConfig = nonSecret
+		}
+	}
+
+	// Write secrets file FIRST. On failure, do not touch config.yml.
+	if err := s.WriteGlobalSecrets(secrets); err != nil {
+		return fmt.Errorf("WriteGlobal: write secrets: %w", err)
 	}
 
 	path := filepath.Join(s.dataDir, globalSidecar)
-	if err := atomicWriteYAML(path, sidecar); err != nil {
+	if err := atomicWriteYAMLMode(path, 0644, sidecar); err != nil {
 		return err
 	}
 	s.callHook(path, "global")
@@ -473,21 +548,33 @@ func (s *Syncer) ImportAppSidecar(data *AppSidecar) error {
 	if err := s.store.DeleteBackupConfigsForApp(app.ID); err != nil {
 		return fmt.Errorf("ImportAppSidecar: delete backup configs: %w", err)
 	}
+	// Load secrets file (if present) and index by UUID.
+	secrets, err := s.ReadAppSecrets(data.App.Slug)
+	if err != nil {
+		return fmt.Errorf("ImportAppSidecar: read secrets: %w", err)
+	}
+	encByID := map[string]string{}
+	if secrets != nil {
+		for _, e := range secrets.BackupConfigs {
+			encByID[e.ID] = e.TargetConfigEnc
+		}
+	}
+
 	for _, b := range data.BackupConfigs {
-		// TODO(fs-auth task 4): repopulate TargetConfigJSON from secrets file (correlated by UUID).
 		cfg := &store.BackupConfig{
-			UUID:           b.ID,
-			AppID:          app.ID,
-			Strategy:       b.Strategy,
-			Target:         b.Target,
-			ScheduleCron:   b.ScheduleCron,
-			RetentionMode:  b.RetentionMode,
-			RetentionCount: b.RetentionCount,
-			RetentionDays:  b.RetentionDays,
-			VerifyUpload:   b.VerifyUpload,
-			PreHooks:       b.PreHooks,
-			PostHooks:      b.PostHooks,
-			Paths:          b.Paths,
+			UUID:             b.ID,
+			AppID:            app.ID,
+			Strategy:         b.Strategy,
+			Target:           b.Target,
+			ScheduleCron:     b.ScheduleCron,
+			TargetConfigJSON: encByID[b.ID],
+			RetentionMode:    b.RetentionMode,
+			RetentionCount:   b.RetentionCount,
+			RetentionDays:    b.RetentionDays,
+			VerifyUpload:     b.VerifyUpload,
+			PreHooks:         b.PreHooks,
+			PostHooks:        b.PostHooks,
+			Paths:            b.Paths,
 		}
 		if err := s.store.CreateBackupConfig(cfg); err != nil {
 			return fmt.Errorf("ImportAppSidecar: create backup config: %w", err)
@@ -507,17 +594,49 @@ func (s *Syncer) ImportAppSidecar(data *AppSidecar) error {
 }
 
 // ImportGlobal performs idempotent upserts for all rows in data into the store.
+// Reads the sibling secrets.yml (if present) and correlates secrets to non-secret
+// rows by their natural keys.
 // Import order: webhooks -> users -> api_keys -> registries -> db_backup_config.
 func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	if data == nil {
 		return nil
 	}
 
+	secrets, err := s.ReadGlobalSecrets()
+	if err != nil {
+		return fmt.Errorf("ImportGlobal: read secrets: %w", err)
+	}
+	pwByUser := map[string]string{}
+	keyHashLookup := map[string]string{} // key: username|name -> key_hash
+	regSecByID := map[string]RegistrySecretsEntry{}
+	whSecByName := map[string]WebhookSecretsEntry{}
+	var dbBackupEnc string
+	if secrets != nil {
+		for _, u := range secrets.Users {
+			pwByUser[u.Username] = u.PasswordHash
+		}
+		for _, k := range secrets.APIKeys {
+			keyHashLookup[k.Username+"|"+k.Name] = k.KeyHash
+		}
+		for _, r := range secrets.Registries {
+			regSecByID[r.ID] = r
+		}
+		for _, w := range secrets.Webhooks {
+			whSecByName[w.Name] = w
+		}
+		if secrets.DBBackup != nil {
+			dbBackupEnc = secrets.DBBackup.TargetConfigEnc
+		}
+	}
+
 	for _, w := range data.Webhooks {
-		// TODO(fs-auth task 4): repopulate URL/TemplateOverride/HeadersJSON from GlobalSecrets.
+		sec := whSecByName[w.Name]
 		wh := &store.Webhook{
-			Name: w.Name,
-			Type: w.Type,
+			Name:             w.Name,
+			Type:             w.Type,
+			URL:              sec.URL,
+			HeadersJSON:      sec.HeadersJSON,
+			TemplateOverride: sec.TemplateOverride,
 		}
 		if err := s.store.UpsertWebhookByName(wh); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert webhook %q: %w", w.Name, err)
@@ -525,12 +644,12 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	}
 
 	for _, u := range data.Users {
-		// TODO(fs-auth task 4): repopulate PasswordHash from GlobalSecrets.
 		user := &store.User{
-			Username:    u.Username,
-			Role:        u.Role,
-			DisplayName: u.DisplayName,
-			Email:       u.Email,
+			Username:     u.Username,
+			PasswordHash: pwByUser[u.Username],
+			Role:         u.Role,
+			DisplayName:  u.DisplayName,
+			Email:        u.Email,
 		}
 		if err := s.store.UpsertUserByUsername(user); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert user %q: %w", u.Username, err)
@@ -538,18 +657,20 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	}
 
 	for _, k := range data.APIKeys {
-		// TODO(fs-auth task 4): repopulate KeyHash from GlobalSecrets; pass empty hash for now.
-		if err := s.store.UpsertAPIKey(k.Username, "", k.Name, k.ExpiresAt); err != nil {
+		hash := keyHashLookup[k.Username+"|"+k.Name]
+		if err := s.store.UpsertAPIKey(k.Username, hash, k.Name, k.ExpiresAt); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert api key %q/%q: %w", k.Username, k.Name, err)
 		}
 	}
 
 	for _, r := range data.Registries {
-		// TODO(fs-auth task 4): repopulate UsernameEnc/PasswordEnc from GlobalSecrets.
+		sec := regSecByID[r.ID]
 		reg := &store.Registry{
-			ID:   r.ID,
-			Name: r.Name,
-			URL:  r.URL,
+			ID:          r.ID,
+			Name:        r.Name,
+			URL:         r.URL,
+			UsernameEnc: sec.UsernameEnc,
+			PasswordEnc: sec.PasswordEnc,
 		}
 		if err := s.store.UpsertRegistryByID(reg); err != nil {
 			return fmt.Errorf("ImportGlobal: upsert registry %q: %w", r.ID, err)
@@ -559,6 +680,11 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 	for k, v := range data.DBBackupConfig {
 		if err := s.store.SetDBBackupConfig(k, v); err != nil {
 			return fmt.Errorf("ImportGlobal: set db_backup_config %q: %w", k, err)
+		}
+	}
+	if dbBackupEnc != "" {
+		if err := s.store.SetDBBackupConfig("target_config_enc", dbBackupEnc); err != nil {
+			return fmt.Errorf("ImportGlobal: set db_backup_config target_config_enc: %w", err)
 		}
 	}
 
@@ -743,15 +869,32 @@ func (s *Syncer) ImportAppSidecarIfMissing(slug string) (bool, error) {
 }
 
 // atomicWriteYAML marshals v to YAML and atomically writes it to path (0600 perm).
+// Kept for backwards compatibility with secret-bearing callers.
 func atomicWriteYAML(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	return atomicWriteYAMLMode(path, 0600, v)
+}
+
+// atomicWriteYAMLMode writes v to path atomically with the given file mode.
+// Directory is created with 0755 for non-secret files (mode>=0644), 0700 otherwise.
+func atomicWriteYAMLMode(path string, mode os.FileMode, v any) error {
+	dirMode := os.FileMode(0700)
+	if mode&0044 != 0 {
+		dirMode = 0755
+	}
+	if err := os.MkdirAll(filepath.Dir(path), dirMode); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 
 	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return fmt.Errorf("open tmp %s: %w", tmp, err)
+	}
+	// Re-chmod in case umask stripped bits.
+	if err := os.Chmod(tmp, mode); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("chmod tmp %s: %w", tmp, err)
 	}
 
 	enc := yaml.NewEncoder(f)

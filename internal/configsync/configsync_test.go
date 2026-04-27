@@ -1,6 +1,3 @@
-// TODO(fs-auth task 4): rewrite tests for split AppSecrets/GlobalSecrets types.
-//go:build fs_auth_task4_pending
-
 package configsync
 
 import (
@@ -185,8 +182,12 @@ func TestRoundtripGlobalSidecar(t *testing.T) {
 	if len(gdata.Users) != 1 || gdata.Users[0].Username != "alice" {
 		t.Errorf("users mismatch: %+v", gdata.Users)
 	}
-	if gdata.Users[0].PasswordHash != "$2a$10$fakehash" {
-		t.Errorf("password hash not preserved: %q", gdata.Users[0].PasswordHash)
+	gsec, err := syncer.ReadGlobalSecrets()
+	if err != nil || gsec == nil {
+		t.Fatalf("ReadGlobalSecrets: %v / nil=%v", err, gsec == nil)
+	}
+	if len(gsec.Users) != 1 || gsec.Users[0].PasswordHash != "$2a$10$fakehash" {
+		t.Errorf("password hash not preserved: %+v", gsec.Users)
 	}
 	if len(gdata.APIKeys) != 1 || gdata.APIKeys[0].Name != "ci" {
 		t.Errorf("api_keys mismatch: %+v", gdata.APIKeys)
@@ -197,8 +198,8 @@ func TestRoundtripGlobalSidecar(t *testing.T) {
 	if len(gdata.Registries) != 1 || gdata.Registries[0].ID != reg.ID {
 		t.Errorf("registries mismatch: %+v", gdata.Registries)
 	}
-	if gdata.Registries[0].UsernameEnc != "encuser" || gdata.Registries[0].PasswordEnc != "encpass" {
-		t.Errorf("encrypted blobs not preserved: %+v", gdata.Registries[0])
+	if len(gsec.Registries) != 1 || gsec.Registries[0].UsernameEnc != "encuser" || gsec.Registries[0].PasswordEnc != "encpass" {
+		t.Errorf("encrypted blobs not preserved: %+v", gsec.Registries)
 	}
 	if gdata.DBBackupConfig["schedule"] != "0 3 * * *" {
 		t.Errorf("db_backup_config mismatch: %+v", gdata.DBBackupConfig)
@@ -304,14 +305,26 @@ func TestFilePermissions(t *testing.T) {
 
 	appPath := filepath.Join(appsDir, "perms-test", appSidecarName)
 	globalPath := filepath.Join(dataDir, globalSidecar)
+	appSecretsPath := filepath.Join(appsDir, "perms-test", appSecretsName)
+	globalSecretsPath := filepath.Join(dataDir, globalSecretsName)
 
+	// Non-secret sidecars: 0644.
 	for _, p := range []string{appPath, globalPath} {
 		info, err := os.Stat(p)
 		if err != nil {
 			t.Fatalf("stat %s: %v", p, err)
 		}
-		mode := info.Mode().Perm()
-		if mode != 0600 {
+		if mode := info.Mode().Perm(); mode != 0644 {
+			t.Errorf("%s: mode = %o, want 0644", p, mode)
+		}
+	}
+	// Secret sidecars: 0600.
+	for _, p := range []string{appSecretsPath, globalSecretsPath} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("stat %s: %v", p, err)
+		}
+		if mode := info.Mode().Perm(); mode != 0600 {
 			t.Errorf("%s: mode = %o, want 0600", p, mode)
 		}
 	}
@@ -555,13 +568,19 @@ func TestImportGlobalIfEmpty_empty(t *testing.T) {
 	dataDir := t.TempDir()
 	syncer := New(st, appsDir, dataDir)
 
-	// Write global sidecar with one user.
+	// Write global sidecar with one user; secrets in sibling secrets.yml.
 	sidecar := GlobalSidecar{
 		Version: Version,
-		Users:   []UserEntry{{Username: "admin", PasswordHash: "$2a$10$hash", Role: "admin"}},
+		Users:   []UserEntry{{Username: "admin", Role: "admin"}},
 	}
-	if err := atomicWriteYAML(filepath.Join(dataDir, globalSidecar), sidecar); err != nil {
+	if err := atomicWriteYAMLMode(filepath.Join(dataDir, globalSidecar), 0644, sidecar); err != nil {
 		t.Fatalf("write sidecar: %v", err)
+	}
+	if err := syncer.WriteGlobalSecrets(&GlobalSecrets{
+		Version: Version,
+		Users:   []UserSecretsEntry{{Username: "admin", PasswordHash: "$2a$10$hash"}},
+	}); err != nil {
+		t.Fatalf("write secrets: %v", err)
 	}
 
 	imported, err := syncer.ImportGlobalIfEmpty()
@@ -595,9 +614,9 @@ func TestImportGlobalIfEmpty_nonempty(t *testing.T) {
 	// Write sidecar with a different user.
 	sidecar := GlobalSidecar{
 		Version: Version,
-		Users:   []UserEntry{{Username: "recovered", PasswordHash: "$2a$10$hash", Role: "admin"}},
+		Users:   []UserEntry{{Username: "recovered", Role: "admin"}},
 	}
-	if err := atomicWriteYAML(filepath.Join(dataDir, globalSidecar), sidecar); err != nil {
+	if err := atomicWriteYAMLMode(filepath.Join(dataDir, globalSidecar), 0644, sidecar); err != nil {
 		t.Fatalf("write sidecar: %v", err)
 	}
 
@@ -1290,10 +1309,16 @@ func TestDBBackupConfigEncRoundtrip(t *testing.T) {
 	if err != nil || gdata == nil {
 		t.Fatalf("ReadGlobal: %v / nil=%v", err, gdata == nil)
 	}
+	gsec, err := syncer.ReadGlobalSecrets()
+	if err != nil || gsec == nil {
+		t.Fatalf("ReadGlobalSecrets: %v / nil=%v", err, gsec == nil)
+	}
 
-	got := gdata.DBBackupConfig["target_config_enc"]
-	if got != blob {
-		t.Errorf("blob changed after write+read\nwant: %q\ngot:  %q", blob, got)
+	if gsec.DBBackup == nil || gsec.DBBackup.TargetConfigEnc != blob {
+		t.Errorf("blob changed after write+read\nwant: %q\ngot:  %v", blob, gsec.DBBackup)
+	}
+	if _, found := gdata.DBBackupConfig["target_config_enc"]; found {
+		t.Errorf("target_config_enc must NOT appear in non-secret config.yml")
 	}
 
 	// Wipe and re-import.

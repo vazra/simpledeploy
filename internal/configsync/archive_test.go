@@ -1,6 +1,3 @@
-// TODO(fs-auth task 4): rewrite tests for split AppSecrets/GlobalSecrets types.
-//go:build fs_auth_task4_pending
-
 package configsync
 
 import (
