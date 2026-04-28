@@ -7,7 +7,7 @@ import (
 func TestCreateAndGetUser(t *testing.T) {
 	s := newTestStore(t)
 
-	u, err := s.CreateUser("alice", "hash123", "admin", "", "")
+	u, err := s.CreateUser("alice", "hash123", "manage", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -17,8 +17,8 @@ func TestCreateAndGetUser(t *testing.T) {
 	if u.Username != "alice" {
 		t.Errorf("Username = %q, want alice", u.Username)
 	}
-	if u.Role != "admin" {
-		t.Errorf("Role = %q, want admin", u.Role)
+	if u.Role != "manage" {
+		t.Errorf("Role = %q, want manage", u.Role)
 	}
 	if u.PasswordHash != "hash123" {
 		t.Errorf("PasswordHash = %q, want hash123", u.PasswordHash)
@@ -56,7 +56,7 @@ func TestListUsers(t *testing.T) {
 	if _, err := s.CreateUser("zara", "h1", "viewer", "", ""); err != nil {
 		t.Fatalf("CreateUser zara: %v", err)
 	}
-	if _, err := s.CreateUser("adam", "h2", "admin", "", ""); err != nil {
+	if _, err := s.CreateUser("adam", "h2", "manage", "", ""); err != nil {
 		t.Fatalf("CreateUser adam: %v", err)
 	}
 

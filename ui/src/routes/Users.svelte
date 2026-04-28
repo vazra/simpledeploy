@@ -52,13 +52,13 @@
 
   const roleVariants = {
     super_admin: 'danger',
-    admin: 'warning',
+    manage: 'warning',
     viewer: 'info',
   }
 
   const roleCircleColors = {
     super_admin: 'bg-red-500/10 text-red-400 light:bg-red-50 light:text-red-700',
-    admin: 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700',
+    manage: 'bg-amber-500/10 text-amber-400 light:bg-amber-50 light:text-amber-700',
     viewer: 'bg-blue-500/10 text-blue-400 light:bg-blue-50 light:text-blue-700',
   }
 
@@ -396,7 +396,7 @@
         <div class="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
           {#each [
             { value: 'viewer', label: 'Viewer', desc: 'View only' },
-            { value: 'admin', label: 'Admin', desc: 'Manage apps' },
+            { value: 'manage', label: 'Manage', desc: 'Run granted apps' },
             { value: 'super_admin', label: 'Super Admin', desc: 'Full access' },
           ] as role}
             <button

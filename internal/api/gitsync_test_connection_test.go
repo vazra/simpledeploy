@@ -114,7 +114,7 @@ func TestHandleTestGitConnection_NonAdmin(t *testing.T) {
 	srv, st := newTestServer(t)
 	jwtMgr := auth.NewJWTManager("test-secret", time.Hour)
 	srv.jwt = jwtMgr
-	if _, err := st.CreateUser("regular", "hashed", "admin", "", ""); err != nil {
+	if _, err := st.CreateUser("regular", "hashed", "manage", "", ""); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	tok, _ := jwtMgr.Generate(2, "regular", "admin")

@@ -267,7 +267,7 @@ func init() {
 
 	usersCreateCmd.Flags().String("username", "", "username")
 	usersCreateCmd.Flags().String("password", "", "password (reads from stdin or SD_PASSWORD env if omitted)")
-	usersCreateCmd.Flags().String("role", "viewer", "role: super_admin, admin, viewer")
+	usersCreateCmd.Flags().String("role", "viewer", "role: super_admin, manage, viewer")
 	usersCreateCmd.MarkFlagRequired("username")
 
 	usersDeleteCmd.Flags().Int64("id", 0, "user ID")

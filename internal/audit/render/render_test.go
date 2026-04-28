@@ -332,7 +332,7 @@ func TestAccessAdded(t *testing.T) {
 }
 
 func TestAccessRemoved(t *testing.T) {
-	s, target := Render("access", "removed", []byte(`{"username":"bob","role":"admin"}`), nil)
+	s, target := Render("access", "removed", []byte(`{"username":"bob","role": "manage"}`), nil)
 	if !strings.Contains(s, "bob") || !strings.Contains(s, "revoked") {
 		t.Errorf("unexpected summary: %q", s)
 	}
@@ -344,8 +344,8 @@ func TestAccessRemoved(t *testing.T) {
 func TestAccessChanged(t *testing.T) {
 	s, target := Render("access", "changed",
 		[]byte(`{"username":"carol","role":"viewer"}`),
-		[]byte(`{"username":"carol","role":"admin"}`))
-	if !strings.Contains(s, "carol") || !strings.Contains(s, "viewer") || !strings.Contains(s, "admin") {
+		[]byte(`{"username":"carol","role": "manage"}`))
+	if !strings.Contains(s, "carol") || !strings.Contains(s, "viewer") || !strings.Contains(s, "manage") {
 		t.Errorf("unexpected summary: %q", s)
 	}
 	if target != "carol" {
@@ -486,11 +486,11 @@ func TestAuthPasswordChanged(t *testing.T) {
 // --- system ---
 
 func TestSystemUserAdded(t *testing.T) {
-	s, target := Render("system", "user_added", nil, []byte(`{"username":"dave","role":"admin"}`))
+	s, target := Render("system", "user_added", nil, []byte(`{"username":"dave","role": "manage"}`))
 	if !strings.Contains(s, "dave") || !strings.Contains(s, "added") {
 		t.Errorf("unexpected summary: %q", s)
 	}
-	if !strings.Contains(s, "admin") {
+	if !strings.Contains(s, "manage") {
 		t.Errorf("expected role in summary: %q", s)
 	}
 	if target != "dave" {
@@ -501,8 +501,8 @@ func TestSystemUserAdded(t *testing.T) {
 func TestSystemUserChanged(t *testing.T) {
 	s, target := Render("system", "user_changed",
 		[]byte(`{"username":"dave","role":"viewer"}`),
-		[]byte(`{"username":"dave","role":"admin"}`))
-	if !strings.Contains(s, "dave") || !strings.Contains(s, "viewer") || !strings.Contains(s, "admin") {
+		[]byte(`{"username":"dave","role": "manage"}`))
+	if !strings.Contains(s, "dave") || !strings.Contains(s, "viewer") || !strings.Contains(s, "manage") {
 		t.Errorf("unexpected summary: %q", s)
 	}
 	if target != "dave" {

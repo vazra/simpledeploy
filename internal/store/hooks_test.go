@@ -146,7 +146,7 @@ func TestMutationHook_GlobalEntities(t *testing.T) {
 	assertLastHook(t, rec, ScopeGlobal, "")
 
 	// CreateUser
-	u, err := s.CreateUser("alice", "hash", "admin", "", "")
+	u, err := s.CreateUser("alice", "hash", "manage", "", "")
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestMutationHook_GlobalEntities(t *testing.T) {
 	assertLastHook(t, rec, ScopeGlobal, "")
 
 	// UpdateProfile, UpdateUserRole, UpdatePassword — need a live user.
-	u2, _ := s.CreateUser("bob", "hash", "admin", "", "")
+	u2, _ := s.CreateUser("bob", "hash", "manage", "", "")
 	rec.mu.Lock()
 	rec.calls = nil
 	rec.mu.Unlock()
@@ -180,7 +180,7 @@ func TestMutationHook_GlobalEntities(t *testing.T) {
 	assertLastHook(t, rec, ScopeGlobal, "")
 
 	// UpsertUserByUsername
-	uu := &User{Username: "carol", PasswordHash: "h", Role: "admin"}
+	uu := &User{Username: "carol", PasswordHash: "h", Role: "manage"}
 	if err := s.UpsertUserByUsername(uu); err != nil {
 		t.Fatalf("UpsertUserByUsername: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestMutationHook_AppEntities(t *testing.T) {
 	}
 
 	// GrantAppAccess / RevokeAppAccess / ReplaceAppAccess
-	u, _ := s.CreateUser("dave", "hash", "admin", "", "")
+	u, _ := s.CreateUser("dave", "hash", "manage", "", "")
 	rec.mu.Lock()
 	rec.calls = nil
 	rec.mu.Unlock()

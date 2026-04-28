@@ -194,7 +194,7 @@ func (s *Server) routes() {
 	// Community recipes catalog (auth)
 	s.mux.Handle("GET /api/recipes/community", s.authMiddleware(http.HandlerFunc(s.handleListRecipes)))
 	s.mux.Handle("GET /api/recipes/community/file", s.authMiddleware(http.HandlerFunc(s.handleFetchRecipeFile)))
-	s.mux.Handle("GET /api/recipes/community/popularity", s.authMiddleware(http.HandlerFunc(s.handleRecipePopularity)))
+	s.mux.Handle("GET /api/recipes/community/popularity", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleRecipePopularity))))
 
 	// User management (auth + super_admin)
 	s.mux.Handle("GET /api/users", s.authMiddleware(http.HandlerFunc(s.handleListUsers)))
@@ -230,44 +230,46 @@ func (s *Server) routes() {
 		s.appAccessMiddleware(http.HandlerFunc(s.handleLogs))))
 
 	// Deploy / remove / compose
-	s.mux.Handle("POST /api/apps/deploy", s.authMiddleware(http.HandlerFunc(s.handleDeploy)))
+	// App creation and deletion are super_admin-only (manage cannot create or delete apps).
+	s.mux.Handle("POST /api/apps/deploy", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDeploy))))
 	s.mux.Handle("POST /api/apps/validate-compose", s.authMiddleware(http.HandlerFunc(s.handleValidateCompose)))
-	s.mux.Handle("DELETE /api/apps/{slug}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRemoveApp))))
+	s.mux.Handle("DELETE /api/apps/{slug}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleRemoveApp))))
 	s.mux.Handle("GET /api/apps/archived", s.authMiddleware(http.HandlerFunc(s.handleListArchived)))
-	s.mux.Handle("POST /api/apps/{slug}/purge", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePurge))))
+	s.mux.Handle("POST /api/apps/{slug}/purge", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePurge))))
 	s.mux.Handle("GET /api/apps/{slug}/compose", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetCompose))))
 
 	// Export / import
 	s.mux.Handle("GET /api/apps/{slug}/export", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleExportApp))))
-	s.mux.Handle("POST /api/apps/import", s.authMiddleware(http.HandlerFunc(s.handleImportApp)))
+	// Importing creates a new app, so it requires super_admin like POST /api/apps/deploy.
+	s.mux.Handle("POST /api/apps/import", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleImportApp))))
 
-	// App actions
-	s.mux.Handle("POST /api/apps/{slug}/restart", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRestart))))
-	s.mux.Handle("POST /api/apps/{slug}/stop", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleStop))))
-	s.mux.Handle("POST /api/apps/{slug}/start", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleStart))))
-	s.mux.Handle("POST /api/apps/{slug}/pull", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePull))))
-	s.mux.Handle("POST /api/apps/{slug}/scale", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleScale))))
+	// App actions (mutating: super_admin or manage with grant)
+	s.mux.Handle("POST /api/apps/{slug}/restart", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleRestart))))
+	s.mux.Handle("POST /api/apps/{slug}/stop", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleStop))))
+	s.mux.Handle("POST /api/apps/{slug}/start", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleStart))))
+	s.mux.Handle("POST /api/apps/{slug}/pull", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handlePull))))
+	s.mux.Handle("POST /api/apps/{slug}/scale", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleScale))))
 	s.mux.Handle("GET /api/apps/{slug}/services", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetServices))))
 	s.mux.Handle("GET /api/apps/{slug}/env", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetEnv))))
-	s.mux.Handle("PUT /api/apps/{slug}/env", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handlePutEnv))))
+	s.mux.Handle("PUT /api/apps/{slug}/env", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handlePutEnv))))
 
-	// Endpoints
-	s.mux.Handle("PUT /api/apps/{slug}/endpoints", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateEndpoints))))
+	// Endpoints (mutating)
+	s.mux.Handle("PUT /api/apps/{slug}/endpoints", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleUpdateEndpoints))))
 
-	// Certs
-	s.mux.Handle("PUT /api/apps/{slug}/certs/{domain}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUploadCert))))
-	s.mux.Handle("DELETE /api/apps/{slug}/certs/{domain}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDeleteCert))))
+	// Certs (mutating)
+	s.mux.Handle("PUT /api/apps/{slug}/certs/{domain}", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleUploadCert))))
+	s.mux.Handle("DELETE /api/apps/{slug}/certs/{domain}", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleDeleteCert))))
 
-	// IP access
-	s.mux.Handle("PUT /api/apps/{slug}/access", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateAccess))))
+	// IP access (mutating)
+	s.mux.Handle("PUT /api/apps/{slug}/access", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleUpdateAccess))))
 
-	// Cancel deploy
-	s.mux.Handle("POST /api/apps/{slug}/cancel", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleCancel))))
+	// Cancel deploy (mutating)
+	s.mux.Handle("POST /api/apps/{slug}/cancel", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleCancel))))
 
 	// Deploy history
 	s.mux.Handle("GET /api/apps/{slug}/versions", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListVersions))))
-	s.mux.Handle("POST /api/apps/{slug}/rollback", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRollback))))
-	s.mux.Handle("DELETE /api/apps/{slug}/versions/{id}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDeleteVersion))))
+	s.mux.Handle("POST /api/apps/{slug}/rollback", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleRollback))))
+	s.mux.Handle("DELETE /api/apps/{slug}/versions/{id}", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleDeleteVersion))))
 	s.mux.Handle("GET /api/apps/{slug}/events", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListDeployEvents))))
 
 	// Webhooks
@@ -289,16 +291,16 @@ func (s *Server) routes() {
 
 	// Backup configs
 	s.mux.Handle("GET /api/apps/{slug}/backups/configs", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListBackupConfigs))))
-	s.mux.Handle("POST /api/apps/{slug}/backups/configs", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleCreateBackupConfig))))
+	s.mux.Handle("POST /api/apps/{slug}/backups/configs", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleCreateBackupConfig))))
 	s.mux.Handle("PUT /api/backups/configs/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateBackupConfig)))
 	s.mux.Handle("DELETE /api/backups/configs/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteBackupConfig)))
 
 	// Backup runs
 	s.mux.Handle("GET /api/apps/{slug}/backups/runs", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListBackupRuns))))
-	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleTriggerBackup))))
+	s.mux.Handle("POST /api/apps/{slug}/backups/run", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleTriggerBackup))))
 	s.mux.Handle("POST /api/backups/restore/{id}", s.authMiddleware(http.HandlerFunc(s.handleRestore)))
 	s.mux.Handle("GET /api/backups/runs/{id}/download", s.authMiddleware(http.HandlerFunc(s.handleDownloadBackup)))
-	s.mux.Handle("POST /api/apps/{slug}/backups/upload-restore", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUploadRestore))))
+	s.mux.Handle("POST /api/apps/{slug}/backups/upload-restore", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleUploadRestore))))
 
 	// Backup dashboard & detection
 	s.mux.Handle("GET /api/backups/summary", s.authMiddleware(http.HandlerFunc(s.handleBackupSummary)))
@@ -307,24 +309,24 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/backups/test-s3", s.authMiddleware(http.HandlerFunc(s.handleTestS3)))
 
 	// Compose versions (extended)
-	s.mux.Handle("PUT /api/apps/{slug}/versions/{id}", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleUpdateComposeVersion))))
+	s.mux.Handle("PUT /api/apps/{slug}/versions/{id}", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleUpdateComposeVersion))))
 	s.mux.Handle("GET /api/apps/{slug}/versions/{id}/download", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDownloadComposeVersion))))
-	s.mux.Handle("POST /api/apps/{slug}/versions/{id}/restore", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRestoreComposeVersion))))
+	s.mux.Handle("POST /api/apps/{slug}/versions/{id}/restore", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleRestoreComposeVersion))))
 
 	// Docker system management
 	s.mux.Handle("GET /api/docker/info", s.authMiddleware(http.HandlerFunc(s.handleDockerInfo)))
 	s.mux.Handle("GET /api/docker/disk-usage", s.authMiddleware(http.HandlerFunc(s.handleDockerDiskUsage)))
-	s.mux.Handle("POST /api/docker/prune/containers", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneContainers)))
-	s.mux.Handle("POST /api/docker/prune/images", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneImages)))
-	s.mux.Handle("POST /api/docker/prune/volumes", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneVolumes)))
-	s.mux.Handle("POST /api/docker/prune/build-cache", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneBuildCache)))
-	s.mux.Handle("POST /api/docker/prune/all", s.authMiddleware(http.HandlerFunc(s.handleDockerPruneAll)))
+	s.mux.Handle("POST /api/docker/prune/containers", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneContainers))))
+	s.mux.Handle("POST /api/docker/prune/images", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneImages))))
+	s.mux.Handle("POST /api/docker/prune/volumes", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneVolumes))))
+	s.mux.Handle("POST /api/docker/prune/build-cache", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneBuildCache))))
+	s.mux.Handle("POST /api/docker/prune/all", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneAll))))
 	s.mux.Handle("GET /api/docker/images", s.authMiddleware(http.HandlerFunc(s.handleDockerImages)))
-	s.mux.Handle("DELETE /api/docker/images/{id}", s.authMiddleware(http.HandlerFunc(s.handleDockerImageRemove)))
+	s.mux.Handle("DELETE /api/docker/images/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerImageRemove))))
 	s.mux.Handle("GET /api/docker/networks", s.authMiddleware(http.HandlerFunc(s.handleDockerNetworks)))
 	s.mux.Handle("GET /api/docker/volumes", s.authMiddleware(http.HandlerFunc(s.handleDockerVolumes)))
-	s.mux.Handle("DELETE /api/docker/networks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDockerNetworkRemove)))
-	s.mux.Handle("DELETE /api/docker/volumes/{name}", s.authMiddleware(http.HandlerFunc(s.handleDockerVolumeRemove)))
+	s.mux.Handle("DELETE /api/docker/networks/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerNetworkRemove))))
+	s.mux.Handle("DELETE /api/docker/volumes/{name}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerVolumeRemove))))
 
 	// System management
 	s.mux.Handle("GET /api/system/info", s.authMiddleware(http.HandlerFunc(s.handleSystemInfo)))
@@ -341,16 +343,16 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/system/process-logs/stream", s.authMiddleware(http.HandlerFunc(s.handleSystemLogsWS)))
 
 	// DB backup
-	s.mux.Handle("POST /api/system/backup/download", s.authMiddleware(http.HandlerFunc(s.handleDBBackupDownload)))
-	s.mux.Handle("GET /api/system/backup/config", s.authMiddleware(http.HandlerFunc(s.handleGetDBBackupConfig)))
-	s.mux.Handle("POST /api/system/backup/config", s.authMiddleware(http.HandlerFunc(s.handleSetDBBackupConfig)))
-	s.mux.Handle("GET /api/system/backup/runs", s.authMiddleware(http.HandlerFunc(s.handleListDBBackupRuns)))
+	s.mux.Handle("POST /api/system/backup/download", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDBBackupDownload))))
+	s.mux.Handle("GET /api/system/backup/config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGetDBBackupConfig))))
+	s.mux.Handle("POST /api/system/backup/config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleSetDBBackupConfig))))
+	s.mux.Handle("GET /api/system/backup/runs", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleListDBBackupRuns))))
 
-	// Registry management
-	s.mux.Handle("GET /api/registries", s.authMiddleware(http.HandlerFunc(s.handleListRegistries)))
-	s.mux.Handle("POST /api/registries", s.authMiddleware(http.HandlerFunc(s.handleCreateRegistry)))
-	s.mux.Handle("PUT /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateRegistry)))
-	s.mux.Handle("DELETE /api/registries/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteRegistry)))
+	// Registry management (super_admin only)
+	s.mux.Handle("GET /api/registries", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleListRegistries))))
+	s.mux.Handle("POST /api/registries", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleCreateRegistry))))
+	s.mux.Handle("PUT /api/registries/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleUpdateRegistry))))
+	s.mux.Handle("DELETE /api/registries/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDeleteRegistry))))
 
 	// Activity / audit log
 	s.mux.Handle("GET /api/activity/recent", s.authMiddleware(http.HandlerFunc(s.handleRecentActivity)))

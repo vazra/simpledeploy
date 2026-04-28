@@ -100,7 +100,7 @@ func TestLoadGlobalFromFS_RoundTrip(t *testing.T) {
 	wantSidecar := &GlobalSidecar{
 		Version: Version,
 		Users: []UserEntry{
-			{Username: "alice", Role: "admin", DisplayName: "Alice", Email: "a@x"},
+			{Username: "alice", Role: "manage", DisplayName: "Alice", Email: "a@x"},
 		},
 		APIKeys:    []APIKeyEntry{{Username: "alice", Name: "ci"}},
 		Registries: []RegistryEntry{},

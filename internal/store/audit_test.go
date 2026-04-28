@@ -136,7 +136,7 @@ func TestListActivityAllowedApps(t *testing.T) {
 	appID2 := int64(2)
 
 	// Insert a user for FK constraint on actor_user_id.
-	u, err := s.CreateUser("testactor", "hash", "admin", "", "")
+	u, err := s.CreateUser("testactor", "hash", "manage", "", "")
 	if err != nil {
 		t.Fatalf("create test user: %v", err)
 	}
@@ -228,11 +228,11 @@ func TestListActivityNonAdminAuthScoping(t *testing.T) {
 	ctx := context.Background()
 
 	// Insert users for FK constraint.
-	uA, err := s.CreateUser("usera", "hash", "admin", "", "")
+	uA, err := s.CreateUser("usera", "hash", "manage", "", "")
 	if err != nil {
 		t.Fatalf("create userA: %v", err)
 	}
-	uB, err := s.CreateUser("userb", "hash", "admin", "", "")
+	uB, err := s.CreateUser("userb", "hash", "manage", "", "")
 	if err != nil {
 		t.Fatalf("create userB: %v", err)
 	}
