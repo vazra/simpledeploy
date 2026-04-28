@@ -2,10 +2,12 @@ package auth
 
 import "golang.org/x/crypto/bcrypt"
 
-const bcryptCost = 12
+// BcryptCost is the work factor used by HashPassword. It is a var so tests
+// may lower it; production code must not change it.
+var BcryptCost = 12
 
 func HashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	return string(hash), err
 }
 
