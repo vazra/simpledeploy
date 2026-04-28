@@ -240,6 +240,7 @@ func (s *Server) routes() {
 	// Export / import
 	s.mux.Handle("GET /api/apps/{slug}/export", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleExportApp))))
 	s.mux.Handle("POST /api/apps/import", s.authMiddleware(http.HandlerFunc(s.handleImportApp)))
+	s.mux.Handle("POST /api/apps/import/preview", s.authMiddleware(http.HandlerFunc(s.handleImportAppPreview)))
 
 	// App actions
 	s.mux.Handle("POST /api/apps/{slug}/restart", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleRestart))))
@@ -386,7 +387,7 @@ func maxBodySize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			// Import bundle endpoint allows up to 10 MiB (handler enforces).
-			if r.URL.Path != "/api/apps/import" {
+			if r.URL.Path != "/api/apps/import" && r.URL.Path != "/api/apps/import/preview" {
 				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			}
 		}

@@ -117,6 +117,22 @@ export function makeApiMock(overrides = {}) {
     getPublicHost: vi.fn(async () => ok({ public_host: '' })),
     exportApp: vi.fn(async () => ok(new Blob(['zip'], { type: 'application/zip' }))),
     importApp: vi.fn(async () => ok({ slug: 'imported', mode: 'new' })),
+    importAppPreview: vi.fn(async () => ok({
+      mode: 'overwrite',
+      slug: 'existing',
+      current: { compose: 'old', sidecar: '' },
+      incoming: { compose: 'new', sidecar: '', manifest: {} },
+      changes: {
+        compose_changed: true,
+        sidecar_changed: false,
+        alert_rule_count_current: 1,
+        alert_rule_count_incoming: 3,
+        alert_rule_count_delta: 2,
+        backup_config_count_current: 0,
+        backup_config_count_incoming: 1,
+        backup_config_count_delta: 1,
+      },
+    })),
     setPublicHost: vi.fn(async () => ok({})),
   };
   return { ...base, ...overrides };

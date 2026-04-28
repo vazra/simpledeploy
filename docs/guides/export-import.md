@@ -53,9 +53,12 @@ CLI/API: `GET /api/apps/{slug}/export` returns the ZIP.
    - **New app**: creates a fresh app at the slug you enter. The slug must not already exist. `.env` is created with the keys from `env.example` and empty values — fill them in before deploying.
    - **Overwrite existing**: replaces the compose, alerts, backup configs, and access for an existing app at the given slug. The on-disk `.env` and `simpledeploy.secrets.yml` are **preserved**, so secrets you already set stay intact.
 
-5. Click **Import**. The app appears in the dashboard, stopped. Review the env values, then deploy.
+5. Click **Import**.
+   - **New app**: imports immediately. The app appears in the dashboard, stopped.
+   - **Overwrite existing**: a confirmation panel shows what will change (compose changed/unchanged, sidecar changed/unchanged, alert rule and backup config counts before -> after). Click **Confirm overwrite** to apply, or **Back** to adjust. Nothing on disk changes until you confirm.
+6. Review env values, then deploy.
 
-CLI/API: `POST /api/apps/import` (multipart: `file=@bundle.zip`, `mode=new|overwrite`, `slug=myapp`).
+CLI/API: `POST /api/apps/import` (multipart: `file=@bundle.zip`, `mode=new|overwrite`, `slug=myapp`). For a dry-run diff before applying, `POST /api/apps/import/preview` with the same fields returns the current vs incoming compose/sidecar plus a `changes` summary.
 
 ## Recipe compatibility
 

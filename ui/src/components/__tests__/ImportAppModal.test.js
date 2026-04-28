@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
 
 vi.mock('../../lib/api.js', async () => {
@@ -19,6 +19,11 @@ async function setFile(input, file) {
 }
 
 describe('ImportAppModal', () => {
+  beforeEach(() => {
+    api.importApp.mockClear();
+    api.importAppPreview.mockClear();
+  });
+
   it('renders file input and disables Import when no file selected', () => {
     const { getByTestId, getByRole } = render(ImportAppModal, {
       open: true,
@@ -63,6 +68,50 @@ describe('ImportAppModal', () => {
     expect(calledFile).toBe(file);
     expect(opts).toEqual({ mode: 'new', slug: 'my-new-app' });
     await waitFor(() => expect(onImported).toHaveBeenCalled());
+  });
+
+  it('overwrite mode shows preview, then Confirm calls importApp', async () => {
+    const onImported = vi.fn();
+    const { container, getByTestId, getByRole, findByTestId } = render(ImportAppModal, {
+      open: true,
+      onclose: () => {},
+      onImported,
+    });
+    const file = mkFile();
+    await setFile(getByTestId('import-file'), file);
+    const overwriteRadio = container.querySelector('input[type=radio][value=overwrite]');
+    await fireEvent.click(overwriteRadio);
+    await fireEvent.input(getByTestId('import-slug'), { target: { value: 'existing' } });
+
+    await fireEvent.click(getByRole('button', { name: /^Import$/ }));
+
+    // Preview API should be called, not importApp yet.
+    await waitFor(() => expect(api.importAppPreview).toHaveBeenCalled());
+    expect(api.importApp).not.toHaveBeenCalled();
+    const panel = await findByTestId('import-preview');
+    expect(panel.textContent).toMatch(/Overwriting app/);
+    expect(panel.textContent).toMatch(/Changed/);
+
+    // Confirm button triggers actual import.
+    await fireEvent.click(getByRole('button', { name: /Confirm overwrite/i }));
+    await waitFor(() => expect(api.importApp).toHaveBeenCalled());
+    const [calledFile, opts] = api.importApp.mock.calls[0];
+    expect(calledFile).toBe(file);
+    expect(opts).toEqual({ mode: 'overwrite', slug: 'existing' });
+    await waitFor(() => expect(onImported).toHaveBeenCalled());
+  });
+
+  it('new mode skips preview and calls importApp directly', async () => {
+    const { getByTestId, getByRole } = render(ImportAppModal, {
+      open: true,
+      onclose: () => {},
+      onImported: () => {},
+    });
+    await setFile(getByTestId('import-file'), mkFile());
+    await fireEvent.input(getByTestId('import-slug'), { target: { value: 'fresh' } });
+    await fireEvent.click(getByRole('button', { name: /^Import$/ }));
+    await waitFor(() => expect(api.importApp).toHaveBeenCalled());
+    expect(api.importAppPreview).not.toHaveBeenCalled();
   });
 
   it('shows error message when api.importApp rejects', async () => {

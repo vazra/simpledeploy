@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -154,6 +155,81 @@ func TestBundleImportBadZip(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBundleImportPreviewOverwrite(t *testing.T) {
+	srv, appsDir := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	// Existing app on disk + in store with different compose content.
+	slug := "prv-app"
+	appDir := filepath.Join(appsDir, slug)
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "docker-compose.yml"), []byte("services:\n  web:\n    image: caddy\n"), 0o644); err != nil {
+		t.Fatalf("write existing compose: %v", err)
+	}
+	if err := srv.store.UpsertApp(&store.App{
+		Name: "Prv", Slug: slug,
+		ComposePath: filepath.Join(appDir, "docker-compose.yml"),
+		Status:      "running",
+	}, nil); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	zipBytes := buildTestBundle(t, slug, "Prv")
+	body, ct := multipartImport(t, zipBytes, "overwrite", slug)
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/import/preview", body)
+	req.Header.Set("Content-Type", ct)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["mode"] != "overwrite" {
+		t.Errorf("mode = %v", resp["mode"])
+	}
+	if resp["current"] == nil {
+		t.Errorf("current should be present for overwrite")
+	}
+	changes, ok := resp["changes"].(map[string]any)
+	if !ok {
+		t.Fatalf("changes missing or wrong type: %v", resp["changes"])
+	}
+	if changes["compose_changed"] != true {
+		t.Errorf("compose_changed = %v, want true", changes["compose_changed"])
+	}
+
+	// Verify import did not actually run: store row still exists with original compose on disk.
+	cur, err := os.ReadFile(filepath.Join(appDir, "docker-compose.yml"))
+	if err != nil {
+		t.Fatalf("read compose: %v", err)
+	}
+	if !bytes.Contains(cur, []byte("caddy")) {
+		t.Errorf("preview must not modify on-disk compose; got %s", cur)
+	}
+}
+
+func TestBundleImportPreviewOverwriteMissing(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+	zipBytes := buildTestBundle(t, "nope", "")
+	body, ct := multipartImport(t, zipBytes, "overwrite", "nope")
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/import/preview", body)
+	req.Header.Set("Content-Type", ct)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", w.Code, w.Body.String())
 	}
 }
 
