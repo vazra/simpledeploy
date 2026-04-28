@@ -20,6 +20,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/events"
 	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -54,7 +55,11 @@ type Reconciler struct {
 	resolver     proxy.UpstreamResolver // nil-safe
 	syncer       *configsync.Syncer     // nil means configsync disabled
 	audit        *audit.Recorder        // nil-safe
+	bus          *events.Bus            // nil-safe
 }
+
+// SetEventBus wires the realtime events bus for status flips. Nil-safe.
+func (r *Reconciler) SetEventBus(b *events.Bus) { r.bus = b }
 
 // New creates a Reconciler. syncer may be nil (disables configsync recovery).
 func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *config.Config, syncer *configsync.Syncer) *Reconciler {
@@ -441,6 +446,10 @@ func (r *Reconciler) RefreshStatuses(ctx context.Context) {
 			continue
 		}
 		log.Printf("[reconciler] %s: status %s -> %s", app.Slug, app.Status, newStatus)
+		if r.bus != nil {
+			r.bus.Publish(ctx, events.Event{Type: "app.status", Topic: events.AppTopic(app.Slug)})
+			r.bus.Publish(ctx, events.Event{Type: "app.status", Topic: events.TopicGlobalApps})
+		}
 	}
 }
 

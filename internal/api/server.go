@@ -22,6 +22,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployment"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/events"
 	"github.com/vazra/simpledeploy/internal/gitsync"
 	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/recipes"
@@ -68,7 +69,11 @@ type Server struct {
 	gs                *gitsync.Syncer
 	cs                *configsync.Syncer
 	recipesCache      *recipes.Cache
+	bus               *events.Bus
 }
+
+// SetBus wires the realtime events bus. nil disables /api/events.
+func (s *Server) SetBus(b *events.Bus) { s.bus = b }
 
 // SetRecipesCache enables /api/recipes/community endpoints. nil disables them.
 func (s *Server) SetRecipesCache(c *recipes.Cache) { s.recipesCache = c }
@@ -337,6 +342,9 @@ func (s *Server) routes() {
 	// Public host (sslip.io quick-domain helper)
 	s.mux.Handle("GET /api/system/public-host", s.authMiddleware(http.HandlerFunc(s.handleGetPublicHost)))
 	s.mux.Handle("PUT /api/system/public-host", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleSetPublicHost))))
+
+	// Realtime notify-only events
+	s.mux.Handle("GET /api/events", s.authMiddleware(http.HandlerFunc(s.handleEventsWS)))
 
 	// System logs
 	s.mux.Handle("GET /api/system/process-logs", s.authMiddleware(http.HandlerFunc(s.handleSystemLogs)))

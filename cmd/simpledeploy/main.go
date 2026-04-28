@@ -35,6 +35,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
+	"github.com/vazra/simpledeploy/internal/events"
 	"github.com/vazra/simpledeploy/internal/gitsync"
 	"github.com/vazra/simpledeploy/internal/metrics"
 	"github.com/vazra/simpledeploy/internal/proxy"
@@ -557,9 +558,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Realtime events bus (in-process publish/subscribe).
+	eventBus := events.New()
+
+	reconcilerAudit := audit.NewRecorder(db)
+	reconcilerAudit.SetBus(eventBus)
+
 	rec := reconciler.New(db, dep, caddyProxy, cfg.AppsDir, cfg, syncer)
 	rec.SetDockerClient(dc)
-	rec.SetAuditRecorder(audit.NewRecorder(db))
+	rec.SetAuditRecorder(reconcilerAudit)
+	rec.SetEventBus(eventBus)
 
 	// Late-bind reconciler pointer for gitsync callback.
 	recRef.Store(rec)
@@ -759,7 +767,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetDataDir(cfg.DataDir)
 	srv.SetWebhookDispatcher(dispatcher)
 	auditRec := audit.NewRecorder(db)
+	auditRec.SetBus(eventBus)
 	srv.SetAudit(auditRec)
+	srv.SetBus(eventBus)
 	dep.SetAuditEmitter(&api.DeployerAuditAdapter{Rec: auditRec})
 	srv.SetLogBuffer(logBuf)
 	recipesClient := recipes.NewClient(cfg.RecipesIndexURL, 0)
