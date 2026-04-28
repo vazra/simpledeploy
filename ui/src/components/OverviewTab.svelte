@@ -11,16 +11,19 @@
   let metricsData = $state(null)
   let events = $state([])
   let loading = $state(true)
+  let hostMemory = $state(0)
 
   onMount(async () => {
-    const [reqRes, metRes, evtRes] = await Promise.all([
+    const [reqRes, metRes, evtRes, dockerRes] = await Promise.all([
       api.appRequests(slug, '1h'),
       api.appMetrics(slug, '1h'),
       api.getDeployEvents(slug),
+      api.dockerInfo(),
     ])
     requestData = reqRes.data
     metricsData = metRes.data
     events = (evtRes.data || []).slice(0, 5)
+    if (dockerRes.data?.memory) hostMemory = dockerRes.data.memory
     loading = false
   })
 
@@ -83,7 +86,8 @@
         const pt = containers[id]?.points?.[i]
         if (pt != null) { sumM += pt.m || 0; sumMl += pt.ml || 0 }
       }
-      result.push(sumMl > 0 ? (sumM / sumMl) * 100 : 0)
+      const eff = hostMemory ? Math.min(sumMl, hostMemory) : sumMl
+      result.push(eff > 0 ? (sumM / eff) * 100 : 0)
     }
     return result
   })
@@ -98,8 +102,9 @@
       const pt = pts[pts.length - 1]
       if (pt) { sumM += pt.m || 0; sumMl += pt.ml || 0 }
     }
-    const pct = sumMl > 0 ? (sumM / sumMl) * 100 : 0
-    return { pct, usedMB: Math.round(sumM / (1024 * 1024)), totalMB: Math.round(sumMl / (1024 * 1024)) }
+    const eff = hostMemory ? Math.min(sumMl, hostMemory) : sumMl
+    const pct = eff > 0 ? (sumM / eff) * 100 : 0
+    return { pct, usedMB: Math.round(sumM / (1024 * 1024)), totalMB: Math.round(eff / (1024 * 1024)) }
   })
 
   // --- Helpers ---

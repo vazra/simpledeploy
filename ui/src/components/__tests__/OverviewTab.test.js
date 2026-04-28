@@ -5,6 +5,7 @@ const apiMock = vi.hoisted(() => ({
   appRequests: vi.fn(async () => ({ data: { points: [{ n: 10, e: 1 }, { n: 20, e: 1 }] }, error: null })),
   appMetrics: vi.fn(async () => ({ data: { points: [{ cpu: 5 }] }, error: null })),
   getDeployEvents: vi.fn(async () => ({ data: [{ event: 'deployed', at: '2026-01-01T00:00:00Z' }], error: null })),
+  dockerInfo: vi.fn(async () => ({ data: { memory: 8 * 1024 * 1024 * 1024 }, error: null })),
 }));
 vi.mock('../../lib/api.js', () => ({ api: apiMock }));
 
