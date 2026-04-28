@@ -238,6 +238,11 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/apps/{slug}/purge", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePurge))))
 	s.mux.Handle("GET /api/apps/{slug}/compose", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleGetCompose))))
 
+	// Export / import
+	s.mux.Handle("GET /api/apps/{slug}/export", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleExportApp))))
+	// Importing creates a new app, so it requires super_admin like POST /api/apps/deploy.
+	s.mux.Handle("POST /api/apps/import", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleImportApp))))
+
 	// App actions (mutating: super_admin or manage with grant)
 	s.mux.Handle("POST /api/apps/{slug}/restart", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleRestart))))
 	s.mux.Handle("POST /api/apps/{slug}/stop", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleStop))))
@@ -382,7 +387,10 @@ func (s *Server) Handler() http.Handler {
 func maxBodySize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			// Import bundle endpoint allows up to 10 MiB (handler enforces).
+			if r.URL.Path != "/api/apps/import" {
+				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
