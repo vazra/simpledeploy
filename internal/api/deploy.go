@@ -249,6 +249,11 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 		if err := s.cs.DeleteAppSidecar(slug); err != nil {
 			log.Printf("[configsync] DeleteAppSidecar %s: %v", slug, err)
 		}
+		// Best-effort: a previously-archived slug whose dir was recreated and
+		// is now being purged via DELETE may still have a tombstone on disk.
+		if err := s.cs.DeleteTombstone(slug); err != nil {
+			log.Printf("[configsync] DeleteTombstone %s: %v", slug, err)
+		}
 	}
 
 	appDir := filepath.Join(s.appsDir, slug)

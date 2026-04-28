@@ -1,8 +1,10 @@
 package configsync
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,5 +93,43 @@ func TestTombstoneWriteReadDelete(t *testing.T) {
 	// Second delete is a no-op.
 	if err := syncer.DeleteTombstone("archapp"); err != nil {
 		t.Fatalf("DeleteTombstone (missing) returned err: %v", err)
+	}
+}
+
+func TestTombstoneJSONShape(t *testing.T) {
+	rd := 7
+	tomb := Tombstone{
+		Version:    Version,
+		ArchivedAt: time.Now().UTC(),
+		App:        AppMeta{Slug: "x", DisplayName: "X"},
+		AlertRules: []AlertRuleEntry{{Metric: "cpu", Operator: ">", Threshold: 1, DurationSec: 60, Webhook: "w", Enabled: true}},
+		BackupConfigs: []BackupConfigEntry{{
+			ID: "id1", Strategy: "volume", Target: "local", ScheduleCron: "0 0 * * *",
+			RetentionMode: "count", RetentionCount: 3, RetentionDays: &rd, VerifyUpload: true,
+		}},
+		Access: []AccessEntry{{Username: "alice"}},
+	}
+	b, err := json.Marshal(tomb)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	for _, key := range []string{
+		`"version"`, `"archived_at"`, `"app"`,
+		`"alert_rules"`, `"backup_configs"`, `"access"`,
+		`"slug"`, `"display_name"`,
+		`"metric"`, `"operator"`, `"threshold"`, `"duration_sec"`, `"webhook"`, `"enabled"`,
+		`"id"`, `"strategy"`, `"target"`, `"schedule_cron"`,
+		`"retention_mode"`, `"retention_count"`, `"retention_days"`, `"verify_upload"`,
+		`"username"`,
+	} {
+		if !strings.Contains(s, key) {
+			t.Errorf("missing key %s in JSON: %s", key, s)
+		}
+	}
+	for _, bad := range []string{`"AlertRules"`, `"BackupConfigs"`, `"Access"`, `"App"`, `"ArchivedAt"`, `"Version"`, `"DisplayName"`} {
+		if strings.Contains(s, bad) {
+			t.Errorf("PascalCase key leaked: %s in %s", bad, s)
+		}
 	}
 }

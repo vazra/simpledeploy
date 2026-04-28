@@ -96,6 +96,8 @@ Mitigation: the debounce is short; production crashes mid-debounce are rare; mos
 
 Caveat: runtime state (metrics, audit log, deploy history, archived-app rows that have no tombstone) is lost.
 
+Apps that were archived before the DB was lost will reappear with empty `compose_path` (no compose to deploy from) and `Status="stopped"`. They show up only in the Archived view; the Clean up button purges them safely. They are not deployable until you re-add a compose file.
+
 ## Troubleshooting
 
 - Logs prefixed `[fs-auth]` describe seed, reload, and apply operations.

@@ -16,39 +16,39 @@ type AppSidecar struct {
 
 // AppMeta holds identifying info about the app.
 type AppMeta struct {
-	Slug        string `yaml:"slug"`
-	DisplayName string `yaml:"display_name"`
+	Slug        string `yaml:"slug" json:"slug"`
+	DisplayName string `yaml:"display_name" json:"display_name"`
 }
 
 // AlertRuleEntry is a portable alert rule (webhook referenced by name, not ID).
 type AlertRuleEntry struct {
-	Metric      string  `yaml:"metric"`
-	Operator    string  `yaml:"operator"`
-	Threshold   float64 `yaml:"threshold"`
-	DurationSec int     `yaml:"duration_sec"`
-	Webhook     string  `yaml:"webhook"` // Webhook.Name
-	Enabled     bool    `yaml:"enabled"`
+	Metric      string  `yaml:"metric" json:"metric"`
+	Operator    string  `yaml:"operator" json:"operator"`
+	Threshold   float64 `yaml:"threshold" json:"threshold"`
+	DurationSec int     `yaml:"duration_sec" json:"duration_sec"`
+	Webhook     string  `yaml:"webhook" json:"webhook"` // Webhook.Name
+	Enabled     bool    `yaml:"enabled" json:"enabled"`
 }
 
 // BackupConfigEntry mirrors store.BackupConfig without DB IDs.
 // target_config_enc lives in the secrets sidecar, correlated by ID (UUID).
 type BackupConfigEntry struct {
-	ID             string `yaml:"id"` // UUID, correlates with secrets file entry
-	Strategy       string `yaml:"strategy"`
-	Target         string `yaml:"target"`
-	ScheduleCron   string `yaml:"schedule_cron"`
-	RetentionMode  string `yaml:"retention_mode"`
-	RetentionCount int    `yaml:"retention_count"`
-	RetentionDays  *int   `yaml:"retention_days"`
-	VerifyUpload   bool   `yaml:"verify_upload"`
-	PreHooks       string `yaml:"pre_hooks,omitempty"`
-	PostHooks      string `yaml:"post_hooks,omitempty"`
-	Paths          string `yaml:"paths,omitempty"`
+	ID             string `yaml:"id" json:"id"` // UUID, correlates with secrets file entry
+	Strategy       string `yaml:"strategy" json:"strategy"`
+	Target         string `yaml:"target" json:"target"`
+	ScheduleCron   string `yaml:"schedule_cron" json:"schedule_cron"`
+	RetentionMode  string `yaml:"retention_mode" json:"retention_mode"`
+	RetentionCount int    `yaml:"retention_count" json:"retention_count"`
+	RetentionDays  *int   `yaml:"retention_days" json:"retention_days"`
+	VerifyUpload   bool   `yaml:"verify_upload" json:"verify_upload"`
+	PreHooks       string `yaml:"pre_hooks,omitempty" json:"pre_hooks,omitempty"`
+	PostHooks      string `yaml:"post_hooks,omitempty" json:"post_hooks,omitempty"`
+	Paths          string `yaml:"paths,omitempty" json:"paths,omitempty"`
 }
 
 // AccessEntry records a user who has explicit access to this app.
 type AccessEntry struct {
-	Username string `yaml:"username"`
+	Username string `yaml:"username" json:"username"`
 }
 
 // GlobalSidecar is the global YAML sidecar written to {data_dir}/config.yml.

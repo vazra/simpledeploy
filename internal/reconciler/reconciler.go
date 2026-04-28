@@ -162,6 +162,14 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			continue // already archived; do nothing
 		}
 		if _, exists := desired[a.Slug]; !exists {
+			// Re-stat the compose path before archiving to absorb transient
+			// FS hiccups (slow NFS, watcher firing mid-rename, etc.). If the
+			// file reappeared between scanAppsDir and now, skip archive.
+			composePath := filepath.Join(r.appsDir, a.Slug, "docker-compose.yml")
+			if _, statErr := os.Stat(composePath); statErr == nil {
+				log.Printf("[reconciler] skipping archive of %s: dir reappeared between scan and decision", a.Slug)
+				continue
+			}
 			if err := r.archiveApp(ctx, a.Slug); err != nil {
 				fmt.Fprintf(os.Stderr, "reconciler: archive %s: %v\n", a.Slug, err)
 			}
@@ -719,6 +727,13 @@ func hashFile(path string) (string, error) {
 // archiveApp runs Teardown, writes the tombstone, marks the row archived, and
 // records an audit entry. Replaces removeApp on the directory-missing branch.
 func (r *Reconciler) archiveApp(ctx context.Context, slug string) error {
+	// Capture app ID once up front; MarkAppArchived may interleave with other
+	// writers, so a single read here avoids a re-query race for the audit row.
+	var appID *int64
+	if app, err := r.store.GetAppBySlug(slug); err == nil {
+		id := app.ID
+		appID = &id
+	}
 	if err := r.deployer.Teardown(ctx, slug); err != nil {
 		log.Printf("[reconciler] archive teardown %s: %v", slug, err)
 		// continue: still want to mark archived
@@ -733,10 +748,6 @@ func (r *Reconciler) archiveApp(ctx context.Context, slug string) error {
 		return fmt.Errorf("mark archived: %w", err)
 	}
 	if r.audit != nil {
-		var appID *int64
-		if app, err := r.store.GetAppBySlug(slug); err == nil {
-			appID = &app.ID
-		}
 		after, _ := json.Marshal(map[string]any{"name": slug})
 		_, _ = r.audit.Record(ctx, audit.RecordReq{
 			AppID:    appID,

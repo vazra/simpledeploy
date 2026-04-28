@@ -14,12 +14,12 @@ const archiveDirName = "archive"
 // Tombstone is the snapshot written to {data_dir}/archive/<slug>.yml when
 // an app is archived (its dir disappeared from apps_dir).
 type Tombstone struct {
-	Version       int                 `yaml:"version"`
-	ArchivedAt    time.Time           `yaml:"archived_at"`
-	App           AppMeta             `yaml:"app"`
-	AlertRules    []AlertRuleEntry    `yaml:"alert_rules,omitempty"`
-	BackupConfigs []BackupConfigEntry `yaml:"backup_configs,omitempty"`
-	Access        []AccessEntry       `yaml:"access,omitempty"`
+	Version       int                 `yaml:"version" json:"version"`
+	ArchivedAt    time.Time           `yaml:"archived_at" json:"archived_at"`
+	App           AppMeta             `yaml:"app" json:"app"`
+	AlertRules    []AlertRuleEntry    `yaml:"alert_rules,omitempty" json:"alert_rules,omitempty"`
+	BackupConfigs []BackupConfigEntry `yaml:"backup_configs,omitempty" json:"backup_configs,omitempty"`
+	Access        []AccessEntry       `yaml:"access,omitempty" json:"access,omitempty"`
 }
 
 // ArchiveDir returns the directory where tombstones are stored.
