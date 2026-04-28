@@ -37,7 +37,7 @@ func makeUserCookie(t *testing.T, srv *Server, st *store.Store, username string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := st.CreateUser(username, hash, "admin", "", "")
+	u, err := st.CreateUser(username, hash, "manage", "", "")
 	if err != nil {
 		t.Fatalf("create user %q: %v", username, err)
 	}
@@ -118,7 +118,7 @@ func TestActivityListScopedNonAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user1, err := st.CreateUser("user1", hash, "admin", "", "")
+	user1, err := st.CreateUser("user1", hash, "manage", "", "")
 	if err != nil {
 		t.Fatalf("create user1: %v", err)
 	}

@@ -23,7 +23,7 @@ func TestFirstBootSeed_WritesFilesAndMarker(t *testing.T) {
 	if err := st.CreateWebhook(wh); err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
-	if _, err := st.CreateUser("admin", "hash$abc", "admin", "Admin", "a@b.c"); err != nil {
+	if _, err := st.CreateUser("admin", "hash$abc", "manage", "Admin", "a@b.c"); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	a1 := &store.App{Name: "App One", Slug: "app1", ComposePath: "/x/a1.yml", Status: "running"}

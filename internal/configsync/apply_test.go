@@ -152,7 +152,7 @@ func TestApplyGlobalSidecar_NilSecretsPreservesPasswordHash(t *testing.T) {
 	syncer := New(st, t.TempDir(), t.TempDir())
 
 	// Pre-existing user with a password hash.
-	if _, err := st.CreateUser("alice", "$2a$10$existinghash", "admin", "Alice", "a@x"); err != nil {
+	if _, err := st.CreateUser("alice", "$2a$10$existinghash", "manage", "Alice", "a@x"); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestApplyGlobalSidecar_NilSecretsPreservesPasswordHash(t *testing.T) {
 		Sidecar: &GlobalSidecar{
 			Version: Version,
 			Users: []UserEntry{
-				{Username: "alice", Role: "admin", DisplayName: "Alice Updated", Email: "a@x"},
+				{Username: "alice", Role: "manage", DisplayName: "Alice Updated", Email: "a@x"},
 			},
 		},
 		Secrets: nil,
@@ -192,17 +192,17 @@ func TestApplyGlobalSidecar_FullReplaceDeletesMissing(t *testing.T) {
 	if err := st.CreateWebhook(wh); err != nil {
 		t.Fatalf("create webhook: %v", err)
 	}
-	if _, err := st.CreateUser("stale-user", "$2a$10$h", "admin", "", ""); err != nil {
+	if _, err := st.CreateUser("stale-user", "$2a$10$h", "manage", "", ""); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := st.CreateUser("alice", "$2a$10$h", "admin", "", ""); err != nil {
+	if _, err := st.CreateUser("alice", "$2a$10$h", "manage", "", ""); err != nil {
 		t.Fatalf("create alice: %v", err)
 	}
 
 	loaded := &LoadedGlobal{
 		Sidecar: &GlobalSidecar{
 			Version: Version,
-			Users:   []UserEntry{{Username: "alice", Role: "admin"}},
+			Users:   []UserEntry{{Username: "alice", Role: "manage"}},
 		},
 		Secrets: &GlobalSecrets{Version: Version, Users: []UserSecretsEntry{{Username: "alice", PasswordHash: "$2a$10$h"}}},
 	}

@@ -45,6 +45,39 @@ type Syncer struct {
 
 	hookMu sync.RWMutex
 	hook   SidecarWriteHook
+
+	// selfWrites tracks the absolute path of sidecar files we just wrote
+	// ourselves, so the reconciler watcher can skip a redundant Apply that
+	// would otherwise race with in-flight DB mutations and revert state.
+	selfWriteMu sync.Mutex
+	selfWrites  map[string]time.Time
+}
+
+// MarkSelfWrite records that path was just written by the syncer itself.
+// IsSelfWrite returns true if path was self-written within the given window
+// (and consumes the entry so a manual edit immediately after would still
+// be honored).
+func (s *Syncer) MarkSelfWrite(path string) {
+	s.selfWriteMu.Lock()
+	if s.selfWrites == nil {
+		s.selfWrites = make(map[string]time.Time)
+	}
+	s.selfWrites[path] = time.Now()
+	s.selfWriteMu.Unlock()
+}
+
+func (s *Syncer) IsSelfWrite(path string, within time.Duration) bool {
+	s.selfWriteMu.Lock()
+	defer s.selfWriteMu.Unlock()
+	t, ok := s.selfWrites[path]
+	if !ok {
+		return false
+	}
+	if time.Since(t) > within {
+		delete(s.selfWrites, path)
+		return false
+	}
+	return true
 }
 
 // SetSidecarWriteHook installs a callback invoked after each successful sidecar
@@ -252,6 +285,7 @@ func (s *Syncer) WriteAppSidecar(slug string) error {
 		return fmt.Errorf("WriteAppSidecar %s: write secrets: %w", slug, err)
 	}
 	path := filepath.Join(s.appsDir, slug, appSidecarName)
+	s.MarkSelfWrite(path)
 	if err := atomicWriteYAMLMode(path, 0644, *sidecar); err != nil {
 		return err
 	}
@@ -477,6 +511,7 @@ func (s *Syncer) WriteGlobal() error {
 	}
 
 	path := filepath.Join(s.dataDir, globalSidecar)
+	s.MarkSelfWrite(path)
 	if err := atomicWriteYAMLMode(path, 0644, sidecar); err != nil {
 		return err
 	}
@@ -777,6 +812,7 @@ func (s *Syncer) WriteRedactedGlobal() error {
 	}
 
 	path := filepath.Join(s.appsDir, redactedGlobalSidecar)
+	s.MarkSelfWrite(path)
 	if err := atomicWriteYAML(path, sidecar); err != nil {
 		return err
 	}

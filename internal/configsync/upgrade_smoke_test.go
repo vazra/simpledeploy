@@ -20,7 +20,7 @@ func TestUpgradeSmoke_SeedThenReload(t *testing.T) {
 	syncer := New(st, appsDir, dataDir)
 
 	// 1 user.
-	if _, err := st.CreateUser("admin", "hash$abc", "admin", "Admin", "a@b.c"); err != nil {
+	if _, err := st.CreateUser("admin", "hash$abc", "manage", "Admin", "a@b.c"); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	// 1 webhook.

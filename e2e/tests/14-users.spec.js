@@ -203,6 +203,82 @@ test.describe('Users - Functional RBAC', () => {
     expect(res.status).toBe(401);
   });
 
+  test('manage user: granted app can mutate; ungranted app and platform endpoints denied', async () => {
+    // Re-login as super_admin to provision a manage user.
+    const adm = await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    expect(adm.ok).toBeTruthy();
+
+    const manageUser = {
+      username: 'e2erbac_manage',
+      password: 'ManagePass123!',
+      display_name: 'E2E RBAC Manage',
+      email: 'rbac-manage@test.local',
+      role: 'manage',
+    };
+
+    // Cleanup any leftover.
+    const list = await apiRequest('GET', '/api/users');
+    if (list.ok && Array.isArray(list.data)) {
+      const existing = list.data.find((u) => u.username === manageUser.username);
+      if (existing) await apiRequest('DELETE', `/api/users/${existing.id}`);
+    }
+
+    const created = await apiRequest('POST', '/api/users', manageUser);
+    expect(created.status).toBe(201);
+    expect(created.data.role).toBe('manage');
+    const mid = created.data.id;
+
+    // Grant access only to e2e-nginx.
+    const grant = await apiRequest('POST', `/api/users/${mid}/access`, { app_slug: 'e2e-nginx' });
+    expect(grant.ok).toBeTruthy();
+
+    // Login as the manage user and create an API key.
+    const mLogin = await apiLogin(manageUser.username, manageUser.password);
+    expect(mLogin.ok).toBeTruthy();
+    const keyRes = await apiRequest('POST', '/api/apikeys', { name: 'e2e-rbac-manage' });
+    expect(keyRes.status).toBe(201);
+    const mKey = keyRes.data.key;
+    const mKeyId = keyRes.data.id;
+
+    // Manage can read the granted app.
+    const readOk = await apiRequestWithKey('GET', '/api/apps/e2e-nginx', null, mKey);
+    expect(readOk.status).toBe(200);
+
+    // Manage can mutate the granted app (restart).
+    const restartOk = await apiRequestWithKey('POST', '/api/apps/e2e-nginx/restart', null, mKey);
+    expect([200, 202]).toContain(restartOk.status);
+
+    // Cannot read or mutate an ungranted app (404 from access middleware).
+    const otherRead = await apiRequestWithKey('GET', '/api/apps/e2e-multi', null, mKey);
+    expect(otherRead.status).toBe(404);
+    const otherRestart = await apiRequestWithKey('POST', '/api/apps/e2e-multi/restart', null, mKey);
+    expect(otherRestart.status).toBe(404);
+
+    // Cannot deploy a new app (super_admin only).
+    const deployRes = await apiRequestWithKey('POST', '/api/apps/deploy',
+      { name: 'should-not-exist', compose: 'services: {}\n' }, mKey);
+    expect(deployRes.status).toBe(403);
+
+    // Cannot delete an app.
+    const delApp = await apiRequestWithKey('DELETE', '/api/apps/e2e-nginx', null, mKey);
+    expect(delApp.status).toBe(403);
+
+    // Cannot list users.
+    const listUsers = await apiRequestWithKey('GET', '/api/users', null, mKey);
+    expect(listUsers.status).toBe(403);
+
+    // Cannot touch system endpoints.
+    const sysVac = await apiRequestWithKey('POST', '/api/system/vacuum', null, mKey);
+    expect(sysVac.status).toBe(403);
+    const regs = await apiRequestWithKey('GET', '/api/registries', null, mKey);
+    expect(regs.status).toBe(403);
+
+    // Cleanup: re-login as super_admin and delete the manage user (cascades key).
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    if (mKeyId) await apiRequest('DELETE', `/api/apikeys/${mKeyId}`);
+    await apiRequest('DELETE', `/api/users/${mid}`);
+  });
+
   test('cleanup: revoke app access, delete API key and viewer user', async () => {
     // Re-login as super_admin to delete the key and user
     const adm = await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);

@@ -14,10 +14,13 @@
   import { appTemplates } from '../lib/appTemplates.js'
   import { connection } from '../lib/stores/connection.svelte.js'
   import { formatBytes, formatTime, formatDate, timeAgo } from '../lib/format.js'
+  import { isSuperAdmin } from '../lib/auth.js'
 
   const featuredIds = ['nginx-static', 'gitea-postgres', 'uptime-kuma', 'vaultwarden', 'n8n-postgres', 'minio']
 
   let apps = $state([])
+  let me = $state(null)
+  let canDeploy = $derived(isSuperAdmin(me))
   let gitSyncStatus = $state(null)
   let cpuHistory = $state([])
   let memHistory = $state([])
@@ -52,14 +55,16 @@
     loading = true
     loadError = false
 
-    const [appsRes, metricsRes, histRes, rulesRes, dockerRes, gitRes] = await Promise.all([
+    const [appsRes, metricsRes, histRes, rulesRes, dockerRes, gitRes, meRes] = await Promise.all([
       api.listApps(),
       api.systemMetrics(timeRange),
       api.alertHistory(),
       api.listAlertRules(),
       api.dockerInfo(),
       api.gitStatus(),
+      api.getProfile(),
     ])
+    if (meRes?.data) me = meRes.data
     gitSyncStatus = gitRes.data || null
     if (dockerRes.data?.memory) hostMemory = dockerRes.data.memory
 
@@ -277,7 +282,7 @@
         <div class="flex flex-wrap items-center gap-2 mb-3">
           <h2 class="text-lg font-semibold text-text-primary tracking-tight flex-1 min-w-0">Applications</h2>
           <div class="flex items-center gap-2">
-            <Button size="sm" onclick={() => showDeployPanel = true}>Deploy App</Button>
+            {#if canDeploy}<Button size="sm" onclick={() => showDeployPanel = true}>Deploy App</Button>{/if}
             <select
               bind:value={filterStatus}
               class="text-xs bg-surface-2 border border-border/50 rounded-lg px-3 py-1.5 text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent/30"
@@ -333,15 +338,19 @@
               </svg>
             </div>
             <p class="text-text-primary font-medium mb-1">No apps deployed yet</p>
-            <p class="text-sm text-text-muted mb-4">Deploy your first app to get started</p>
-            <Button size="sm" onclick={() => showDeployPanel = true}>Deploy App</Button>
-            <div class="mt-8 text-left">
-              <QuickDeployStrip
-                templates={appTemplates}
-                {featuredIds}
-                onselect={(id) => { quickTemplateId = id; showDeployPanel = true }}
-              />
-            </div>
+            {#if canDeploy}
+              <p class="text-sm text-text-muted mb-4">Deploy your first app to get started</p>
+              <Button size="sm" onclick={() => showDeployPanel = true}>Deploy App</Button>
+              <div class="mt-8 text-left">
+                <QuickDeployStrip
+                  templates={appTemplates}
+                  {featuredIds}
+                  onselect={(id) => { quickTemplateId = id; showDeployPanel = true }}
+                />
+              </div>
+            {:else}
+              <p class="text-sm text-text-muted">Ask a super admin to deploy an app and grant you access.</p>
+            {/if}
           </div>
         {:else}
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -346,7 +346,7 @@ func TestPurgeApp_CascadesHistory(t *testing.T) {
 	}
 
 	// user + access
-	res, err := s.db.Exec(`INSERT INTO users (username, password_hash, role) VALUES ('u1','h','admin')`)
+	res, err := s.db.Exec(`INSERT INTO users (username, password_hash, role) VALUES ('u1','h','manage')`)
 	if err != nil {
 		t.Fatalf("insert user: %v", err)
 	}

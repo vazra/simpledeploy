@@ -89,7 +89,7 @@ func TestCreateUser(t *testing.T) {
 	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
 		"username": "newuser",
 		"password": "pass1234",
-		"role":     "admin",
+		"role": "manage",
 	}, cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -104,8 +104,8 @@ func TestCreateUser(t *testing.T) {
 	if resp["username"] != "newuser" {
 		t.Errorf("username = %q, want newuser", resp["username"])
 	}
-	if resp["role"] != "admin" {
-		t.Errorf("role = %q, want admin", resp["role"])
+	if resp["role"] != "manage" {
+		t.Errorf("role = %q, want manage", resp["role"])
 	}
 	if _, ok := resp["password_hash"]; ok {
 		t.Error("response must not include password_hash")
@@ -115,13 +115,13 @@ func TestCreateUser(t *testing.T) {
 func TestCreateUserForbidden(t *testing.T) {
 	srv, st, _ := setupUserTestServer(t)
 
-	// create an admin (non-super_admin) and log in as them
-	adminCookie := loginAs(t, srv, st, "regularadmin", "pass123", "admin")
+	// create a manage user (non-super_admin) and log in as them
+	adminCookie := loginAs(t, srv, st, "regularadmin", "pass123", "manage")
 
 	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
 		"username": "anotheruser",
 		"password": "pass1234",
-		"role":     "admin",
+		"role": "manage",
 	}, adminCookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -131,12 +131,44 @@ func TestCreateUserForbidden(t *testing.T) {
 	}
 }
 
+func TestCreateUserRejectsLegacyAdminRole(t *testing.T) {
+	srv, _, cookie := setupUserTestServer(t)
+
+	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
+		"username": "legacy",
+		"password": "pass1234",
+		"role":     "admin",
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateUserRejectsLegacyAdminRole(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+	hash, _ := auth.HashPassword("p")
+	target, err := st.CreateUser("targ", hash, "manage", "", "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	req := authedRequest(t, http.MethodPut, fmt.Sprintf("/api/users/%d", target.ID),
+		map[string]string{"role": "admin"}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestListUsers(t *testing.T) {
 	srv, st, cookie := setupUserTestServer(t)
 
 	// create a second user
 	hash, _ := auth.HashPassword("p")
-	if _, err := st.CreateUser("bob", hash, "admin", "", ""); err != nil {
+	if _, err := st.CreateUser("bob", hash, "manage", "", ""); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
@@ -165,7 +197,7 @@ func TestDeleteUser(t *testing.T) {
 	srv, st, cookie := setupUserTestServer(t)
 
 	hash, _ := auth.HashPassword("p")
-	created, err := st.CreateUser("todelete", hash, "admin", "", "")
+	created, err := st.CreateUser("todelete", hash, "manage", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -197,7 +229,7 @@ func TestGrantAppAccess(t *testing.T) {
 
 	// create target user
 	hash, _ := auth.HashPassword("p")
-	target, err := st.CreateUser("targetuser", hash, "admin", "", "")
+	target, err := st.CreateUser("targetuser", hash, "manage", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

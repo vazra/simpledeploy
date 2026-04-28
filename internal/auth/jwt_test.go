@@ -7,7 +7,7 @@ import (
 
 func TestJWTGenerateAndValidate(t *testing.T) {
 	mgr := NewJWTManager("supersecret", time.Hour)
-	token, err := mgr.Generate(42, "alice", "admin")
+	token, err := mgr.Generate(42, "alice", "manage")
 	if err != nil {
 		t.Fatalf("Generate error: %v", err)
 	}
@@ -25,8 +25,8 @@ func TestJWTGenerateAndValidate(t *testing.T) {
 	if claims.Username != "alice" {
 		t.Errorf("expected username alice, got %s", claims.Username)
 	}
-	if claims.Role != "admin" {
-		t.Errorf("expected role admin, got %s", claims.Role)
+	if claims.Role != "manage" {
+		t.Errorf("expected role manage, got %s", claims.Role)
 	}
 }
 

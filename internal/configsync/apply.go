@@ -48,12 +48,29 @@ func (s *Syncer) ApplyAppSidecar(slug string, loaded *LoadedApp) error {
 		whByName[w.Name] = w.ID
 	}
 
-	// Full-replace alert_rules. Rules pointing at unknown webhooks are
-	// dropped with a log line (not an error) so that one stale rule cannot
-	// block the entire reconcile.
-	if err := s.store.DeleteAlertRulesForApp(app.ID); err != nil {
-		return fmt.Errorf("ApplyAppSidecar %s: delete alert rules: %w", slug, err)
+	// Reconcile alert_rules by natural key (metric,operator,threshold,
+	// duration_sec,webhook_id). Existing rows whose key still matches an
+	// incoming rule keep their id (and their alert_history rows); rows not
+	// in the incoming set are deleted; new keys are created. Rules pointing
+	// at unknown webhooks are dropped with a log line.
+	existingRules, err := s.store.ListAlertRules(&app.ID)
+	if err != nil {
+		return fmt.Errorf("ApplyAppSidecar %s: list alert rules: %w", slug, err)
 	}
+	type ruleKey struct {
+		metric, op string
+		threshold  float64
+		dur        int
+		whID       int64
+	}
+	keyOf := func(r store.AlertRule) ruleKey {
+		return ruleKey{r.Metric, r.Operator, r.Threshold, r.DurationSec, r.WebhookID}
+	}
+	existingByKey := make(map[ruleKey]store.AlertRule, len(existingRules))
+	for _, r := range existingRules {
+		existingByKey[keyOf(r)] = r
+	}
+	keepIDs := make(map[int64]struct{}, len(data.AlertRules))
 	for i, r := range data.AlertRules {
 		var whID int64
 		if r.Webhook != "" {
@@ -63,6 +80,18 @@ func (s *Syncer) ApplyAppSidecar(slug string, loaded *LoadedApp) error {
 				continue
 			}
 			whID = id
+		}
+		k := ruleKey{r.Metric, r.Operator, r.Threshold, r.DurationSec, whID}
+		if prev, ok := existingByKey[k]; ok {
+			keepIDs[prev.ID] = struct{}{}
+			if prev.Enabled != r.Enabled {
+				updated := prev
+				updated.Enabled = r.Enabled
+				if err := s.store.UpdateAlertRule(&updated); err != nil {
+					return fmt.Errorf("ApplyAppSidecar %s: update alert rule: %w", slug, err)
+				}
+			}
+			continue
 		}
 		rule := &store.AlertRule{
 			AppID:       &app.ID,
@@ -76,20 +105,37 @@ func (s *Syncer) ApplyAppSidecar(slug string, loaded *LoadedApp) error {
 		if err := s.store.CreateAlertRule(rule); err != nil {
 			return fmt.Errorf("ApplyAppSidecar %s: create alert rule: %w", slug, err)
 		}
+		keepIDs[rule.ID] = struct{}{}
+	}
+	for _, prev := range existingRules {
+		if _, keep := keepIDs[prev.ID]; keep {
+			continue
+		}
+		if err := s.store.DeleteAlertRule(prev.ID); err != nil {
+			return fmt.Errorf("ApplyAppSidecar %s: delete alert rule: %w", slug, err)
+		}
 	}
 
-	// Full-replace backup_configs. Join secrets by UUID; missing entry =>
-	// empty target_config_enc (NULL/empty) so DR works without secrets file.
-	if err := s.store.DeleteBackupConfigsForApp(app.ID); err != nil {
-		return fmt.Errorf("ApplyAppSidecar %s: delete backup configs: %w", slug, err)
-	}
+	// Reconcile backup_configs by UUID: update existing rows in place,
+	// insert new ones, delete only those whose UUID is no longer present.
+	// Preserves backup_runs (FK ON DELETE CASCADE) across sidecar reapplies.
 	encByID := map[string]string{}
 	if loaded.Secrets != nil {
 		for _, e := range loaded.Secrets.BackupConfigs {
 			encByID[e.ID] = e.TargetConfigEnc
 		}
 	}
+	existingCfgs, err := s.store.ListBackupConfigs(&app.ID)
+	if err != nil {
+		return fmt.Errorf("ApplyAppSidecar %s: list backup configs: %w", slug, err)
+	}
+	existingByUUID := make(map[string]store.BackupConfig, len(existingCfgs))
+	for _, c := range existingCfgs {
+		existingByUUID[c.UUID] = c
+	}
+	incomingUUIDs := make(map[string]struct{}, len(data.BackupConfigs))
 	for _, b := range data.BackupConfigs {
+		incomingUUIDs[b.ID] = struct{}{}
 		cfg := &store.BackupConfig{
 			UUID:             b.ID,
 			AppID:            app.ID,
@@ -105,8 +151,30 @@ func (s *Syncer) ApplyAppSidecar(slug string, loaded *LoadedApp) error {
 			PostHooks:        b.PostHooks,
 			Paths:            b.Paths,
 		}
-		if err := s.store.CreateBackupConfig(cfg); err != nil {
-			return fmt.Errorf("ApplyAppSidecar %s: create backup config: %w", slug, err)
+		if prev, ok := existingByUUID[b.ID]; ok {
+			cfg.ID = prev.ID
+			// DR-safe: when the secrets sidecar lacks an entry for this
+			// UUID (e.g. a debounced write hasn't flushed yet), preserve
+			// the existing encrypted target_config_json instead of
+			// blanking it.
+			if cfg.TargetConfigJSON == "" {
+				cfg.TargetConfigJSON = prev.TargetConfigJSON
+			}
+			if err := s.store.UpdateBackupConfig(cfg); err != nil {
+				return fmt.Errorf("ApplyAppSidecar %s: update backup config: %w", slug, err)
+			}
+		} else {
+			if err := s.store.CreateBackupConfig(cfg); err != nil {
+				return fmt.Errorf("ApplyAppSidecar %s: create backup config: %w", slug, err)
+			}
+		}
+	}
+	for uuid, prev := range existingByUUID {
+		if _, keep := incomingUUIDs[uuid]; keep {
+			continue
+		}
+		if err := s.store.DeleteBackupConfig(prev.ID); err != nil {
+			return fmt.Errorf("ApplyAppSidecar %s: delete backup config: %w", slug, err)
 		}
 	}
 
