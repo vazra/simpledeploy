@@ -115,6 +115,8 @@ export function makeApiMock(overrides = {}) {
     systemSetBackupConfig: vi.fn(async () => ok({})),
     systemBackupRuns: vi.fn(async () => ok([])),
     getPublicHost: vi.fn(async () => ok({ public_host: '' })),
+    exportApp: vi.fn(async () => ok(new Blob(['zip'], { type: 'application/zip' }))),
+    importApp: vi.fn(async () => ok({ slug: 'imported', mode: 'new' })),
     setPublicHost: vi.fn(async () => ok({})),
   };
   return { ...base, ...overrides };
