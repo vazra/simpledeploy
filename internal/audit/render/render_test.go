@@ -660,6 +660,38 @@ func TestLifecyclePurgedNoCount(t *testing.T) {
 	}
 }
 
+// --- lifecycle exported/imported ---
+
+func TestLifecycleExported(t *testing.T) {
+	s, target := Render("lifecycle", "exported", nil, []byte(`{"name":"myapp"}`))
+	if !strings.Contains(s, "myapp") || !strings.Contains(s, "exported") {
+		t.Errorf("unexpected summary: %q", s)
+	}
+	if target != "myapp" {
+		t.Errorf("target=%q", target)
+	}
+}
+
+func TestLifecycleImportedWithMode(t *testing.T) {
+	s, target := Render("lifecycle", "imported", nil, []byte(`{"name":"myapp","mode":"new"}`))
+	if !strings.Contains(s, "myapp") || !strings.Contains(s, "imported") {
+		t.Errorf("unexpected summary: %q", s)
+	}
+	if !strings.Contains(s, "new") {
+		t.Errorf("expected mode in summary: %q", s)
+	}
+	if target != "myapp" {
+		t.Errorf("target=%q", target)
+	}
+}
+
+func TestLifecycleImportedNoMode(t *testing.T) {
+	s, _ := Render("lifecycle", "imported", nil, []byte(`{"name":"myapp"}`))
+	if !strings.Contains(s, "myapp") || !strings.Contains(s, "imported") {
+		t.Errorf("unexpected summary: %q", s)
+	}
+}
+
 // --- compose version_removed ---
 
 func TestComposeVersionRemoved(t *testing.T) {

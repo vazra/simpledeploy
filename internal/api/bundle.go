@@ -35,11 +35,13 @@ func (s *Server) handleExportApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	exportedAfter, _ := json.Marshal(map[string]any{"name": app.Slug})
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		AppID:    &app.ID,
 		AppSlug:  app.Slug,
 		Category: "lifecycle",
 		Action:   "exported",
+		After:    exportedAfter,
 	})
 
 	w.Header().Set("Content-Type", "application/zip")
@@ -211,11 +213,13 @@ func (s *Server) handleImportApp(w http.ResponseWriter, r *http.Request) {
 	} else if app, err := s.store.GetAppBySlug(slug); err == nil {
 		appID = &app.ID
 	}
+	importedAfter, _ := json.Marshal(map[string]any{"name": slug, "mode": mode})
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		AppID:    appID,
 		AppSlug:  slug,
 		Category: "lifecycle",
 		Action:   "imported",
+		After:    importedAfter,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
