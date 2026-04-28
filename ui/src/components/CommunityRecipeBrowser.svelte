@@ -68,7 +68,7 @@
 
 {#if open}
   <div class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" role="dialog" aria-label="Browse community recipes">
-    <div class="bg-bg-elevated rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col border border-border/50">
+    <div class="bg-surface-2 rounded-xl shadow-xl max-w-4xl w-full max-h-[85vh] overflow-hidden flex flex-col border border-border/50">
       <header class="flex items-center justify-between px-5 py-3 border-b border-border/50">
         <h2 class="text-lg font-semibold text-text-primary">Community Recipes</h2>
         <button class="text-text-muted hover:text-text-primary" onclick={close} aria-label="Close">✕</button>
