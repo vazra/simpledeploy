@@ -2,6 +2,7 @@
   import { push } from 'svelte-spa-router'
   import yaml from 'js-yaml'
   import { api } from '../lib/api.js'
+  import { toasts } from '../lib/stores/toast.js'
   import ConfigTab from './ConfigTab.svelte'
   import EnvEditor from './EnvEditor.svelte'
   import Button from './Button.svelte'
@@ -51,6 +52,30 @@
   let showDanger = $state(false)
   let showDeleteModal = $state(false)
   let deleting = $state(false)
+
+  // Export
+  let exporting = $state(false)
+  async function exportConfig() {
+    if (exporting) return
+    exporting = true
+    const res = await api.exportApp(slug)
+    exporting = false
+    if (res.error) {
+      toasts.error(res.error)
+      return
+    }
+    try {
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(res.data)
+      a.download = `${slug}.simpledeploy.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      toasts.error(e.message || 'Download failed')
+    }
+  }
 
 
   // Endpoints from app response
@@ -341,6 +366,15 @@
   {#if composeMode !== 'yaml'}
     <EnvEditor {slug} />
   {/if}
+
+  <!-- Section 4b: Export config -->
+  <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 flex items-center justify-between gap-4">
+    <div>
+      <h3 class="text-sm font-medium text-text-primary">Export config</h3>
+      <p class="text-xs text-text-muted mt-0.5">Download a portable bundle (compose + endpoints). Secrets and env values are not included.</p>
+    </div>
+    <Button size="sm" variant="secondary" onclick={exportConfig} loading={exporting}>Export</Button>
+  </div>
 
   <!-- Section 5: Advanced (collapsed) -->
   <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden">

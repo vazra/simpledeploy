@@ -5,6 +5,7 @@
   import YamlEditor from './YamlEditor.svelte'
   import VisualEditor from './VisualEditor.svelte'
   import TemplatePicker from './TemplatePicker.svelte'
+  import ImportAppModal from './ImportAppModal.svelte'
   import { appTemplates, categories, applyVars, applyAccessMode, suggestName } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
 
@@ -422,6 +423,14 @@
   }
 
   let confirmClose = $state(false)
+  let importOpen = $state(false)
+
+  function handleImported({ slug }) {
+    importOpen = false
+    onComplete()
+    onAppsChanged()
+    if (slug) window.location.hash = `#/apps/${slug}`
+  }
 
   function handleClose() {
     if (step === 3 && deployStatus === 'deploying') {
@@ -515,6 +524,21 @@
                 <p class="text-xs text-text-muted">Use the visual builder to add services, ports, env vars, and volumes step by step.</p>
               </button>
             </div>
+
+            <button
+              type="button"
+              onclick={() => importOpen = true}
+              data-testid="wizard-import-btn"
+              class="text-left bg-surface-3/50 border border-border/30 rounded-lg px-5 py-4 hover:border-accent/50 transition-colors flex flex-col gap-2 sm:col-span-2"
+            >
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 15v4a2 2 0 002 2h14a2 2 0 002-2v-4M17 8l-5-5-5 5M12 3v12" />
+                </svg>
+                <span class="text-sm font-semibold text-text-primary">Import from file</span>
+              </div>
+              <p class="text-xs text-text-muted">Restore an app from a SimpleDeploy bundle (.zip) exported from another instance.</p>
+            </button>
 
             <input
               id="wizard-start-upload"
@@ -832,6 +856,8 @@
     </div>
   </div>
 {/if}
+
+<ImportAppModal open={importOpen} onclose={() => importOpen = false} onImported={handleImported} />
 
 <!-- Close confirmation during deploy -->
 {#if confirmClose}
