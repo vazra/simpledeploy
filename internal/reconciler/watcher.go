@@ -147,6 +147,15 @@ func (r *Reconciler) Watch(ctx context.Context) error {
 				slug = filepath.Base(parent)
 			}
 
+			// Sidecar writes that originated from configsync itself
+			// (e.g. an API mutation -> debounced WriteAppSidecar) are
+			// already in sync with the DB; re-applying them races with
+			// in-flight DB mutations and reverts state. Skip events for
+			// self-writes within a short window.
+			if (isAppSidecar || isGlobalSidecar) && r.syncer != nil && r.syncer.IsSelfWrite(path, 5*time.Second) {
+				continue
+			}
+
 			if isAppSidecar && slug != "" {
 				mu.Lock()
 				pendingSlugs[slug] = struct{}{}

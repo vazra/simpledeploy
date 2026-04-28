@@ -199,9 +199,18 @@ test.describe('Deploy - Functional', () => {
   });
 
   test('proxy routes HTTP traffic for nginx-test.local', async () => {
-    const res = await fetchViaProxy('nginx-test.local', '/');
+    // Caddy reload after deploy is async; poll until the route is live.
+    const deadline = Date.now() + 30_000;
+    let res, body = '';
+    while (Date.now() < deadline) {
+      res = await fetchViaProxy('nginx-test.local', '/');
+      if (res.status === 200) {
+        body = await res.text();
+        if (body.includes('Welcome to nginx')) break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
     expect(res.status).toBe(200);
-    const body = await res.text();
     expect(body).toContain('Welcome to nginx');
 
     const missing = await fetchViaProxy('nonexistent.local', '/');
