@@ -219,10 +219,13 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load app state before removal for audit before-snapshot. When the app
-	// row is missing (legacy / dir-only state) we proceed with dir cleanup.
+	// row is missing the app may still have a dir on disk (legacy / dir-only)
+	// so we still proceed with dir cleanup, but skip the deployer + DB purge.
 	var beforeJSON []byte
+	appExists := false
 	if s.store != nil {
 		if app, err := s.store.GetAppBySlug(slug); err == nil {
+			appExists = true
 			if app.ArchivedAt.Valid {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
@@ -236,6 +239,28 @@ func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
 				"status": app.Status,
 			})
 		}
+	}
+
+	// If the app row doesn't exist, return 404 early. There is no DB state
+	// to purge and Teardown/PurgeApp would error on a missing slug. Dir
+	// cleanup below still runs to handle legacy dir-only state.
+	if !appExists {
+		appDir := filepath.Join(s.appsDir, slug)
+		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+			http.Error(w, "app not found", http.StatusNotFound)
+			return
+		}
+		// Dir exists without DB row: best-effort cleanup of the dir + sidecar.
+		if s.cs != nil {
+			_ = s.cs.DeleteAppSidecar(slug)
+			_ = s.cs.DeleteTombstone(slug)
+		}
+		if err := os.RemoveAll(appDir); err != nil {
+			http.Error(w, "failed to remove app directory", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
 	}
 
 	if s.reconciler != nil {
