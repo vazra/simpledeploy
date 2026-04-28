@@ -15,6 +15,7 @@
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
   import { connection } from '../lib/stores/connection.svelte.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
   import { formatBytes } from '../lib/format.js'
   import { canMutateApp, isSuperAdmin } from '../lib/auth.js'
 
@@ -86,6 +87,7 @@
   }
 
   const unsubReconnect = connection.onReconnect(() => loadApp())
+  let unsubRealtime = null
   onMount(() => {
     loadApp()
     const hash = window.location.hash
@@ -93,8 +95,9 @@
     if (tabMatch && tabs.includes(tabMatch[1])) {
       activeTab = tabMatch[1]
     }
+    unsubRealtime = realtime.register(`app:${slug}`, loadApp)
   })
-  onDestroy(() => { unsubReconnect(); stopPolling() })
+  onDestroy(() => { unsubReconnect(); stopPolling(); if (unsubRealtime) unsubRealtime() })
 
   async function loadApp() {
     const [appRes, meRes] = await Promise.all([

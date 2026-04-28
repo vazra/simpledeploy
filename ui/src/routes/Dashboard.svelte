@@ -13,6 +13,7 @@
   import { api } from '../lib/api.js'
   import { appTemplates } from '../lib/appTemplates.js'
   import { connection } from '../lib/stores/connection.svelte.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
   import { formatBytes, formatTime, formatDate, timeAgo } from '../lib/format.js'
   import { isSuperAdmin } from '../lib/auth.js'
 
@@ -48,7 +49,12 @@
   let quickTemplateId = $state(null)
 
   const unsubReconnect = connection.onReconnect(() => loadDashboard())
-  onMount(loadDashboard)
+  onMount(() => {
+    loadDashboard()
+    const offApps = realtime.register('global:apps', loadDashboard)
+    const offAudit = realtime.register('global:audit', loadDashboard)
+    return () => { offApps(); offAudit() }
+  })
   onDestroy(unsubReconnect)
 
   async function loadDashboard() {

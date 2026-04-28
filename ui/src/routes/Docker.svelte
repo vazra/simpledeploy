@@ -6,6 +6,7 @@
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
   import { toasts } from '../lib/stores/toast.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
   import { formatBytes } from '../lib/format.js'
 
   let activeTab = $state('cleanup')
@@ -36,9 +37,16 @@
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
+  function refreshActiveTab() {
+    loadDockerInfo()
+    if (activeTab === 'cleanup') loadCleanup()
+    else if (activeTab === 'images') loadImages()
+    else if (activeTab === 'netsvols') loadNetsVols()
+  }
   onMount(() => {
     loadDockerInfo()
     loadCleanup()
+    return realtime.register('global:docker', refreshActiveTab)
   })
 
   async function loadDockerInfo() {

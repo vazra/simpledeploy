@@ -5,6 +5,7 @@
   import Skeleton from '../components/Skeleton.svelte'
   import FormModal from '../components/FormModal.svelte'
   import { api } from '../lib/api.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
 
   let status = $state(null)
   let loading = $state(true)
@@ -204,14 +205,16 @@
     }
   }
 
+  let unsubGitSync = null
   onMount(() => {
     loadConfig()
     load()
-    interval = setInterval(load, 15000)
+    unsubGitSync = realtime.register('global:settings', () => { loadConfig(); load() })
   })
 
   onDestroy(() => {
     if (interval) clearInterval(interval)
+    if (unsubGitSync) unsubGitSync()
   })
 </script>
 

@@ -7,6 +7,7 @@
   import Modal from '../components/Modal.svelte'
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
 
   let users = $state([])
   let keys = $state([])
@@ -69,7 +70,10 @@
     return name.slice(0, 2).toUpperCase()
   }
 
-  onMount(loadAll)
+  onMount(() => {
+    loadAll()
+    return realtime.register('global:users', loadAll)
+  })
 
   async function loadAll() {
     loading = true

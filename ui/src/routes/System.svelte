@@ -6,6 +6,7 @@
   import SystemAuditTab from '../components/SystemAuditTab.svelte'
   import { api } from '../lib/api.js'
   import { toasts } from '../lib/stores/toast.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
   import { formatBytes } from '../lib/format.js'
 
   let activeTab = $state('overview')
@@ -50,6 +51,7 @@
       if (tab) switchTab(tab)
     }
     Promise.all([loadInfo(), loadBreakdown(), loadCurrentUser()])
+    return realtime.register('global:settings', () => { loadInfo() })
   })
 
   async function loadCurrentUser() {

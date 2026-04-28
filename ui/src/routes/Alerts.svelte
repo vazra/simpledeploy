@@ -8,6 +8,7 @@
   import FormModal from '../components/FormModal.svelte'
   import { api } from '../lib/api.js'
   import { timeAgo } from '../lib/format.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
 
   let webhooks = $state([])
   let rules = $state([])
@@ -178,7 +179,10 @@
   }
 
 
-  onMount(loadAll)
+  onMount(() => {
+    loadAll()
+    return realtime.register('global:alerts', loadAll)
+  })
 
   async function loadAll() {
     loading = true

@@ -5,6 +5,7 @@
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
   import { push } from 'svelte-spa-router'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
 
   let loading = $state(true)
   let saving = $state(false)
@@ -21,7 +22,10 @@
   let confirmPw = $state('')
   let pwError = $state('')
 
-  onMount(loadProfile)
+  onMount(() => {
+    loadProfile()
+    return realtime.register('global:settings', loadProfile)
+  })
 
   async function loadProfile() {
     loading = true

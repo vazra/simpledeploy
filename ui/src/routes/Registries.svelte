@@ -5,6 +5,7 @@
   import SlidePanel from '../components/SlidePanel.svelte'
   import Skeleton from '../components/Skeleton.svelte'
   import { api } from '../lib/api.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
 
   let registries = $state([])
   let loading = $state(true)
@@ -15,7 +16,10 @@
   let rUsername = $state('')
   let rPassword = $state('')
 
-  onMount(loadRegistries)
+  onMount(() => {
+    loadRegistries()
+    return realtime.register('global:registries', loadRegistries)
+  })
 
   async function loadRegistries() {
     loading = true

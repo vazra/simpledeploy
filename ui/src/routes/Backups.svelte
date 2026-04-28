@@ -5,13 +5,19 @@
   import Skeleton from '../components/Skeleton.svelte'
   import BackupHealthCard from '../components/BackupHealthCard.svelte'
   import { api } from '../lib/api.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
 
   let apps = $state([])
   let recentRuns = $state([])
   let loading = $state(true)
   let statusFilter = $state('all')
 
-  onMount(loadSummary)
+  onMount(() => {
+    loadSummary()
+    const offB = realtime.register('global:backups', loadSummary)
+    const offA = realtime.register('global:apps', loadSummary)
+    return () => { offB(); offA() }
+  })
 
   async function loadSummary() {
     const res = await api.backupSummary()
