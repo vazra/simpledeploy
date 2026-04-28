@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/svelte';
+import { render, fireEvent } from '@testing-library/svelte';
 
 vi.mock('../../lib/api.js', async () => {
   const { makeApiMock } = await import('../../test-mocks/api.js');
@@ -32,5 +32,24 @@ describe('SettingsTab (smoke)', () => {
       onAppUpdated: () => {},
     });
     expect(container.textContent).toMatch(/Danger|Advanced|Remove/i);
+  });
+
+  it('expands Advanced section without throwing when ComposePath is set', async () => {
+    const { getByRole, container } = render(SettingsTab, {
+      slug: 'foo',
+      app: {
+        Name: 'foo',
+        Slug: 'foo',
+        Labels: {},
+        ComposePath: '/srv/apps/foo/docker-compose.yml',
+        CreatedAt: '2024-01-01T00:00:00Z',
+      },
+      services: [],
+      onAppUpdated: () => {},
+    });
+    const btn = getByRole('button', { name: /Advanced/i });
+    await fireEvent.click(btn);
+    expect(container.textContent).toMatch(/IP Allowlist/);
+    expect(container.textContent).toMatch(/\.env/);
   });
 });

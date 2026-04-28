@@ -394,7 +394,7 @@
             </div>
             <div class="flex gap-3">
               <span class="text-xs text-text-muted w-24 shrink-0">Env File</span>
-              <span class="text-xs font-mono text-text-primary break-all">{app?.ComposePath ? app.ComposeFile.replace(/[^/]+$/, '.env') : '-'}</span>
+              <span class="text-xs font-mono text-text-primary break-all">{app?.ComposePath ? app.ComposePath.replace(/[^/]+$/, '.env') : '-'}</span>
             </div>
             <div class="flex gap-3">
               <span class="text-xs text-text-muted w-24 shrink-0">Created</span>
