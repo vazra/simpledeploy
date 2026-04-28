@@ -4,7 +4,15 @@ import { tick } from 'svelte';
 
 vi.mock('../../lib/api.js', async () => {
   const { makeApiMock } = await import('../../test-mocks/api.js');
-  return { api: makeApiMock() };
+  return {
+    api: makeApiMock({
+      getProfile: vi.fn(async () => ({
+        data: { username: 'admin', display_name: 'Admin', role: 'super_admin', app_access: [] },
+        error: null,
+        status: 200,
+      })),
+    }),
+  };
 });
 
 import Sidebar from '../Sidebar.svelte';
@@ -17,8 +25,10 @@ describe('Sidebar', () => {
     window.location.hash = '#/';
   });
 
-  it('renders all primary nav items', () => {
-    const { getByText } = render(Sidebar);
+  it('renders all primary nav items for super_admin', async () => {
+    const { getByText, findByText } = render(Sidebar);
+    // Wait for async profile load to populate role-gated items.
+    await findByText('Users');
     for (const label of ['Dashboard', 'Alerts', 'Backups', 'Users', 'Registries', 'Docker', 'System']) {
       expect(getByText(label)).toBeInTheDocument();
     }
@@ -42,6 +52,25 @@ describe('Sidebar', () => {
     sidebarExpanded.set(false);
     const { getByText } = render(Sidebar, { forceExpanded: true });
     expect(getByText('SimpleDeploy')).toBeInTheDocument();
+  });
+
+  it('hides super-admin-only nav for manage role', async () => {
+    // Override the mocked profile to return a manage user.
+    const apiModule = await import('../../lib/api.js');
+    apiModule.api.getProfile = vi.fn(async () => ({
+      data: { username: 'mgr', role: 'manage', app_access: ['x'] },
+      error: null,
+      status: 200,
+    }));
+    const { findByText, queryByText } = render(Sidebar);
+    await findByText('Dashboard');
+    // Allow microtasks to flush profile load.
+    await tick();
+    await tick();
+    expect(queryByText('Users')).toBeNull();
+    expect(queryByText('Registries')).toBeNull();
+    expect(queryByText('Docker')).toBeNull();
+    expect(queryByText('System')).toBeNull();
   });
 
   it('updates active link on hashchange', async () => {

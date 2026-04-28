@@ -50,7 +50,7 @@ func TestAuthMiddlewareNoAuth(t *testing.T) {
 func TestAuthMiddlewareValidJWT(t *testing.T) {
 	srv, _ := newMiddlewareTestServer(t)
 
-	token, err := srv.jwt.Generate(1, "admin", "super_admin")
+	token, err := srv.jwt.Generate(1, "manage", "super_admin")
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestAuthMiddlewareValidAPIKey(t *testing.T) {
 	srv, s := newMiddlewareTestServer(t)
 	srv.SetMasterSecret("test-master-secret")
 
-	user, err := s.CreateUser("bob", "hash", "admin", "", "")
+	user, err := s.CreateUser("bob", "hash", "manage", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAuthMiddlewareValidAPIKey(t *testing.T) {
 	if captured == nil {
 		t.Fatal("auth user not set in context")
 	}
-	if captured.Username != "bob" || captured.Role != "admin" {
+	if captured.Username != "bob" || captured.Role != "manage" {
 		t.Errorf("auth user = %+v, want {bob admin}", captured)
 	}
 }
@@ -150,7 +150,7 @@ func TestAppAccessSuperAdmin(t *testing.T) {
 func TestAppAccessAuthorizedUser(t *testing.T) {
 	srv, s := newMiddlewareTestServer(t)
 
-	user, err := s.CreateUser("carol", "hash", "admin", "", "")
+	user, err := s.CreateUser("carol", "hash", "manage", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestAppAccessAuthorizedUser(t *testing.T) {
 
 	// Simulate a request that has {slug} set via PathValue - use the full route
 	req := httptest.NewRequest(http.MethodGet, "/api/apps/myapp", nil)
-	req = setAuthUser(req, &AuthUser{ID: user.ID, Username: "carol", Role: "admin"})
+	req = setAuthUser(req, &AuthUser{ID: user.ID, Username: "carol", Role: "manage"})
 
 	// We need PathValue to work, so register through the mux
 	mux := http.NewServeMux()
@@ -185,7 +185,7 @@ func TestAuditCtxFromAuth(t *testing.T) {
 	t.Run("cookie/JWT sets source=ui", func(t *testing.T) {
 		srv, _ := newMiddlewareTestServer(t)
 
-		token, err := srv.jwt.Generate(1, "admin", "super_admin")
+		token, err := srv.jwt.Generate(1, "manage", "super_admin")
 		if err != nil {
 			t.Fatalf("generate token: %v", err)
 		}
@@ -223,7 +223,7 @@ func TestAuditCtxFromAuth(t *testing.T) {
 		srv, s := newMiddlewareTestServer(t)
 		srv.SetMasterSecret("test-master-secret")
 
-		user, err := s.CreateUser("eve", "hash", "admin", "", "")
+		user, err := s.CreateUser("eve", "hash", "manage", "", "")
 		if err != nil {
 			t.Fatalf("create user: %v", err)
 		}
@@ -266,10 +266,51 @@ func TestAuditCtxFromAuth(t *testing.T) {
 	})
 }
 
+func TestMutatingAppMiddleware(t *testing.T) {
+	srv, s := newMiddlewareTestServer(t)
+
+	if err := s.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", ComposePath: "/tmp/1.yml", Status: "running"}, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+	app, _ := s.GetAppBySlug("myapp")
+	manageGranted, _ := s.CreateUser("mgr1", "h", "manage", "", "")
+	if err := s.GrantAppAccess(manageGranted.ID, app.ID); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	manageNoGrant, _ := s.CreateUser("mgr2", "h", "manage", "", "")
+	viewer, _ := s.CreateUser("vw1", "h", "viewer", "", "")
+	_ = s.GrantAppAccess(viewer.ID, app.ID)
+
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/apps/{slug}/restart", srv.mutatingAppMiddleware(okHandler))
+
+	cases := []struct {
+		name string
+		user *AuthUser
+		want int
+	}{
+		{"super_admin always passes", &AuthUser{ID: 999, Username: "root", Role: "super_admin"}, 200},
+		{"manage with grant passes", &AuthUser{ID: manageGranted.ID, Username: "mgr1", Role: "manage"}, 200},
+		{"manage without grant 404", &AuthUser{ID: manageNoGrant.ID, Username: "mgr2", Role: "manage"}, 404},
+		{"viewer forbidden 403", &AuthUser{ID: viewer.ID, Username: "vw1", Role: "viewer"}, 403},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/apps/myapp/restart", nil)
+			req = setAuthUser(req, tc.user)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Errorf("status = %d, want %d", w.Code, tc.want)
+			}
+		})
+	}
+}
+
 func TestAppAccessUnauthorizedUser(t *testing.T) {
 	srv, s := newMiddlewareTestServer(t)
 
-	user, err := s.CreateUser("dave", "hash", "admin", "", "")
+	user, err := s.CreateUser("dave", "hash", "manage", "", "")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -279,7 +320,7 @@ func TestAppAccessUnauthorizedUser(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/apps/secret", nil)
-	req = setAuthUser(req, &AuthUser{ID: user.ID, Username: "dave", Role: "admin"})
+	req = setAuthUser(req, &AuthUser{ID: user.ID, Username: "dave", Role: "manage"})
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /api/apps/{slug}", srv.appAccessMiddleware(okHandler))

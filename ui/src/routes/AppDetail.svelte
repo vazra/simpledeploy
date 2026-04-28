@@ -16,6 +16,7 @@
   import { push } from 'svelte-spa-router'
   import { connection } from '../lib/stores/connection.svelte.js'
   import { formatBytes } from '../lib/format.js'
+  import { canMutateApp, isSuperAdmin } from '../lib/auth.js'
 
   let { params } = $props()
   let slug = $derived(params.slug)
@@ -24,6 +25,8 @@
   let activeTab = $state('overview')
   let loading = $state(true)
   let services = $state([])
+  let me = $state(null)
+  let canMutate = $derived(canMutateApp(me, slug))
 
   // Metrics state
   let metricsRange = $state('1h')
@@ -94,9 +97,10 @@
   onDestroy(() => { unsubReconnect(); stopPolling() })
 
   async function loadApp() {
-    const [appRes] = await Promise.all([
+    const [appRes, meRes] = await Promise.all([
       api.getApp(slug),
       loadServices(),
+      api.getProfile().then(r => { if (r.data) me = r.data; return r }),
     ])
     if (appRes.error) { push('/'); return }
     app = appRes.data
@@ -324,6 +328,7 @@
           {/each}
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          {#if canMutate}
           {#if app.Status === 'running' || app.Status === 'degraded' || app.Status === 'unstable'}
             <Button variant="secondary" size="sm" onclick={() => showRestartModal = true} loading={actionLoading === 'restart'}>Restart</Button>
             <Button variant="secondary" size="sm" onclick={handleStop} loading={actionLoading === 'stop'}>Stop</Button>
@@ -331,7 +336,9 @@
             <Button variant="primary" size="sm" onclick={handleStart} loading={actionLoading === 'start'}>Start</Button>
           {/if}
           <Button variant="secondary" size="sm" onclick={handlePull} loading={actionLoading === 'pull'}>Pull & Update</Button>
+          {/if}
           <!-- More dropdown -->
+          {#if canMutate}
           <div class="relative">
             <Button variant="ghost" size="sm" onclick={() => showMoreMenu = !showMoreMenu}>
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -348,6 +355,7 @@
               </div>
             {/if}
           </div>
+          {/if}
         </div>
       </div>
       {#if app.Domain}

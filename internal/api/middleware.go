@@ -132,6 +132,38 @@ func (s *Server) checkAppAccessByID(w http.ResponseWriter, r *http.Request, appI
 	return true
 }
 
+// mutatingAppMiddleware requires the caller to be super_admin or manage with
+// access to the app identified by {slug}. Viewers receive 403; users without
+// access (or no slug match) receive 404 to match appAccessMiddleware semantics.
+func (s *Server) mutatingAppMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := GetAuthUser(r)
+		if user == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if user.Role == "super_admin" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if user.Role != "manage" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		slug := r.PathValue("slug")
+		if slug == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		hasAccess, _ := s.store.HasAppAccess(user.ID, slug)
+		if !hasAccess {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // rateLimitMiddleware applies the server-level rate limiter to a handler.
 // Used for unauthenticated endpoints that should still be rate-limited (e.g. git webhook).
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {

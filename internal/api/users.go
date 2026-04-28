@@ -43,8 +43,13 @@ func toUserResponse(u *store.User) userResponse {
 	return userResponse{ID: u.ID, Username: u.Username, Role: u.Role, DisplayName: u.DisplayName, Email: u.Email, CreatedAt: u.CreatedAt}
 }
 
+// validRole returns true if role is an accepted role value.
+func validRole(role string) bool {
+	return role == "super_admin" || role == "manage" || role == "viewer"
+}
+
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
-	if requireRole(w, r, "super_admin", "admin") == nil {
+	if requireRole(w, r, "super_admin") == nil {
 		return
 	}
 	users, err := s.store.ListUsers()
@@ -71,8 +76,18 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	// Include the user's per-app access slugs so the UI can compute
+	// canMutateApp/canViewApp without an extra round trip.
+	slugs, _ := s.store.GetUserAppSlugs(authUser.ID)
+	if slugs == nil {
+		slugs = []string{}
+	}
+	resp := struct {
+		userResponse
+		AppAccess []string `json:"app_access"`
+	}{toUserResponse(user), slugs}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(toUserResponse(user))
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +179,13 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
 	}
+	if body.Role == "" {
+		body.Role = "viewer"
+	}
+	if !validRole(body.Role) {
+		http.Error(w, "invalid role: must be super_admin, manage, or viewer", http.StatusBadRequest)
+		return
+	}
 	if body.Email != "" {
 		if taken, _ := s.store.EmailTaken(body.Email, 0); taken {
 			http.Error(w, "email already in use", http.StatusConflict)
@@ -227,6 +249,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Role != "" {
+		if !validRole(body.Role) {
+			http.Error(w, "invalid role: must be super_admin, manage, or viewer", http.StatusBadRequest)
+			return
+		}
 		if caller.ID == id && body.Role != "super_admin" {
 			http.Error(w, "cannot change your own role", http.StatusBadRequest)
 			return

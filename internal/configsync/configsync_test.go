@@ -133,7 +133,7 @@ func TestRoundtripGlobalSidecar(t *testing.T) {
 	syncer := New(st, appsDir, dataDir)
 
 	// Seed user.
-	u, err := st.CreateUser("alice", "$2a$10$fakehash", "admin", "Alice", "alice@example.com")
+	u, err := st.CreateUser("alice", "$2a$10$fakehash", "manage", "Alice", "alice@example.com")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestRoundtripGlobalSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list users: %v", err)
 	}
-	if len(users) != 1 || users[0].Username != "alice" || users[0].Role != "admin" {
+	if len(users) != 1 || users[0].Username != "alice" || users[0].Role != "manage" {
 		t.Errorf("users after import: %+v", users)
 	}
 	restored, err := st.GetUserByUsername("alice")
@@ -571,7 +571,7 @@ func TestImportGlobalIfEmpty_empty(t *testing.T) {
 	// Write global sidecar with one user; secrets in sibling secrets.yml.
 	sidecar := GlobalSidecar{
 		Version: Version,
-		Users:   []UserEntry{{Username: "admin", Role: "admin"}},
+		Users:   []UserEntry{{Username: "admin", Role: "manage"}},
 	}
 	if err := atomicWriteYAMLMode(filepath.Join(dataDir, globalSidecar), 0644, sidecar); err != nil {
 		t.Fatalf("write sidecar: %v", err)
@@ -607,14 +607,14 @@ func TestImportGlobalIfEmpty_nonempty(t *testing.T) {
 	syncer := New(st, appsDir, dataDir)
 
 	// Pre-seed DB with a user.
-	if err := st.UpsertUserByUsername(&store.User{Username: "existing", PasswordHash: "h", Role: "admin"}); err != nil {
+	if err := st.UpsertUserByUsername(&store.User{Username: "existing", PasswordHash: "h", Role: "manage"}); err != nil {
 		t.Fatalf("upsert user: %v", err)
 	}
 
 	// Write sidecar with a different user.
 	sidecar := GlobalSidecar{
 		Version: Version,
-		Users:   []UserEntry{{Username: "recovered", Role: "admin"}},
+		Users:   []UserEntry{{Username: "recovered", Role: "manage"}},
 	}
 	if err := atomicWriteYAMLMode(filepath.Join(dataDir, globalSidecar), 0644, sidecar); err != nil {
 		t.Fatalf("write sidecar: %v", err)
@@ -933,7 +933,7 @@ func TestImportRedactedPreservesSecrets(t *testing.T) {
 	syncer := New(st, appsDir, dataDir)
 
 	origHash := "$2a$12$originalHashForBob"
-	if _, err := st.CreateUser("bob", origHash, "admin", "Bob", "bob@example.com"); err != nil {
+	if _, err := st.CreateUser("bob", origHash, "manage", "Bob", "bob@example.com"); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	reg, err := st.CreateRegistry("BobReg", "reg.example.com", "orig-user-enc", "orig-pass-enc")
@@ -1031,7 +1031,7 @@ func TestImportRedactedNoDeletes(t *testing.T) {
 	syncer := New(st, appsDir, dataDir)
 
 	// Pre-existing user not in redacted file.
-	if _, err := st.CreateUser("alice", "$2a$12$hash", "admin", "", ""); err != nil {
+	if _, err := st.CreateUser("alice", "$2a$12$hash", "manage", "", ""); err != nil {
 		t.Fatalf("create alice: %v", err)
 	}
 
@@ -1061,7 +1061,7 @@ func TestDebouncedGlobalWritesBothFiles(t *testing.T) {
 	syncer := New(st, appsDir, dataDir)
 	defer syncer.Close()
 
-	if _, err := st.CreateUser("carol", "$2a$12$hash", "admin", "", ""); err != nil {
+	if _, err := st.CreateUser("carol", "$2a$12$hash", "manage", "", ""); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
@@ -1202,7 +1202,7 @@ func TestImportGlobalIdempotent(t *testing.T) {
 	dataDir := t.TempDir()
 	syncer := New(st, appsDir, dataDir)
 
-	u, err := st.CreateUser("alice", "$2a$10$fakehash", "admin", "Alice", "alice@example.com")
+	u, err := st.CreateUser("alice", "$2a$10$fakehash", "manage", "Alice", "alice@example.com")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

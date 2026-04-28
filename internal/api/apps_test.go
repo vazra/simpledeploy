@@ -32,7 +32,7 @@ func newTestServer(t *testing.T) (*Server, *store.Store) {
 // superAdminCookie generates a session cookie for a super_admin user.
 func superAdminCookie(t *testing.T, jwtMgr *auth.JWTManager) *http.Cookie {
 	t.Helper()
-	token, err := jwtMgr.Generate(1, "admin", "super_admin")
+	token, err := jwtMgr.Generate(1, "manage", "super_admin")
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
