@@ -337,6 +337,13 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	afterJSON, _ := json.Marshal(map[string]any{"version_id": body.VersionID})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "lifecycle",
+		Action:   "rolled_back",
+		AppSlug:  slug,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

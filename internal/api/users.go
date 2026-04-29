@@ -104,10 +104,29 @@ func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	// Capture before-snapshot for audit; UpdateProfile only mutates display
+	// name and email so we record those.
+	var beforeJSON []byte
+	if before, err := s.store.GetUserByID(authUser.ID); err == nil && before != nil {
+		beforeJSON, _ = json.Marshal(map[string]any{
+			"display_name": before.DisplayName,
+			"email":        before.Email,
+		})
+	}
 	if err := s.store.UpdateProfile(authUser.ID, body.DisplayName, body.Email); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	afterJSON, _ := json.Marshal(map[string]any{
+		"display_name": body.DisplayName,
+		"email":        body.Email,
+	})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "profile_changed",
+		Before:   beforeJSON,
+		After:    afterJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
