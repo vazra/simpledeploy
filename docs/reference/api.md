@@ -340,7 +340,7 @@ List users.
 Create user.
 
 ```json
-{"username": "dev", "password": "secret", "role": "admin"}
+{"username": "dev", "password": "secret", "role": "manage"}
 ```
 
 ### `DELETE /api/users/{id}`
