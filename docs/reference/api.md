@@ -13,6 +13,8 @@ All endpoints except `/api/health`, `/api/auth/login`, `/api/auth/logout`, and `
 
 **API Key (CLI/automation):** Include `Authorization: Bearer sd_...` header.
 
+**Roles:** every authenticated request is evaluated against the caller's role (`super_admin`, `manage`, `viewer`) plus their `user_app_access` grants. App-scoped routes (`/api/apps/{slug}/...`) return `404` for callers without access. Platform routes (`/api/docker/*`, `/api/system/info`, `/api/system/audit-config`, `/api/backups/test-s3`, user CRUD, registries, git sync, DB backups) require `super_admin`. See [Users and roles](/guides/users-roles/) for the full matrix.
+
 ## Public Endpoints
 
 ### `GET /api/health`
@@ -346,6 +348,10 @@ Create user.
 ### `DELETE /api/users/{id}`
 
 Delete user.
+
+### `GET /api/users/{id}/access`
+
+List app slugs the user has been granted. Returns `[]string`. `super_admin` users have implicit access to all apps and return `[]`.
 
 ### `POST /api/users/{id}/access`
 
