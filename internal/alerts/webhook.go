@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,6 +14,53 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+// extraReservedRanges captures CIDRs not covered by net.IP.IsPrivate /
+// IsLoopback / IsLinkLocal*: CGNAT, class-E, IETF assignments, and the
+// AWS metadata equivalent on EC2 IMDSv2 alt path. Multicast and the
+// unspecified address are checked separately via IsMulticast/IsUnspecified.
+var extraReservedRanges = func() []*net.IPNet {
+	cidrs := []string{
+		"0.0.0.0/8",
+		"100.64.0.0/10",   // CGNAT
+		"192.0.0.0/24",    // IETF
+		"192.0.2.0/24",    // TEST-NET-1
+		"198.18.0.0/15",   // benchmarking
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+		"240.0.0.0/4",     // class E + broadcast
+		"::/128",          // IPv6 unspecified
+		"::1/128",         // IPv6 loopback
+		"100::/64",        // IPv6 discard
+		"fc00::/7",        // IPv6 unique-local
+	}
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}()
+
+// isReservedIP returns true if ip falls in any private, loopback, link-local,
+// multicast, unspecified, or otherwise reserved range that should never be
+// reachable from a webhook dispatcher.
+func isReservedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	for _, n := range extraReservedRanges {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
 
 var builtinTemplates = map[string]string{
 	"slack":    `{"text":"[{{.Status}}] {{.AppName}} - {{.MetricDisplay}} {{.Operator}} {{.ThresholdDisplay}} (current: {{.ValueDisplay}})"}`,
@@ -26,14 +74,61 @@ type WebhookDispatcher struct {
 	allowPrivate bool // skip SSRF validation (for tests)
 }
 
+// safeDialer rejects dial attempts to reserved IPs at the transport layer,
+// closing the DNS-rebinding window between validateWebhookURL's resolve and
+// http.Client's resolve.
+func safeDialer(allowPrivate bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		var lastErr error
+		for _, ipa := range ips {
+			if !allowPrivate && isReservedIP(ipa.IP) {
+				lastErr = fmt.Errorf("dial blocked: %s resolves to reserved IP %s", host, ipa.IP)
+				continue
+			}
+			conn, err := d.DialContext(ctx, network, net.JoinHostPort(ipa.IP.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
+		}
+		if lastErr == nil {
+			lastErr = fmt.Errorf("no valid address for %s", host)
+		}
+		return nil, lastErr
+	}
+}
+
+func newDispatcherClient(allowPrivate bool) *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext:           safeDialer(allowPrivate),
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			IdleConnTimeout:       30 * time.Second,
+			MaxIdleConns:          10,
+		},
+	}
+}
+
 func NewWebhookDispatcher() *WebhookDispatcher {
-	return &WebhookDispatcher{client: &http.Client{Timeout: 10 * time.Second}}
+	return &WebhookDispatcher{client: newDispatcherClient(false)}
 }
 
 // NewWebhookDispatcherAllowPrivate creates a dispatcher that skips SSRF checks (for testing).
 func NewWebhookDispatcherAllowPrivate() *WebhookDispatcher {
 	return &WebhookDispatcher{
-		client:       &http.Client{Timeout: 10 * time.Second},
+		client:       newDispatcherClient(true),
 		allowPrivate: true,
 	}
 }
@@ -53,12 +148,8 @@ func validateWebhookURL(rawURL string) error {
 		return fmt.Errorf("dns lookup failed for %q: %w", host, err)
 	}
 	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		if isReservedIP(ip) {
 			return fmt.Errorf("webhook url resolves to private/reserved IP %s", ip)
-		}
-		// Block cloud metadata IPs (169.254.169.254)
-		if ip.Equal(net.ParseIP("169.254.169.254")) {
-			return fmt.Errorf("webhook url resolves to cloud metadata IP")
 		}
 	}
 	return nil
