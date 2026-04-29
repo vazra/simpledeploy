@@ -34,16 +34,18 @@ const (
 )
 
 // allowedTopics computes the topic ACL for a given user. super_admin sees all.
-// admin/regular see global app/backup/alert/audit topics plus app:<slug> for
-// every slug they have access to.
+// admin/regular see global app/backup/alert topics plus app:<slug> for every
+// slug they have access to. The global audit topic is super_admin-only:
+// non-admins get an audit-row notification only via the activity REST list,
+// which is filtered server-side.
 func (s *Server) allowedTopics(user *AuthUser) map[string]bool {
 	out := map[string]bool{
 		events.TopicGlobalApps:    true,
 		events.TopicGlobalBackups: true,
 		events.TopicGlobalAlerts:  true,
-		events.TopicGlobalAudit:   true,
 	}
 	if user.Role == "super_admin" {
+		out[events.TopicGlobalAudit] = true
 		out[events.TopicGlobalUsers] = true
 		out[events.TopicGlobalRegistries] = true
 		out[events.TopicGlobalSettings] = true
