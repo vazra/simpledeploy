@@ -61,6 +61,7 @@ type ServiceConfig struct {
 	Restart     string
 	Labels      map[string]string
 	DependsOn   []string
+	DeployMode  string
 }
 
 // PortMapping represents a host:container port binding.
@@ -259,6 +260,10 @@ func convertService(name string, svc types.ServiceConfig) ServiceConfig {
 			Target: v.Target,
 			Type:   v.Type,
 		})
+	}
+
+	if svc.Deploy != nil {
+		sc.DeployMode = svc.Deploy.Mode
 	}
 
 	return sc

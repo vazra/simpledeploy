@@ -4,7 +4,25 @@
   import StatCard from './StatCard.svelte'
   import Badge from './Badge.svelte'
 
-  let { slug, app, services = [], onSwitchTab } = $props()
+  let { slug, app, services = [], onSwitchTab, canMutate = false, onScaled } = $props()
+
+  // --- Scale state ---
+  let pendingScale = $state({}) // { [serviceName]: 'busy' | undefined }
+  let scaleErrors = $state({})  // { [serviceName]: string }
+
+  async function bumpReplicas(name, delta, current) {
+    const target = Math.max(1, (current || 1) + delta)
+    if (target === (current || 1)) return
+    pendingScale = { ...pendingScale, [name]: 'busy' }
+    scaleErrors = { ...scaleErrors, [name]: '' }
+    const res = await api.scaleApp(slug, { [name]: target })
+    pendingScale = { ...pendingScale, [name]: undefined }
+    if (res.error) {
+      scaleErrors = { ...scaleErrors, [name]: res.error }
+      return
+    }
+    if (typeof onScaled === 'function') onScaled()
+  }
 
   // --- State ---
   let requestData = $state(null)
@@ -207,14 +225,50 @@
 <!-- Services -->
 {#if services.length > 0}
   <div class="bg-surface-2 rounded-xl p-5 shadow-sm border border-border/50 mb-6">
-    <h3 class="text-sm font-medium text-text-primary mb-4">Services</h3>
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-medium text-text-primary">Services</h3>
+      {#if canMutate && services.some(s => s.scalable)}
+        <span class="text-xs text-text-muted">Use - / + to scale stateless services.</span>
+      {/if}
+    </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
       {#each services as svc}
-        <div class="flex items-center gap-2 px-3 py-2 bg-surface-1 rounded-lg border border-border/30">
-          <span class="font-mono text-sm text-text-primary flex-1 truncate">{svc.service}</span>
-          <Badge variant={serviceVariant(svc.state)}>{svc.state}</Badge>
-          {#if svc.health}
-            <Badge variant={healthVariant(svc.health)}>{svc.health}</Badge>
+        {@const replicas = svc.replicas ?? 0}
+        {@const busy = pendingScale[svc.service] === 'busy'}
+        {@const err = scaleErrors[svc.service]}
+        <div class="px-3 py-2 bg-surface-1 rounded-lg border border-border/30">
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-sm text-text-primary flex-1 truncate" title={svc.service}>{svc.service}</span>
+            {#if svc.state}
+              <Badge variant={serviceVariant(svc.state)}>{svc.state}</Badge>
+            {/if}
+            {#if svc.health}
+              <Badge variant={healthVariant(svc.health)}>{svc.health}</Badge>
+            {/if}
+            {#if canMutate && svc.scalable}
+              <div class="flex items-center gap-1 ml-1">
+                <button
+                  type="button"
+                  aria-label="Decrease replicas"
+                  onclick={() => bumpReplicas(svc.service, -1, replicas)}
+                  disabled={busy || replicas <= 1}
+                  class="w-6 h-6 grid place-items-center rounded border border-border/50 text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >−</button>
+                <span class="text-sm tabular-nums text-text-primary w-6 text-center" title="Current replicas">{busy ? '…' : replicas}</span>
+                <button
+                  type="button"
+                  aria-label="Increase replicas"
+                  onclick={() => bumpReplicas(svc.service, 1, replicas)}
+                  disabled={busy}
+                  class="w-6 h-6 grid place-items-center rounded border border-border/50 text-text-secondary hover:text-text-primary hover:bg-surface-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >+</button>
+              </div>
+            {:else if svc.scale_reason}
+              <span class="text-xs text-text-muted ml-1" title={`Cannot scale: ${svc.scale_reason}`}>×{replicas || 1}</span>
+            {/if}
+          </div>
+          {#if err}
+            <p class="mt-1 text-xs text-danger">{err}</p>
           {/if}
         </div>
       {/each}

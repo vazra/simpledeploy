@@ -403,6 +403,11 @@ func (r *Reconciler) AppServices(ctx context.Context, slug string) ([]deployer.S
 	return r.deployer.Status(ctx, slug)
 }
 
+// AppConfig returns the parsed compose config for the given app slug.
+func (r *Reconciler) AppConfig(slug string) (*compose.AppConfig, error) {
+	return r.loadAppConfig(slug)
+}
+
 // RefreshStatuses polls every running/unstable app and flips between those
 // two states based on actual container health. Conservative on purpose:
 // only detects post-deploy crash loops, never overwrites stopped/error/

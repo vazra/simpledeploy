@@ -29,6 +29,7 @@ type reconciler interface {
 	PullOne(ctx context.Context, slug string) error
 	ScaleOne(ctx context.Context, slug string, scales map[string]int) error
 	AppServices(ctx context.Context, slug string) ([]deployer.ServiceStatus, error)
+	AppConfig(slug string) (*compose.AppConfig, error)
 	RollbackOne(ctx context.Context, slug string, versionID int64) error
 	ListVersions(ctx context.Context, slug string) ([]store.ComposeVersion, error)
 	ListDeployEvents(ctx context.Context, slug string) ([]store.DeployEvent, error)
