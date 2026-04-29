@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -52,10 +53,13 @@ func (s *SQLiteStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRe
 		return nil, fmt.Errorf("no SQLite database paths specified")
 	}
 
-	// Use sqlite3 .backup for each path to get a consistent snapshot
+	// Use sqlite3 .backup for each path to get a consistent snapshot.
+	// The tmp path is derived from the source file's basename so concurrent
+	// runs against different databases do not collide. Predictable but
+	// inside the container's /tmp, which is in our trust boundary.
 	var backupPaths []string
-	for i, dbPath := range opts.Paths {
-		tmpPath := fmt.Sprintf("/tmp/sd-backup-%d.db", i)
+	for _, dbPath := range opts.Paths {
+		tmpPath := fmt.Sprintf("/tmp/sd-backup-%s", filepath.Base(dbPath))
 		backupCmd := fmt.Sprintf(".backup '%s'", tmpPath)
 		cmd := exec.CommandContext(ctx, "docker", "exec", container,
 			"sqlite3", dbPath, backupCmd)
@@ -108,9 +112,10 @@ func (s *SQLiteStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 		return fmt.Errorf("tar extract: %w: %s", err, out)
 	}
 
-	// Copy each backup file to its original path
-	for i, dbPath := range opts.Paths {
-		tmpPath := fmt.Sprintf("/tmp/sd-backup-%d.db", i)
+	// Copy each backup file to its original path. The tmp paths use the
+	// source basename to match the Backup() side; see comment there.
+	for _, dbPath := range opts.Paths {
+		tmpPath := fmt.Sprintf("/tmp/sd-backup-%s", filepath.Base(dbPath))
 		cpCmd := exec.CommandContext(ctx, "docker", "exec", container,
 			"cp", tmpPath, dbPath)
 		if out, err := cpCmd.CombinedOutput(); err != nil {
