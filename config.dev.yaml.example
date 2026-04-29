@@ -3,6 +3,9 @@ apps_dir: ./dev/apps
 listen_addr: ":443"
 http_listen_addr: ":80"
 management_port: 8500
+# management_addr: "" binds all interfaces (legacy default). The new default is
+# "127.0.0.1" so the dashboard is local-only unless explicitly opened up.
+management_addr: "127.0.0.1"
 domain: localhost
 tls:
   mode: "local"

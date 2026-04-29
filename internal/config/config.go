@@ -36,6 +36,11 @@ type Config struct {
 	ListenAddr     string          `yaml:"listen_addr"`
 	HTTPListenAddr string          `yaml:"http_listen_addr"`
 	ManagementPort int             `yaml:"management_port"`
+	// ManagementAddr is the bind address for the dashboard listener.
+	// Defaults to "127.0.0.1" so the plain-HTTP dashboard is not exposed
+	// to the network without an explicit operator decision (front it with
+	// Caddy, or set ManagementAddr: "" to bind all interfaces).
+	ManagementAddr string `yaml:"management_addr"`
 	Domain         string          `yaml:"domain"`
 	TLS            TLSConfig       `yaml:"tls"`
 	MasterSecret   string          `yaml:"master_secret"`
@@ -91,6 +96,7 @@ func DefaultConfig() *Config {
 		AppsDir:        "/etc/simpledeploy/apps",
 		ListenAddr:     ":443",
 		ManagementPort: 8443,
+		ManagementAddr: "127.0.0.1",
 		TLS: TLSConfig{
 			Mode: "auto",
 		},
