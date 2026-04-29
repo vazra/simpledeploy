@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -376,6 +377,57 @@ func TestRBAC_GetActivity_NonAdminSystemEntryHidden(t *testing.T) {
 	srv.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("viewer got %d for system audit row, want 404", w.Code)
+	}
+}
+
+// TestRBAC_ListWebhooks_NonAdminGetsScrubbed ensures GET /api/webhooks does
+// not return URL/headers/template fields to non-super_admin callers. Closes
+// audit finding M-04.
+func TestRBAC_ListWebhooks_NonAdminGetsScrubbed(t *testing.T) {
+	srv, st, _ := setupUserTestServer(t)
+	viewerCookie := loginAs(t, srv, st, "v1", "viewerpass1", "viewer")
+
+	// Seed a webhook with a secret-bearing URL.
+	if err := st.CreateWebhook(&store.Webhook{
+		Name:        "incidents",
+		Type:        "slack",
+		URL:         "https://hooks.slack.com/services/SECRET/DO/NOT/LEAK",
+		HeadersJSON: `{"Authorization":"Bearer leakme"}`,
+	}); err != nil {
+		t.Fatalf("CreateWebhook: %v", err)
+	}
+
+	req := authedRequest(t, http.MethodGet, "/api/webhooks", nil, viewerCookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "SECRET") || strings.Contains(body, "leakme") {
+		t.Fatalf("non-admin webhook list leaked secrets: %s", body)
+	}
+	if !strings.Contains(body, "incidents") {
+		t.Fatalf("non-admin webhook list missing name: %s", body)
+	}
+}
+
+// TestRBAC_ListWebhooks_SuperAdminGetsFull ensures super_admin still receives
+// the full webhook payload (URL, headers).
+func TestRBAC_ListWebhooks_SuperAdminGetsFull(t *testing.T) {
+	srv, st, adminCookie := setupUserTestServer(t)
+	if err := st.CreateWebhook(&store.Webhook{
+		Name: "admin-only",
+		Type: "custom",
+		URL:  "https://example.test/full-url-visible",
+	}); err != nil {
+		t.Fatalf("CreateWebhook: %v", err)
+	}
+	req := authedRequest(t, http.MethodGet, "/api/webhooks", nil, adminCookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if !strings.Contains(w.Body.String(), "full-url-visible") {
+		t.Fatalf("admin webhook list missing URL: %s", w.Body.String())
 	}
 }
 
