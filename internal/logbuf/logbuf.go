@@ -1,10 +1,45 @@
 package logbuf
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// maxLineBytes caps a single buffered message. Anything beyond is
+// truncated with an explicit marker so a runaway log line cannot blow
+// memory or carry a megabytes-long payload to UI subscribers.
+const maxLineBytes = 8 * 1024
+
+// ansiEscapeRe matches CSI / OSC / common terminal escape sequences. We
+// strip these before storing because the buffer is rendered in many
+// contexts (browser, curl, terminal); a crafted escape from a malicious
+// container image's pull progress could otherwise hijack a viewer's
+// terminal (cursor moves, OSC-52 clipboard, etc.).
+var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]`)
+
+// sanitizeLogMessage strips ANSI escapes, removes control characters
+// other than tab, and truncates to maxLineBytes.
+func sanitizeLogMessage(msg string) string {
+	msg = strings.TrimRight(msg, "\n")
+	msg = ansiEscapeRe.ReplaceAllString(msg, "")
+	// Strip ASCII control chars (keep tab, drop CR/LF/NUL/etc.).
+	if strings.ContainsAny(msg, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0d\x0e\x0f") {
+		var b strings.Builder
+		b.Grow(len(msg))
+		for _, r := range msg {
+			if r == '\t' || r >= 0x20 {
+				b.WriteRune(r)
+			}
+		}
+		msg = b.String()
+	}
+	if len(msg) > maxLineBytes {
+		msg = msg[:maxLineBytes] + "...[truncated]"
+	}
+	return msg
+}
 
 type Entry struct {
 	Timestamp time.Time `json:"timestamp"`
@@ -32,10 +67,9 @@ func New(size int) *Buffer {
 }
 
 func (b *Buffer) Write(p []byte) (int, error) {
-	msg := strings.TrimRight(string(p), "\n")
 	e := Entry{
 		Timestamp: time.Now(),
-		Message:   msg,
+		Message:   sanitizeLogMessage(string(p)),
 	}
 
 	b.mu.Lock()
