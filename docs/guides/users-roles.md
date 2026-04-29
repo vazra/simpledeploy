@@ -65,13 +65,40 @@ curl -X POST https://manage.example.com/api/users/2/access \
 
 ## Per-app access
 
-Non-`super_admin` users see only apps they've been granted. Apps they can't see return `404` (not `403`) so they don't even know they exist.
+Non-`super_admin` users see only apps they've been granted. The dashboard list (`/api/apps` and the UI overview) is automatically filtered for `manage` and `viewer` callers. Apps they can't see return `404` (not `403`) so they don't even know they exist.
 
+### Granting per-app access
+
+<Tabs>
+<TabItem label="UI">
+<Steps>
+
+1. Settings, **Users**.
+2. Click **Edit** on the user.
+3. Under **App access**, check the apps the user should have access to. Each toggle saves immediately.
+4. To revoke, uncheck the box.
+
+</Steps>
+Super admins automatically have access to every app, so the checkbox list is hidden when the user's role is `super_admin`.
+</TabItem>
+<TabItem label="API">
 ```bash
+# List a user's grants (super_admin only)
+curl https://manage.example.com/api/users/2/access \
+  -H "Authorization: Bearer $SD_API_KEY"
+
+# Grant
+curl -X POST https://manage.example.com/api/users/2/access \
+  -H "Authorization: Bearer $SD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"app_slug":"myapp"}'
+
 # Revoke
 curl -X DELETE https://manage.example.com/api/users/2/access/myapp \
   -H "Authorization: Bearer $SD_API_KEY"
 ```
+</TabItem>
+</Tabs>
 
 ## Inviting teammates
 

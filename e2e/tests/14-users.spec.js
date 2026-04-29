@@ -203,6 +203,30 @@ test.describe('Users - Functional RBAC', () => {
     expect(res.status).toBe(401);
   });
 
+  test('dashboard list filters apps for restricted viewer', async () => {
+    expect(viewerKey).toBeTruthy();
+    // Viewer was granted access only to e2e-nginx earlier in this suite.
+    const res = await apiRequestWithKey('GET', '/api/apps', null, viewerKey);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.data)).toBeTruthy();
+    const slugs = res.data.map((a) => a.Slug);
+    expect(slugs).toContain('e2e-nginx');
+    expect(slugs).not.toContain('e2e-multi');
+    expect(slugs).not.toContain('e2e-postgres');
+  });
+
+  test('GET /api/users/:id/access lists granted slugs (super_admin only)', async () => {
+    const adm = await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    expect(adm.ok).toBeTruthy();
+    const res = await apiRequest('GET', `/api/users/${viewerId}/access`);
+    expect(res.status).toBe(200);
+    expect(res.data).toEqual(['e2e-nginx']);
+
+    // Forbidden for the viewer's own API key.
+    const forbidden = await apiRequestWithKey('GET', `/api/users/${viewerId}/access`, null, viewerKey);
+    expect(forbidden.status).toBe(403);
+  });
+
   test('manage user: granted app can mutate; ungranted app and platform endpoints denied', async () => {
     // Re-login as super_admin to provision a manage user.
     const adm = await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
@@ -277,6 +301,44 @@ test.describe('Users - Functional RBAC', () => {
     await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
     if (mKeyId) await apiRequest('DELETE', `/api/apikeys/${mKeyId}`);
     await apiRequest('DELETE', `/api/users/${mid}`);
+  });
+
+  test('UI: grant additional app access via Users edit modal', async ({ page }) => {
+    // Log in as super_admin in the browser.
+    await loginAsAdmin(page);
+    const state = getState();
+    await page.goto(`${state.baseURL}/#/users`);
+    await expect(page.locator('main').getByText(VIEWER_USER.username).first()).toBeVisible({ timeout: 5_000 });
+
+    // Open edit modal for the RBAC viewer row.
+    const row = page.locator('tr, [class*="card"]').filter({ hasText: VIEWER_USER.username });
+    await row.getByRole('button', { name: /edit/i }).first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/app access/i)).toBeVisible({ timeout: 5_000 });
+
+    // Find e2e-multi row checkbox (currently unchecked) and toggle on.
+    const multiLabel = dialog.locator('label').filter({ hasText: 'e2e-multi' });
+    await expect(multiLabel).toBeVisible({ timeout: 5_000 });
+    const multiCheckbox = multiLabel.locator('input[type="checkbox"]');
+    expect(await multiCheckbox.isChecked()).toBe(false);
+    await multiCheckbox.check();
+
+    // Wait for the API call to settle then close modal.
+    await page.waitForTimeout(500);
+
+    // Verify via API: viewer now has both slugs granted.
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    const accessRes = await apiRequest('GET', `/api/users/${viewerId}/access`);
+    expect(accessRes.status).toBe(200);
+    expect(accessRes.data.sort()).toEqual(['e2e-multi', 'e2e-nginx']);
+
+    // Revoke via UI by unchecking again, to leave viewer in original state.
+    await multiCheckbox.uncheck();
+    await page.waitForTimeout(500);
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    const after = await apiRequest('GET', `/api/users/${viewerId}/access`);
+    expect(after.data).toEqual(['e2e-nginx']);
   });
 
   test('cleanup: revoke app access, delete API key and viewer user', async () => {
