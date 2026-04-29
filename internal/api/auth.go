@@ -28,10 +28,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lockout check
+	// Lockout check. Keyed on (user, ip) tuple plus a per-IP counter so
+	// an attacker on one IP cannot lock out a victim's username globally
+	// (account-DoS vector reported by audit L-05). The per-IP counter still
+	// stops brute-force from a single source.
+	lockoutKey := "user:" + req.Username + "@" + ip
 	if s.lockout != nil {
-		if s.lockout.IsLocked("user:"+req.Username) || s.lockout.IsLocked("ip:"+ip) {
-			http.Error(w, "account temporarily locked", http.StatusTooManyRequests)
+		if s.lockout.IsLocked(lockoutKey) || s.lockout.IsLocked("ip:"+ip) {
+			// Match the 401 response shape of an invalid-credentials reply
+			// so a probe cannot use response variance to enumerate accounts.
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
 	}
@@ -45,7 +51,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !auth.CheckPassword(hash, req.Password) || err != nil {
 		if s.lockout != nil {
-			s.lockout.RecordFailure("user:" + req.Username)
+			s.lockout.RecordFailure(lockoutKey)
 			s.lockout.RecordFailure("ip:" + ip)
 		}
 		failCtx := audit.With(r.Context(), audit.Ctx{
@@ -73,7 +79,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.lockout != nil {
-		s.lockout.RecordSuccess("user:" + req.Username)
+		s.lockout.RecordSuccess(lockoutKey)
 		s.lockout.RecordSuccess("ip:" + ip)
 	}
 
