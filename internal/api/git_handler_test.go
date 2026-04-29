@@ -131,7 +131,7 @@ func TestApplyPending_SuperAdminOnly(t *testing.T) {
 	if _, err := st.CreateUser("regular", "hashed", "manage", "", ""); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	tok, _ := jwtMgr.Generate(2, "regular", "admin")
+	tok, _ := jwtMgr.Generate(2, "regular", "admin", 1)
 	req := httptest.NewRequest("POST", "/api/git/apply-pending", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: tok})
 	w := httptest.NewRecorder()

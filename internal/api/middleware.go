@@ -66,6 +66,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 					http.Error(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
+				// Token-version match: rejects cookies invalidated by
+				// logout, password change, or role change. Tokens minted
+				// before migration 026 carry tv=0 and the new default is
+				// 1, so they are auto-invalidated on first deployment.
+				if claims.TokenVersion != user.TokenVersion {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
 				r = setAuthUser(r, &AuthUser{ID: user.ID, Username: user.Username, Role: user.Role})
 				uid := user.ID
 				ctx := audit.With(r.Context(), audit.Ctx{

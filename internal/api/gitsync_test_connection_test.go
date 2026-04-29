@@ -142,7 +142,7 @@ func TestHandleTestGitConnection_NonAdmin(t *testing.T) {
 	if _, err := st.CreateUser("regular", "hashed", "manage", "", ""); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	tok, _ := jwtMgr.Generate(2, "regular", "admin")
+	tok, _ := jwtMgr.Generate(2, "regular", "admin", 1)
 	cookie := &http.Cookie{Name: "session", Value: tok}
 	rr := postTestConn(t, srv, cookie, map[string]any{"remote": "x", "branch": "main"})
 	if rr.Code != http.StatusForbidden && rr.Code != http.StatusUnauthorized {

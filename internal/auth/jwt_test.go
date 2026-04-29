@@ -7,7 +7,7 @@ import (
 
 func TestJWTGenerateAndValidate(t *testing.T) {
 	mgr := NewJWTManager("supersecret", time.Hour)
-	token, err := mgr.Generate(42, "alice", "manage")
+	token, err := mgr.Generate(42, "alice", "manage", 0)
 	if err != nil {
 		t.Fatalf("Generate error: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestJWTGenerateAndValidate(t *testing.T) {
 
 func TestJWTExpired(t *testing.T) {
 	mgr := NewJWTManager("supersecret", time.Millisecond)
-	token, err := mgr.Generate(1, "bob", "user")
+	token, err := mgr.Generate(1, "bob", "user", 0)
 	if err != nil {
 		t.Fatalf("Generate error: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestJWTInvalidSignature(t *testing.T) {
 	mgr1 := NewJWTManager("secret1", time.Hour)
 	mgr2 := NewJWTManager("secret2", time.Hour)
 
-	token, err := mgr1.Generate(1, "carol", "user")
+	token, err := mgr1.Generate(1, "carol", "user", 0)
 	if err != nil {
 		t.Fatalf("Generate error: %v", err)
 	}
