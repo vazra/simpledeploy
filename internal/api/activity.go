@@ -175,10 +175,21 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	// Non-admin: verify access if entry is scoped to an app.
-	if e.AppID != nil {
-		if !s.checkAppAccessByID(w, r, *e.AppID) {
-			return
+	// Mirror the non-admin filter applied to ListActivity:
+	//   - super_admin: any row
+	//   - other roles: app-scoped row only if the caller has access to the app;
+	//     system-scoped row (AppID == nil) only if the caller is the actor.
+	user := GetAuthUser(r)
+	if user.Role != "super_admin" {
+		if e.AppID != nil {
+			if !s.checkAppAccessByID(w, r, *e.AppID) {
+				return
+			}
+		} else {
+			if e.ActorUserID == nil || *e.ActorUserID != user.ID {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
