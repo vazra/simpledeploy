@@ -323,18 +323,25 @@ func TestPurgeAuditSuperAdminOnly(t *testing.T) {
 	}
 }
 
-// TestAuditConfigGetSetSuperAdminOnly verifies get works for any admin; put requires super-admin.
+// TestAuditConfigGetSetSuperAdminOnly verifies both GET and PUT require super-admin.
 func TestAuditConfigGetSetSuperAdminOnly(t *testing.T) {
 	srv, st := newTestServer(t)
 
-	// any authed user can GET
+	// non-super-admin GET => 403
 	nonSuperCookie := makeUserCookie(t, srv, st, "cfg-admin")
 	w := doRequest(t, srv, http.MethodGet, "/api/system/audit-config", nonSuperCookie)
-	if w.Code != http.StatusOK {
-		t.Errorf("GET audit-config: expected 200, got %d", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("non-super GET audit-config: expected 403, got %d", w.Code)
+	}
+
+	// super_admin GET => 200
+	adminCookie := makeAdminCookie(t, srv)
+	wAdminGet := doRequest(t, srv, http.MethodGet, "/api/system/audit-config", adminCookie)
+	if wAdminGet.Code != http.StatusOK {
+		t.Errorf("super GET audit-config: expected 200, got %d", wAdminGet.Code)
 	}
 	var cfg map[string]any
-	json.NewDecoder(w.Body).Decode(&cfg)
+	json.NewDecoder(wAdminGet.Body).Decode(&cfg)
 	if cfg["retention_days"] == nil {
 		t.Error("retention_days missing from response")
 	}
@@ -351,11 +358,10 @@ func TestAuditConfigGetSetSuperAdminOnly(t *testing.T) {
 	}
 
 	// super_admin PUT => 204
-	cookie := makeAdminCookie(t, srv)
 	req3 := httptest.NewRequest(http.MethodPut, "/api/system/audit-config",
 		strings.NewReader(`{"retention_days":180}`))
 	req3.Header.Set("Content-Type", "application/json")
-	req3.AddCookie(cookie)
+	req3.AddCookie(adminCookie)
 	w3 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w3, req3)
 	if w3.Code != http.StatusNoContent {

@@ -10,11 +10,32 @@ import (
 )
 
 // handleListArchived returns archived apps with their tombstone payload (if any).
+// super_admin sees all archived apps; manage/viewer only see archived apps they were
+// granted access to.
 func (s *Server) handleListArchived(w http.ResponseWriter, r *http.Request) {
+	user := GetAuthUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	apps, err := s.store.ListArchivedApps()
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
+	}
+
+	var allowed map[string]struct{}
+	if user.Role != "super_admin" {
+		slugs, err := s.store.GetUserAppSlugs(user.ID)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		allowed = make(map[string]struct{}, len(slugs))
+		for _, sl := range slugs {
+			allowed[sl] = struct{}{}
+		}
 	}
 
 	type archivedApp struct {
@@ -23,6 +44,11 @@ func (s *Server) handleListArchived(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]archivedApp, 0, len(apps))
 	for _, a := range apps {
+		if allowed != nil {
+			if _, ok := allowed[a.Slug]; !ok {
+				continue
+			}
+		}
 		entry := archivedApp{App: a}
 		if s.cs != nil {
 			if t, err := s.cs.ReadTombstone(a.Slug); err == nil {
