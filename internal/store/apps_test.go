@@ -410,7 +410,6 @@ func TestPurgeApp_CascadesHistory(t *testing.T) {
 		{"app_labels", `SELECT COUNT(*) FROM app_labels WHERE app_id = ?`, []any{app.ID}},
 		{"user_app_access", `SELECT COUNT(*) FROM user_app_access WHERE app_id = ?`, []any{app.ID}},
 		{"deploy_events", `SELECT COUNT(*) FROM deploy_events WHERE app_slug = ?`, []any{app.Slug}},
-		{"audit_log", `SELECT COUNT(*) FROM audit_log WHERE app_slug = ? OR app_id = ?`, []any{app.Slug, app.ID}},
 		{"compose_versions", `SELECT COUNT(*) FROM compose_versions WHERE app_id = ?`, []any{app.ID}},
 		{"backup_configs", `SELECT COUNT(*) FROM backup_configs WHERE app_id = ?`, []any{app.ID}},
 		{"backup_runs", `SELECT COUNT(*) FROM backup_runs WHERE backup_config_id = ?`, []any{bcID}},
@@ -425,6 +424,23 @@ func TestPurgeApp_CascadesHistory(t *testing.T) {
 		if n != 0 {
 			t.Errorf("%s: rows remaining = %d, want 0", c.name, n)
 		}
+	}
+
+	// audit_log rows are intentionally preserved for forensic continuity.
+	// app_id should be NULL (FK SET NULL via PurgeApp's UPDATE), but the
+	// denormalized app_slug remains so the row stays attributable.
+	var auditRowsWithAppID, auditRowsWithSlug int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE app_id = ?`, app.ID).Scan(&auditRowsWithAppID); err != nil {
+		t.Fatalf("count audit_log app_id: %v", err)
+	}
+	if auditRowsWithAppID != 0 {
+		t.Errorf("audit_log: rows still bound to deleted app_id = %d, want 0", auditRowsWithAppID)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE app_slug = ?`, app.Slug).Scan(&auditRowsWithSlug); err != nil {
+		t.Fatalf("count audit_log slug: %v", err)
+	}
+	if auditRowsWithSlug == 0 {
+		t.Errorf("audit_log: forensic rows for purged slug missing, want preserved")
 	}
 }
 

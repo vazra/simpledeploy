@@ -440,3 +440,12 @@ func (s *Store) PurgeAudit(ctx context.Context) error {
 	}
 	return nil
 }
+
+// CountAudit returns the current number of rows in audit_log.
+func (s *Store) CountAudit(ctx context.Context) (int64, error) {
+	var n int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_log`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count audit_log: %w", err)
+	}
+	return n, nil
+}

@@ -313,13 +313,18 @@ func TestPurgeAuditSuperAdminOnly(t *testing.T) {
 		t.Errorf("super_admin: expected 204, got %d; body: %s", w2.Code, w2.Body.String())
 	}
 
-	// list should now be empty
+	// After purge the only remaining entry must be the audit_purged sentinel,
+	// which records who/when so the wipe is itself attributable.
 	wList := doRequest(t, srv, http.MethodGet, "/api/activity", cookie)
 	var resp map[string]any
 	json.NewDecoder(wList.Body).Decode(&resp)
 	entries := resp["entries"].([]any)
-	if len(entries) != 0 {
-		t.Errorf("after purge, expected 0 entries, got %d", len(entries))
+	if len(entries) != 1 {
+		t.Fatalf("after purge, expected 1 sentinel entry, got %d", len(entries))
+	}
+	first := entries[0].(map[string]any)
+	if first["action"] != "audit_purged" {
+		t.Errorf("sentinel action = %v, want audit_purged", first["action"])
 	}
 }
 
