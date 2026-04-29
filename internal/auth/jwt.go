@@ -23,12 +23,22 @@ func NewJWTManager(secret string, expiry time.Duration) *JWTManager {
 	return &JWTManager{secret: []byte(secret), expiry: expiry}
 }
 
+// JWTIssuer/Audience bind tokens to this product, defending against
+// secret reuse across services should the same master_secret ever be
+// shared (e.g. operator copies prod config to staging).
+const (
+	JWTIssuer   = "simpledeploy"
+	JWTAudience = "simpledeploy-dashboard"
+)
+
 func (m *JWTManager) Generate(userID int64, username, role string) (string, error) {
 	claims := &Claims{
 		UserID:   userID,
 		Username: username,
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    JWTIssuer,
+			Audience:  jwt.ClaimStrings{JWTAudience},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(m.expiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
@@ -43,7 +53,7 @@ func (m *JWTManager) Validate(tokenStr string) (*Claims, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return m.secret, nil
-	})
+	}, jwt.WithIssuer(JWTIssuer), jwt.WithAudience(JWTAudience))
 	if err != nil {
 		return nil, err
 	}
