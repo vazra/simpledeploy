@@ -449,11 +449,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("[serve] ensure shared network: %v (continuing)", err)
 	}
 
+	// Default HTTP listener to :80 when TLS is auto/local so HTTP -> HTTPS
+	// redirect is enabled out of the box. Operators who terminate TLS in
+	// front of SimpleDeploy (or want plain HTTP) leave http_listen_addr
+	// empty and get no redirect listener.
+	httpAddr := cfg.HTTPListenAddr
+	if httpAddr == "" && (cfg.TLS.Mode == "auto" || cfg.TLS.Mode == "local") {
+		httpAddr = ":80"
+	}
 	proxyCfg := proxy.CaddyConfig{
-		ListenAddr: cfg.ListenAddr,
-		TLSMode:    cfg.TLS.Mode,
-		TLSEmail:   cfg.TLS.Email,
-		DataDir:    cfg.DataDir,
+		ListenAddr:     cfg.ListenAddr,
+		HTTPListenAddr: httpAddr,
+		TLSMode:        cfg.TLS.Mode,
+		TLSEmail:       cfg.TLS.Email,
+		DataDir:        cfg.DataDir,
 	}
 	caddyProxy := proxy.NewCaddyProxy(proxyCfg)
 	defer func() { _ = caddyProxy.Stop() }()
