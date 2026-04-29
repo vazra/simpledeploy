@@ -452,12 +452,30 @@ func recoverPanic(next http.Handler) http.Handler {
 }
 
 // maxBodySize limits request body to 1MB for non-GET requests.
+// pathBodyLimit returns the maximum request body bytes allowed for path.
+// 0 means no global limit (per-handler enforcement applies).
+func pathBodyLimit(path string) int64 {
+	switch {
+	case path == "/api/apps/import" || path == "/api/apps/import/preview":
+		// Bundle import: 10 MiB cap is enforced by the handler itself; the
+		// global wrapper opts out so the larger limit passes through.
+		return 0
+	case strings.HasSuffix(path, "/upload-restore"):
+		// Multipart restore upload: 32 MiB.
+		return 32 << 20
+	case strings.Contains(path, "/certs/"):
+		// Cert upload: TLS chains can run several KiB; 256 KiB is plenty.
+		return 256 << 10
+	default:
+		return 1 << 20
+	}
+}
+
 func maxBodySize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			// Import bundle endpoint allows up to 10 MiB (handler enforces).
-			if r.URL.Path != "/api/apps/import" && r.URL.Path != "/api/apps/import/preview" {
-				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			if limit := pathBodyLimit(r.URL.Path); limit > 0 {
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
 			}
 		}
 		next.ServeHTTP(w, r)
