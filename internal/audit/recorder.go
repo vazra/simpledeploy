@@ -104,7 +104,7 @@ func (r *Recorder) publish(ctx context.Context, req RecordReq, actor *int64) {
 		return
 	}
 	defer func() { _ = recover() }()
-	topics := events.TopicsForAudit(req.Category, req.AppSlug)
+	topics := events.TopicsForAudit(req.Category, req.Action, req.AppSlug)
 	t := events.TypeForCategory(req.Category)
 	for _, topic := range topics {
 		r.bus.Publish(ctx, events.Event{Type: t, Topic: topic, ActorID: actor})

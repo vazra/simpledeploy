@@ -1,6 +1,9 @@
 package events
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Topic constants for the global scopes. Per-app topics are formed via AppTopic.
 const (
@@ -18,9 +21,9 @@ const (
 func AppTopic(slug string) string { return fmt.Sprintf("app:%s", slug) }
 
 // TopicsForAudit returns the list of topics that should fire for a given
-// audit category and (optional) app slug. Used by the audit recorder to
-// translate mutation events into bus publishes.
-func TopicsForAudit(category, slug string) []string {
+// audit category, action, and (optional) app slug. Used by the audit recorder
+// to translate mutation events into bus publishes.
+func TopicsForAudit(category, action, slug string) []string {
 	out := []string{TopicGlobalAudit}
 	switch category {
 	case "compose", "endpoint", "env":
@@ -56,6 +59,11 @@ func TopicsForAudit(category, slug string) []string {
 		out = append(out, TopicGlobalSettings)
 	case "system":
 		out = append(out, TopicGlobalSettings)
+		// User and API key management actions log under the "system" category
+		// but should also wake the Users page.
+		if strings.HasPrefix(action, "user_") || strings.HasPrefix(action, "apikey_") {
+			out = append(out, TopicGlobalUsers)
+		}
 	case "docker":
 		out = append(out, TopicGlobalDocker)
 	case "auth":
