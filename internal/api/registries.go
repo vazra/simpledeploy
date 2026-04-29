@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/vazra/simpledeploy/internal/auth"
@@ -64,12 +65,12 @@ func (s *Server) handleCreateRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	usernameEnc, err := auth.Encrypt(req.Username, s.masterSecret)
 	if err != nil {
-		http.Error(w, "encrypt username: "+err.Error(), http.StatusInternalServerError)
+		httpError(w, fmt.Errorf("encrypt username: %w", err), http.StatusInternalServerError)
 		return
 	}
 	passwordEnc, err := auth.Encrypt(req.Password, s.masterSecret)
 	if err != nil {
-		http.Error(w, "encrypt password: "+err.Error(), http.StatusInternalServerError)
+		httpError(w, fmt.Errorf("encrypt password: %w", err), http.StatusInternalServerError)
 		return
 	}
 	reg, err := s.store.CreateRegistry(req.Name, req.URL, usernameEnc, passwordEnc)
@@ -109,12 +110,12 @@ func (s *Server) handleUpdateRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	usernameEnc, err := auth.Encrypt(req.Username, s.masterSecret)
 	if err != nil {
-		http.Error(w, "encrypt: "+err.Error(), http.StatusInternalServerError)
+		httpError(w, fmt.Errorf("encrypt username: %w", err), http.StatusInternalServerError)
 		return
 	}
 	passwordEnc, err := auth.Encrypt(req.Password, s.masterSecret)
 	if err != nil {
-		http.Error(w, "encrypt: "+err.Error(), http.StatusInternalServerError)
+		httpError(w, fmt.Errorf("encrypt password: %w", err), http.StatusInternalServerError)
 		return
 	}
 	if err := s.store.UpdateRegistry(id, req.Name, req.URL, usernameEnc, passwordEnc); err != nil {
