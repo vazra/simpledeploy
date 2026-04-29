@@ -31,9 +31,17 @@ test.describe('App Actions', () => {
 
   test('start app', async ({ page }) => {
     const state = getState();
+    // Ensure stopped via API to avoid cross-test ordering flakiness.
+    await apiLogin('e2eadmin', 'E2eTestPass123!');
+    await apiRequest('POST', '/api/apps/e2e-nginx/stop');
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const res = await apiRequest('GET', '/api/apps/e2e-nginx');
+      if (res.ok && res.data?.status === 'stopped') break;
+      await new Promise(r => setTimeout(r, 1_000));
+    }
     await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    // App should be stopped from previous test; Start button should appear
-    await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 30_000 });
     await page.getByRole('button', { name: 'Start' }).click();
     await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 30_000 });
   });
