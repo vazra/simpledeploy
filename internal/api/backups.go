@@ -119,7 +119,7 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 		http.Error(w, "backup config not found", http.StatusNotFound)
 		return
 	}
-	if !s.checkAppAccessByID(w, r, existing.AppID) {
+	if !s.canMutateForApp(w, r, &existing.AppID) {
 		return
 	}
 
@@ -189,7 +189,7 @@ func (s *Server) handleDeleteBackupConfig(w http.ResponseWriter, r *http.Request
 		http.Error(w, "backup config not found", http.StatusNotFound)
 		return
 	}
-	if !s.checkAppAccessByID(w, r, existing.AppID) {
+	if !s.canMutateForApp(w, r, &existing.AppID) {
 		return
 	}
 
@@ -314,7 +314,7 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "backup config not found", http.StatusNotFound)
 		return
 	}
-	if !s.checkAppAccessByID(w, r, cfg.AppID) {
+	if !s.canMutateForApp(w, r, &cfg.AppID) {
 		return
 	}
 
@@ -403,7 +403,7 @@ func (s *Server) handleTriggerBackupConfig(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "backup config not found", http.StatusNotFound)
 		return
 	}
-	if !s.checkAppAccessByID(w, r, cfg.AppID) {
+	if !s.canMutateForApp(w, r, &cfg.AppID) {
 		return
 	}
 
