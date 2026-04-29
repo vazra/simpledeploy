@@ -8,9 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-git/go-git/v5"
+
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/config"
 )
+
+func gitPlainInit(path string, bare bool) (*git.Repository, error) {
+	return git.PlainInit(path, bare)
+}
 
 func TestGetGitConfig_Unauth(t *testing.T) {
 	srv, _ := newTestServer(t)
@@ -137,6 +143,55 @@ func TestPutGitConfig_SetAndGet(t *testing.T) {
 	}
 	if resp.Source != "db" {
 		t.Errorf("expected source=db, got %q", resp.Source)
+	}
+}
+
+func TestPutGitConfig_EmptyRemote_AllowsSave(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.cfg = &config.Config{
+		AppsDir:      t.TempDir(),
+		MasterSecret: "test-master-secret",
+	}
+	srv.masterSecret = "test-master-secret"
+
+	jwtMgr := auth.NewJWTManager("test-secret", time.Hour)
+	srv.jwt = jwtMgr
+	cookie := superAdminCookie(t, jwtMgr)
+
+	// Brand-new empty bare repo (no branches, no refs).
+	bareDir := t.TempDir() + "/empty.git"
+	if _, err := gitPlainInit(bareDir, true); err != nil {
+		t.Fatalf("init bare: %v", err)
+	}
+
+	payload := gitConfigRequest{
+		Enabled:             true,
+		Remote:              bareDir,
+		Branch:              "main",
+		AuthorName:          "test",
+		AuthorEmail:         "test@example.com",
+		PollIntervalSeconds: 30,
+	}
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("PUT", "/api/git/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT want 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	kv, err := srv.store.GetGitSyncConfig()
+	if err != nil {
+		t.Fatalf("GetGitSyncConfig: %v", err)
+	}
+	if kv["remote"] != bareDir {
+		t.Errorf("remote in DB: %q want %q", kv["remote"], bareDir)
+	}
+	if kv["enabled"] != "true" {
+		t.Errorf("enabled in DB: %q", kv["enabled"])
 	}
 }
 

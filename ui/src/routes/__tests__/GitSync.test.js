@@ -319,6 +319,35 @@ describe('GitSync test connection', () => {
     });
   });
 
+  it('shows empty_repo info banner and changes save label', async () => {
+    apiMock.gitConfig.mockResolvedValue({
+      data: { ...baseCfg, enabled: true, remote: 'file:///tmp/empty.git' },
+      error: null,
+      status: 200,
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      text: async () => '',
+      json: async () => ({
+        ok: true,
+        code: 'empty_repo',
+        message: 'Repository is empty. Saving will push your current SimpleDeploy configs as the initial commit.',
+        branch_found: false,
+        raw_error: '',
+      }),
+    });
+    const utils = render(GitSync);
+    await openConfig(utils);
+    const btn = await utils.findByRole('button', { name: 'Test connection' });
+    await fireEvent.click(btn);
+    await waitFor(() => {
+      const banner = utils.getByTestId('gitsync-test-result');
+      expect(banner.textContent).toMatch(/Repository is empty/);
+      expect(banner.className).toMatch(/blue/);
+    });
+    expect(await utils.findByRole('button', { name: 'Save & push initial commit' })).toBeInTheDocument();
+  });
+
   it('disables button when remote is empty', async () => {
     apiMock.gitConfig.mockResolvedValue({
       data: { ...baseCfg, enabled: true, remote: '' },

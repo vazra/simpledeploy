@@ -106,7 +106,7 @@ If the remote is already up-to-date when apply is triggered, the operation compl
 
 ## First run and adopting existing state
 
-If the remote repository is empty, SimpleDeploy initializes a repo in `apps_dir`, commits current state, and pushes. This is the recommended starting point.
+If the remote repository is empty, SimpleDeploy initializes a repo in `apps_dir`, commits current state, and pushes. This is the recommended starting point. The Git Sync config form detects this case: testing the connection shows an info banner, and the save button changes to **Save & push initial commit**, making it explicit that saving will push your current SimpleDeploy configs as the initial commit.
 
 If the remote already has commits, SimpleDeploy refuses to push and surfaces an error in `git status` and on the Git Sync page in admin nav. You then have two options:
 

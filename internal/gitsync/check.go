@@ -55,9 +55,25 @@ func CheckRemote(cfg Config) RemoteCheck {
 	})
 	refs, err := rem.List(&git.ListOptions{Auth: auth})
 	if err != nil {
+		if errors.Is(err, transport.ErrEmptyRemoteRepository) {
+			return RemoteCheck{
+				OK:          true,
+				Code:        "empty_repo",
+				BranchFound: false,
+				RefCount:    0,
+			}
+		}
 		return RemoteCheck{
 			Code:     classifyRemoteErr(err),
 			RawError: scrubSecrets(err.Error(), cfg.HTTPSToken),
+		}
+	}
+	if len(refs) == 0 {
+		return RemoteCheck{
+			OK:          true,
+			Code:        "empty_repo",
+			BranchFound: false,
+			RefCount:    0,
 		}
 	}
 	target := plumbing.NewBranchReferenceName(branch)

@@ -88,6 +88,18 @@ func TestCheckRemote_BranchPresence(t *testing.T) {
 	})
 }
 
+func TestCheckRemote_EmptyRepo(t *testing.T) {
+	dir := t.TempDir()
+	bare := filepath.Join(dir, "empty.git")
+	if _, err := git.PlainInit(bare, true); err != nil {
+		t.Fatalf("init bare: %v", err)
+	}
+	got := CheckRemote(Config{Remote: bare, Branch: "main"})
+	if !got.OK || got.Code != "empty_repo" || got.RefCount != 0 || got.BranchFound {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestCheckRemote_ScrubsToken(t *testing.T) {
 	res := CheckRemote(Config{
 		Remote:     "/tmp/definitely-not-a-real-repo-xyz.git",
