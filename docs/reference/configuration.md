@@ -29,6 +29,11 @@ http_listen_addr: ":80"
 # Management API + dashboard port
 management_port: 8443
 
+# Management bind address. Default "127.0.0.1" keeps the dashboard local-only;
+# front it with Caddy on a manage.<domain> route, or set to "" (or "0.0.0.0")
+# to bind every interface (legacy behavior, exposes plain HTTP).
+management_addr: "127.0.0.1"
+
 # Management domain (for TLS cert)
 domain: manage.example.com
 
@@ -98,8 +103,9 @@ git_sync:
 | `data_dir` | string | `/var/lib/simpledeploy` | Database and backup storage |
 | `apps_dir` | string | `/etc/simpledeploy/apps` | Watched directory for compose files |
 | `listen_addr` | string | `:443` | Reverse proxy listen address (HTTPS) |
-| `http_listen_addr` | string | `""` | Optional plain-HTTP listener that 308-redirects to HTTPS. Ignored when `tls.mode: off`. |
+| `http_listen_addr` | string | `:80` (when `tls.mode` is `auto` or `local`) | Plain-HTTP listener that 308-redirects to HTTPS. Set explicitly to `""` to disable. Ignored when `tls.mode: off`. |
 | `management_port` | int | `8443` | Management API port |
+| `management_addr` | string | `127.0.0.1` | Management API bind address. Default keeps the dashboard local-only. Set to `""` (or `0.0.0.0`) to expose on every interface. |
 | `domain` | string | - | Management UI domain |
 | `public_host` | string | `""` | Server hostname/IP used for sslip.io auto-domains in template Quick test mode. Editable at runtime. |
 | `tls.mode` | string | `auto` | TLS mode: `auto`, `custom`, `off`, `local` |

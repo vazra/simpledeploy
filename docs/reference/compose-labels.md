@@ -46,6 +46,42 @@ If `simpledeploy.port` is not set, SimpleDeploy uses the first port mapping it f
 
 Endpoint services no longer need to publish host ports to be reachable. SimpleDeploy auto-attaches them to a shared `simpledeploy-public` Docker network and reverse-proxies over that. `ports:` still works and, when present, takes precedence over the shared-network path.
 
+### Published port loopback rewrite
+
+`ports: "8080:80"` style mappings are rewritten at deploy time to
+`127.0.0.1:8080:80` so the published port is reachable only from the host
+itself. Caddy still proxies external traffic to the same upstream, but
+this prevents an unauthenticated attacker from reaching the app raw on
+:8080 and bypassing per-app `simpledeploy.access.allow` and
+`simpledeploy.ratelimit.*` controls.
+
+Operator-explicit interface bindings (`"0.0.0.0:8080:80"`,
+`"127.0.0.1:9090:90"`, `"[::1]:5432:5432"`) are preserved verbatim. To
+disable the rewrite globally, set `SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true`.
+
+### Compose security validation
+
+Compose files are rejected at deploy time (and by the reconciler watcher
+on disk) if they declare any of the following container-escape vectors:
+
+- `privileged: true`
+- `network_mode: host`, `pid: host`, `pid: container:*`, `pid: service:*`
+- `ipc: host`, `userns_mode: host`, `cgroup: host`
+- Dangerous capabilities via `cap_add`: `ALL`, `SYS_ADMIN`, `SYS_PTRACE`,
+  `SYS_MODULE`, `SYS_RAWIO`, `SYS_BOOT`, `SYS_TIME`, `NET_ADMIN`,
+  `NET_RAW`, `DAC_READ_SEARCH`, `DAC_OVERRIDE`, `BPF`, `PERFMON`, `MKNOD`
+  (with or without the `CAP_` prefix).
+- `security_opt`: `apparmor=unconfined`, `seccomp=unconfined`,
+  `label=disable`, `systempaths=unconfined`, `no-new-privileges=false`.
+- `devices` (any non-empty list).
+- `volumes_from` (any non-empty list).
+- Bind mounts of `/etc`, `/proc`, `/sys`, `/dev`, `/var/run/docker.sock`,
+  `/root`, `/var/lib/docker`, `/boot`, `/lib/modules`, `/run`, `/`,
+  or any path containing `..`.
+- Top-level volumes with `driver_opts` of the form
+  `type: none, o: bind, device: /host/path` (the host-bind shim) when the
+  device path falls in the bind-source deny list.
+
 ## Access Control Labels
 
 See [IP access control](/guides/access-control/) for the full guide.

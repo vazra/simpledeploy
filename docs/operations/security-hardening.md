@@ -26,22 +26,41 @@ Before going to production:
 
 ### JWT Sessions
 
-- Session tokens are signed JWTs with 24-hour expiry
-- The signing key is derived from `master_secret` in your config
-- If `master_secret` is not set, a random secret is generated per process (sessions won't survive restarts)
-- Cookies are set with `HttpOnly`, `Secure`, `SameSite=Strict`, and `MaxAge=86400`
+- Session tokens are signed JWTs (HS256) with 24-hour expiry. The signing
+  key is HKDF-SHA256-derived from `master_secret` with purpose label
+  `simpledeploy-jwt-v1` so it is domain-separated from credential
+  encryption and API-key HMAC.
+- Tokens carry `iss=simpledeploy`, `aud=simpledeploy-dashboard`, and a
+  per-user `tv` (token version) claim. Bumping `tv` server-side
+  invalidates all outstanding JWTs for that user.
+- `tv` is bumped on logout, password change, and role change — a stolen
+  cookie cannot outlive any of those events.
+- Cookies are `HttpOnly`, `Secure` (when TLS), `SameSite=Strict`, `MaxAge=86400`.
 
 ### API Keys
 
 - API keys use the `sd_` prefix followed by 64 hex characters (32 bytes of entropy)
 - Keys are hashed with **HMAC-SHA256** using your `master_secret` before storage
 - Even if the database is stolen, keys cannot be recovered without the master secret
-- Keys support optional expiry dates; expired keys are rejected at the middleware level
+- Keys support optional `expires_at` (set on create); expired keys are rejected at the middleware level
+- `last_used_at` is updated lazily on every successful auth so operators can spot stale keys
 - The plaintext key is shown exactly once at creation and never stored
+
+### Login Rate Limit
+
+The login endpoint has its own rate limiter, capped at **10 requests per
+minute per client IP**. Login abuse cannot deplete the global request
+budget and vice versa. `trusted_proxies` accepts CIDR ranges
+(e.g. `10.0.0.0/8`); without a matching entry the proxy IP is treated as
+the client.
 
 ### Account Lockout
 
-After 10 failed login attempts, the account is temporarily locked with progressive backoff:
+After 10 failed login attempts per (username, IP) tuple, the account is
+temporarily locked with progressive backoff. Locking is per-IP-per-user
+so an attacker on one IP cannot DoS a victim's login from a different
+IP. A locked-out attempt returns the same `401 invalid credentials` as
+a wrong password, eliminating an enumeration tell.
 
 | Failures over threshold | Lockout duration |
 |------------------------|-----------------|

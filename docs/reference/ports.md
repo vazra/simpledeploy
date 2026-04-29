@@ -13,11 +13,13 @@ SimpleDeploy listens on three TCP ports by default. App container ports are boun
 | `443` | Caddy | HTTPS reverse proxy for all apps with `simpledeploy.domain`. | Yes |
 | `8443` | management API | Dashboard, REST API, WebSockets. | Optional |
 
-The proxy listen address comes from `listen_addr` in `config.yaml` (default `:443`). Caddy automatically opens `:80` when `tls.mode` is `auto` so it can solve ACME challenges and redirect plaintext traffic.
+The proxy listen address comes from `listen_addr` in `config.yaml` (default `:443`). Caddy automatically opens `:80` when `tls.mode` is `auto` or `local` (via `http_listen_addr`, defaulted to `:80`) so it can solve ACME challenges and 308-redirect plaintext traffic to HTTPS.
 
-The management port comes from `management_port` (default `8443`). It serves the Svelte UI, REST API (`/api/*`), and WebSocket streams. Bind it to a private interface or front it with the same Caddy proxy under a `manage.example.com` domain if you do not want it directly reachable.
+The management dashboard listens on `management_port` (default `8443`) bound to `management_addr` (default `127.0.0.1`). With the default bind, it is reachable only from the host itself; route external traffic to it through Caddy under a `manage.<domain>` route, or set `management_addr: ""` to expose every interface (legacy behavior, plain HTTP).
 
-App containers bind whatever ports the compose file declares. SimpleDeploy never auto-publishes ports; if you do not write `ports:` in your compose, the container is reachable only on the Docker bridge network and via the Caddy reverse proxy.
+App containers bind whatever ports the compose file declares — but any `ports: "8080:80"` mapping is rewritten at deploy time to `127.0.0.1:8080:80` so the published port is reachable only from the host. Caddy still proxies external traffic to the same upstream, but raw connections from outside the host cannot bypass the per-app `simpledeploy.access.allow` IP allowlist or `simpledeploy.ratelimit.*` controls. Operators who explicitly want the legacy 0.0.0.0 binding can set `SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true`, or write the bind explicitly (`"0.0.0.0:8080:80"`) which is preserved verbatim.
+
+If you do not write `ports:` at all, the container is reachable only on the Docker bridge network and via the Caddy reverse proxy.
 
 ## Firewall examples
 
