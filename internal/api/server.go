@@ -294,7 +294,7 @@ func (s *Server) routes() {
 
 	// Alert history
 	s.mux.Handle("GET /api/alerts/history", s.authMiddleware(http.HandlerFunc(s.handleListAlertHistory)))
-	s.mux.Handle("DELETE /api/alerts/history", s.authMiddleware(http.HandlerFunc(s.handleClearAlertHistory)))
+	s.mux.Handle("DELETE /api/alerts/history", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleClearAlertHistory))))
 
 	// Backup configs
 	s.mux.Handle("GET /api/apps/{slug}/backups/configs", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListBackupConfigs))))

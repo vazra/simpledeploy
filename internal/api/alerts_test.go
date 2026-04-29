@@ -768,3 +768,43 @@ func TestEditRuleAfterFired(t *testing.T) {
 		}
 	}
 }
+
+// --- RBAC tests for DELETE /api/alerts/history ---
+
+func TestClearAlertHistory_RequiresSuperAdmin(t *testing.T) {
+	srv, st, adminCookie := setupUserTestServer(t)
+
+	// super_admin: 200
+	req := authedRequest(t, http.MethodDelete, "/api/alerts/history", nil, adminCookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("super_admin status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	// manage: 403
+	manageCookie := loginAs(t, srv, st, "mgr", "managepass1", "manage")
+	req = authedRequest(t, http.MethodDelete, "/api/alerts/history", nil, manageCookie)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("manage status = %d, want 403", w.Code)
+	}
+
+	// viewer: 403
+	viewerCookie := loginAs(t, srv, st, "v1", "viewerpass1", "viewer")
+	req = authedRequest(t, http.MethodDelete, "/api/alerts/history", nil, viewerCookie)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("viewer status = %d, want 403", w.Code)
+	}
+
+	// unauth: 401
+	req = httptest.NewRequest(http.MethodDelete, "/api/alerts/history", nil)
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth status = %d, want 401", w.Code)
+	}
+}

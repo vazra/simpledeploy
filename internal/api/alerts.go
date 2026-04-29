@@ -472,6 +472,11 @@ func (s *Server) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
 // --- Alert History ---
 
 func (s *Server) handleListAlertHistory(w http.ResponseWriter, r *http.Request) {
+	user := GetAuthUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var ruleID *int64
 	if v := r.URL.Query().Get("rule_id"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
@@ -495,6 +500,27 @@ func (s *Server) handleListAlertHistory(w http.ResponseWriter, r *http.Request) 
 	}
 	if hist == nil {
 		hist = []store.AlertHistory{}
+	}
+	// Filter to apps the caller has access to (super_admin sees everything).
+	if user.Role != "super_admin" {
+		filtered := hist[:0]
+		accessCache := map[string]bool{}
+		for _, h := range hist {
+			if h.AppSlug == "" {
+				// global rows visible only to super_admin
+				continue
+			}
+			ok, present := accessCache[h.AppSlug]
+			if !present {
+				granted, _ := s.store.HasAppAccess(user.ID, h.AppSlug)
+				accessCache[h.AppSlug] = granted
+				ok = granted
+			}
+			if ok {
+				filtered = append(filtered, h)
+			}
+		}
+		hist = filtered
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(hist)
