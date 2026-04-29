@@ -32,6 +32,9 @@ SQL files live in `internal/store/migrations/` and are embedded with `go:embed`.
 | 015 | backups v2 |
 | 016 | indexes (alert_history, backup_runs) |
 | 017 | alert_history.rule_id nullable for gitsync conflict alerts |
+| 018 | gitsync_config (DB-authoritative git sync configuration) |
+| 019 | apps_status_unstable (transient status tracking) |
+| 020 | audit_log (unified activity feed) + audit_config (retention) |
 
 Migrations are forward-only. Adding a column with a default is safe; renames and drops are forbidden in published migrations to keep rollback to a previous binary version possible.
 
