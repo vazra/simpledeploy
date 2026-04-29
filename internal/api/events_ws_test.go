@@ -28,6 +28,7 @@ func dialEvents(t *testing.T, ts *httptest.Server, cookie *http.Cookie) *websock
 	u, _ := url.Parse(ts.URL)
 	wsURL := "ws://" + u.Host + "/api/events"
 	hdr := http.Header{}
+	hdr.Set("Origin", "http://"+u.Host)
 	if cookie != nil {
 		hdr.Set("Cookie", cookie.Name+"="+cookie.Value)
 	}

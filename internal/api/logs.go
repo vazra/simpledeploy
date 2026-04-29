@@ -19,11 +19,17 @@ var upgrader = websocket.Upgrader{
 }
 
 // checkWebSocketOrigin validates the Origin header for WebSocket connections.
-// Allows same-origin requests and rejects cross-origin requests.
+// Browsers always send Origin on WS upgrade; cookie-authed callers must
+// match the request Host. Bearer-authed callers (CLI, curl, integrations)
+// can omit Origin since they do not depend on cookie ambient credentials,
+// so cross-origin CSRF is structurally impossible for them.
 func checkWebSocketOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		return true // non-browser clients
+		// Allow only when the caller is Bearer-authed; cookie-authed
+		// upgrades MUST present an Origin so we can compare it to Host.
+		auth := r.Header.Get("Authorization")
+		return strings.HasPrefix(auth, "Bearer ")
 	}
 	host := r.Host
 	// Strip port from origin for comparison
