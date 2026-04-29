@@ -483,7 +483,9 @@ func (s *Server) runDBBackup(destDir string, compact bool, retention int) {
 	fname := fmt.Sprintf("simpledeploy-%s.db", ts)
 	destPath := filepath.Join(destDir, fname)
 
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	// 0700 dir + 0600 file: DB backup contains hashed passwords, encrypted
+	// secrets, full audit log.
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		log.Printf("[db-backup] mkdir %s: %v", destDir, err)
 		s.store.CreateDBBackupRun(destPath, 0, compact, "failed", err.Error())
 		return
@@ -493,6 +495,9 @@ func (s *Server) runDBBackup(destDir string, compact bool, retention int) {
 		log.Printf("[db-backup] vacuum into: %v", err)
 		s.store.CreateDBBackupRun(destPath, 0, compact, "failed", err.Error())
 		return
+	}
+	if err := os.Chmod(destPath, 0o600); err != nil {
+		log.Printf("[db-backup] chmod %s: %v", destPath, err)
 	}
 
 	if compact {

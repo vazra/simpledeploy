@@ -378,11 +378,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
+	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	if err := os.MkdirAll(cfg.AppsDir, 0755); err != nil {
+	// 0700: apps dir contains per-app compose + .env files with secrets.
+	if err := os.MkdirAll(cfg.AppsDir, 0o700); err != nil {
 		return fmt.Errorf("create apps dir: %w", err)
 	}
 
@@ -804,7 +805,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 
-	if err := os.WriteFile(cfgFile, data, 0644); err != nil {
+	// 0600: config.yaml contains master_secret.
+	if err := os.WriteFile(cfgFile, data, 0o600); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 
@@ -818,7 +820,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	if err := os.MkdirAll(cfg.AppsDir, 0755); err != nil {
+	if err := os.MkdirAll(cfg.AppsDir, 0o700); err != nil {
 		return fmt.Errorf("create apps dir: %w", err)
 	}
 
@@ -1525,12 +1527,12 @@ func copyCompose(src, appsDir, name string) (string, error) {
 	}
 
 	destDir := filepath.Join(appsDir, name)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return "", fmt.Errorf("create dest dir: %w", err)
 	}
 
 	dest := filepath.Join(destDir, "docker-compose.yml")
-	if err := os.WriteFile(dest, data, 0644); err != nil {
+	if err := os.WriteFile(dest, data, 0o600); err != nil {
 		return "", fmt.Errorf("write %s: %w", dest, err)
 	}
 

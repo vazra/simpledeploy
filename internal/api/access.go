@@ -140,7 +140,7 @@ func updateComposeAccessAllow(composePath, allow string) error {
 			}
 			lines[lineIdx] = replaceAllowValue(lines[lineIdx], node.Value, allow)
 		}
-		return os.WriteFile(composePath, joinLines(lines), 0644)
+		return os.WriteFile(composePath, joinLines(lines), 0o600)
 	}
 
 	// No existing label: no-op if allow is empty
@@ -164,7 +164,7 @@ func updateComposeAccessAllow(composePath, allow string) error {
 	if err != nil {
 		return fmt.Errorf("marshal compose: %w", err)
 	}
-	return os.WriteFile(composePath, out, 0644)
+	return os.WriteFile(composePath, out, 0o600)
 }
 
 // replaceAllowValue replaces the old allow value on a YAML line, preserving
