@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,5 +185,33 @@ func TestWebhookSendError(t *testing.T) {
 	err := d.Send(wh, event)
 	if err == nil {
 		t.Fatal("expected error for 500 response, got nil")
+	}
+}
+
+func TestIsReservedIP(t *testing.T) {
+	cases := []struct {
+		ip       string
+		reserved bool
+	}{
+		{"127.0.0.1", true},
+		{"10.0.0.1", true},
+		{"192.168.1.1", true},
+		{"169.254.169.254", true},
+		{"100.64.0.1", true}, // CGNAT
+		{"0.0.0.0", true},
+		{"255.255.255.255", true},
+		{"203.0.113.5", true}, // TEST-NET-3
+		{"224.0.0.1", true},   // multicast
+		{"::1", true},
+		{"fc00::1", true},
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+		{"2606:4700:4700::1111", false},
+	}
+	for _, c := range cases {
+		ip := net.ParseIP(c.ip)
+		if got := isReservedIP(ip); got != c.reserved {
+			t.Errorf("isReservedIP(%s) = %v, want %v", c.ip, got, c.reserved)
+		}
 	}
 }
