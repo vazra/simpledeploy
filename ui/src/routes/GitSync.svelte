@@ -455,7 +455,7 @@
 
           <div class="flex flex-wrap gap-2 pt-1">
             <Button type="submit" size="sm" disabled={cfgSaving}>
-              {cfgSaving ? 'Saving...' : 'Save'}
+              {cfgSaving ? 'Saving...' : (testResult?.code === 'empty_repo' ? 'Save & push initial commit' : 'Save')}
             </Button>
             <Button type="button" size="sm" variant="secondary" disabled={!fRemote || testing} onclick={() => runTest({ usePersistedToken: false })}>
               {testing ? 'Testing...' : 'Test connection'}
@@ -468,11 +468,13 @@
           </div>
 
           {#if testResult}
-            {@const cls = testResult.ok
-              ? 'bg-green-500/10 border-green-500/20 text-green-400'
-              : testResult.code === 'branch_missing'
-                ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
-                : 'bg-red-500/10 border-red-500/20 text-red-400'}
+            {@const cls = testResult.code === 'empty_repo'
+              ? 'bg-blue-500/10 border-blue-500/20 text-blue-400'
+              : testResult.ok
+                ? 'bg-green-500/10 border-green-500/20 text-green-400'
+                : testResult.code === 'branch_missing'
+                  ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
+                  : 'bg-red-500/10 border-red-500/20 text-red-400'}
             <div class="rounded-lg border px-3 py-2 text-sm {cls}" role="status" data-testid="gitsync-test-result">
               <p>{testResult.message}</p>
               {#if !testResult.ok && testResult.raw_error}

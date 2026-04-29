@@ -93,6 +93,31 @@ func TestHandleTestGitConnection_BranchMissing(t *testing.T) {
 	}
 }
 
+func TestHandleTestGitConnection_EmptyRepo(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+	dir := t.TempDir()
+	bare := filepath.Join(dir, "empty.git")
+	if _, err := git.PlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	rr := postTestConn(t, srv, cookie, map[string]any{
+		"remote": bare,
+		"branch": "main",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rr.Code, rr.Body.String())
+	}
+	var resp testConnResponse
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if !resp.OK || resp.Code != "empty_repo" {
+		t.Fatalf("resp %+v", resp)
+	}
+	if resp.Message != testConnMessages["empty_repo"] {
+		t.Fatalf("message %q", resp.Message)
+	}
+}
+
 func TestHandleTestGitConnection_NotFound(t *testing.T) {
 	srv, _ := newTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)

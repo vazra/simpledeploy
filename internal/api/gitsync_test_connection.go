@@ -23,6 +23,7 @@ var testConnMessages = map[string]string{
 	"auth_failed":    "Authentication failed. Check token or SSH key.",
 	"not_found":      "Repository not found at the given remote URL.",
 	"branch_missing": "Connected, but the configured branch does not exist on the remote.",
+	"empty_repo":     "Repository is empty. Saving will push your current SimpleDeploy configs as the initial commit.",
 	"network":        "Could not reach remote (network error).",
 	"unknown":        "Connection failed.",
 }
