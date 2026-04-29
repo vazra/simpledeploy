@@ -85,7 +85,7 @@ Do not skip backup *restore* testing. An untested backup is not a backup.
 
 ## Access
 
-- [ ] Long-lived API key minted for CI/CD with appropriate role (admin, not super_admin)
+- [ ] Long-lived API key minted for CI/CD with appropriate role (manage, not super_admin)
 - [ ] Per-developer accounts created (no shared `admin` login)
 - [ ] Viewer accounts for stakeholders who only need to look
 - [ ] `user_app_access` configured for non-admins so they only see their apps

@@ -134,7 +134,7 @@ simpledeploy users list
 simpledeploy users delete --id 2
 ```
 
-Roles: `super_admin` (full access), `admin` (per-app access), `viewer` (read-only per-app).
+Roles: `super_admin` (full platform + all apps), `manage` (write access to granted apps only, no platform mgmt, cannot create or delete apps), `viewer` (read-only on granted apps).
 
 ### `simpledeploy apikey`
 

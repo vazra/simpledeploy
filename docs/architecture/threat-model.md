@@ -8,7 +8,7 @@ SimpleDeploy targets a single host operated by a small team. The threat model be
 ## Trust boundaries
 
 1. **Operator** with shell on the host. Fully trusted. Owns `master_secret`, the database, and the binary.
-2. **Dashboard user** with role `super_admin`, `admin`, or `viewer`. Authenticated via password + JWT or API key. Trusted within their role and per-app scope.
+2. **Dashboard user** with role `super_admin`, `manage`, or `viewer`. Authenticated via password + JWT or API key. Trusted within their role and per-app scope.
 3. **Deployed app**. Untrusted. Could be compromised. Should not be able to harm SimpleDeploy or other apps beyond standard Docker isolation.
 4. **Public network**. Untrusted.
 
