@@ -218,6 +218,11 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 // --- Alert Rules ---
 
 func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
+	user := GetAuthUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var appID *int64
 	if v := r.URL.Query().Get("app_id"); v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
@@ -227,6 +232,13 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 		}
 		appID = &id
 	}
+	if appID != nil && user.Role != "super_admin" {
+		ok, _ := s.store.HasAppAccessByID(user.ID, *appID)
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+	}
 	rules, err := s.store.ListAlertRules(appID)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
@@ -234,6 +246,19 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 	}
 	if rules == nil {
 		rules = []store.AlertRule{}
+	}
+	if user.Role != "super_admin" {
+		filtered := rules[:0]
+		for _, rule := range rules {
+			if rule.AppID == nil {
+				continue
+			}
+			ok, _ := s.store.HasAppAccessByID(user.ID, *rule.AppID)
+			if ok {
+				filtered = append(filtered, rule)
+			}
+		}
+		rules = filtered
 	}
 	for i, r := range rules {
 		if r.AppID != nil {
@@ -274,6 +299,9 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Metric == "" || req.Operator == "" || req.WebhookID == 0 {
 		http.Error(w, "metric, operator and webhook_id required", http.StatusBadRequest)
+		return
+	}
+	if !s.canMutateForApp(w, r, req.AppID) {
 		return
 	}
 	// verify webhook exists
@@ -341,6 +369,14 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
+	// Authorise against both the existing rule's app (so a manage user
+	// cannot reach across apps) and the requested target app.
+	if existing != nil && !s.canMutateForApp(w, r, existing.AppID) {
+		return
+	}
+	if !s.canMutateForApp(w, r, req.AppID) {
+		return
+	}
 	var appSlug string
 	if req.AppID != nil {
 		if app, err := s.store.GetAppByID(*req.AppID); err == nil {
@@ -398,6 +434,17 @@ func (s *Server) handleDeleteAlertRule(w http.ResponseWriter, r *http.Request) {
 				existing = &r2
 				break
 			}
+		}
+	}
+	if existing != nil && !s.canMutateForApp(w, r, existing.AppID) {
+		return
+	}
+	if existing == nil {
+		// Fall through to DeleteAlertRule which will 404; still require auth role for safety.
+		user := GetAuthUser(r)
+		if user == nil || (user.Role != "super_admin" && user.Role != "manage") {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
 	}
 	if err := s.store.DeleteAlertRule(id); err != nil {
