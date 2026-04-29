@@ -173,7 +173,19 @@ func (s *Server) SetUIFS(fsys fs.FS) {
 				return
 			}
 		}
-		// SPA fallback: serve index.html directly
+		// SPA fallback: serve index.html directly. Apply a strict CSP for
+		// the only HTML document we ever serve from this origin; the SPA is
+		// fully self-hosted and never needs cross-origin script/frame.
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; "+
+				"font-src 'self' data:; "+
+				"connect-src 'self' ws: wss:; "+
+				"frame-ancestors 'none'; "+
+				"base-uri 'self'; "+
+				"form-action 'self'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
 	}))
