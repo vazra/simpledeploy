@@ -504,6 +504,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", s.port),
 		Handler: s.Handler(),
+		// ReadHeaderTimeout caps slow-header (slowloris) attacks; IdleTimeout
+		// reaps idle keep-alives. ReadTimeout/WriteTimeout are intentionally
+		// unset so streaming endpoints (WS, log fanout, multipart restore)
+		// are not killed mid-flight — those handlers manage their own
+		// deadlines via the request context or websocket Conn.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	go func() {
 		<-ctx.Done()
