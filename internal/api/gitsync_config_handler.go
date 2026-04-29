@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/config"
 	"github.com/vazra/simpledeploy/internal/gitsync"
@@ -294,6 +295,8 @@ func (s *Server) handlePutGitConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Snapshot before-state for audit (omit secret material).
+	before := gitSyncAuditSnapshot(s.store)
 	if err := s.store.SetGitSyncConfig(kvs); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
@@ -305,11 +308,30 @@ func (s *Server) handlePutGitConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	beforeJSON, _ := json.Marshal(before)
+	afterJSON, _ := json.Marshal(map[string]any{
+		"enabled":            req.Enabled,
+		"remote":             req.Remote,
+		"branch":             req.Branch,
+		"https_username":     req.HTTPSUsername,
+		"poll_interval":      req.PollIntervalSeconds,
+		"poll_enabled":       boolPtrValue(req.PollEnabled, true),
+		"auto_push_enabled":  boolPtrValue(req.AutoPushEnabled, true),
+		"auto_apply_enabled": boolPtrValue(req.AutoApplyEnabled, true),
+	})
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "gitsync_config_changed",
+		Before:   beforeJSON,
+		After:    afterJSON,
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(st)
 }
 
 func (s *Server) handleDisableGitSync(w http.ResponseWriter, r *http.Request) {
+	before := gitSyncAuditSnapshot(s.store)
 	if err := s.store.DeleteGitSyncConfig(); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
@@ -319,8 +341,46 @@ func (s *Server) handleDisableGitSync(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fmt.Errorf("reload gitsync: %w", err), http.StatusInternalServerError)
 		return
 	}
+	beforeJSON, _ := json.Marshal(before)
+	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+		Category: "system",
+		Action:   "gitsync_disabled",
+		Before:   beforeJSON,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(st)
+}
+
+// gitSyncAuditSnapshot returns a non-secret view of the current gitsync
+// config for use in Before/After audit fields. Secret material (tokens,
+// SSH keys) is intentionally omitted.
+func gitSyncAuditSnapshot(s gitSyncConfigReader) map[string]any {
+	kvs, err := s.GetGitSyncConfig()
+	if err != nil {
+		return nil
+	}
+	pi, _ := strconv.Atoi(kvs["poll_interval"])
+	return map[string]any{
+		"enabled":            kvs["enabled"] == "true",
+		"remote":             kvs["remote"],
+		"branch":             kvs["branch"],
+		"https_username":     kvs["https_username"],
+		"poll_interval":      pi,
+		"poll_enabled":       kvs["poll_enabled"] != "false",
+		"auto_push_enabled":  kvs["auto_push_enabled"] != "false",
+		"auto_apply_enabled": kvs["auto_apply_enabled"] != "false",
+	}
+}
+
+type gitSyncConfigReader interface {
+	GetGitSyncConfig() (map[string]string, error)
+}
+
+func boolPtrValue(p *bool, def bool) bool {
+	if p == nil {
+		return def
+	}
+	return *p
 }
 
 func boolStr(b bool) string {
