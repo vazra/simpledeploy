@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -28,6 +29,7 @@ func (m *mockReconciler) ScaleOne(_ context.Context, _ string, _ map[string]int)
 func (m *mockReconciler) AppServices(_ context.Context, _ string) ([]deployer.ServiceStatus, error) {
 	return nil, nil
 }
+func (m *mockReconciler) AppConfig(_ string) (*compose.AppConfig, error) { return nil, nil }
 func (m *mockReconciler) RollbackOne(_ context.Context, _ string, _ int64) error { return nil }
 func (m *mockReconciler) ListVersions(_ context.Context, _ string) ([]store.ComposeVersion, error) {
 	return nil, nil

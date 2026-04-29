@@ -48,10 +48,8 @@
   // Action modal state
   let actionModal = $state({ show: false, action: '' })
   let showMoreMenu = $state(false)
-  let showScaleModal = $state(false)
   let showRestartModal = $state(false)
   let actionLoading = $state('')
-  let scaleInputs = $state({})
 
   const tabs = ['overview', 'events', 'logs', 'activity', 'metrics', 'backups', 'settings']
   const ranges = ['1h', '6h', '24h', '1w', '1m', '1yr']
@@ -158,18 +156,6 @@
   async function cancelDeploy() {
     await api.cancelDeploy(slug)
     await loadApp()
-  }
-
-  async function handleScale() {
-    actionLoading = 'scale'
-    const scales = {}
-    for (const [svc, n] of Object.entries(scaleInputs)) {
-      scales[svc] = parseInt(n) || 1
-    }
-    await api.scaleApp(slug, scales)
-    actionLoading = ''
-    showScaleModal = false
-    loadApp()
   }
 
   function closeActionModal() {
@@ -340,8 +326,8 @@
           {/if}
           <Button variant="secondary" size="sm" onclick={handlePull} loading={actionLoading === 'pull'}>Pull & Update</Button>
           {/if}
-          <!-- More dropdown -->
-          {#if canMutate}
+          <!-- More dropdown (only meaningful while deploying) -->
+          {#if canMutate && app?.deploying}
           <div class="relative">
             <Button variant="ghost" size="sm" onclick={() => showMoreMenu = !showMoreMenu}>
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -351,10 +337,7 @@
             {#if showMoreMenu}
               <button class="fixed inset-0 z-10" onclick={() => showMoreMenu = false} aria-label="Close menu"></button>
               <div class="absolute right-0 top-full mt-1 bg-surface-2 border border-border/50 rounded-lg shadow-xl py-1 min-w-36 z-20">
-                <button onclick={() => { scaleInputs = {}; showScaleModal = true; showMoreMenu = false }} class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors">Scale</button>
-                {#if app?.deploying}
-                  <button onclick={() => { cancelDeploy(); showMoreMenu = false }} class="w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover transition-colors">Cancel Deploy</button>
-                {/if}
+                <button onclick={() => { cancelDeploy(); showMoreMenu = false }} class="w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover transition-colors">Cancel Deploy</button>
               </div>
             {/if}
           </div>
@@ -381,7 +364,7 @@
 
     <!-- Tab Content -->
     {#if activeTab === 'overview'}
-      <OverviewTab {slug} {app} {services} onSwitchTab={(tab) => activeTab = tab} />
+      <OverviewTab {slug} {app} {services} {canMutate} onScaled={loadServices} onSwitchTab={(tab) => activeTab = tab} />
 
     {:else if activeTab === 'events'}
       <EventsTab {slug} deploying={app?.deploying || false} />
@@ -465,33 +448,5 @@
       </div>
     {/if}
 
-    <!-- Scale modal -->
-    {#if showScaleModal}
-      <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
-        <button class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick={() => showScaleModal = false} aria-label="Close"></button>
-        <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md shadow-2xl animate-scale-in">
-          <h3 class="text-lg font-semibold tracking-tight text-text-primary mb-4">Scale Services</h3>
-          <div class="space-y-3 mb-5">
-            {#each services.length ? services : [{ service: 'web' }] as svc}
-              {@const name = svc.service || 'web'}
-              <div class="flex items-center gap-3">
-                <label class="text-sm text-text-secondary w-24">{name}</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={scaleInputs[name] ?? 1}
-                  oninput={(e) => scaleInputs = {...scaleInputs, [name]: e.currentTarget.value}}
-                  class="w-20 px-2.5 py-1.5 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary"
-                />
-              </div>
-            {/each}
-          </div>
-          <div class="flex justify-end gap-2">
-            <button onclick={() => showScaleModal = false} class="px-3 py-1.5 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary transition-colors">Cancel</button>
-            <Button onclick={handleScale} loading={actionLoading === 'scale'}>Apply</Button>
-          </div>
-        </div>
-      </div>
-    {/if}
   {/if}
 </Layout>

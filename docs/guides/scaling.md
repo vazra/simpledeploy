@@ -33,7 +33,9 @@ services:
 
 <Tabs>
 <TabItem label="UI">
-App page, Services tab, click the **+/-** next to a service. Apply.
+App page, Overview tab, Services panel. Each scalable service shows a **−** / count / **+** control. Click + to add a replica, − to remove one. Minimum is 1 (use **Stop** for full shutdown).
+
+Services that can't safely scale (databases, services with host port bindings, named volumes, or `deploy.mode: global`) show only the current count with a tooltip explaining why. Override detection with the `simpledeploy.scalable` label (below).
 </TabItem>
 <TabItem label="API">
 ```bash
@@ -42,10 +44,36 @@ curl -X POST https://manage.example.com/api/apps/myapp/scale \
   -H "Content-Type: application/json" \
   -d '{"scales": {"web": 3, "worker": 2}}'
 ```
+
+Requests for non-scalable services return `400` with a human-readable reason (e.g. `cannot scale db: stateful image (postgres)`). Lower-level failures forward the `docker compose` stderr in the body.
 </TabItem>
 </Tabs>
 
 The proxy rebuilds its upstream pool and starts load-balancing across all replicas immediately.
+
+## Eligibility detection
+
+A service is treated as non-scalable when any of the following hold:
+
+- A host port is published (`ports: ["8080:8080"]`).
+- A named volume is mounted (typically stateful state).
+- `deploy.mode: global` is set.
+- The image matches a known stateful database / broker (postgres, mysql, mariadb, mongo, redis, valkey, dragonfly, elasticsearch, opensearch, clickhouse, cassandra, rabbitmq, kafka, etcd, neo4j, influxdb, prometheus, qdrant, weaviate, minio, cockroach, ...).
+
+Override detection with a label:
+
+```yaml
+services:
+  worker:
+    image: my-bespoke-stateless-pg-helper
+    labels:
+      simpledeploy.scalable: "true"   # force-allow
+
+  web:
+    image: nginx
+    labels:
+      simpledeploy.scalable: "false"  # force-block
+```
 
 ## Limits and gotchas
 

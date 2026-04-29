@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
 )
@@ -50,6 +51,7 @@ func (m *mockReconcilerFull) AppServices(_ context.Context, slug string) ([]depl
 	m.calls = append(m.calls, "AppServices:"+slug)
 	return []deployer.ServiceStatus{{Service: "web", State: "running", Health: "healthy"}}, nil
 }
+func (m *mockReconcilerFull) AppConfig(_ string) (*compose.AppConfig, error) { return nil, nil }
 func (m *mockReconcilerFull) RollbackOne(_ context.Context, slug string, versionID int64) error {
 	m.calls = append(m.calls, fmt.Sprintf("RollbackOne:%s:%d", slug, versionID))
 	return nil
@@ -148,8 +150,15 @@ func TestScaleEndpoint(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
-	if len(mock.calls) == 0 || mock.calls[0] != "ScaleOne:myapp" {
-		t.Errorf("expected ScaleOne:myapp, got: %v", mock.calls)
+	found := false
+	for _, c := range mock.calls {
+		if c == "ScaleOne:myapp" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected ScaleOne:myapp in calls, got: %v", mock.calls)
 	}
 }
 

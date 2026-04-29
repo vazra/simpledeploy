@@ -344,19 +344,25 @@ paths:
     parameters: [{ $ref: '#/components/parameters/AppSlug' }]
     post:
       tags: [app-actions]
-      summary: Scale a service up or down
+      summary: Scale services up or down
+      description: |
+        Set replica counts for one or more services. Returns 400 if any named
+        service is non-scalable (stateful image, host port binding, named
+        volume, deploy.mode=global, or simpledeploy.scalable=false label).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [service, replicas]
+              required: [scales]
               properties:
-                service: { type: string }
-                replicas: { type: integer, minimum: 0 }
+                scales:
+                  type: object
+                  additionalProperties: { type: integer, minimum: 1 }
+                  example: { web: 3, worker: 2 }
       responses:
-        '202': { description: Scale accepted. }
+        '200': { description: Scale applied. }
         '400': { $ref: '#/components/responses/BadRequest' }
   /apps/{slug}/cancel:
     parameters: [{ $ref: '#/components/parameters/AppSlug' }]
@@ -1877,15 +1883,14 @@ components:
               items: { $ref: '#/components/schemas/Endpoint' }
     Service:
       type: object
+      description: Aggregated status for one compose service across all replicas.
       properties:
-        name: { type: string }
-        image: { type: string }
-        state: { type: string, example: running }
-        status: { type: string }
-        ports:
-          type: array
-          items: { type: string }
-        replicas: { type: integer }
+        service: { type: string }
+        state: { type: string, example: running, description: "Worst-case state across replicas (running, restarting, stopped, ...)." }
+        health: { type: string, example: healthy }
+        replicas: { type: integer, description: "Number of running containers for this service." }
+        scalable: { type: boolean, description: "Whether the service is eligible for replica scaling." }
+        scale_reason: { type: string, description: "When scalable is false, explains why (e.g. 'stateful image (postgres)')." }
     Endpoint:
       type: object
       properties:
