@@ -108,7 +108,7 @@ fi`
 	args := append([]string{"exec", "-i"}, envArgs...)
 	args = append(args, opts.ContainerName, "sh", "-c", script)
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdin = gr
+	cmd.Stdin = limitedGzip(gr, opts.MaxDecompressedBytes)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mysql restore: %w: %s", err, truncateOutput(out))

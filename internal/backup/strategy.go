@@ -38,4 +38,23 @@ type RestoreOpts struct {
 	Paths         []string
 	Credentials   map[string]string
 	Reader        io.ReadCloser
+	// MaxDecompressedBytes caps the total bytes a strategy is willing to
+	// produce from the (potentially gzipped) Reader. 0 means use the default
+	// from defaultMaxDecompressed. Set explicitly to override.
+	MaxDecompressedBytes int64
+}
+
+// defaultMaxDecompressed bounds gzip decompression on restore paths to
+// guard against compression-bomb DoS. 8 GiB is high enough to cover real
+// large-DB dumps but low enough that the host disk does not fill silently.
+const defaultMaxDecompressed = 8 << 30
+
+// limitedGzip wraps gr in an io.LimitReader using max (or the default cap
+// when max <= 0). The returned reader exposes Close so callers can keep
+// their existing defer gr.Close() pattern via the underlying gzip reader.
+func limitedGzip(gr io.Reader, max int64) io.Reader {
+	if max <= 0 {
+		max = defaultMaxDecompressed
+	}
+	return io.LimitReader(gr, max)
 }
