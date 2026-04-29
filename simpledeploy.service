@@ -9,5 +9,46 @@ ExecStart=/usr/local/bin/simpledeploy serve --config /etc/simpledeploy/config.ya
 Restart=always
 RestartSec=5
 
+# --- Hardening ---
+# SimpleDeploy must run as root by default because it talks to the docker
+# daemon socket and binds privileged ports (80/443) via Caddy. The
+# directives below reduce blast radius without breaking the runtime path.
+
+# Allow binding low ports without full root capabilities.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_DAC_OVERRIDE CAP_CHOWN CAP_SETUID CAP_SETGID CAP_KILL
+
+# Block setuid/setgid binaries inside the unit.
+NoNewPrivileges=true
+
+# Read-only system tree, with explicit writable paths for state.
+ProtectSystem=strict
+ReadWritePaths=/etc/simpledeploy /var/lib/simpledeploy /var/log/simpledeploy
+ProtectHome=true
+PrivateTmp=true
+
+# Kernel and tuning surface.
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+# Network: dashboard speaks IP and unix (docker.sock); deny the rest.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+# Syscall filter: standard system-service set covers our needs (including
+# fork/exec for docker compose).
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
 [Install]
 WantedBy=multi-user.target
