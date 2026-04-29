@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,24 @@ import (
 type envVar struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+// validateEnvVars rejects entries that would corrupt or smuggle additional
+// lines into the .env file: empty/invalid keys, keys containing whitespace
+// or `=`, and values containing CR/LF/NUL.
+func validateEnvVars(vars []envVar) error {
+	for i, v := range vars {
+		if v.Key == "" {
+			return fmt.Errorf("entry %d: empty key", i)
+		}
+		if strings.ContainsAny(v.Key, " \t\r\n\x00=") {
+			return fmt.Errorf("entry %d: key contains invalid character", i)
+		}
+		if strings.ContainsAny(v.Value, "\r\n\x00") {
+			return fmt.Errorf("entry %d: value contains newline or NUL", i)
+		}
+	}
+	return nil
 }
 
 func parseEnvFile(path string) ([]envVar, error) {
@@ -96,6 +115,10 @@ func (s *Server) handlePutEnv(w http.ResponseWriter, r *http.Request) {
 	var vars []envVar
 	if err := json.NewDecoder(r.Body).Decode(&vars); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := validateEnvVars(vars); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
