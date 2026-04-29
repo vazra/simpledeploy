@@ -131,7 +131,7 @@ exec psql -U "$user" -d "$db"`
 	args := append([]string{"exec", "-i"}, envArgs...)
 	args = append(args, opts.ContainerName, "sh", "-c", script)
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdin = gr
+	cmd.Stdin = limitedGzip(gr, opts.MaxDecompressedBytes)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("psql: %w: %s", err, truncateOutput(out))

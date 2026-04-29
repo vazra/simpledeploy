@@ -138,7 +138,7 @@ func (s *RedisStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 	// docker cp reads from stdin as a tar archive; we pipe the decompressed rdb
 	// We need to create a tar with the rdb file and pipe it to docker cp
 	cmd := exec.CommandContext(ctx, "docker", "cp", "-", container+":/data/")
-	cmd.Stdin = gr
+	cmd.Stdin = limitedGzip(gr, opts.MaxDecompressedBytes)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		if restartOut, restartErr := exec.CommandContext(ctx, "docker", "start", container).CombinedOutput(); restartErr != nil {
