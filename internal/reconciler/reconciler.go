@@ -633,6 +633,15 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 			fmt.Fprintf(os.Stderr, "reconciler: parse %s: %v\n", name, err)
 			continue
 		}
+		// Apply the same security validation as the API deploy path so a
+		// compose file dropped via gitsync, SSH, or restore cannot bypass
+		// the privileged-container / dangerous-bind-mount guards just by
+		// being on disk. Skip-and-warn rather than aborting the whole scan.
+		if violations := compose.ValidateComposeSecurity(cfg); len(violations) > 0 {
+			fmt.Fprintf(os.Stderr, "reconciler: refuse %s: compose security: %v\n", name, violations)
+			log.Printf("[reconciler] SECURITY: skipping %s: %v", name, violations)
+			continue
+		}
 		result[name] = cfg
 	}
 	return result, nil
