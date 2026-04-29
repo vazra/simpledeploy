@@ -43,6 +43,7 @@ func httpError(w http.ResponseWriter, err error, code int) {
 type Server struct {
 	mux               *http.ServeMux
 	port              int
+	bindAddr          string
 	store             *store.Store
 	jwt               *auth.JWTManager
 	rateLimiter       *auth.RateLimiter
@@ -100,6 +101,10 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 
 // SetMasterSecret sets the master secret for encrypting registry credentials.
 func (s *Server) SetMasterSecret(secret string) { s.masterSecret = secret }
+
+// SetBindAddr sets the listener bind address (default "" = all interfaces).
+// Use "127.0.0.1" to keep the dashboard local-only when not fronted by Caddy.
+func (s *Server) SetBindAddr(addr string) { s.bindAddr = addr }
 
 // SetBuildInfo sets the build version, commit, and date.
 func (s *Server) SetBuildInfo(version, commit, date string) {
@@ -548,7 +553,7 @@ func (s *Server) runDBBackup(destDir string, compact bool, retention int) {
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.port),
+		Addr:    fmt.Sprintf("%s:%d", s.bindAddr, s.port),
 		Handler: s.Handler(),
 		// ReadHeaderTimeout caps slow-header (slowloris) attacks; IdleTimeout
 		// reaps idle keep-alives. ReadTimeout/WriteTimeout are intentionally

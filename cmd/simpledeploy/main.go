@@ -754,6 +754,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}()
 
 	srv := api.NewServer(cfg.ManagementPort, db, jwtMgr, rl)
+	srv.SetBindAddr(cfg.ManagementAddr)
 	srv.SetBackupScheduler(backupSched)
 	srv.SetDocker(dc)
 	srv.SetAppsDir(cfg.AppsDir)
@@ -785,7 +786,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	distFS, _ := fs.Sub(uiDistFS, "ui_dist")
 	srv.SetUIFS(distFS)
 
-	fmt.Printf("simpledeploy listening on :%d\n", cfg.ManagementPort)
+	bindLog := cfg.ManagementAddr
+	if bindLog == "" {
+		bindLog = "*"
+	}
+	fmt.Printf("simpledeploy listening on %s:%d\n", bindLog, cfg.ManagementPort)
 	err = srv.ListenAndServe(ctx)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
