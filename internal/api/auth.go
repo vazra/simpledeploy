@@ -95,10 +95,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	secure := s.tlsMode != "off"
+	// Always SameSite=Strict regardless of TLS mode. Lax allows top-level
+	// GET navigations to carry the cookie, which on a misconfigured TLS-off
+	// install opens minor CSRF surface; Strict closes it. This breaks
+	// link-bookmark sign-ins (visiting a bookmarked URL won't carry the
+	// cookie on the very first navigation), which is acceptable for an
+	// admin tool.
 	sameSite := http.SameSiteStrictMode
-	if !secure {
-		sameSite = http.SameSiteLaxMode
-	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    token,
@@ -127,10 +130,13 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	secure := s.tlsMode != "off"
+	// Always SameSite=Strict regardless of TLS mode. Lax allows top-level
+	// GET navigations to carry the cookie, which on a misconfigured TLS-off
+	// install opens minor CSRF surface; Strict closes it. This breaks
+	// link-bookmark sign-ins (visiting a bookmarked URL won't carry the
+	// cookie on the very first navigation), which is acceptable for an
+	// admin tool.
 	sameSite := http.SameSiteStrictMode
-	if !secure {
-		sameSite = http.SameSiteLaxMode
-	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    "",
