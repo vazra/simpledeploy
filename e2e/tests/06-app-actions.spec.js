@@ -90,21 +90,20 @@ test.describe('App Actions', () => {
 
   test('scale service', async ({ page }) => {
     const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    // Scale is inside the "..." (more) dropdown menu
-    const moreBtn = page.locator('button').filter({ has: page.locator('svg path[d*="6.75 12a.75"]') });
-    await moreBtn.click();
-    await page.locator('button').filter({ hasText: 'Scale' }).click();
-
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    const inputs = dialog.locator('input[type="number"]');
-    const count = await inputs.count();
-    if (count > 0) {
-      await inputs.first().fill('2');
+    // Make sure app is running so services render with scale controls.
+    await apiLogin('e2eadmin', 'E2eTestPass123!');
+    await apiRequest('POST', '/api/apps/e2e-multi/start');
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const res = await apiRequest('GET', '/api/apps/e2e-multi');
+      if (res.ok && res.data?.status === 'running') break;
+      await new Promise(r => setTimeout(r, 1_000));
     }
-    const applyBtn = dialog.getByRole('button', { name: /apply/i });
-    await applyBtn.click();
+    await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
+    // Scale uses inline +/- buttons per scalable service in OverviewTab.
+    const incBtn = page.getByRole('button', { name: 'Increase replicas' }).first();
+    await expect(incBtn).toBeVisible({ timeout: 30_000 });
+    await incBtn.click();
     await expect(page.getByText(/running/i).first()).toBeVisible({ timeout: 30_000 });
   });
 });

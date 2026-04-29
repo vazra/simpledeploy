@@ -9,3 +9,5 @@ services:
       simpledeploy.endpoints.0.tls: "off"
   cache:
     image: redis:alpine
+    labels:
+      simpledeploy.scalable: "true"
