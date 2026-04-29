@@ -70,10 +70,11 @@ test.describe('Multi-User Isolation', () => {
       expect(res.status).toBe(403);
     });
 
-    test('DELETE /api/apps/e2e-multi returns 404 (no access)', async () => {
-      // Viewer has no access to e2e-multi, so appAccessMiddleware returns 404
+    test('DELETE /api/apps/e2e-multi returns 403 (viewer cannot mutate)', async () => {
+      // Viewers are blocked by mutatingAppMiddleware before app access is
+      // checked, so they always see 403 (not 404) on mutating routes.
       const res = await apiRequest('DELETE', '/api/apps/e2e-multi');
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(403);
     });
   });
 
