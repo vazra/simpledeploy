@@ -85,9 +85,17 @@ func (s *VolumeStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRe
 }
 
 func (s *VolumeStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
+	// Validate the archive before handing it to the in-container tar so an
+	// attacker-uploaded backup with absolute paths, '..' segments, or
+	// symlinks cannot escape the container's volume layout (and via bind
+	// mounts, the host).
+	safe, err := validateTarStream(opts.Reader)
+	if err != nil {
+		return fmt.Errorf("reject restore archive: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName,
-		"tar", "-xzf", "-", "-C", "/")
-	cmd.Stdin = opts.Reader
+		"tar", "-xzf", "-", "-C", "/", "--no-same-owner", "--no-overwrite-dir")
+	cmd.Stdin = safe
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar restore: %w: %s", err, out)
