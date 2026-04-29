@@ -24,8 +24,27 @@ func (s *Server) handleListWebhooks(w http.ResponseWriter, r *http.Request) {
 	if whs == nil {
 		whs = []store.Webhook{}
 	}
+	// Webhook URLs and headers commonly embed authentication secrets
+	// (Slack/Discord/Teams tokens, Authorization headers). Only super_admin
+	// sees them; managers/viewers see only the metadata needed to label a
+	// webhook in the alerts UI.
+	user := GetAuthUser(r)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(whs)
+	if user.Role == "super_admin" {
+		json.NewEncoder(w).Encode(whs)
+		return
+	}
+	type webhookSummary struct {
+		ID        int64     `json:"id"`
+		Name      string    `json:"name"`
+		Type      string    `json:"type"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	out := make([]webhookSummary, 0, len(whs))
+	for _, wh := range whs {
+		out = append(out, webhookSummary{ID: wh.ID, Name: wh.Name, Type: wh.Type, CreatedAt: wh.CreatedAt})
+	}
+	json.NewEncoder(w).Encode(out)
 }
 
 // webhookAuditJSON builds the webhookView JSON shape for audit records.
