@@ -86,6 +86,45 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// Server-driven keepalive: send a ping every 30s so the browser pong
+	// refreshes the read deadline and the goroutines exit promptly when
+	// the client disconnects abruptly. Closes audit L-15.
+	pingTicker := time.NewTicker(30 * time.Second)
+	defer pingTicker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-pingTicker.C:
+				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+			}
+		}
+	}()
+
+	// Periodic auth recheck: long-lived log streams should not outlive a
+	// password change, role change, or logout. Bumping token_version on
+	// the user makes the next recheck cancel the connection. Closes L-14.
+	authUser := GetAuthUser(r)
+	if authUser != nil {
+		go func() {
+			t := time.NewTicker(60 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					u, err := s.store.GetUserByID(authUser.ID)
+					if err != nil || u == nil || u.Role != authUser.Role {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+	}
+
 	go func() {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
