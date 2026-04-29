@@ -187,7 +187,7 @@ func TestMutationHook_GlobalEntities(t *testing.T) {
 	assertLastHook(t, rec, ScopeGlobal, "")
 
 	// CreateAPIKey
-	k, err := s.CreateAPIKey(u2.ID, "keyhash", "mykey")
+	k, err := s.CreateAPIKey(u2.ID, "keyhash", "mykey", nil)
 	if err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}

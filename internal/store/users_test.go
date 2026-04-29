@@ -123,7 +123,7 @@ func TestCreateAndGetAPIKey(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	k, err := s.CreateAPIKey(u.ID, "hashABC", "my-key")
+	k, err := s.CreateAPIKey(u.ID, "hashABC", "my-key", nil)
 	if err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}
@@ -157,10 +157,10 @@ func TestListAPIKeysByUser(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	if _, err := s.CreateAPIKey(u.ID, "hash1", "key-one"); err != nil {
+	if _, err := s.CreateAPIKey(u.ID, "hash1", "key-one", nil); err != nil {
 		t.Fatalf("CreateAPIKey 1: %v", err)
 	}
-	if _, err := s.CreateAPIKey(u.ID, "hash2", "key-two"); err != nil {
+	if _, err := s.CreateAPIKey(u.ID, "hash2", "key-two", nil); err != nil {
 		t.Fatalf("CreateAPIKey 2: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestDeleteAPIKey(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	k, err := s.CreateAPIKey(u.ID, "hashDEL", "doomed-key")
+	k, err := s.CreateAPIKey(u.ID, "hashDEL", "doomed-key", nil)
 	if err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}

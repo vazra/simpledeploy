@@ -140,7 +140,7 @@ func TestRoundtripGlobalSidecar(t *testing.T) {
 
 	// Seed API key for alice.
 	expires := time.Now().Add(24 * time.Hour).Truncate(time.Second)
-	if _, err := st.CreateAPIKey(u.ID, "sha256hash", "ci"); err != nil {
+	if _, err := st.CreateAPIKey(u.ID, "sha256hash", "ci", nil); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
 	// Also test expires_at via direct upsert (CreateAPIKey doesn't support it, so ok to skip for expires coverage)
@@ -1206,7 +1206,7 @@ func TestImportGlobalIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := st.CreateAPIKey(u.ID, "keyhash-idem", "ci"); err != nil {
+	if _, err := st.CreateAPIKey(u.ID, "keyhash-idem", "ci", nil); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
 	wh := &store.Webhook{Name: "idem-slack", Type: "slack", URL: "https://hooks.example.com/idem"}
@@ -1365,7 +1365,7 @@ func TestConfigExportImportRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := st.CreateAPIKey(u.ID, "apikeyhash", "mykey"); err != nil {
+	if _, err := st.CreateAPIKey(u.ID, "apikeyhash", "mykey", nil); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
 	wh := &store.Webhook{Name: "rt-slack", Type: "slack", URL: "https://hooks.example.com/rt"}
