@@ -121,26 +121,26 @@
           Overwriting app <span class="font-mono font-semibold">{preview.slug}</span>
         </p>
         <div class="flex flex-col gap-2 text-sm">
-          <div class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
+          <div data-testid="import-preview-compose" class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
             <span class="text-text-secondary">Compose file</span>
             <span class={preview.changes?.compose_changed ? 'text-warning font-medium' : 'text-text-muted'}>
               {preview.changes?.compose_changed ? 'Changed' : 'Unchanged'}
             </span>
           </div>
-          <div class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
+          <div data-testid="import-preview-sidecar" class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
             <span class="text-text-secondary">Sidecar config</span>
             <span class={preview.changes?.sidecar_changed ? 'text-warning font-medium' : 'text-text-muted'}>
               {preview.changes?.sidecar_changed ? 'Changed' : 'Unchanged'}
             </span>
           </div>
-          <div class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
+          <div data-testid="import-preview-alerts" class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
             <span class="text-text-secondary">Alert rules</span>
             <span class="font-mono text-xs text-text-primary">
               {preview.changes?.alert_rule_count_current ?? 0} -&gt; {preview.changes?.alert_rule_count_incoming ?? 0}
               <span class="ml-1 text-text-muted">({formatDelta(preview.changes?.alert_rule_count_delta ?? 0)})</span>
             </span>
           </div>
-          <div class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
+          <div data-testid="import-preview-backups" class="flex items-center justify-between bg-surface-3/50 rounded-md px-3 py-2">
             <span class="text-text-secondary">Backup configs</span>
             <span class="font-mono text-xs text-text-primary">
               {preview.changes?.backup_config_count_current ?? 0} -&gt; {preview.changes?.backup_config_count_incoming ?? 0}
