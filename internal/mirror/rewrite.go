@@ -15,6 +15,41 @@ import (
 // is preserved by capture group 1.
 var imageLineRe = regexp.MustCompile(`(?m)^([ \t]+image:[ \t]*)(['"]?)([^'"#\n]+?)(['"]?)([ \t]*(?:#.*)?)$`)
 
+// portsListEntryRe matches a long-form ports list entry of the form
+// `<indent>- [quote]<host>:<container>[/proto][quote]`. host is digits-only
+// (no IP prefix, no host:container omission). Indentation, quoting, and
+// any trailing comment / protocol are preserved by capture groups.
+//
+// Lines that already pin an interface (127.0.0.1:8080:80, 0.0.0.0:8080:80,
+// [::1]:8080:80) do NOT match — they are operator-explicit.
+var portsListEntryRe = regexp.MustCompile(`(?m)^([ \t]+-[ \t]+)(['"]?)([0-9]+:[0-9]+(?:/[a-z]+)?)(['"]?)([ \t]*(?:#.*)?)$`)
+
+// RewritePortsLoopback prefixes every "host:container" ports list entry
+// with "127.0.0.1:" so the published port is reachable only from the host
+// itself. Caddy still proxies external traffic to the same upstream
+// (resolved as localhost:host_port), so external behavior is unchanged
+// while the bypass-Caddy hole is closed.
+//
+// Operator-explicit entries (already pinned to an IP) are left alone.
+// Set SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true to skip the rewrite globally.
+func RewritePortsLoopback(composeYAML []byte) []byte {
+	return portsListEntryRe.ReplaceAllFunc(composeYAML, func(line []byte) []byte {
+		m := portsListEntryRe.FindSubmatch(line)
+		if m == nil {
+			return line
+		}
+		prefix, openQ, mapping, closeQ, suffix := m[1], m[2], m[3], m[4], m[5]
+		out := make([]byte, 0, len(line)+len("127.0.0.1:"))
+		out = append(out, prefix...)
+		out = append(out, openQ...)
+		out = append(out, []byte("127.0.0.1:")...)
+		out = append(out, mapping...)
+		out = append(out, closeQ...)
+		out = append(out, suffix...)
+		return out
+	})
+}
+
 // RewriteCompose returns composeYAML with every docker.io-bound image
 // reference rewritten to prefix + normalized path. prefix must include
 // trailing slash (e.g. "ghcr.io/vazra/"). If prefix is empty, returns
