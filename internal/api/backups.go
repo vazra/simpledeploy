@@ -503,7 +503,10 @@ func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "backup config not found", http.StatusNotFound)
 		return
 	}
-	if !s.checkAppAccessByID(w, r, cfg.AppID) {
+	// Backup files contain hashed passwords, encrypted creds, full DB
+	// dumps. Restrict to manage+grant or super_admin (mirror of the
+	// restore endpoint's authorization). Closes audit M-15.
+	if !s.canMutateForApp(w, r, &cfg.AppID) {
 		return
 	}
 

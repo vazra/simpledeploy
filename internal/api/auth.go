@@ -11,9 +11,15 @@ import (
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ip := auth.RealIP(r, s.trustedProxies)
 
-	// Rate limit by client IP
-	if s.rateLimiter != nil {
-		if !s.rateLimiter.Allow(ip) {
+	// Rate limit: prefer dedicated login limiter so this endpoint cannot
+	// deplete the global request budget (or vice versa). Fall back to the
+	// global limiter if the login one is unconfigured.
+	limiter := s.loginLimiter
+	if limiter == nil {
+		limiter = s.rateLimiter
+	}
+	if limiter != nil {
+		if !limiter.Allow(ip) {
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
@@ -161,6 +167,12 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	// Serialize concurrent setup requests so the count + insert pair is
+	// effectively a single critical section. Without this, two simultaneous
+	// callers can both observe count==0 and both attempt to create the
+	// initial super_admin; the loser sees a UNIQUE error and a generic 500.
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
 	count, err := s.store.UserCount()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

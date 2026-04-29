@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -47,6 +48,13 @@ type Server struct {
 	store             *store.Store
 	jwt               *auth.JWTManager
 	rateLimiter       *auth.RateLimiter
+	// loginLimiter is a tighter, separate per-IP limiter for the login
+	// endpoint so abuse there does not deplete the global request budget
+	// (and vice versa). Default 10/min/IP.
+	loginLimiter *auth.RateLimiter
+	// setupMu serializes /api/setup so concurrent first-install requests
+	// cannot race past the UserCount() check before either inserts.
+	setupMu sync.Mutex
 	backupScheduler   *backup.Scheduler
 	docker            docker.Client
 	appsDir           string
@@ -105,6 +113,10 @@ func (s *Server) SetMasterSecret(secret string) { s.masterSecret = secret }
 // SetBindAddr sets the listener bind address (default "" = all interfaces).
 // Use "127.0.0.1" to keep the dashboard local-only when not fronted by Caddy.
 func (s *Server) SetBindAddr(addr string) { s.bindAddr = addr }
+
+// SetLoginLimiter installs a dedicated rate limiter for the login endpoint
+// so login abuse cannot deplete the global request budget.
+func (s *Server) SetLoginLimiter(rl *auth.RateLimiter) { s.loginLimiter = rl }
 
 // SetBuildInfo sets the build version, commit, and date.
 func (s *Server) SetBuildInfo(version, commit, date string) {
