@@ -27,6 +27,7 @@ func (s *Server) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
 	// long deploy (slow image pull) would hit our 5min read deadline and
 	// the connection would die mid-deploy. Refresh the deadline whenever
 	// a pong arrives, and drive that pong by emitting a ping every minute.
+	conn.SetReadLimit(wsMaxFrameSize)
 	conn.SetReadDeadline(time.Now().Add(deployLogReadDeadline))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(deployLogReadDeadline))

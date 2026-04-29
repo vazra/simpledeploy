@@ -68,6 +68,9 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// Cap inbound frames; this WS is server-to-client only and should not
+	// receive payloads of any size from the browser.
+	conn.SetReadLimit(wsMaxFrameSize)
 	conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
