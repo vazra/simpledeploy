@@ -1,0 +1,28 @@
+- support private docker registers 
+
+
+
+
+- the is an OSS project, add required legal documents both in the marketing website as well as in code . 
+- support sending emails. you can even setup a mail-server as an app if needed. 
+- make gitsync related fuctionalities only available for super admins. 
+- provide an option to export yaml/compose config. 
+- in the app overview page, I want to know the current memory (single value in MB) and compute (percent) usage of each container. 
+
+
+Bug: 
+- when an app is added and failed, the app gets added to the system, but visible only after a page reload. 
+- App Details -> Advanced tab not expanding. 
+- How to find export option. 
+- alerts side panel dismiss when clicking outside. 
+- for community recepe, make the endpoint custom tls by default. user can change to auto if needed. 
+- by default - make the endpoints as service-app.domain.com
+
+
+
+
+
+
+Prod Rediness : 
+- test deploying all the apps I need locally and make sure everything works as expected. 
+- then deploy stack. 

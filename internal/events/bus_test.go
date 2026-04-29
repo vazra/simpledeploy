@@ -97,24 +97,27 @@ func TestBusUnsubscribe(t *testing.T) {
 
 func TestTopicsForAudit(t *testing.T) {
 	cases := []struct {
-		cat, slug string
-		want      []string
+		cat, action, slug string
+		want              []string
 	}{
-		{"compose", "foo", []string{"global:audit", "app:foo"}},
-		{"lifecycle", "foo", []string{"global:audit", "app:foo", "global:apps"}},
-		{"backup", "foo", []string{"global:audit", "app:foo", "global:backups"}},
-		{"webhook", "", []string{"global:audit", "global:alerts"}},
-		{"settings", "", []string{"global:audit", "global:settings"}},
-		{"docker", "", []string{"global:audit", "global:docker"}},
+		{"compose", "changed", "foo", []string{"global:audit", "app:foo"}},
+		{"lifecycle", "created", "foo", []string{"global:audit", "app:foo", "global:apps"}},
+		{"backup", "changed", "foo", []string{"global:audit", "app:foo", "global:backups"}},
+		{"webhook", "added", "", []string{"global:audit", "global:alerts"}},
+		{"settings", "changed", "", []string{"global:audit", "global:settings"}},
+		{"docker", "pruned", "", []string{"global:audit", "global:docker"}},
+		{"system", "user_added", "", []string{"global:audit", "global:settings", "global:users"}},
+		{"system", "apikey_removed", "", []string{"global:audit", "global:settings", "global:users"}},
+		{"system", "maintenance_ran", "", []string{"global:audit", "global:settings"}},
 	}
 	for _, c := range cases {
-		got := TopicsForAudit(c.cat, c.slug)
+		got := TopicsForAudit(c.cat, c.action, c.slug)
 		if len(got) != len(c.want) {
-			t.Fatalf("%s/%s: got %v, want %v", c.cat, c.slug, got, c.want)
+			t.Fatalf("%s/%s/%s: got %v, want %v", c.cat, c.action, c.slug, got, c.want)
 		}
 		for i, g := range got {
 			if g != c.want[i] {
-				t.Fatalf("%s/%s: got %v, want %v", c.cat, c.slug, got, c.want)
+				t.Fatalf("%s/%s/%s: got %v, want %v", c.cat, c.action, c.slug, got, c.want)
 			}
 		}
 	}

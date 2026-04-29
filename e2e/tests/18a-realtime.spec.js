@@ -1,12 +1,15 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
-import { apiRequest } from '../helpers/api.js';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest } from '../helpers/api.js';
 
 // Realtime WS keeps the dashboard in sync without manual refresh.
 // We mutate via a separate API call (different "session") and watch the
 // open page reflect the change within a few seconds.
 test.describe('Realtime updates', () => {
   test.beforeEach(async ({ page }) => {
+    // Re-establish admin session for apiRequest (prior specs may have left a
+    // viewer or stale cookie on the module-level state).
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
     await loginAsAdmin(page);
   });
 
@@ -40,15 +43,15 @@ test.describe('Realtime updates', () => {
     await page.goto(`${state.baseURL}/#/`);
     await expect(page.getByRole('heading', { name: 'e2e-nginx', exact: true })).toBeVisible({ timeout: 5_000 });
 
-    // Touch the app via a no-op env update so an audit/lifecycle/env event fires.
+    // Touch the app via a no-op env update so an audit/env event fires.
     const slug = 'e2e-nginx';
-    const envRes = await apiRequest('PUT', `/api/apps/${slug}/env`, { vars: { RT_PING: '1' } });
+    const envRes = await apiRequest('PUT', `/api/apps/${slug}/env`, [{ key: 'RT_PING', value: '1' }]);
     expect(envRes.ok).toBe(true);
 
     // The dashboard should still show the app card, possibly refreshed.
     await expect(page.getByRole('heading', { name: 'e2e-nginx', exact: true })).toBeVisible({ timeout: 5_000 });
 
     // Clean up env var.
-    await apiRequest('PUT', `/api/apps/${slug}/env`, { vars: {} });
+    await apiRequest('PUT', `/api/apps/${slug}/env`, []);
   });
 });
