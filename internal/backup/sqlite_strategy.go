@@ -92,10 +92,17 @@ func (s *SQLiteStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 		return fmt.Errorf("no SQLite database paths specified")
 	}
 
+	// Validate the archive before handing it to the in-container tar to
+	// block tar-slip / symlink-poison from a hostile uploaded backup.
+	safe, err := validateTarStream(opts.Reader)
+	if err != nil {
+		return fmt.Errorf("reject restore archive: %w", err)
+	}
+
 	// Extract tar into /tmp inside container
 	extractCmd := exec.CommandContext(ctx, "docker", "exec", "-i", container,
-		"tar", "-xzf", "-", "-C", "/")
-	extractCmd.Stdin = opts.Reader
+		"tar", "-xzf", "-", "-C", "/", "--no-same-owner", "--no-overwrite-dir")
+	extractCmd.Stdin = safe
 
 	if out, err := extractCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar extract: %w: %s", err, out)
