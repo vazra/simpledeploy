@@ -80,12 +80,12 @@ func TestBuildConfigWithRoutes(t *testing.T) {
 			t.Errorf("route[%d] host: got %q, want %q", i, host, wantDomains[i])
 		}
 
-		// handlers: [ipaccess, ratelimit, metrics, reverse_proxy]
+		// handlers: [ipaccess, ratelimit, metrics, headers, reverse_proxy]
 		handleList := r["handle"].([]interface{})
-		if len(handleList) != 4 {
-			t.Fatalf("route[%d] handle: got %d handlers, want 4", i, len(handleList))
+		if len(handleList) != 5 {
+			t.Fatalf("route[%d] handle: got %d handlers, want 5", i, len(handleList))
 		}
-		rp := handleList[3].(map[string]interface{})
+		rp := handleList[4].(map[string]interface{})
 		dial := rp["upstreams"].([]interface{})[0].(map[string]interface{})["dial"].(string)
 		if dial != wantDials[i] {
 			t.Errorf("route[%d] dial: got %q, want %q", i, dial, wantDials[i])
@@ -121,12 +121,12 @@ func TestBuildConfigHandlerOrder(t *testing.T) {
 	r := routes[0].(map[string]interface{})
 	handleList := r["handle"].([]interface{})
 
-	// Expect 4 handlers: ipaccess, ratelimit, metrics, reverse_proxy
-	if len(handleList) != 4 {
-		t.Fatalf("handle: got %d handlers, want 4", len(handleList))
+	// Expect 5 handlers: ipaccess, ratelimit, metrics, headers, reverse_proxy
+	if len(handleList) != 5 {
+		t.Fatalf("handle: got %d handlers, want 5", len(handleList))
 	}
 
-	wantOrder := []string{"simpledeploy_ipaccess", "simpledeploy_ratelimit", "simpledeploy_metrics", "reverse_proxy"}
+	wantOrder := []string{"simpledeploy_ipaccess", "simpledeploy_ratelimit", "simpledeploy_metrics", "headers", "reverse_proxy"}
 	for i, want := range wantOrder {
 		h := handleList[i].(map[string]interface{})
 		got := h["handler"].(string)

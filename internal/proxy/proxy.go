@@ -112,10 +112,30 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		if r.TLS == "local" {
 			localTLSDomains = append(localTLSDomains, r.Domain)
 		}
+		// Inject safe-default security headers on responses from each app.
+		// Defer (rather than overwrite) so an app that already sets these
+		// keeps its own value. HSTS is only added when the route uses TLS;
+		// adding it on plain-HTTP routes would lock victims into HTTPS for
+		// hosts that never serve it.
+		headerHandler := map[string]interface{}{
+			"handler": "headers",
+			"response": map[string]interface{}{
+				"deferred": true,
+				"set": map[string]interface{}{
+					"X-Content-Type-Options": []string{"nosniff"},
+					"X-Frame-Options":        []string{"SAMEORIGIN"},
+					"Referrer-Policy":        []string{"strict-origin-when-cross-origin"},
+				},
+			},
+		}
+		if r.TLS != "off" && r.TLS != "" {
+			headerHandler["response"].(map[string]interface{})["set"].(map[string]interface{})["Strict-Transport-Security"] = []string{"max-age=31536000; includeSubDomains"}
+		}
 		handlers := []interface{}{
 			map[string]interface{}{"handler": "simpledeploy_ipaccess"},
 			map[string]interface{}{"handler": "simpledeploy_ratelimit"},
 			map[string]interface{}{"handler": "simpledeploy_metrics"},
+			headerHandler,
 			map[string]interface{}{
 				"handler": "reverse_proxy",
 				"upstreams": []interface{}{
