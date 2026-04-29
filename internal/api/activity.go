@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -226,9 +227,29 @@ func (s *Server) handlePutAuditConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePurgeActivity(w http.ResponseWriter, r *http.Request) {
+	// Count rows about to be wiped so the sentinel records the scale of the
+	// purge — useful when correlating with operator reports.
+	count, _ := s.store.CountAudit(r.Context())
 	if err := s.store.PurgeAudit(r.Context()); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	// Sentinel: write an audit row AFTER the purge so it survives. Without
+	// this, a super_admin could clear the audit log with no record of who
+	// did it. We bypass the optional Recorder and write directly via the
+	// store so the row is persisted even in setups where SetAudit has not
+	// been called.
+	c := audit.From(r.Context())
+	beforeJSON, _ := json.Marshal(map[string]any{"row_count": count})
+	_, _ = s.store.RecordAudit(r.Context(), store.AuditEntry{
+		ActorUserID: c.ActorUserID,
+		ActorName:   c.ActorName,
+		ActorSource: c.ActorSource,
+		IP:          c.IP,
+		Category:    "system",
+		Action:      "audit_purged",
+		Summary:     "audit log purged",
+		BeforeJSON:  beforeJSON,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

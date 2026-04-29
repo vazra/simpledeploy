@@ -344,6 +344,47 @@ func TestRBAC_Archived_NoGrantEmpty(t *testing.T) {
 	}
 }
 
+// TestPurgeActivity_WritesSentinel ensures DELETE /api/activity leaves a
+// sentinel audit row attributing the purge. Closes audit finding H-07.
+func TestPurgeActivity_WritesSentinel(t *testing.T) {
+	srv, st, adminCookie := setupUserTestServer(t)
+
+	// Seed a few audit rows.
+	for i := 0; i < 3; i++ {
+		if _, err := st.RecordAudit(t.Context(), store.AuditEntry{
+			ActorSource: "api",
+			Category:    "system",
+			Action:      "noise",
+			Summary:     "to be purged",
+		}); err != nil {
+			t.Fatalf("RecordAudit: %v", err)
+		}
+	}
+
+	req := authedRequest(t, http.MethodDelete, "/api/activity", nil, adminCookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DELETE /api/activity status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// After purge the only row should be the sentinel.
+	count, err := st.CountAudit(t.Context())
+	if err != nil {
+		t.Fatalf("CountAudit: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit_log row count after purge = %d, want 1 sentinel", count)
+	}
+	rows, _, err := st.ListActivity(t.Context(), store.ActivityFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("ListActivity: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Action != "audit_purged" {
+		t.Fatalf("sentinel row = %+v, want action=audit_purged", rows)
+	}
+}
+
 // TestRBAC_GetActivity_NonAdminSystemEntryHidden ensures GET /api/activity/{id}
 // does not leak system-category audit rows (AppID == nil) to non-super_admin
 // callers who are not the actor. Closes audit IDOR finding M-05.

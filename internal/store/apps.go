@@ -187,8 +187,12 @@ func (s *Store) PurgeApp(slug string) error {
 		query string
 		arg   any
 	}
+	// audit_log is preserved across app purge for forensic continuity.
+	// Migration 020 declared `app_id ... ON DELETE SET NULL`; the row is
+	// also denormalized with `app_slug` so it remains identifiable after
+	// the apps row is gone. Pre-existing app-id refs are nulled below.
 	statements := []stmt{
-		{`DELETE FROM audit_log WHERE app_id = ? OR app_slug = ?`, nil},
+		{`UPDATE audit_log SET app_id = NULL WHERE app_id = ?`, appID},
 		{`DELETE FROM deploy_events WHERE app_slug = ?`, slug},
 		{`DELETE FROM backup_runs WHERE backup_config_id IN (SELECT id FROM backup_configs WHERE app_id = ?)`, appID},
 		{`DELETE FROM compose_versions WHERE app_id = ?`, appID},
@@ -202,8 +206,6 @@ func (s *Store) PurgeApp(slug string) error {
 	for _, st := range statements {
 		var err error
 		switch st.query {
-		case `DELETE FROM audit_log WHERE app_id = ? OR app_slug = ?`:
-			_, err = tx.Exec(st.query, appID, slug)
 		case `DELETE FROM alert_history WHERE app_slug = ? OR rule_id IN (SELECT id FROM alert_rules WHERE app_id = ?)`:
 			_, err = tx.Exec(st.query, slug, appID)
 		default:
