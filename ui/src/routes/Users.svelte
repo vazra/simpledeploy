@@ -33,6 +33,10 @@
   let eEmail = $state('')
   let eRole = $state('')
   let eError = $state('')
+  let allApps = $state([])
+  let userAccess = $state([])
+  let accessLoading = $state(false)
+  let accessBusy = $state({})
 
   // password reset (separate from edit)
   let showPasswordModal = $state(false)
@@ -116,13 +120,47 @@
     }
   }
 
-  function openEdit(u) {
+  async function openEdit(u) {
     editUser = u
     eName = u.display_name || ''
     eEmail = u.email || ''
     eRole = u.role
     eError = ''
+    allApps = []
+    userAccess = []
+    accessBusy = {}
     showEditModal = true
+    await loadAccess()
+  }
+
+  async function loadAccess() {
+    if (!editUser) return
+    accessLoading = true
+    const [appsRes, accessRes] = await Promise.all([
+      api.listApps(),
+      api.listUserAccess(editUser.id),
+    ])
+    allApps = appsRes.data || []
+    userAccess = accessRes.data || []
+    accessLoading = false
+  }
+
+  async function toggleAccess(slug, currentlyHas) {
+    if (!editUser) return
+    accessBusy = { ...accessBusy, [slug]: true }
+    const res = currentlyHas
+      ? await api.revokeUserAccess(editUser.id, slug)
+      : await api.grantUserAccess(editUser.id, slug)
+    if (!res.error) {
+      if (currentlyHas) {
+        userAccess = userAccess.filter((s) => s !== slug)
+      } else {
+        userAccess = [...userAccess, slug]
+      }
+    }
+    const next = { ...accessBusy }
+    delete next[slug]
+    accessBusy = next
   }
 
   async function saveEdit() {
@@ -440,7 +478,7 @@
           <div class="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
             {#each [
               { value: 'viewer', label: 'Viewer', desc: 'View only' },
-              { value: 'admin', label: 'Admin', desc: 'Manage apps' },
+              { value: 'manage', label: 'Manage', desc: 'Run granted apps' },
               { value: 'super_admin', label: 'Super Admin', desc: 'Full access' },
             ] as role}
               <button
@@ -453,6 +491,39 @@
               </button>
             {/each}
           </div>
+        </div>
+      {/if}
+      {#if editUser}
+        <div class="border-t border-border/30 pt-4">
+          <label class="block text-xs font-medium text-text-muted mb-2">App access</label>
+          {#if eRole === 'super_admin'}
+            <p class="text-xs text-text-secondary bg-surface-1 rounded-lg px-3 py-2 border border-border/40">Super admins have access to all apps automatically.</p>
+          {:else if accessLoading}
+            <p class="text-xs text-text-muted">Loading apps...</p>
+          {:else if allApps.length === 0}
+            <p class="text-xs text-text-muted">No apps deployed yet.</p>
+          {:else}
+            <p class="text-[10px] text-text-muted mb-2">Check apps this user can access. Changes save immediately.</p>
+            <div class="max-h-56 overflow-y-auto space-y-1 border border-border/40 rounded-lg p-2 bg-surface-1">
+              {#each allApps as app}
+                {@const has = userAccess.includes(app.Slug)}
+                {@const busy = accessBusy[app.Slug]}
+                <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-hover cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={has}
+                    disabled={busy}
+                    onchange={() => toggleAccess(app.Slug, has)}
+                    class="rounded border-border/50"
+                  />
+                  <span class="text-sm text-text-primary flex-1 truncate">{app.Name || app.Slug}</span>
+                  {#if busy}
+                    <span class="text-[10px] text-text-muted">saving...</span>
+                  {/if}
+                </label>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
       <Button type="submit">Save Changes</Button>

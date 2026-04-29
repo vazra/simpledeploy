@@ -256,6 +256,31 @@ describe('api', () => {
     }
   });
 
+  it('listUserAccess GETs /users/:id/access', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(['alpha']));
+    const res = await api.listUserAccess(7);
+    expect(res.data).toEqual(['alpha']);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/users/7/access');
+    expect(fetchMock.mock.calls[0][1].method).toBe('GET');
+  });
+
+  it('grantUserAccess POSTs app_slug body', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
+    await api.grantUserAccess(3, 'alpha');
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/users/3/access');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ app_slug: 'alpha' });
+  });
+
+  it('revokeUserAccess DELETEs slug-encoded URL', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
+    await api.revokeUserAccess(3, 'app/with/slash');
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/users/3/access/app%2Fwith%2Fslash');
+    expect(opts.method).toBe('DELETE');
+  });
+
   it('encodes URL components for cert and docker endpoints', async () => {
     fetchMock.mockResolvedValue(jsonResponse({}));
     await api.deleteCert('foo', 'sub.example.com');

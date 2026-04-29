@@ -21,6 +21,28 @@ func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 	if apps == nil {
 		apps = []store.App{}
 	}
+	// Filter for non-super_admin callers: only return apps they have access to.
+	if user := GetAuthUser(r); user != nil && user.Role != "super_admin" {
+		allowed, err := s.store.GetUserAppSlugs(user.ID)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		allowSet := make(map[string]struct{}, len(allowed))
+		for _, slug := range allowed {
+			allowSet[slug] = struct{}{}
+		}
+		filtered := apps[:0]
+		for _, a := range apps {
+			if _, ok := allowSet[a.Slug]; ok {
+				filtered = append(filtered, a)
+			}
+		}
+		apps = filtered
+		if apps == nil {
+			apps = []store.App{}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(apps)
 }

@@ -342,6 +342,31 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleListUserAccess(w http.ResponseWriter, r *http.Request) {
+	if requireRole(w, r, "super_admin") == nil {
+		return
+	}
+	userID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if u, err := s.store.GetUserByID(userID); err != nil || u == nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	slugs, err := s.store.GetUserAppSlugs(userID)
+	if err != nil {
+		httpError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if slugs == nil {
+		slugs = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(slugs)
+}
+
 func (s *Server) handleGrantAccess(w http.ResponseWriter, r *http.Request) {
 	if requireRole(w, r, "super_admin") == nil {
 		return
