@@ -628,8 +628,21 @@ func (s *Server) handleUploadRestore(w http.ResponseWriter, r *http.Request) {
 		containerName = app.Name
 	}
 
+	// Reject when too many restores are already running. The semaphore is
+	// shared across apps; holding a slot for the duration of a slow restore
+	// would otherwise let unlimited concurrent uploads exhaust docker
+	// daemon resources.
+	select {
+	case s.restoreSem <- struct{}{}:
+	default:
+		os.Remove(tmpPath)
+		http.Error(w, "too many restores in progress, try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	// Async restore
 	go func() {
+		defer func() { <-s.restoreSem }()
 		defer os.Remove(tmpPath)
 
 		st, ok := s.backupScheduler.GetStrategy(strategy)

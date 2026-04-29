@@ -71,6 +71,10 @@ type Server struct {
 	cs                *configsync.Syncer
 	recipesCache      *recipes.Cache
 	bus               *events.Bus
+	// restoreSem caps concurrent upload-restore goroutines to bound memory
+	// pressure on the docker daemon (and host disk when the input expands
+	// via gzip). Buffered channel acts as a semaphore.
+	restoreSem chan struct{}
 }
 
 // SetBus wires the realtime events bus. nil disables /api/events.
@@ -88,6 +92,7 @@ func NewServer(port int, st *store.Store, jwtMgr *auth.JWTManager, rl *auth.Rate
 		rateLimiter:    rl,
 		startedAt:      time.Now(),
 		deploymentMode: deployment.Detect(),
+		restoreSem:     make(chan struct{}, 4),
 	}
 	s.routes()
 	return s
