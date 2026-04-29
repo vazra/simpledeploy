@@ -31,9 +31,13 @@ sudo simpledeploy apikey create --name ci-deploy --user-id 1
 curl -X POST https://manage.example.com/api/apikeys \
   -H "Authorization: Bearer $SD_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"ci-deploy"}'
+  -d '{"name":"ci-deploy","expires_at":"2026-12-31T23:59:59Z"}'
 # {"id":3,"name":"ci-deploy","key":"sd_a1b2c3..."}
 ```
+
+`expires_at` is optional (omit for keys that never expire). Past dates are
+rejected. `GET /api/apikeys` returns `id`, `name`, `created_at`,
+`expires_at`, and `last_used_at` so operators can spot stale keys.
 </TabItem>
 </Tabs>
 

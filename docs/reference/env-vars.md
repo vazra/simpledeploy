@@ -10,7 +10,8 @@ SimpleDeploy reads a small number of environment variables. The CLI prefers expl
 | Name | Default | Scope | Effect |
 |------|---------|-------|--------|
 | `SD_PASSWORD` | (none) | client | Password used by `users create`, `apikey create`, and `registry add` when the `--password` flag is omitted. Avoids interactive stdin prompt. |
-| `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS` | `0` | server | When set to `1`, the alert webhook dispatcher allows posting to private/loopback IP ranges (RFC 1918, 127.0.0.0/8). Off by default to prevent SSRF. |
+| `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS` | `0` | server | When set to `1`, the alert webhook dispatcher allows posting to private/loopback IP ranges (RFC 1918, 127.0.0.0/8, CGNAT, multicast, etc.). Off by default. The dispatcher also re-validates the resolved IP at connect time to close DNS-rebinding bypass. |
+| `SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK` | `false` | server | When `true`, compose `ports:` mappings are NOT rewritten to `127.0.0.1:`. Default behavior pins published ports to loopback so Caddy's `simpledeploy.access.allow` and `simpledeploy.ratelimit.*` controls cannot be bypassed by direct connection. |
 | `SIMPLEDEPLOY_UPSTREAM_HOST` | `localhost` | server | Overrides the host used for `localhost:<port>` upstreams. Set to `host.docker.internal` when running SimpleDeploy inside a Docker container (non-host network) so Caddy can reach app host-published ports. The Docker install docs enable this automatically. |
 | `SIMPLEDEPLOY_HEALTH_PORT` | `8443` | container (healthcheck only) | Port used by the official Docker image's `HEALTHCHECK` to probe `http://localhost:$SIMPLEDEPLOY_HEALTH_PORT/api/health`. Override when your `management_port` differs from the default (e.g. `make dev-docker` sets `8500`). Not read by the simpledeploy binary itself. |
 

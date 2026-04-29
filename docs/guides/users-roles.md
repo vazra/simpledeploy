@@ -132,8 +132,23 @@ curl -X DELETE https://manage.example.com/api/users/2 \
 
 This also revokes all their API keys.
 
+## Session invalidation
+
+JWT cookies carry a `tv` (token version) claim that is bumped server-side on:
+
+- **Logout** — the cookie is invalidated immediately, not just cleared.
+- **Password change** — every other session for that user is signed out.
+- **Role change** — promotions and demotions take effect right away,
+  not 24 hours later when the cookie expires.
+
+If a session is suspected compromised, force-rotating the user's password
+or role kills the existing JWT cookie even if the attacker holds it.
+
 <Aside>
-Account lockout kicks in after 10 failed logins. See [Security hardening](/operations/security-hardening/) for the backoff schedule.
+Account lockout kicks in after 10 failed logins per (user, IP) tuple. The
+login endpoint is rate-limited to 10 requests/minute per IP. See
+[Security hardening](/operations/security-hardening/) for the backoff
+schedule.
 </Aside>
 
 See also: [API keys](/guides/api-keys/), [Audit log](/guides/audit-log/).

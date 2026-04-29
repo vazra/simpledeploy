@@ -117,6 +117,10 @@ docker run --rm -v myapp_data:/restore -v $(pwd):/backup alpine \
   tar xzf /backup/myapp-2026-04-15.tar.gz -C /restore
 ```
 
+<Aside type="caution">
+SimpleDeploy's own volume and SQLite restore endpoints (`POST /api/apps/{slug}/backups/upload-restore`) reject tar archives that contain absolute paths, `..` segments, symlinks, hardlinks, or device entries. They also cap gzip decompression at 8 GiB and run no more than 4 concurrent restores at a time. Archives produced by the matching `Backup` step pass these checks; bring-your-own tarballs may need to be repacked without symlinks.
+</Aside>
+
 ### Step 8: Verify
 
 - Dashboard loads
