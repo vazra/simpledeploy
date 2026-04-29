@@ -270,26 +270,26 @@ func (s *Server) handleImportApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appDir := filepath.Join(s.appsDir, slug)
-	if err := os.MkdirAll(appDir, 0o755); err != nil {
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
 		http.Error(w, "failed to create app directory", http.StatusInternalServerError)
 		return
 	}
 	composePath := filepath.Join(appDir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, composeData, 0o644); err != nil {
+	if err := os.WriteFile(composePath, composeData, 0o600); err != nil {
 		http.Error(w, "failed to write compose file", http.StatusInternalServerError)
 		return
 	}
 
 	// Sidecar: always overwrite if present in bundle.
 	if len(bundle.Sidecar) > 0 {
-		if err := os.WriteFile(filepath.Join(appDir, "simpledeploy.yml"), bundle.Sidecar, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(appDir, "simpledeploy.yml"), bundle.Sidecar, 0o600); err != nil {
 			log.Printf("[import] write sidecar %s: %v", slug, err)
 		}
 	}
 	// .env: only write for mode=new (do not clobber existing env on overwrite).
 	if mode == "new" && len(bundle.EnvExample) > 0 {
 		envPath := filepath.Join(appDir, ".env")
-		if err := os.WriteFile(envPath, bundle.EnvExample, 0o644); err != nil {
+		if err := os.WriteFile(envPath, bundle.EnvExample, 0o600); err != nil {
 			log.Printf("[import] write .env %s: %v", slug, err)
 		}
 	}

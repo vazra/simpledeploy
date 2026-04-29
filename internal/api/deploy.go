@@ -133,7 +133,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appDir := filepath.Join(s.appsDir, body.Name)
-	if err := os.MkdirAll(appDir, 0755); err != nil {
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
 		http.Error(w, "failed to create app directory", http.StatusInternalServerError)
 		return
 	}
@@ -142,7 +142,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	// Capture old compose for audit Before snapshot before overwriting.
 	// Read unconditionally; missing file (truly new app) yields nil bytes.
 	oldComposeData, _ := os.ReadFile(composePath)
-	if err := os.WriteFile(composePath, composeData, 0644); err != nil {
+	if err := os.WriteFile(composePath, composeData, 0o600); err != nil {
 		http.Error(w, "failed to write compose file", http.StatusInternalServerError)
 		return
 	}

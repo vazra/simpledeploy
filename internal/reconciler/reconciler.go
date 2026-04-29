@@ -249,7 +249,7 @@ func ensureSharedNetwork(path string) bool {
 		return false
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
 		log.Printf("[reconciler] write %s: %v", tmp, err)
 		return false
 	}
@@ -519,7 +519,7 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
 		composeData = mirror.RewriteCompose(composeData, prefix)
 	}
-	if err := os.WriteFile(composePath, composeData, 0644); err != nil {
+	if err := os.WriteFile(composePath, composeData, 0o600); err != nil {
 		return fmt.Errorf("write compose: %w", err)
 	}
 

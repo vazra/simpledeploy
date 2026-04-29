@@ -41,7 +41,9 @@ func parseEnvFile(path string) ([]envVar, error) {
 }
 
 func writeEnvFile(path string, vars []envVar) error {
-	f, err := os.Create(path)
+	// 0600: .env files contain app secrets; only the simpledeploy/docker
+	// daemon user should read them.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}

@@ -197,7 +197,9 @@ func (c *Config) SaveAtomic(path string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Chmod(tmpPath, 0644); err != nil {
+	// 0600: config.yaml contains master_secret which gates all encrypted
+	// blobs and JWT/HMAC signing.
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
