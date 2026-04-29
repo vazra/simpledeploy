@@ -1,11 +1,34 @@
 package auth
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/hkdf"
 )
+
+// DeriveSubkey returns an HKDF-SHA256 derived 32-byte subkey from master
+// using the given purpose label as info. Salt is empty (acceptable for
+// cryptographically-strong master secrets).
+//
+// Use this whenever a new cryptographic purpose is introduced so that
+// rotating or compromising one subkey does not affect another. Today it
+// is used for JWT signing; existing AES-GCM credential KEK and API key
+// HMAC continue to use master_secret directly to preserve compatibility
+// with stored ciphertexts and key hashes.
+func DeriveSubkey(master, purpose string) []byte {
+	r := hkdf.New(sha256.New, []byte(master), nil, []byte(purpose))
+	out := make([]byte, 32)
+	_, _ = io.ReadFull(r, out)
+	return out
+}
+
+// ensure hmac/sha256 stay imported even when not all helpers below use them.
+var _ = hmac.Equal
 
 type JWTManager struct {
 	secret []byte
@@ -20,8 +43,15 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// jwtSubkeyPurpose is the HKDF info label for JWT signing keys. Including
+// 'v1' lets future versions migrate by rotating the label.
+const jwtSubkeyPurpose = "simpledeploy-jwt-v1"
+
+// NewJWTManager derives a per-purpose subkey from the operator-provided
+// master secret via HKDF. Compromise or rotation of the JWT key now does
+// not require re-encrypting registry credentials or invalidating API keys.
 func NewJWTManager(secret string, expiry time.Duration) *JWTManager {
-	return &JWTManager{secret: []byte(secret), expiry: expiry}
+	return &JWTManager{secret: DeriveSubkey(secret, jwtSubkeyPurpose), expiry: expiry}
 }
 
 // JWTIssuer/Audience bind tokens to this product, defending against
