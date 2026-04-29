@@ -164,6 +164,37 @@ func (s *Server) mutatingAppMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// canMutateForApp authorises mutating actions on a per-app resource (alert
+// rules, etc.) when the resource references its app via a body field rather
+// than a URL slug. super_admin always passes; manage passes with access to
+// appID; viewers and missing-grant manage are rejected. A nil appID means the
+// resource is global and only super_admin may mutate it. Writes a 401/403/404
+// to w and returns false on rejection.
+func (s *Server) canMutateForApp(w http.ResponseWriter, r *http.Request, appID *int64) bool {
+	user := GetAuthUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	if user.Role == "super_admin" {
+		return true
+	}
+	if user.Role != "manage" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	if appID == nil {
+		http.Error(w, "forbidden: super_admin required for global rules", http.StatusForbidden)
+		return false
+	}
+	ok, _ := s.store.HasAppAccessByID(user.ID, *appID)
+	if !ok {
+		http.Error(w, "not found", http.StatusNotFound)
+		return false
+	}
+	return true
+}
+
 // rateLimitMiddleware applies the server-level rate limiter to a handler.
 // Used for unauthenticated endpoints that should still be rate-limited (e.g. git webhook).
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {

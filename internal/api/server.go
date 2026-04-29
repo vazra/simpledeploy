@@ -277,12 +277,12 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/apps/{slug}/versions/{id}", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleDeleteVersion))))
 	s.mux.Handle("GET /api/apps/{slug}/events", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleListDeployEvents))))
 
-	// Webhooks
+	// Webhooks (global config; super_admin-only writes)
 	s.mux.Handle("GET /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleListWebhooks)))
-	s.mux.Handle("POST /api/webhooks", s.authMiddleware(http.HandlerFunc(s.handleCreateWebhook)))
-	s.mux.Handle("PUT /api/webhooks/{id}", s.authMiddleware(http.HandlerFunc(s.handleUpdateWebhook)))
-	s.mux.Handle("DELETE /api/webhooks/{id}", s.authMiddleware(http.HandlerFunc(s.handleDeleteWebhook)))
-	s.mux.Handle("POST /api/webhooks/test", s.authMiddleware(http.HandlerFunc(s.handleTestWebhook)))
+	s.mux.Handle("POST /api/webhooks", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleCreateWebhook))))
+	s.mux.Handle("PUT /api/webhooks/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleUpdateWebhook))))
+	s.mux.Handle("DELETE /api/webhooks/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDeleteWebhook))))
+	s.mux.Handle("POST /api/webhooks/test", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleTestWebhook))))
 
 	// Alert rules
 	s.mux.Handle("GET /api/alerts/rules", s.authMiddleware(http.HandlerFunc(s.handleListAlertRules)))

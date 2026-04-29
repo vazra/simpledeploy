@@ -332,3 +332,49 @@ func TestAppAccessUnauthorizedUser(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
+
+func TestCanMutateForApp(t *testing.T) {
+	srv, s := newMiddlewareTestServer(t)
+	if err := s.UpsertApp(&store.App{Name: "myapp", Slug: "myapp", ComposePath: "/tmp/1.yml", Status: "running"}, nil); err != nil {
+		t.Fatalf("upsert app: %v", err)
+	}
+	app, _ := s.GetAppBySlug("myapp")
+	mgrGranted, _ := s.CreateUser("mg1", "h", "manage", "", "")
+	if err := s.GrantAppAccess(mgrGranted.ID, app.ID); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	mgrNoGrant, _ := s.CreateUser("mg2", "h", "manage", "", "")
+	viewer, _ := s.CreateUser("vw", "h", "viewer", "", "")
+	_ = s.GrantAppAccess(viewer.ID, app.ID)
+
+	cases := []struct {
+		name  string
+		user  *AuthUser
+		appID *int64
+		want  int
+	}{
+		{"super_admin nil app passes", &AuthUser{ID: 999, Role: "super_admin"}, nil, 200},
+		{"super_admin with app passes", &AuthUser{ID: 999, Role: "super_admin"}, &app.ID, 200},
+		{"manage nil app forbidden", &AuthUser{ID: mgrGranted.ID, Role: "manage"}, nil, 403},
+		{"manage granted app passes", &AuthUser{ID: mgrGranted.ID, Role: "manage"}, &app.ID, 200},
+		{"manage no grant 404", &AuthUser{ID: mgrNoGrant.ID, Role: "manage"}, &app.ID, 404},
+		{"viewer always 403", &AuthUser{ID: viewer.ID, Role: "viewer"}, &app.ID, 403},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/x", nil)
+			req = setAuthUser(req, tc.user)
+			w := httptest.NewRecorder()
+			ok := srv.canMutateForApp(w, req, tc.appID)
+			if ok && tc.want != 200 {
+				t.Errorf("expected reject (status %d) but ok=true", tc.want)
+			}
+			if !ok && tc.want == 200 {
+				t.Errorf("expected ok but rejected with %d", w.Code)
+			}
+			if !ok && w.Code != tc.want {
+				t.Errorf("status = %d, want %d", w.Code, tc.want)
+			}
+		})
+	}
+}
