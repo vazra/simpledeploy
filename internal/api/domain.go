@@ -49,16 +49,28 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate: each endpoint needs at least a domain
+	// Validate: each endpoint needs a service and a domain whose shape will
+	// not break the proxy reload. Catching it here returns a per-endpoint
+	// error instead of failing the whole batch when Caddy validates routes.
+	seen := make(map[string]bool, len(endpoints))
 	for i, ep := range endpoints {
 		if ep.Domain == "" {
 			http.Error(w, fmt.Sprintf("endpoint %d: domain is required", i), http.StatusBadRequest)
+			return
+		}
+		if len(ep.Domain) > 253 || !validDomain.MatchString(ep.Domain) {
+			http.Error(w, fmt.Sprintf("endpoint %d: invalid domain", i), http.StatusBadRequest)
 			return
 		}
 		if ep.Service == "" {
 			http.Error(w, fmt.Sprintf("endpoint %d: service is required", i), http.StatusBadRequest)
 			return
 		}
+		if seen[ep.Domain] {
+			http.Error(w, fmt.Sprintf("endpoint %d: duplicate domain %s", i, ep.Domain), http.StatusBadRequest)
+			return
+		}
+		seen[ep.Domain] = true
 	}
 
 	if err := updateComposeEndpoints(app.ComposePath, endpoints); err != nil {
@@ -205,7 +217,7 @@ func updateComposeEndpoints(composePath string, endpoints []compose.EndpointConf
 	if err != nil {
 		return fmt.Errorf("marshal compose: %w", err)
 	}
-	return os.WriteFile(composePath, out, 0644)
+	return os.WriteFile(composePath, out, 0o600)
 }
 
 type indexedEndpoint struct {
