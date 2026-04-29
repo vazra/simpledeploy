@@ -313,7 +313,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/backups/summary", s.authMiddleware(http.HandlerFunc(s.handleBackupSummary)))
 	s.mux.Handle("GET /api/apps/{slug}/backups/detect", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleDetectStrategies))))
 	s.mux.Handle("POST /api/backups/configs/{id}/run", s.authMiddleware(http.HandlerFunc(s.handleTriggerBackupConfig)))
-	s.mux.Handle("POST /api/backups/test-s3", s.authMiddleware(http.HandlerFunc(s.handleTestS3)))
+	s.mux.Handle("POST /api/backups/test-s3", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleTestS3))))
 
 	// Compose versions (extended)
 	s.mux.Handle("PUT /api/apps/{slug}/versions/{id}", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleUpdateComposeVersion))))
@@ -321,23 +321,23 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/apps/{slug}/versions/{id}/restore", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleRestoreComposeVersion))))
 
 	// Docker system management
-	s.mux.Handle("GET /api/docker/info", s.authMiddleware(http.HandlerFunc(s.handleDockerInfo)))
-	s.mux.Handle("GET /api/docker/disk-usage", s.authMiddleware(http.HandlerFunc(s.handleDockerDiskUsage)))
+	s.mux.Handle("GET /api/docker/info", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerInfo))))
+	s.mux.Handle("GET /api/docker/disk-usage", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerDiskUsage))))
 	s.mux.Handle("POST /api/docker/prune/containers", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneContainers))))
 	s.mux.Handle("POST /api/docker/prune/images", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneImages))))
 	s.mux.Handle("POST /api/docker/prune/volumes", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneVolumes))))
 	s.mux.Handle("POST /api/docker/prune/build-cache", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneBuildCache))))
 	s.mux.Handle("POST /api/docker/prune/all", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerPruneAll))))
-	s.mux.Handle("GET /api/docker/images", s.authMiddleware(http.HandlerFunc(s.handleDockerImages)))
+	s.mux.Handle("GET /api/docker/images", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerImages))))
 	s.mux.Handle("DELETE /api/docker/images/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerImageRemove))))
-	s.mux.Handle("GET /api/docker/networks", s.authMiddleware(http.HandlerFunc(s.handleDockerNetworks)))
-	s.mux.Handle("GET /api/docker/volumes", s.authMiddleware(http.HandlerFunc(s.handleDockerVolumes)))
+	s.mux.Handle("GET /api/docker/networks", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerNetworks))))
+	s.mux.Handle("GET /api/docker/volumes", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerVolumes))))
 	s.mux.Handle("DELETE /api/docker/networks/{id}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerNetworkRemove))))
 	s.mux.Handle("DELETE /api/docker/volumes/{name}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDockerVolumeRemove))))
 
 	// System management
-	s.mux.Handle("GET /api/system/info", s.authMiddleware(http.HandlerFunc(s.handleSystemInfo)))
-	s.mux.Handle("GET /api/system/storage-breakdown", s.authMiddleware(http.HandlerFunc(s.handleStorageBreakdown)))
+	s.mux.Handle("GET /api/system/info", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleSystemInfo))))
+	s.mux.Handle("GET /api/system/storage-breakdown", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleStorageBreakdown))))
 	s.mux.Handle("POST /api/system/prune/metrics", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePruneMetrics))))
 	s.mux.Handle("POST /api/system/prune/request-stats", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePruneRequestMetrics))))
 	s.mux.Handle("POST /api/system/vacuum", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleVacuumDB))))
@@ -370,7 +370,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/activity", s.authMiddleware(http.HandlerFunc(s.handleListActivity)))
 	s.mux.Handle("DELETE /api/activity", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePurgeActivity))))
 	s.mux.Handle("GET /api/apps/{slug}/activity", s.authMiddleware(http.HandlerFunc(s.handleAppActivity)))
-	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(http.HandlerFunc(s.handleGetAuditConfig)))
+	s.mux.Handle("GET /api/system/audit-config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleGetAuditConfig))))
 	s.mux.Handle("PUT /api/system/audit-config", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePutAuditConfig))))
 
 	// Git sync

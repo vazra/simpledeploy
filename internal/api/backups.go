@@ -328,19 +328,53 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackupSummary(w http.ResponseWriter, r *http.Request) {
+	user := GetAuthUser(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	apps, err := s.store.GetBackupSummary()
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
-	}
-	if apps == nil {
-		apps = []store.BackupSummaryApp{}
 	}
 
 	runs, err := s.store.ListRecentBackupRuns(20)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
+	}
+
+	// Filter to apps the caller can see (super_admin sees all).
+	if user.Role != "super_admin" {
+		slugs, err := s.store.GetUserAppSlugs(user.ID)
+		if err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+		allowed := make(map[string]struct{}, len(slugs))
+		for _, sl := range slugs {
+			allowed[sl] = struct{}{}
+		}
+		filteredApps := make([]store.BackupSummaryApp, 0, len(apps))
+		for _, a := range apps {
+			if _, ok := allowed[a.AppSlug]; ok {
+				filteredApps = append(filteredApps, a)
+			}
+		}
+		apps = filteredApps
+		filteredRuns := make([]store.BackupRunWithApp, 0, len(runs))
+		for _, rn := range runs {
+			if _, ok := allowed[rn.AppSlug]; ok {
+				filteredRuns = append(filteredRuns, rn)
+			}
+		}
+		runs = filteredRuns
+	}
+
+	if apps == nil {
+		apps = []store.BackupSummaryApp{}
 	}
 	if runs == nil {
 		runs = []store.BackupRunWithApp{}

@@ -19,6 +19,16 @@ SimpleDeploy ships with three roles. Pick the lowest privilege that gets the job
 
 `viewer` users can read everything for granted apps (overview, logs, metrics, events, versions, backup history) but cannot mutate anything.
 
+### Platform views are super_admin-only
+
+Reads of host- or platform-level state are gated to `super_admin` to keep host details and other tenants' data invisible to scoped roles. Specifically, only `super_admin` may call:
+
+- `GET /api/docker/info`, `/api/docker/disk-usage`, `/api/docker/images`, `/api/docker/networks`, `/api/docker/volumes`
+- `GET /api/system/info`, `/api/system/storage-breakdown`, `/api/system/audit-config`
+- `POST /api/backups/test-s3`
+
+Cross-app read endpoints (`GET /api/backups/summary`, `GET /api/apps/archived`) are filtered server-side to the apps the caller has been granted; non-super_admin callers only see their own apps.
+
 <Aside type="caution">
 Pre-existing `admin` users are migrated to `manage` automatically on upgrade. They keep any per-app access grants they already had. If you want them to manage **all** apps, promote them to `super_admin`.
 </Aside>
