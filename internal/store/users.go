@@ -15,6 +15,11 @@ type User struct {
 	DisplayName  string
 	Email        string
 	CreatedAt    time.Time
+	// TokenVersion is bumped on logout, password change, and role change.
+	// JWTs embed the value at issue; the middleware rejects tokens whose
+	// claim does not match. Provides server-side session invalidation
+	// without a denylist.
+	TokenVersion int64
 }
 
 type APIKeyRecord struct {
@@ -32,9 +37,9 @@ func (s *Store) CreateUser(username, passwordHash, role, displayName, email stri
 	err := s.db.QueryRow(`
 		INSERT INTO users (username, password_hash, role, display_name, email)
 		VALUES (?, ?, ?, ?, ?)
-		RETURNING id, username, password_hash, role, display_name, email, created_at
+		RETURNING id, username, password_hash, role, display_name, email, created_at, token_version
 	`, username, passwordHash, role, displayName, email).Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt,
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt, &u.TokenVersion,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -47,9 +52,9 @@ func (s *Store) CreateUser(username, passwordHash, role, displayName, email stri
 func (s *Store) GetUserByUsername(username string) (*User, error) {
 	var u User
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, display_name, email, created_at
+		SELECT id, username, password_hash, role, display_name, email, created_at, token_version
 		FROM users WHERE username = ?
-	`, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt)
+	`, username).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt, &u.TokenVersion)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user %q not found", username)
 	}
@@ -63,9 +68,9 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 func (s *Store) GetUserByID(id int64) (*User, error) {
 	var u User
 	err := s.db.QueryRow(`
-		SELECT id, username, password_hash, role, display_name, email, created_at
+		SELECT id, username, password_hash, role, display_name, email, created_at, token_version
 		FROM users WHERE id = ?
-	`, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt)
+	`, id).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt, &u.TokenVersion)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user %d not found", id)
 	}
@@ -154,13 +159,13 @@ func (s *Store) GetAPIKeyByHash(hash string) (*APIKeyRecord, *User, error) {
 	err := s.db.QueryRow(`
 		SELECT
 			ak.id, ak.user_id, ak.key_hash, ak.name, ak.created_at, ak.expires_at,
-			u.id, u.username, u.password_hash, u.role, u.display_name, u.email, u.created_at
+			u.id, u.username, u.password_hash, u.role, u.display_name, u.email, u.created_at, u.token_version
 		FROM api_keys ak
 		JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 	`, hash).Scan(
 		&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAt,
-		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt,
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt, &u.TokenVersion,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil, fmt.Errorf("api key not found")
@@ -332,7 +337,9 @@ func (s *Store) UpdateProfile(id int64, displayName, email string) error {
 
 // UpdateUserRole updates the user's role.
 func (s *Store) UpdateUserRole(id int64, role string) error {
-	res, err := s.db.Exec(`UPDATE users SET role = ? WHERE id = ?`, role, id)
+	// Bump token_version so any outstanding JWT for this user is rejected;
+	// role changes must take effect immediately, not lag the 24h cookie.
+	res, err := s.db.Exec(`UPDATE users SET role = ?, token_version = token_version + 1 WHERE id = ?`, role, id)
 	if err != nil {
 		return fmt.Errorf("update role: %w", err)
 	}
@@ -347,9 +354,10 @@ func (s *Store) UpdateUserRole(id int64, role string) error {
 	return nil
 }
 
-// UpdatePassword updates the user's password hash.
+// UpdatePassword updates the user's password hash and bumps token_version
+// so existing JWT cookies are invalidated immediately.
 func (s *Store) UpdatePassword(id int64, newHash string) error {
-	res, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, newHash, id)
+	res, err := s.db.Exec(`UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?`, newHash, id)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
 	}
@@ -361,6 +369,16 @@ func (s *Store) UpdatePassword(id int64, newHash string) error {
 		return fmt.Errorf("user %d not found", id)
 	}
 	s.fireHook(ScopeGlobal, "")
+	return nil
+}
+
+// BumpTokenVersion increments the user's token_version, invalidating any
+// outstanding JWT. Called on logout.
+func (s *Store) BumpTokenVersion(id int64) error {
+	_, err := s.db.Exec(`UPDATE users SET token_version = token_version + 1 WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("bump token version: %w", err)
+	}
 	return nil
 }
 

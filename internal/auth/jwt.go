@@ -13,9 +13,10 @@ type JWTManager struct {
 }
 
 type Claims struct {
-	UserID   int64  `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserID       int64  `json:"user_id"`
+	Username     string `json:"username"`
+	Role         string `json:"role"`
+	TokenVersion int64  `json:"tv,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -31,11 +32,12 @@ const (
 	JWTAudience = "simpledeploy-dashboard"
 )
 
-func (m *JWTManager) Generate(userID int64, username, role string) (string, error) {
+func (m *JWTManager) Generate(userID int64, username, role string, tokenVersion int64) (string, error) {
 	claims := &Claims{
-		UserID:   userID,
-		Username: username,
-		Role:     role,
+		UserID:       userID,
+		Username:     username,
+		Role:         role,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    JWTIssuer,
 			Audience:  jwt.ClaimStrings{JWTAudience},

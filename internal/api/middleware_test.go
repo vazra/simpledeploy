@@ -50,7 +50,7 @@ func TestAuthMiddlewareNoAuth(t *testing.T) {
 func TestAuthMiddlewareValidJWT(t *testing.T) {
 	srv, _ := newMiddlewareTestServer(t)
 
-	token, err := srv.jwt.Generate(1, "manage", "super_admin")
+	token, err := srv.jwt.Generate(1, "manage", "super_admin", 1)
 	if err != nil {
 		t.Fatalf("generate token: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestAuditCtxFromAuth(t *testing.T) {
 	t.Run("cookie/JWT sets source=ui", func(t *testing.T) {
 		srv, _ := newMiddlewareTestServer(t)
 
-		token, err := srv.jwt.Generate(1, "manage", "super_admin")
+		token, err := srv.jwt.Generate(1, "manage", "super_admin", 1)
 		if err != nil {
 			t.Fatalf("generate token: %v", err)
 		}

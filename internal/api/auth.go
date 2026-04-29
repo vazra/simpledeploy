@@ -72,7 +72,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.jwt.Generate(user.ID, user.Username, user.Role)
+	token, err := s.jwt.Generate(user.ID, user.Username, user.Role, user.TokenVersion)
 	if err != nil {
 		http.Error(w, "failed to generate token", http.StatusInternalServerError)
 		return
@@ -117,6 +117,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// Server-side invalidation: bump the user's token_version so the JWT
+	// embedded in this (or any) outstanding cookie is rejected on its
+	// next presentation. The route is unauthenticated (so logout works
+	// after the cookie expires too); inspect the cookie best-effort.
+	if cookie, err := r.Cookie("session"); err == nil && s.jwt != nil {
+		if claims, err := s.jwt.Validate(cookie.Value); err == nil {
+			_ = s.store.BumpTokenVersion(claims.UserID)
+		}
+	}
 	secure := s.tlsMode != "off"
 	sameSite := http.SameSiteStrictMode
 	if !secure {
