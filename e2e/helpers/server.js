@@ -61,6 +61,11 @@ export async function startServer(binPath, overrides = {}) {
     `  window: "${rlWindow}"`,
     `  burst: ${rlBurst}`,
     `  by: "${rlBy}"`,
+    // Per-IP login rate limit. Production default is 10/min; tests log in
+    // many times in rapid succession from 127.0.0.1, so raise it.
+    `login_ratelimit:`,
+    `  requests: 10000`,
+    `  window: "60s"`,
   ].join('\n');
 
   writeFileSync(configPath, config);

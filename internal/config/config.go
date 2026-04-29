@@ -46,6 +46,7 @@ type Config struct {
 	MasterSecret   string          `yaml:"master_secret"`
 	Metrics        MetricsConfig   `yaml:"metrics"`
 	RateLimit      RateLimitConfig `yaml:"ratelimit"`
+	LoginRateLimit RateLimitConfig `yaml:"login_ratelimit"`
 	Registries     []string        `yaml:"registries"`
 	TrustedProxies []string        `yaml:"trusted_proxies"`
 	LogBufferSize  int             `yaml:"log_buffer_size"`
@@ -114,6 +115,10 @@ func DefaultConfig() *Config {
 			Window:   "60s",
 			Burst:    50,
 			By:       "ip",
+		},
+		LoginRateLimit: RateLimitConfig{
+			Requests: 10,
+			Window:   "60s",
 		},
 		LogBufferSize: 500,
 	}

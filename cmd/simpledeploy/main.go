@@ -769,7 +769,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetAppsDir(cfg.AppsDir)
 	srv.SetReconciler(rec)
 	srv.SetLockout(lockout)
-	srv.SetLoginLimiter(auth.NewRateLimiter(10, time.Minute))
+	loginReq := cfg.LoginRateLimit.Requests
+	if loginReq <= 0 {
+		loginReq = 10
+	}
+	loginWin := time.Minute
+	if d, err := time.ParseDuration(cfg.LoginRateLimit.Window); err == nil && d > 0 {
+		loginWin = d
+	}
+	srv.SetLoginLimiter(auth.NewRateLimiter(loginReq, loginWin))
 	srv.SetTrustedProxies(cfg.TrustedProxies)
 	srv.SetMasterSecret(cfg.MasterSecret)
 	srv.SetBuildInfo(version, commit, date)
