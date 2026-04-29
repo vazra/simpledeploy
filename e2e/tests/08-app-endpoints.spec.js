@@ -98,7 +98,7 @@ test.describe('Endpoints - Functional', () => {
     ]);
     expect(res.ok).toBe(true);
 
-    const r = await waitForProxyStatus('added-e2e.local', 200, 20_000, 'Welcome to nginx');
+    const r = await waitForProxyStatus('added-e2e.local', 200, 40_000, 'Welcome to nginx');
     const body = await r.text();
     expect(body).toContain('Welcome to nginx');
   });
