@@ -121,7 +121,7 @@ func (s *Server) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 	writeFrame := func(f outboundFrame) error {
 		mu.Lock()
 		defer mu.Unlock()
-		conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+		_ = conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
 		return conn.WriteJSON(f)
 	}
 
@@ -176,7 +176,7 @@ func (s *Server) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-pingT.C:
 			mu.Lock()
-			conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			_ = conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
 			err := conn.WriteMessage(websocket.PingMessage, nil)
 			mu.Unlock()
 			if err != nil {
