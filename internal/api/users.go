@@ -475,12 +475,21 @@ func (s *Server) handleListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type keyResponse struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
+		ID         int64      `json:"id"`
+		Name       string     `json:"name"`
+		CreatedAt  time.Time  `json:"created_at"`
+		ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+		LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	}
 	resp := make([]keyResponse, len(keys))
 	for i, k := range keys {
-		resp[i] = keyResponse{ID: k.ID, Name: k.Name}
+		resp[i] = keyResponse{
+			ID:         k.ID,
+			Name:       k.Name,
+			CreatedAt:  k.CreatedAt,
+			ExpiresAt:  k.ExpiresAt,
+			LastUsedAt: k.LastUsedAt,
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -493,10 +502,15 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Name string `json:"name"`
+		Name      string     `json:"name"`
+		ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.ExpiresAt != nil && body.ExpiresAt.Before(time.Now()) {
+		http.Error(w, "expires_at must be in the future", http.StatusBadRequest)
 		return
 	}
 	plaintext, hash, err := auth.GenerateAPIKey(s.masterSecret)
@@ -504,7 +518,7 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	k, err := s.store.CreateAPIKey(user.ID, hash, body.Name)
+	k, err := s.store.CreateAPIKey(user.ID, hash, body.Name, body.ExpiresAt)
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return

@@ -91,7 +91,7 @@ func TestAuthMiddlewareValidAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate api key: %v", err)
 	}
-	if _, err := s.CreateAPIKey(user.ID, hash, "test-key"); err != nil {
+	if _, err := s.CreateAPIKey(user.ID, hash, "test-key", nil); err != nil {
 		t.Fatalf("create api key: %v", err)
 	}
 
@@ -232,7 +232,7 @@ func TestAuditCtxFromAuth(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate api key: %v", err)
 		}
-		if _, err := s.CreateAPIKey(user.ID, hash, "test-key"); err != nil {
+		if _, err := s.CreateAPIKey(user.ID, hash, "test-key", nil); err != nil {
 			t.Fatalf("create api key: %v", err)
 		}
 

@@ -1061,7 +1061,7 @@ func runAPIKeyCreate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	_, err = db.CreateAPIKey(userID, hash, name)
+	_, err = db.CreateAPIKey(userID, hash, name, nil)
 	if err != nil {
 		return err
 	}

@@ -36,6 +36,14 @@ func TestMigration025_RenamesAdminToManage(t *testing.T) {
 		);
 		CREATE TABLE apps (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT);
 		CREATE TABLE user_app_access (user_id INTEGER, app_id INTEGER, PRIMARY KEY (user_id, app_id));
+		CREATE TABLE api_keys (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			key_hash TEXT NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			expires_at DATETIME
+		);
 	`); err != nil {
 		t.Fatalf("seed schema: %v", err)
 	}

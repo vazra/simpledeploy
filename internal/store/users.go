@@ -23,12 +23,13 @@ type User struct {
 }
 
 type APIKeyRecord struct {
-	ID        int64
-	UserID    int64
-	KeyHash   string
-	Name      string
-	CreatedAt time.Time
-	ExpiresAt *time.Time
+	ID         int64
+	UserID     int64
+	KeyHash    string
+	Name       string
+	CreatedAt  time.Time
+	ExpiresAt  *time.Time
+	LastUsedAt *time.Time
 }
 
 // CreateUser inserts a new user and returns it.
@@ -129,19 +130,24 @@ func (s *Store) UserCount() (int, error) {
 	return count, nil
 }
 
-// CreateAPIKey inserts a new API key record and returns it.
-func (s *Store) CreateAPIKey(userID int64, keyHash, name string) (*APIKeyRecord, error) {
+// CreateAPIKey inserts a new API key record and returns it. expiresAt may
+// be nil for keys that never expire.
+func (s *Store) CreateAPIKey(userID int64, keyHash, name string, expiresAt *time.Time) (*APIKeyRecord, error) {
 	var k APIKeyRecord
-	var expiresAt sql.NullTime
+	var expiresAtNT sql.NullTime
+	var exp sql.NullTime
+	if expiresAt != nil {
+		exp = sql.NullTime{Time: *expiresAt, Valid: true}
+	}
 	err := s.db.QueryRow(`
-		INSERT INTO api_keys (user_id, key_hash, name)
-		VALUES (?, ?, ?)
+		INSERT INTO api_keys (user_id, key_hash, name, expires_at)
+		VALUES (?, ?, ?, ?)
 		RETURNING id, user_id, key_hash, name, created_at, expires_at
-	`, userID, keyHash, name).Scan(
-		&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAt,
+	`, userID, keyHash, name, exp).Scan(
+		&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAtNT,
 	)
-	if expiresAt.Valid {
-		t := expiresAt.Time
+	if expiresAtNT.Valid {
+		t := expiresAtNT.Time
 		k.ExpiresAt = &t
 	}
 	if err != nil {
@@ -155,16 +161,16 @@ func (s *Store) CreateAPIKey(userID int64, keyHash, name string) (*APIKeyRecord,
 func (s *Store) GetAPIKeyByHash(hash string) (*APIKeyRecord, *User, error) {
 	var k APIKeyRecord
 	var u User
-	var expiresAt sql.NullTime
+	var expiresAt, lastUsedAt sql.NullTime
 	err := s.db.QueryRow(`
 		SELECT
-			ak.id, ak.user_id, ak.key_hash, ak.name, ak.created_at, ak.expires_at,
+			ak.id, ak.user_id, ak.key_hash, ak.name, ak.created_at, ak.expires_at, ak.last_used_at,
 			u.id, u.username, u.password_hash, u.role, u.display_name, u.email, u.created_at, u.token_version
 		FROM api_keys ak
 		JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 	`, hash).Scan(
-		&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAt,
+		&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAt, &lastUsedAt,
 		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.DisplayName, &u.Email, &u.CreatedAt, &u.TokenVersion,
 	)
 	if err == sql.ErrNoRows {
@@ -177,13 +183,19 @@ func (s *Store) GetAPIKeyByHash(hash string) (*APIKeyRecord, *User, error) {
 		t := expiresAt.Time
 		k.ExpiresAt = &t
 	}
+	if lastUsedAt.Valid {
+		t := lastUsedAt.Time
+		k.LastUsedAt = &t
+	}
+	// Lazy update last_used_at; ignore failure (best-effort telemetry).
+	_, _ = s.db.Exec(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`, k.ID)
 	return &k, &u, nil
 }
 
 // ListAPIKeysByUser returns all API keys for the given user.
 func (s *Store) ListAPIKeysByUser(userID int64) ([]APIKeyRecord, error) {
 	rows, err := s.db.Query(`
-		SELECT id, user_id, key_hash, name, created_at, expires_at
+		SELECT id, user_id, key_hash, name, created_at, expires_at, last_used_at
 		FROM api_keys WHERE user_id = ?
 	`, userID)
 	if err != nil {
@@ -194,13 +206,17 @@ func (s *Store) ListAPIKeysByUser(userID int64) ([]APIKeyRecord, error) {
 	var keys []APIKeyRecord
 	for rows.Next() {
 		var k APIKeyRecord
-		var expiresAt sql.NullTime
-		if err := rows.Scan(&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAt); err != nil {
+		var expiresAt, lastUsedAt sql.NullTime
+		if err := rows.Scan(&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAt, &lastUsedAt); err != nil {
 			return nil, fmt.Errorf("scan api key: %w", err)
 		}
 		if expiresAt.Valid {
 			t := expiresAt.Time
 			k.ExpiresAt = &t
+		}
+		if lastUsedAt.Valid {
+			t := lastUsedAt.Time
+			k.LastUsedAt = &t
 		}
 		keys = append(keys, k)
 	}
