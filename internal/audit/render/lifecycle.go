@@ -16,6 +16,33 @@ func init() {
 	register("lifecycle", "image_pulled", renderLifecycleImagePulled)
 	register("lifecycle", "archived", renderLifecycleArchived)
 	register("lifecycle", "purged", renderLifecyclePurged)
+	register("lifecycle", "exported", renderLifecycleExported)
+	register("lifecycle", "imported", renderLifecycleImported)
+}
+
+func renderLifecycleExported(before, after []byte) (string, string) {
+	var v lifecycleView
+	if len(after) > 0 {
+		_ = json.Unmarshal(after, &v)
+	}
+	if v.Name == "" {
+		_ = json.Unmarshal(before, &v)
+	}
+	return fmt.Sprintf("App %q exported as bundle", v.Name), v.Name
+}
+
+func renderLifecycleImported(before, after []byte) (string, string) {
+	var v lifecycleView
+	if len(after) > 0 {
+		_ = json.Unmarshal(after, &v)
+	}
+	if v.Name == "" {
+		_ = json.Unmarshal(before, &v)
+	}
+	if v.Mode != "" {
+		return fmt.Sprintf("App %q imported from bundle (%s)", v.Name, v.Mode), v.Name
+	}
+	return fmt.Sprintf("App %q imported from bundle", v.Name), v.Name
 }
 
 func renderLifecycleArchived(before, after []byte) (string, string) {
@@ -54,6 +81,7 @@ type lifecycleView struct {
 	Status      string `json:"status"`
 	Replicas    int    `json:"replicas"`
 	RowsDeleted int    `json:"rows_deleted"`
+	Mode        string `json:"mode"`
 }
 
 func renderLifecycleCreated(before, after []byte) (string, string) {

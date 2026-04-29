@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,11 +10,136 @@ import (
 	"os"
 	"path/filepath"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/vazra/simpledeploy/internal/appbundle"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+// handleImportAppPreview parses an uploaded bundle and returns a diff summary
+// without applying any changes. Used by the UI to confirm overwrite imports.
+func (s *Server) handleImportAppPreview(w http.ResponseWriter, r *http.Request) {
+	const maxBundle = 10 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxBundle)
+	if err := r.ParseMultipartForm(maxBundle); err != nil {
+		http.Error(w, "invalid multipart upload", http.StatusBadRequest)
+		return
+	}
+	mode := r.FormValue("mode")
+	slug := r.FormValue("slug")
+	if mode != "new" && mode != "overwrite" {
+		http.Error(w, "mode must be \"new\" or \"overwrite\"", http.StatusBadRequest)
+		return
+	}
+	if !validAppName.MatchString(slug) {
+		http.Error(w, "invalid slug", http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	var zipBuf bytes.Buffer
+	if _, err := zipBuf.ReadFrom(file); err != nil {
+		http.Error(w, "failed to read upload", http.StatusBadRequest)
+		return
+	}
+	bundle, err := appbundle.Parse(zipBuf.Bytes())
+	if err != nil {
+		http.Error(w, "invalid bundle: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	incoming := map[string]any{
+		"compose":  string(bundle.Compose),
+		"sidecar":  string(bundle.Sidecar),
+		"manifest": bundle.Manifest,
+	}
+
+	resp := map[string]any{
+		"mode":     mode,
+		"slug":     slug,
+		"incoming": incoming,
+	}
+
+	if mode == "new" {
+		resp["current"] = nil
+		resp["changes"] = map[string]any{
+			"compose_changed":           true,
+			"sidecar_changed":           len(bundle.Sidecar) > 0,
+			"alert_rule_count_delta":    countAlertRules(bundle.Sidecar),
+			"backup_config_count_delta": countBackupConfigs(bundle.Sidecar),
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// overwrite
+	existing, err := s.store.GetAppBySlug(slug)
+	if err != nil || existing == nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+	appDir := filepath.Join(s.appsDir, slug)
+	curCompose, _ := os.ReadFile(filepath.Join(appDir, "docker-compose.yml"))
+	curSidecar, _ := os.ReadFile(filepath.Join(appDir, "simpledeploy.yml"))
+
+	resp["current"] = map[string]any{
+		"compose": string(curCompose),
+		"sidecar": string(curSidecar),
+	}
+
+	curAlerts := countAlertRules(curSidecar)
+	curBackups := countBackupConfigs(curSidecar)
+	inAlerts := countAlertRules(bundle.Sidecar)
+	inBackups := countBackupConfigs(bundle.Sidecar)
+
+	resp["changes"] = map[string]any{
+		"compose_changed":           !bytes.Equal(curCompose, bundle.Compose),
+		"sidecar_changed":           !bytes.Equal(curSidecar, bundle.Sidecar),
+		"alert_rule_count_current":  curAlerts,
+		"alert_rule_count_incoming": inAlerts,
+		"alert_rule_count_delta":    inAlerts - curAlerts,
+		"backup_config_count_current":  curBackups,
+		"backup_config_count_incoming": inBackups,
+		"backup_config_count_delta":    inBackups - curBackups,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func countAlertRules(sidecarYAML []byte) int {
+	if len(sidecarYAML) == 0 {
+		return 0
+	}
+	var sc configsync.AppSidecar
+	if err := yaml.Unmarshal(sidecarYAML, &sc); err != nil {
+		return 0
+	}
+	return len(sc.AlertRules)
+}
+
+func countBackupConfigs(sidecarYAML []byte) int {
+	if len(sidecarYAML) == 0 {
+		return 0
+	}
+	var sc configsync.AppSidecar
+	if err := yaml.Unmarshal(sidecarYAML, &sc); err != nil {
+		return 0
+	}
+	return len(sc.BackupConfigs)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
 
 // handleExportApp returns a ZIP bundle of the app's on-disk config files.
 func (s *Server) handleExportApp(w http.ResponseWriter, r *http.Request) {
@@ -35,11 +161,13 @@ func (s *Server) handleExportApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	exportedAfter, _ := json.Marshal(map[string]any{"name": app.Slug})
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		AppID:    &app.ID,
 		AppSlug:  app.Slug,
 		Category: "lifecycle",
 		Action:   "exported",
+		After:    exportedAfter,
 	})
 
 	w.Header().Set("Content-Type", "application/zip")
@@ -211,11 +339,13 @@ func (s *Server) handleImportApp(w http.ResponseWriter, r *http.Request) {
 	} else if app, err := s.store.GetAppBySlug(slug); err == nil {
 		appID = &app.ID
 	}
+	importedAfter, _ := json.Marshal(map[string]any{"name": slug, "mode": mode})
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		AppID:    appID,
 		AppSlug:  slug,
 		Category: "lifecycle",
 		Action:   "imported",
+		After:    importedAfter,
 	})
 
 	w.Header().Set("Content-Type", "application/json")

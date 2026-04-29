@@ -245,8 +245,9 @@ func (s *Server) routes() {
 
 	// Export / import
 	s.mux.Handle("GET /api/apps/{slug}/export", s.authMiddleware(s.appAccessMiddleware(http.HandlerFunc(s.handleExportApp))))
-	// Importing creates a new app, so it requires super_admin like POST /api/apps/deploy.
+	// Importing creates a new app (or overwrites one), so it requires super_admin like POST /api/apps/deploy.
 	s.mux.Handle("POST /api/apps/import", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleImportApp))))
+	s.mux.Handle("POST /api/apps/import/preview", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleImportAppPreview))))
 
 	// App actions (mutating: super_admin or manage with grant)
 	s.mux.Handle("POST /api/apps/{slug}/restart", s.authMiddleware(s.mutatingAppMiddleware(http.HandlerFunc(s.handleRestart))))
@@ -396,7 +397,7 @@ func maxBodySize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			// Import bundle endpoint allows up to 10 MiB (handler enforces).
-			if r.URL.Path != "/api/apps/import" {
+			if r.URL.Path != "/api/apps/import" && r.URL.Path != "/api/apps/import/preview" {
 				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 			}
 		}

@@ -303,6 +303,36 @@ export const api = {
       return { data: null, error: err.message }
     }
   },
+  importAppPreview: async (file, { mode, slug }) => {
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('mode', mode)
+      fd.append('slug', slug)
+      const res = await fetch(`${BASE}/apps/import/preview`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+      })
+      if (res.status === 401) {
+        if (!window.location.hash.includes('login')) window.location.hash = '#/login'
+        return { data: null, error: 'Unauthorized' }
+      }
+      const text = await res.text()
+      let data = null
+      const ct = res.headers.get('content-type')
+      if (ct && ct.includes('application/json') && text) {
+        try { data = JSON.parse(text) } catch { /* ignore */ }
+      }
+      if (!res.ok) {
+        const errMsg = (data && typeof data.error === 'string') ? data.error : (text || `HTTP ${res.status}`)
+        return { data, error: errMsg, status: res.status }
+      }
+      return { data, error: null, status: res.status }
+    } catch (err) {
+      return { data: null, error: err.message }
+    }
+  },
   importApp: async (file, { mode, slug }) => {
     try {
       const fd = new FormData()
