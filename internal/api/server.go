@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -390,7 +391,30 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Handler() http.Handler {
-	return securityHeaders(maxBodySize(s.mux))
+	return securityHeaders(maxBodySize(recoverPanic(s.mux)))
+}
+
+// recoverPanic catches handler panics, logs a sanitized message server-side,
+// and returns a generic 500 to the client without leaking the panic value or
+// stack trace. The full stack is written to the api logger (which feeds the
+// in-process log buffer) so super_admin operators can still debug.
+func recoverPanic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+			log.Printf("[api] panic recovered: %s %s: %v\n%s", r.Method, r.URL.Path, rec, debug.Stack())
+			if w.Header().Get("Content-Type") == "" {
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // maxBodySize limits request body to 1MB for non-GET requests.
