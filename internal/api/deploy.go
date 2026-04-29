@@ -121,6 +121,16 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		composeData = mirror.RewriteCompose(composeData, prefix)
 	}
 
+	// Pin published host ports to 127.0.0.1 so external traffic must go
+	// through Caddy (which enforces simpledeploy.access.allow IP allowlist
+	// and simpledeploy.ratelimit.* per-app). Otherwise an unauthenticated
+	// attacker could reach the app raw on the published port and bypass
+	// the proxy controls entirely. Operator can opt out by setting
+	// SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true.
+	if os.Getenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK") != "true" {
+		composeData = mirror.RewritePortsLoopback(composeData)
+	}
+
 	// Attach the shared public network so endpoint services are reachable
 	// from the host-native Caddy without requiring published ports. On failure,
 	// log and fall through with the original bytes so the validator below can

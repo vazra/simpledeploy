@@ -126,3 +126,51 @@ func TestRewriteComposeAutoAddsSlash(t *testing.T) {
 		t.Errorf("expected rewritten image in output, got: %s", withSlash)
 	}
 }
+
+func TestRewritePortsLoopback(t *testing.T) {
+	in := `services:
+  web:
+    image: nginx
+    ports:
+      - "8080:80"
+      - 9090:90
+      - "5432:5432/tcp"
+`
+	out := string(RewritePortsLoopback([]byte(in)))
+	wantSubs := []string{
+		`- "127.0.0.1:8080:80"`,
+		`- 127.0.0.1:9090:90`,
+		`- "127.0.0.1:5432:5432/tcp"`,
+	}
+	for _, w := range wantSubs {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q\n--- got ---\n%s", w, out)
+		}
+	}
+}
+
+func TestRewritePortsLoopback_LeavesExplicitInterface(t *testing.T) {
+	in := `services:
+  web:
+    ports:
+      - "0.0.0.0:8080:80"
+      - "127.0.0.1:9090:90"
+      - "[::1]:5432:5432"
+`
+	out := string(RewritePortsLoopback([]byte(in)))
+	if out != in {
+		t.Errorf("operator-explicit interface bindings must not be rewritten:\n--- got ---\n%s\n--- want ---\n%s", out, in)
+	}
+}
+
+func TestRewritePortsLoopback_LeavesContainerOnly(t *testing.T) {
+	in := `services:
+  web:
+    ports:
+      - 80
+`
+	out := string(RewritePortsLoopback([]byte(in)))
+	if out != in {
+		t.Errorf("container-only ports must not be rewritten")
+	}
+}

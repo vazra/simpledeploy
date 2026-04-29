@@ -785,7 +785,10 @@ func (s *Server) handleRestoreComposeVersion(w http.ResponseWriter, r *http.Requ
 	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
 		composeData = mirror.RewriteCompose(composeData, prefix)
 	}
-	if err := os.WriteFile(app.ComposePath, composeData, 0644); err != nil {
+	if os.Getenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK") != "true" {
+		composeData = mirror.RewritePortsLoopback(composeData)
+	}
+	if err := os.WriteFile(app.ComposePath, composeData, 0o600); err != nil {
 		httpError(w, fmt.Errorf("write compose: %w", err), http.StatusInternalServerError)
 		return
 	}

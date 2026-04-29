@@ -519,6 +519,9 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
 		composeData = mirror.RewriteCompose(composeData, prefix)
 	}
+	if os.Getenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK") != "true" {
+		composeData = mirror.RewritePortsLoopback(composeData)
+	}
 	if err := os.WriteFile(composePath, composeData, 0o600); err != nil {
 		return fmt.Errorf("write compose: %w", err)
 	}
