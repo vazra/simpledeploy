@@ -42,10 +42,18 @@ func RealIP(r *http.Request, trustedProxies []string) string {
 	return directIP
 }
 
+// isTrusted accepts plain IPs ("10.0.0.1") and CIDR ranges ("10.0.0.0/8")
+// in trusted. Malformed entries are skipped (not matched).
 func isTrusted(ip string, trusted []string) bool {
+	parsed := net.ParseIP(ip)
 	for _, t := range trusted {
-		if ip == t {
+		if t == ip {
 			return true
+		}
+		if parsed != nil && strings.Contains(t, "/") {
+			if _, n, err := net.ParseCIDR(t); err == nil && n.Contains(parsed) {
+				return true
+			}
 		}
 	}
 	return false
