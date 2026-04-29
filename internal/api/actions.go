@@ -133,10 +133,16 @@ func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture before/after replica counts for audit.
-	// beforeReplicas: sum of current values in the incoming scale map (not live state,
-	// since ServiceStatus has no Replicas field). We use 0 as unknown before-state.
-	var afterReplicas int
+	// Capture before/after replica counts for audit. Before-state comes from
+	// live container counts so down/up-scales are visible in the audit log.
+	var beforeReplicas, afterReplicas int
+	if statuses, err := s.reconciler.AppServices(r.Context(), slug); err == nil {
+		for _, c := range statuses {
+			if _, want := body.Scales[c.Service]; want {
+				beforeReplicas++
+			}
+		}
+	}
 	for _, v := range body.Scales {
 		afterReplicas += v
 	}
@@ -144,7 +150,11 @@ func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
 	// Validate against compose config: refuse to scale services that are not
 	// scalable. This stops silly requests (e.g. scaling a postgres) before
 	// docker compose returns a generic failure.
-	if cfg, err := s.reconciler.AppConfig(slug); err == nil && cfg != nil {
+	cfg, cfgErr := s.reconciler.AppConfig(slug)
+	if cfgErr != nil {
+		log.Printf("[api] scale %s: load compose config: %v", slug, cfgErr)
+	}
+	if cfg != nil {
 		known := map[string]*compose.ServiceConfig{}
 		for i := range cfg.Services {
 			known[cfg.Services[i].Name] = &cfg.Services[i]
@@ -170,7 +180,7 @@ func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	beforeJSON, _ := json.Marshal(map[string]any{"name": slug, "replicas": 0})
+	beforeJSON, _ := json.Marshal(map[string]any{"name": slug, "replicas": beforeReplicas})
 	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "replicas": afterReplicas})
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category: "lifecycle",
@@ -247,9 +257,13 @@ func (s *Server) handleGetServices(w http.ResponseWriter, r *http.Request) {
 	for _, name := range order {
 		a := byName[name]
 		info := scaleInfo[name]
+		state := a.state
+		if state == "" && a.replicas == 0 {
+			state = "stopped"
+		}
 		out = append(out, serviceInfo{
 			Service:     name,
-			State:       a.state,
+			State:       state,
 			Health:      a.health,
 			Replicas:    a.replicas,
 			Scalable:    info.scalable,
@@ -287,6 +301,8 @@ func worseHealth(candidate, current string) bool {
 	}
 	rank := func(s string) int {
 		switch s {
+		case "":
+			return -1
 		case "healthy":
 			return 0
 		case "starting":

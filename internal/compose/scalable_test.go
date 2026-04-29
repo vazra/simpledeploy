@@ -69,6 +69,16 @@ func TestScaleEligibility(t *testing.T) {
 			svc:      ServiceConfig{Name: "weird", Image: "postgres:16", Labels: map[string]string{"simpledeploy.scalable": "true"}},
 			scalable: true,
 		},
+		{
+			name:     "exporter sidecar is not flagged stateful",
+			svc:      ServiceConfig{Name: "metrics", Image: "prometheuscommunity/postgres-exporter:v0.15"},
+			scalable: true,
+		},
+		{
+			name:     "node-exporter is not flagged stateful",
+			svc:      ServiceConfig{Name: "node", Image: "prom/node-exporter:latest"},
+			scalable: true,
+		},
 	}
 
 	for _, tc := range cases {

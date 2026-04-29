@@ -75,8 +75,10 @@ func matchStatefulImage(image string) string {
 		name = name[:i]
 	}
 	name = strings.ToLower(name)
+	// Exact match only. Substring/prefix matching would catch sidecars like
+	// postgres-exporter or prometheus-node-exporter, which are stateless.
 	for _, p := range statefulImagePrefixes {
-		if name == p || strings.HasPrefix(name, p+"-") {
+		if name == p {
 			return "stateful image (" + p + ")"
 		}
 	}

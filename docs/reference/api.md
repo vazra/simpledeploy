@@ -114,7 +114,7 @@ Pull latest images and redeploy. Uses configured registry auth if available. Ret
 
 ### `POST /api/apps/{slug}/scale`
 
-Scale services.
+Set replica counts for one or more services. Services that fail eligibility checks (stateful image, host port binding, named volume, `deploy.mode: global`, or `simpledeploy.scalable=false` label) return `400` with a reason. Lower-level failures forward `docker compose` stderr in the body.
 
 ```json
 // Request
@@ -122,14 +122,20 @@ Scale services.
 
 // Response 200
 {"status": "ok"}
+
+// Response 400 (ineligible)
+cannot scale db: stateful image (postgres)
 ```
 
 ### `GET /api/apps/{slug}/services`
 
-List service status.
+List one row per compose service with aggregated state, replica count, and scale eligibility. Services configured but not running appear with `state: "stopped"` and `replicas: 0`.
 
 ```json
-[{"service": "web", "state": "running", "health": "healthy"}]
+[
+  {"service": "web", "state": "running", "health": "healthy", "replicas": 2, "scalable": true},
+  {"service": "db", "state": "running", "health": "healthy", "replicas": 1, "scalable": false, "scale_reason": "stateful image (postgres)"}
+]
 ```
 
 ## Deploy History

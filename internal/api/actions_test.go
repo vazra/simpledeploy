@@ -150,8 +150,15 @@ func TestScaleEndpoint(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
-	if len(mock.calls) == 0 || mock.calls[0] != "ScaleOne:myapp" {
-		t.Errorf("expected ScaleOne:myapp, got: %v", mock.calls)
+	found := false
+	for _, c := range mock.calls {
+		if c == "ScaleOne:myapp" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected ScaleOne:myapp in calls, got: %v", mock.calls)
 	}
 }
 
