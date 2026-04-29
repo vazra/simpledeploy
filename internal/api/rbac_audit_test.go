@@ -2,11 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -338,5 +340,70 @@ func TestRBAC_Archived_NoGrantEmpty(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if len(resp) != 0 {
 		t.Errorf("no-grant archived = %+v, want empty", resp)
+	}
+}
+
+// TestRBAC_GetActivity_NonAdminSystemEntryHidden ensures GET /api/activity/{id}
+// does not leak system-category audit rows (AppID == nil) to non-super_admin
+// callers who are not the actor. Closes audit IDOR finding M-05.
+func TestRBAC_GetActivity_NonAdminSystemEntryHidden(t *testing.T) {
+	srv, st, _ := setupUserTestServer(t)
+	viewerCookie := loginAs(t, srv, st, "v1", "viewerpass1", "viewer")
+
+	// Insert a system audit row authored by another user.
+	hash, err := auth.HashPassword("otherpass1")
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	other, err := st.CreateUser("other", hash, "manage", "", "")
+	if err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+	id, err := st.RecordAudit(t.Context(), store.AuditEntry{
+		ActorUserID: &other.ID,
+		ActorName:   "other",
+		ActorSource: "api",
+		Category:    "system",
+		Action:      "user_added",
+		Summary:     "system event by other user",
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+
+	req := authedRequest(t, http.MethodGet, fmt.Sprintf("/api/activity/%d", id), nil, viewerCookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("viewer got %d for system audit row, want 404", w.Code)
+	}
+}
+
+// TestRBAC_GetActivity_NonAdminSeesOwnAuth ensures non-admins can still see
+// their own auth events via GET /api/activity/{id}.
+func TestRBAC_GetActivity_NonAdminSeesOwnAuth(t *testing.T) {
+	srv, st, _ := setupUserTestServer(t)
+	viewerCookie := loginAs(t, srv, st, "v1", "viewerpass1", "viewer")
+	user, err := st.GetUserByUsername("v1")
+	if err != nil {
+		t.Fatalf("get v1: %v", err)
+	}
+
+	id, err := st.RecordAudit(t.Context(), store.AuditEntry{
+		ActorUserID: &user.ID,
+		ActorSource: "api",
+		Category:    "auth",
+		Action:      "login",
+		Summary:     "v1 login",
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+
+	req := authedRequest(t, http.MethodGet, fmt.Sprintf("/api/activity/%d", id), nil, viewerCookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("viewer got %d for own auth row, want 200; body=%s", w.Code, w.Body.String())
 	}
 }
