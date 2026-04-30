@@ -3,7 +3,7 @@ title: Private registries
 description: Add credentials for ghcr.io, Docker Hub, AWS ECR, Azure ACR, or any registry. Encrypted at rest with master_secret.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Aside, TabItem, Tabs } from '@astrojs/starlight/components';
 
 Add credentials so SimpleDeploy can pull private images. Credentials are encrypted with AES-256-GCM derived from `master_secret` before being stored.
 

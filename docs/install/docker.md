@@ -3,8 +3,6 @@ title: Install via Docker
 description: Install SimpleDeploy as a Docker container. The universal path for non-Debian distros (Fedora, Arch, Alpine), NAS boxes (Synology, TrueNAS), or a quick trial on any Linux host.
 ---
 
-import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
-
 The universal path. Use Docker when you are on Fedora, Arch, Alpine, a NAS (Synology, TrueNAS), or just want a quick trial. For Debian/Ubuntu production servers, [apt](/install/ubuntu/) is still the recommended install.
 
 <Aside type="note">

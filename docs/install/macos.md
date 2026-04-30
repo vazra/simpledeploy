@@ -3,8 +3,6 @@ title: Install on macOS
 description: Install the SimpleDeploy CLI on macOS via Homebrew. Use it to manage remote Linux servers from your laptop.
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
-
 <Aside type="caution" title="macOS is for the CLI, not the server">
 SimpleDeploy targets Linux for production. Run the server on a Linux VPS. The macOS install is for the CLI client so you can manage remote servers from your laptop, the same way `kubectl` works.
 </Aside>

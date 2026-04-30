@@ -3,8 +3,6 @@ title: Upgrade and rollback
 description: Safely upgrade SimpleDeploy. Rollback procedures if a release breaks something in your environment.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 SimpleDeploy is a single binary with embedded UI. Upgrades replace the binary and run any pending DB migrations on startup.
 
 <Aside type="caution">

@@ -3,8 +3,6 @@ title: Prepare the server
 description: What you need before installing SimpleDeploy. VPS sizing, Docker, firewall ports, and DNS records.
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
-
 Five minutes of prep saves an hour of debugging later.
 
 ## Pick a VPS

@@ -3,8 +3,6 @@ title: Git sync
 description: How to keep your SimpleDeploy app configs in a git repository, synced automatically on every change.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 Git sync is optional and disabled by default.
 
 When enabled, SimpleDeploy treats your `apps_dir` as a git working tree and commits every config change to a remote repository. Each deploy, env-var edit, or sidecar update triggers a commit and push within seconds. You can also pull remote changes back in, making it possible to manage deployments through git rather than (or alongside) the UI.

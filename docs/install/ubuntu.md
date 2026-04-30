@@ -3,8 +3,6 @@ title: Install on Ubuntu / Debian
 description: Install SimpleDeploy on Ubuntu or Debian via the official APT repository. Includes systemd setup, firewall config, and verification.
 ---
 
-import { Steps, Aside } from '@astrojs/starlight/components';
-
 The recommended path for production. The `.deb` package ships a systemd unit and pulls updates through normal `apt upgrade`.
 
 Prefer containers or on a non-Debian distro? See [Install via Docker](/install/docker/).

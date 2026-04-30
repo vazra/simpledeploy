@@ -3,8 +3,6 @@ title: Deploy via the CLI
 description: Use simpledeploy apply from your laptop or CI to push compose files to a remote server. Contexts work like kubectl.
 ---
 
-import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
-
 The CLI runs in two modes.
 
 | Mode | When | How it works |

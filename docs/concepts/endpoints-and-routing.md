@@ -3,8 +3,6 @@ title: Endpoints and routing
 description: How endpoints map (domain, service, port, TLS) to Caddy routes inside the embedded proxy.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 An **endpoint** is a tuple: `(domain, service, port, tls_mode)`. One app can declare multiple endpoints. Each endpoint becomes one Caddy route. Caddy receives all inbound traffic on `:80` and `:443` and matches by `Host` header.
 
 ## Declaring endpoints

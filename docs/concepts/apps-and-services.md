@@ -3,8 +3,6 @@ title: Apps and services
 description: The SimpleDeploy mental model: an app is a Compose project, a service is a container in that project.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 ## Definitions
 
 **App.** A Compose project managed by SimpleDeploy. Lives at `apps_dir/<slug>/docker-compose.yml`. Has exactly one slug, one directory, one project name.

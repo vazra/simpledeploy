@@ -3,8 +3,6 @@ title: Write a docker-compose.yml
 description: Walk-through of writing a Compose file with simpledeploy.* labels for routing, TLS, and multi-service apps. Uses whoami as the example.
 ---
 
-import { Aside, Steps, FileTree } from '@astrojs/starlight/components';
-
 A SimpleDeploy app is a regular `docker-compose.yml` with a few extra labels under the `simpledeploy.*` namespace. Existing compose files work as-is once you add labels for routing.
 
 ## Minimal example

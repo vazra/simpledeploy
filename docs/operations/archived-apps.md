@@ -3,8 +3,6 @@ title: Archived apps
 description: How SimpleDeploy archives apps when their config directory disappears, what's preserved, and how to purge or restore them.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 When an app's config directory disappears from `apps_dir`, SimpleDeploy does not silently forget it. The running containers are torn down, but the database row, deploy history, audit log, alert rules, backup configs, and access grants are all retained. The app moves to an **archived** state and shows up under "Archived apps" in the sidebar.
 
 This is intentional: filesystem removal is reversible-ish (you can put the directory back or restore from git), and you almost never want to lose months of metrics, audit trail, or backup history just because someone ran `rm -rf` or git pulled a delete.

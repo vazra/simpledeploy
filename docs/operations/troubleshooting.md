@@ -3,8 +3,6 @@ title: Troubleshooting
 description: Common issues with SimpleDeploy and how to diagnose them: TLS, deploys, backups, proxy, auth.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 Each entry follows: **symptom -> diagnostic command -> fix**.
 
 ## Deploy hangs at "pulling image"

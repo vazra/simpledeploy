@@ -3,8 +3,6 @@ title: Proxy (embedded Caddy)
 description: How buildConfig() composes Caddy JSON, custom modules plug in, and TLS modes map to automation policies.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 Caddy runs in-process as a library. There is no Caddyfile. All config is JSON, built programmatically and pushed via `caddy.Load()`. Source: [/internal/proxy/](https://github.com/vazra/simpledeploy/tree/main/internal/proxy).
 
 ## Lifecycle

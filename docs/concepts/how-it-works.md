@@ -3,8 +3,6 @@ title: How it works
 description: A request walkthrough from compose file edit to first byte served, covering reconciler, deployer, and embedded Caddy.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 Follow one request from "I edited a YAML file" to "the browser got bytes."
 
 ## The path

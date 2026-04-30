@@ -3,7 +3,7 @@ title: Scaling services
 description: Run multiple replicas of a compose service on the same host. Useful for stateless web/worker tiers, with caveats for stateful services.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Aside, TabItem, Tabs } from '@astrojs/starlight/components';
 
 Run more than one replica of a compose service. SimpleDeploy shells out to `docker compose up --scale` and the built-in proxy round-robins requests across the replicas.
 

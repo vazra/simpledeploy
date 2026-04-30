@@ -3,8 +3,6 @@ title: Architecture overview
 description: Single-binary process layout with embedded Caddy, SQLite, channel-based metrics pipeline, and custom Caddy modules.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 ## One process, many goroutines
 
 SimpleDeploy is a single Go binary. There is no agent, no sidecar, no separate proxy process. Caddy runs as an in-process library, not a child process. SQLite is the only datastore. Everything else is a goroutine inside one PID.

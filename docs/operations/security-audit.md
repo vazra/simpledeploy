@@ -3,8 +3,6 @@ title: Activity & Audit Log
 description: Per-app and global activity feed tracking every config change, deploy outcome, auth event, and system action in SimpleDeploy.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 The activity log is a persistent, queryable record of everything that changes in SimpleDeploy: who did what, when, and for which app.
 
 ## Where to find it

@@ -3,8 +3,6 @@ title: Rate limiting
 description: Per-app rate limits via compose labels. Limit by IP, header value, or path. Returns 429 with Retry-After when tripped.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
-
 Rate limiting is per-app, configured with `simpledeploy.ratelimit.*` labels on any service in the compose file.
 
 ## Labels

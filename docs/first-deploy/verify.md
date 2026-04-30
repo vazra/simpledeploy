@@ -3,8 +3,6 @@ title: Verify the deployment
 description: Confirm the app is running, HTTPS works, logs stream, metrics flow, and set up your first alert.
 ---
 
-import { Steps, Aside } from '@astrojs/starlight/components';
-
 Five checks to make sure the deploy actually worked.
 
 <Steps>

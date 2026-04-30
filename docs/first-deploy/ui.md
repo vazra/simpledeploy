@@ -3,8 +3,6 @@ title: Deploy via the dashboard
 description: Use the web UI to add a service, paste your compose file, deploy, and watch live logs stream.
 ---
 
-import { Steps, Aside } from '@astrojs/starlight/components';
-
 The fastest way to deploy if you already have the dashboard open.
 
 <Steps>
