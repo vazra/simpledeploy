@@ -200,6 +200,32 @@ func TestBuildConfigTLSLocalStorage(t *testing.T) {
 	}
 }
 
+func TestBuildConfigTLSAutoStorage(t *testing.T) {
+	// Storage must be pinned for auto mode too, otherwise certmagic falls
+	// back to $HOME/.local/share/caddy which ProtectHome=true blocks under
+	// the shipped systemd unit.
+	dataDir := "/tmp/testdata"
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr: ":443",
+		TLSMode:    "auto",
+		TLSEmail:   "ops@example.com",
+		DataDir:    dataDir,
+	})
+	cfg := parseConfig(t, p)
+
+	storage, ok := cfg["storage"].(map[string]interface{})
+	if !ok {
+		t.Fatal("storage not set for tls.mode=auto")
+	}
+	if storage["module"] != "file_system" {
+		t.Errorf("storage.module: got %v, want \"file_system\"", storage["module"])
+	}
+	wantRoot := dataDir + "/caddy"
+	if storage["root"] != wantRoot {
+		t.Errorf("storage.root: got %v, want %q", storage["root"], wantRoot)
+	}
+}
+
 func TestBuildConfigMixedLocalAndOff(t *testing.T) {
 	p := NewCaddyProxy(CaddyConfig{
 		ListenAddr: ":443",

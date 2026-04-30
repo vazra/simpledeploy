@@ -29,12 +29,12 @@ Default: `/var/lib/simpledeploy/`.
 ├── backups/               # local backup target output
 │   └── <app-slug>/
 │       └── 2026-04-17T02-00-00Z.sql.gz
-└── caddy/                 # Caddy storage (only when tls.mode is "local")
+└── caddy/                 # Caddy storage (ACME state, certs, locks)
     ├── certificates/
     └── locks/
 ```
 
-For `tls.mode: auto`, Caddy stores ACME state and certificates under its default location (`$HOME/.local/share/caddy` for the user running `simpledeploy`, typically `/root/.local/share/caddy` under systemd). For `tls.mode: local`, state lives under `data_dir/caddy/`. For `tls.mode: custom`, you provide cert files and SimpleDeploy reads them from the path declared by each app.
+Caddy storage lives under `data_dir/caddy/` for both `tls.mode: auto` (Let's Encrypt ACME state and issued certs) and `tls.mode: local` (self-signed CA). For `tls.mode: custom`, you provide cert files and SimpleDeploy reads them from the path declared by each app.
 
 Permissions:
 

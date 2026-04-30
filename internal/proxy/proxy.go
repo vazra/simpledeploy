@@ -235,7 +235,10 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		},
 	}
 
-	if (c.tlsMode == "local" || needsLocalTLS) && c.dataDir != "" {
+	// Pin Caddy storage under data_dir for all TLS modes. Without this,
+	// certmagic falls back to $HOME/.local/share/caddy, which is masked by
+	// systemd's ProtectHome=true in the shipped unit and breaks tls.mode=auto.
+	if c.dataDir != "" {
 		cfg["storage"] = map[string]interface{}{
 			"module": "file_system",
 			"root":   filepath.Join(c.dataDir, "caddy"),
