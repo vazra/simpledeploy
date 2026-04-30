@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.1](https://github.com/vazra/simpledeploy/compare/v1.3.0...v1.3.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* **docs:** prefix internal links with site base, repair broken targets ([0d0faf4](https://github.com/vazra/simpledeploy/commit/0d0faf483bb2095d841ba2829fc0ea5122c86e43))
+* **docs:** rename JSX-using pages to .mdx, drop bare imports from .md ([ab487c4](https://github.com/vazra/simpledeploy/commit/ab487c40caa275a535a0ebed0ba648bf69ce84a6))
+* **proxy,systemd:** pin Caddy storage to data_dir, fix systemd unit ([#84](https://github.com/vazra/simpledeploy/issues/84)) ([d07b190](https://github.com/vazra/simpledeploy/commit/d07b1909f5126cabc1654d11c97d346b3090daeb))
+
 ## [1.3.0](https://github.com/vazra/simpledeploy/compare/v1.2.0...v1.3.0) (2026-04-30)
 
 
