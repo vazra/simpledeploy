@@ -132,5 +132,5 @@ Before you start: make sure ports 80 and 443 are open, Docker is installed, and 
   <LinkCard title="Deploy more apps" href="/first-deploy/compose/" description="Multi-service stacks, env vars, port mappings." />
   <LinkCard title="Configure backups" href="/guides/backups/overview/" description="Postgres, MySQL, Mongo, volume tarballs to S3." />
   <LinkCard title="Add alerts" href="/guides/alerts/rules/" description="CPU, memory, error rate, custom webhooks." />
-  <LinkCard title="Invite your team" href="/guides/users/roles/" description="Per-app RBAC, API keys for CI." />
+  <LinkCard title="Invite your team" href="/guides/users-roles/" description="Per-app RBAC, API keys for CI." />
 </CardGrid>

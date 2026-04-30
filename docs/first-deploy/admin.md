@@ -79,6 +79,6 @@ The full key is shown only once. If you lose it, revoke it and create a new one.
 | `admin` | All apps + most settings (no user management) |
 | `user` | Only the apps explicitly granted to them |
 
-Per-app access for `user` accounts is set under **Users &rarr; (user) &rarr; App access**. See [Roles and permissions](/guides/users/roles/).
+Per-app access for `user` accounts is set under **Users &rarr; (user) &rarr; App access**. See [Roles and permissions](/guides/users-roles/).
 
 Next: [write your first compose file](/first-deploy/compose/).

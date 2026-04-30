@@ -77,5 +77,5 @@ Managed via `simpledeploy context add|use|list`. Permissions `0600` are recommen
 ## See also
 
 - [Configuration](/reference/configuration/) for `data_dir` and `apps_dir` config keys.
-- [Backups](/guides/backups/) for the `backups/` layout in detail.
+- [Backups](/guides/backups/overview/) for the `backups/` layout in detail.
 - [TLS and HTTPS](/guides/tls/) for Caddy storage paths.
