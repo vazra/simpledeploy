@@ -9,6 +9,12 @@ ExecStart=/usr/local/bin/simpledeploy serve --config /etc/simpledeploy/config.ya
 Restart=always
 RestartSec=5
 
+# Point HOME at a writable, allow-listed path. ProtectHome=true masks /root,
+# so anything that consults $HOME (docker CLI config, certmagic ACME fallback,
+# future deps) needs an alternate writable HOME. /var/lib/simpledeploy is
+# already in ReadWritePaths below.
+Environment=HOME=/var/lib/simpledeploy
+
 # --- Hardening ---
 # SimpleDeploy must run as root by default because it talks to the docker
 # daemon socket and binds privileged ports (80/443) via Caddy. The
@@ -23,7 +29,7 @@ NoNewPrivileges=true
 
 # Read-only system tree, with explicit writable paths for state.
 ProtectSystem=strict
-ReadWritePaths=/etc/simpledeploy /var/lib/simpledeploy /var/log/simpledeploy
+ReadWritePaths=/etc/simpledeploy /var/lib/simpledeploy
 ProtectHome=true
 PrivateTmp=true
 

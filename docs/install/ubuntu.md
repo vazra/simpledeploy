@@ -98,4 +98,18 @@ sudo apt update && sudo apt upgrade simpledeploy
 
 Schema migrations run automatically on the next start. See [Upgrading](/install/upgrading/) for rollback notes.
 
+## Troubleshooting
+
+### `status=226/NAMESPACE` or `Failed to set up mount namespacing`
+
+Old releases (< the systemd unit fix) listed a path in `ReadWritePaths` that the package never created, and let Caddy's ACME state fall under `/root/.local/share/caddy`, which the unit's `ProtectHome=true` blocks. Both are fixed in current releases. If you hit this on an existing host:
+
+```bash
+sudo apt update && sudo apt upgrade simpledeploy
+sudo systemctl daemon-reload
+sudo systemctl restart simpledeploy
+```
+
+ACME state now lives under `/var/lib/simpledeploy/caddy/`. If you previously had certs under `/root/.local/share/caddy/`, you can copy them over to skip a re-issue, or just let Let's Encrypt re-issue on next request.
+
 Next: [First deploy](/first-deploy/prepare/).
