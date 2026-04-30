@@ -51,6 +51,9 @@ export async function startServer(binPath, overrides = {}) {
     `data_dir: "${dataDir}"`,
     `apps_dir: "${appsDir}"`,
     `listen_addr: ":${proxyPort}"`,
+    // Opt out of the HTTP->HTTPS redirect listener (defaults to :80 when
+    // tls.mode is auto/local). :80 needs root and conflicts in CI.
+    `http_listen_addr: "off"`,
     `management_port: ${port}`,
     `master_secret: "e2e-test-secret-key-32bytes!!"`,
     `log_buffer_size: 100`,

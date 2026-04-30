@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -65,8 +66,12 @@ func (s *VolumeStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRe
 
 	filename := fmt.Sprintf("%s-%s.tar.gz", opts.ContainerName, time.Now().Format("20060102-150405"))
 
-	args := []string{"exec", opts.ContainerName, "tar", "-czf", "-"}
-	args = append(args, opts.Paths...)
+	// -C / + relative paths so archive entries are normalized to relative
+	// form (validateTarStream on restore rejects absolute paths).
+	args := []string{"exec", opts.ContainerName, "tar", "-czf", "-", "-C", "/"}
+	for _, p := range opts.Paths {
+		args = append(args, strings.TrimPrefix(p, "/"))
+	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
@@ -93,8 +98,11 @@ func (s *VolumeStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 	if err != nil {
 		return fmt.Errorf("reject restore archive: %w", err)
 	}
+	// Keep extract flags portable: BusyBox tar (Alpine) lacks
+	// --no-same-owner/--no-overwrite-dir. validateTarStream already
+	// rejects the dangerous archive shapes those flags were guarding.
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", opts.ContainerName,
-		"tar", "-xzf", "-", "-C", "/", "--no-same-owner", "--no-overwrite-dir")
+		"tar", "-xzf", "-", "-C", "/")
 	cmd.Stdin = safe
 
 	if out, err := cmd.CombinedOutput(); err != nil {

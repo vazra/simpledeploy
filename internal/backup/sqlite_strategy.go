@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -69,9 +70,14 @@ func (s *SQLiteStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRe
 		backupPaths = append(backupPaths, tmpPath)
 	}
 
-	// Tar+gzip all backup files and stream out
-	tarArgs := []string{"exec", container, "tar", "-czf", "-"}
-	tarArgs = append(tarArgs, backupPaths...)
+	// Tar+gzip all backup files and stream out. -C / + relative paths so
+	// archive entries are normalized to relative form (validateTarStream
+	// on restore rejects absolute paths to block tar-slip from a hostile
+	// uploaded backup).
+	tarArgs := []string{"exec", container, "tar", "-czf", "-", "-C", "/"}
+	for _, p := range backupPaths {
+		tarArgs = append(tarArgs, strings.TrimPrefix(p, "/"))
+	}
 
 	cmd := exec.CommandContext(ctx, "docker", tarArgs...)
 	stdout, err := cmd.StdoutPipe()
@@ -103,9 +109,12 @@ func (s *SQLiteStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 		return fmt.Errorf("reject restore archive: %w", err)
 	}
 
-	// Extract tar into /tmp inside container
+	// Extract tar inside container. validateTarStream above rejects the
+	// symlink/hardlink/parent-traversal/absolute-path vectors that
+	// --no-same-owner/--no-overwrite-dir were guarding against; keep the
+	// extract flags portable so BusyBox tar (Alpine) works too.
 	extractCmd := exec.CommandContext(ctx, "docker", "exec", "-i", container,
-		"tar", "-xzf", "-", "-C", "/", "--no-same-owner", "--no-overwrite-dir")
+		"tar", "-xzf", "-", "-C", "/")
 	extractCmd.Stdin = safe
 
 	if out, err := extractCmd.CombinedOutput(); err != nil {
