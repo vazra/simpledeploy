@@ -457,6 +457,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if httpAddr == "" && (cfg.TLS.Mode == "auto" || cfg.TLS.Mode == "local") {
 		httpAddr = ":80"
 	}
+	// Sentinel "off" / "disabled" / "none" opts out of the HTTP redirect
+	// listener even with tls.mode=auto/local (e.g. tests, environments
+	// where :80 is unavailable or another listener owns it).
+	switch httpAddr {
+	case "off", "disabled", "none":
+		httpAddr = ""
+	}
 	proxyCfg := proxy.CaddyConfig{
 		ListenAddr:     cfg.ListenAddr,
 		HTTPListenAddr: httpAddr,
