@@ -3,8 +3,6 @@ title: Disaster recovery
 description: Restore a SimpleDeploy server from scratch using the system DB backup and per-app backups.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 When things go badly wrong, the speed of recovery depends entirely on how you set things up beforehand. This page covers three failure modes, ordered by severity.
 
 SimpleDeploy also mirrors every user-editable setting (users, alert rules, backup configs, registries, webhooks) to YAML sidecar files on disk. A wiped database can be recovered from those files without a prior backup. See [Config sidecars and sidecar-based recovery](/operations/config-sidecars/) for the full procedure.

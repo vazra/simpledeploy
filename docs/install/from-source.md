@@ -3,8 +3,6 @@ title: Build from source
 description: Build SimpleDeploy from source. Requires Go 1.22+ and Node.js 18+. Recommended for contributors and hackers, not production.
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
-
 <Aside type="caution">
 Not recommended for production unless you are patching the codebase. The released binaries are reproducible and signed via CI. Building from source means you also own the upgrade path.
 </Aside>

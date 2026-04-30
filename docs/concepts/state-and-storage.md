@@ -3,8 +3,6 @@ title: State and storage
 description: What SimpleDeploy stores, where it lives on disk, and how to back it up.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 SimpleDeploy keeps state in three places: a SQLite database, an apps directory, and Caddy's own storage for ACME certs. Backups go anywhere you point them.
 
 ## Layout

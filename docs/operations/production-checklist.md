@@ -3,8 +3,6 @@ title: Production checklist
 description: Pre-flight checks for going live with SimpleDeploy: TLS, master_secret, backups, alerts, firewall, audit log.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 Run through every box before you put real traffic on a SimpleDeploy host. Skipping items will burn you later.
 
 <Aside type="caution">

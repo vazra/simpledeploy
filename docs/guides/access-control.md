@@ -3,8 +3,6 @@ title: IP access control
 description: Restrict which client IPs can reach an app with simpledeploy.access.allow. Allowlist-only, default-allow when empty, 404 for blocked IPs.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
-
 Restrict which client IPs reach an app with the `simpledeploy.access.allow` label. Useful for admin panels, internal APIs, geo-pinning to known office IPs, or staging environments.
 
 ## Semantics

@@ -3,7 +3,7 @@ title: Upgrading
 description: Upgrade SimpleDeploy via apt, brew, or by replacing the binary. Always back up the SQLite DB first. Schema migrations run automatically.
 ---
 
-import { Tabs, TabItem, Steps, Aside } from '@astrojs/starlight/components';
+import { Aside, Steps, TabItem, Tabs } from '@astrojs/starlight/components';
 
 <Aside type="caution" title="Back up first">
 Always back up the SQLite database (and your `apps/` directory) before upgrading. Migrations run forward only. See [Disaster recovery](/operations/disaster-recovery/) for the procedure.

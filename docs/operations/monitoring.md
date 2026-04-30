@@ -3,8 +3,6 @@ title: Monitoring and observability
 description: How to monitor SimpleDeploy itself: server logs, metrics, alerts, and integrations with external observability tools.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 Monitor SimpleDeploy in three layers. Each catches a different class of failure.
 
 ## Layer 1: SimpleDeploy itself

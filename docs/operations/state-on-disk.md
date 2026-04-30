@@ -3,8 +3,6 @@ title: State on disk
 description: How SimpleDeploy stores configuration on the filesystem, which files are authoritative, where secrets live, and how to recover from a corrupted database.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 SimpleDeploy treats the filesystem as the source of truth for all portable configuration. The SQLite database is a cache that can be rebuilt from disk at any time. This page describes the on-disk layout, the authority boundary, the secrets boundary, and recovery procedures.
 
 ## File layout

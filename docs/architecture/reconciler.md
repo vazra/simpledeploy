@@ -3,8 +3,6 @@ title: Reconciler
 description: Tick loop, hash-based change detection, concurrency cap, and deploy event lifecycle.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 The reconciler is the only component allowed to mutate Docker state. Everything else writes a file or a row and lets the loop converge. Source: [/internal/reconciler/reconciler.go](https://github.com/vazra/simpledeploy/blob/main/internal/reconciler/reconciler.go) and [/internal/reconciler/watcher.go](https://github.com/vazra/simpledeploy/blob/main/internal/reconciler/watcher.go).
 
 ## Trigger model

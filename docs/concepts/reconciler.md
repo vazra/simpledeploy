@@ -3,8 +3,6 @@ title: Desired-state reconciler
 description: How the reconciler converges Docker state to match the apps directory and SQLite store.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 SimpleDeploy is declarative. You describe what you want (compose files in `apps_dir/`, rows in SQLite), and the reconciler keeps Docker matching. Same model as Kubernetes, smaller scope.
 
 ## Two states

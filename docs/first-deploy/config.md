@@ -3,8 +3,6 @@ title: Generate config
 description: Run simpledeploy init, edit the YAML, and set the three required fields (domain, master_secret, tls.email).
 ---
 
-import { Steps, Aside } from '@astrojs/starlight/components';
-
 SimpleDeploy reads its config from `/etc/simpledeploy/config.yaml` by default. Generate a starter file, then edit three things.
 
 ## Generate

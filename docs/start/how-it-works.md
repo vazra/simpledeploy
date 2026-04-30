@@ -3,8 +3,6 @@ title: How it works
 description: Architecture overview. Single Go binary running embedded Caddy, a directory-watching reconciler, SQLite state, plus metrics, backups, alerts, and auth.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
 SimpleDeploy is one process. Inside it, several subsystems share state through a SQLite database and coordinate via channels.
 
 ```mermaid
