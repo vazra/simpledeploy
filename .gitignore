@@ -35,3 +35,6 @@ docs-site/src/content/docs/README.md
 
 .worktrees/
 _dev/
+.claude/
+*.bck.yml
+/simpledeploy
