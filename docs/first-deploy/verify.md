@@ -67,6 +67,6 @@ For deeper troubleshooting: [Operations &rarr; Troubleshooting](/operations/trou
 That is the full happy path. Next, dig in:
 
 - [Add backups](/guides/backups/overview/) for stateful services.
-- [Invite teammates](/guides/users/roles/) and scope per-app access.
+- [Invite teammates](/guides/users-roles/) and scope per-app access.
 - [Wire up a private registry](/guides/registries/) for non-public images.
 - [Front SimpleDeploy with a load balancer](/guides/load-balancer/) if you outgrow one VPS.

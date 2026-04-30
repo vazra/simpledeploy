@@ -56,4 +56,4 @@ The DB is itself a backup target via the System page. SimpleDeploy uses SQLite `
 Copying the raw `simpledeploy.db` file while the process is running is unsafe. WAL pages may not yet be checkpointed. Use the System backup endpoint (which calls `VACUUM INTO`) or stop the process first.
 </Aside>
 
-For backing up your apps' data (postgres volumes, redis dumps, app files), see [Backups](/simpledeploy/concepts/backups/) and [Backup architecture](/simpledeploy/architecture/backup/).
+For backing up your apps' data (postgres volumes, redis dumps, app files), see [Backups](/guides/backups/overview/) and [Backup architecture](/architecture/backup/).

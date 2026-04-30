@@ -6,12 +6,17 @@ import starlightOpenAPI, { openAPISidebarGroups } from "starlight-openapi";
 import starlightBlog from "starlight-blog";
 import starlightLinksValidator from "starlight-links-validator";
 import starlightImageZoom from "starlight-image-zoom";
+import remarkPrefixBase from "./plugins/remark-prefix-base.mjs";
 
 const githubRepo = "https://github.com/vazra/simpledeploy";
+const siteBase = "/simpledeploy";
 
 export default defineConfig({
   site: "https://vazra.github.io",
-  base: "/simpledeploy",
+  base: siteBase,
+  markdown: {
+    remarkPlugins: [[remarkPrefixBase, { base: siteBase }]],
+  },
   integrations: [
     svelte(),
     starlight({
@@ -45,7 +50,14 @@ export default defineConfig({
           failOnError: false,
           errorOnRelativeLinks: false,
           errorOnInvalidHashes: false,
-          exclude: ["/reference/api", "/reference/api/**"],
+          exclude: [
+            "/reference/api",
+            "/reference/api/**",
+            "/simpledeploy/blog",
+            "/simpledeploy/blog/",
+            "http://localhost:**",
+            "https://localhost:**",
+          ],
         }),
         starlightOpenAPI([
           {
