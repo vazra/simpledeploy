@@ -34,3 +34,4 @@ docs-site/src/content/docs/faq.md
 docs-site/src/content/docs/README.md
 
 .worktrees/
+_dev/
