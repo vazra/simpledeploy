@@ -440,3 +440,115 @@ func TestMockProxySetRoutes(t *testing.T) {
 		t.Fatalf("Routes: got %d, want 2", len(got))
 	}
 }
+
+func TestBuildConfigGRPCPathCatchAllSameDomain(t *testing.T) {
+	p := newTestProxy("off", "")
+	p.mu.Lock()
+	p.routes = []Route{
+		{Domain: "co.example.com", Upstream: "co:8001", Protocol: "http"},
+		{Domain: "co.example.com", Upstream: "co:8000", Protocol: "http", Path: "/ws*"},
+		{Domain: "co.example.com", Upstream: "co:50051", Protocol: "grpc"},
+	}
+	p.mu.Unlock()
+
+	routes := getServer(t, parseConfig(t, p))["routes"].([]interface{})
+	if len(routes) != 3 {
+		t.Fatalf("routes: got %d, want 3", len(routes))
+	}
+
+	lastHandler := func(i int) map[string]interface{} {
+		h := routes[i].(map[string]interface{})["handle"].([]interface{})
+		return h[len(h)-1].(map[string]interface{})
+	}
+	matchOf := func(i int) map[string]interface{} {
+		return routes[i].(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})
+	}
+
+	wantDial := []string{"co:50051", "co:8000", "co:8001"}
+	for i := range routes {
+		if routes[i].(map[string]interface{})["terminal"] != true {
+			t.Errorf("route[%d] terminal: want true", i)
+		}
+		dial := lastHandler(i)["upstreams"].([]interface{})[0].(map[string]interface{})["dial"]
+		if dial != wantDial[i] {
+			t.Fatalf("route[%d] dial = %v, want %s", i, dial, wantDial[i])
+		}
+	}
+
+	// grpc route: header matcher, grpc-web excluded, h2c transport, flush -1
+	gm := matchOf(0)
+	ct := gm["header"].(map[string]interface{})["Content-Type"].([]interface{})
+	if len(ct) != 1 || ct[0] != "application/grpc*" {
+		t.Errorf("grpc header matcher = %v", ct)
+	}
+	notCT := gm["not"].([]interface{})[0].(map[string]interface{})["header"].(map[string]interface{})["Content-Type"].([]interface{})
+	if len(notCT) != 1 || notCT[0] != "application/grpc-web*" {
+		t.Errorf("grpc not matcher = %v", notCT)
+	}
+	rp := lastHandler(0)
+	tr := rp["transport"].(map[string]interface{})
+	if tr["protocol"] != "http" || tr["versions"].([]interface{})[0] != "h2c" {
+		t.Errorf("grpc transport = %v", tr)
+	}
+	if rp["flush_interval"] != float64(-1) {
+		t.Errorf("grpc flush_interval = %v, want -1", rp["flush_interval"])
+	}
+
+	// path route
+	if pm := matchOf(1)["path"].([]interface{}); len(pm) != 1 || pm[0] != "/ws*" {
+		t.Errorf("path matcher = %v", pm)
+	}
+	if _, ok := lastHandler(1)["transport"]; ok {
+		t.Error("path http route must not set transport")
+	}
+
+	// catch-all
+	cm := matchOf(2)
+	if _, ok := cm["path"]; ok {
+		t.Error("catch-all must not have path")
+	}
+	if _, ok := cm["header"]; ok {
+		t.Error("catch-all must not have header")
+	}
+}
+
+func TestBuildConfigTLSOffEnablesH2CListener(t *testing.T) {
+	server := getServer(t, parseConfig(t, newTestProxy("off", "")))
+	protos, ok := server["protocols"].([]interface{})
+	if !ok {
+		t.Fatal("protocols not set for plain-HTTP listener")
+	}
+	want := []string{"h1", "h2", "h2c"}
+	if len(protos) != len(want) {
+		t.Fatalf("protocols = %v, want %v", protos, want)
+	}
+	for i := range want {
+		if protos[i] != want[i] {
+			t.Errorf("protocols[%d] = %v, want %s", i, protos[i], want[i])
+		}
+	}
+}
+
+func TestBuildConfigTLSAutoKeepsDefaultProtocols(t *testing.T) {
+	server := getServer(t, parseConfig(t, newTestProxy("auto", "ops@example.com")))
+	if _, ok := server["protocols"]; ok {
+		t.Errorf("protocols must be unset on TLS listener, got %v", server["protocols"])
+	}
+}
+
+func TestBuildConfigCustomCertLoadedOncePerDomain(t *testing.T) {
+	p := newTestProxy("custom", "")
+	p.mu.Lock()
+	p.routes = []Route{
+		{Domain: "co.example.com", Upstream: "co:8001", TLS: "custom", CertDir: "/certs"},
+		{Domain: "co.example.com", Upstream: "co:50051", TLS: "custom", CertDir: "/certs", Protocol: "grpc"},
+	}
+	p.mu.Unlock()
+
+	cfg := parseConfig(t, p)
+	tlsApp := cfg["apps"].(map[string]interface{})["tls"].(map[string]interface{})
+	files := tlsApp["certificates"].(map[string]interface{})["load_files"].([]interface{})
+	if len(files) != 1 {
+		t.Fatalf("load_files = %d entries, want 1", len(files))
+	}
+}

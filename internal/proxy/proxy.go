@@ -103,10 +103,12 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	routes := make([]Route, len(c.routes))
 	copy(routes, c.routes)
 	c.mu.Unlock()
+	routes = orderRoutes(routes)
 
 	// Collect custom TLS cert files and per-route local-TLS domains
 	var loadFiles []interface{}
 	var localTLSDomains []string
+	seenCertDomains := map[string]bool{}
 
 	for _, r := range routes {
 		if r.TLS == "local" {
@@ -136,25 +138,16 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 			map[string]interface{}{"handler": "simpledeploy_ratelimit"},
 			map[string]interface{}{"handler": "simpledeploy_metrics"},
 			headerHandler,
-			map[string]interface{}{
-				"handler": "reverse_proxy",
-				"upstreams": []interface{}{
-					map[string]interface{}{
-						"dial": r.Upstream,
-					},
-				},
-			},
+			reverseProxyHandler(r),
 		}
 		caddyRoutes = append(caddyRoutes, map[string]interface{}{
-			"match": []interface{}{
-				map[string]interface{}{
-					"host": []string{r.Domain},
-				},
-			},
-			"handle": handlers,
+			"match":    []interface{}{routeMatcher(r)},
+			"handle":   handlers,
+			"terminal": true,
 		})
 
-		if r.TLS == "custom" && r.CertDir != "" {
+		if r.TLS == "custom" && r.CertDir != "" && !seenCertDomains[r.Domain] {
+			seenCertDomains[r.Domain] = true
 			loadFiles = append(loadFiles, map[string]interface{}{
 				"certificate": filepath.Join(r.CertDir, r.Domain+".crt"),
 				"key":         filepath.Join(r.CertDir, r.Domain+".key"),
@@ -178,6 +171,11 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		server["automatic_https"] = map[string]interface{}{
 			"disable": true,
 		}
+		// Plain-HTTP listener (TLS terminated in front of SimpleDeploy, or
+		// local testing): also accept HTTP/2 cleartext so gRPC clients can
+		// connect with prior knowledge. TLS listeners negotiate h2 via ALPN
+		// with Caddy's default protocols.
+		server["protocols"] = []string{"h1", "h2", "h2c"}
 	} else {
 		// Caddy only terminates TLS on servers with a connection policy; an
 		// empty policy is enough to make the listener serve TLS and let the
