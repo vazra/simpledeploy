@@ -1,8 +1,10 @@
 package compose
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -220,5 +222,69 @@ func TestPrimaryDomainEmpty(t *testing.T) {
 	cfg := &AppConfig{}
 	if cfg.PrimaryDomain() != "" {
 		t.Errorf("PrimaryDomain() = %q, want empty", cfg.PrimaryDomain())
+	}
+}
+
+func TestExtractEndpointsProtocolAndPath(t *testing.T) {
+	labels := map[string]string{
+		"simpledeploy.endpoints.0.domain":   "co.example.com",
+		"simpledeploy.endpoints.0.port":     "50051",
+		"simpledeploy.endpoints.0.protocol": " GRPC ",
+		"simpledeploy.endpoints.1.domain":   "co.example.com",
+		"simpledeploy.endpoints.1.port":     "8000",
+		"simpledeploy.endpoints.1.path":     " /ws* ",
+		"simpledeploy.endpoints.2.domain":   "co.example.com",
+		"simpledeploy.endpoints.2.port":     "8001",
+	}
+
+	eps := extractEndpoints(labels, "co")
+	if len(eps) != 3 {
+		t.Fatalf("len(endpoints) = %d, want 3", len(eps))
+	}
+	if eps[0].Protocol != "grpc" || eps[0].Path != "" {
+		t.Errorf("eps[0] = %+v, want Protocol=grpc Path=\"\"", eps[0])
+	}
+	if eps[1].Protocol != "" || eps[1].Path != "/ws*" {
+		t.Errorf("eps[1] = %+v, want Protocol=\"\" Path=/ws*", eps[1])
+	}
+	if eps[2].Protocol != "" || eps[2].Path != "" {
+		t.Errorf("eps[2] = %+v, want empty Protocol and Path", eps[2])
+	}
+}
+
+func TestParseGRPCCompose(t *testing.T) {
+	cfg, err := ParseFile(testdataPath("grpc.yml"), "grpcapp")
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if len(cfg.Endpoints) != 3 {
+		t.Fatalf("len(Endpoints) = %d, want 3", len(cfg.Endpoints))
+	}
+	byPort := map[string]EndpointConfig{}
+	for _, ep := range cfg.Endpoints {
+		if ep.Domain != "co.example.com" || ep.Service != "co" {
+			t.Errorf("unexpected endpoint %+v", ep)
+		}
+		byPort[ep.Port] = ep
+	}
+	if byPort["50051"].Protocol != ProtocolGRPC {
+		t.Errorf("50051 Protocol = %q, want grpc", byPort["50051"].Protocol)
+	}
+	if byPort["8000"].Path != "/ws*" {
+		t.Errorf("8000 Path = %q, want /ws*", byPort["8000"].Path)
+	}
+	if byPort["8001"].Protocol != "" || byPort["8001"].Path != "" {
+		t.Errorf("8001 = %+v, want catch-all", byPort["8001"])
+	}
+}
+
+func TestEndpointConfigJSONOmitsEmptyProtocolAndPath(t *testing.T) {
+	b, err := json.Marshal(EndpointConfig{Domain: "a.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Contains(s, "protocol") || strings.Contains(s, "path") {
+		t.Errorf("json = %s, want no protocol/path keys", s)
 	}
 }

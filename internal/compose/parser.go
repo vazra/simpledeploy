@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
@@ -14,10 +15,12 @@ import (
 
 // EndpointConfig holds config for a single endpoint (domain/port/tls bound to a service).
 type EndpointConfig struct {
-	Domain  string `json:"domain"`
-	Port    string `json:"port"`
-	TLS     string `json:"tls"`
-	Service string `json:"service"`
+	Domain   string `json:"domain"`
+	Port     string `json:"port"`
+	TLS      string `json:"tls"`
+	Service  string `json:"service"`
+	Protocol string `json:"protocol,omitempty"` // "", "http", "h2c" or "grpc"
+	Path     string `json:"path,omitempty"`     // optional Caddy path matcher, e.g. "/ws*"
 }
 
 // AppConfig holds the parsed compose file config plus extracted simpledeploy labels.
@@ -87,7 +90,7 @@ type LabelConfig struct {
 	RateLimit       RateLimitLabels
 }
 
-var endpointLabelRe = regexp.MustCompile(`^simpledeploy\.endpoints\.(\d+)\.(domain|port|tls)$`)
+var endpointLabelRe = regexp.MustCompile(`^simpledeploy\.endpoints\.(\d+)\.(domain|port|tls|protocol|path)$`)
 
 // ParseFile parses the compose file at path and returns an AppConfig with appName as the name.
 // simpledeploy.* labels are collected across all services; the first value found wins.
@@ -183,7 +186,7 @@ func ExtractLabels(labels map[string]string) LabelConfig {
 	}
 }
 
-// extractEndpoints scans labels for simpledeploy.endpoints.N.{domain,port,tls}
+// extractEndpoints scans labels for simpledeploy.endpoints.N.{domain,port,tls,protocol,path}
 // and returns EndpointConfigs sorted by index, with Service set to serviceName.
 func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig {
 	byIndex := map[int]*EndpointConfig{}
@@ -203,6 +206,10 @@ func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig 
 			byIndex[idx].Port = v
 		case "tls":
 			byIndex[idx].TLS = v
+		case "protocol":
+			byIndex[idx].Protocol = NormalizeProtocol(v)
+		case "path":
+			byIndex[idx].Path = strings.TrimSpace(v)
 		}
 	}
 

@@ -1,0 +1,12 @@
+services:
+  co:
+    image: example/co:latest
+    labels:
+      simpledeploy.endpoints.0.domain: "co.example.com"
+      simpledeploy.endpoints.0.port: "50051"
+      simpledeploy.endpoints.0.protocol: "grpc"
+      simpledeploy.endpoints.1.domain: "co.example.com"
+      simpledeploy.endpoints.1.port: "8000"
+      simpledeploy.endpoints.1.path: "/ws*"
+      simpledeploy.endpoints.2.domain: "co.example.com"
+      simpledeploy.endpoints.2.port: "8001"
