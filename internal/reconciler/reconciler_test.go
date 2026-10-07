@@ -1,9 +1,12 @@
 package reconciler
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -468,5 +471,67 @@ func TestClassifyStatus(t *testing.T) {
 				t.Errorf("classifyStatus(%+v) = %q, want %q", c.svcs, got, c.want)
 			}
 		})
+	}
+}
+
+func TestReconcileKeepsAppWithEndpointCollisionsAndWarns(t *testing.T) {
+	r, _, _, appsDir := newTestEnv(t)
+
+	// Written by an older SimpleDeploy that allowed two catch-alls on one
+	// domain. After an upgrade the app must stay routed (first endpoint
+	// wins), with a warning instead of being dropped.
+	appDir := filepath.Join(appsDir, "legacy")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `services:
+  web:
+    image: nginx
+    labels:
+      simpledeploy.endpoints.0.domain: "legacy.example.com"
+      simpledeploy.endpoints.0.port: "80"
+      simpledeploy.endpoints.1.domain: "legacy.example.com"
+      simpledeploy.endpoints.1.port: "81"
+      simpledeploy.endpoints.2.domain: "legacy.example.com"
+      simpledeploy.endpoints.2.port: "82"
+      simpledeploy.endpoints.2.path: "/ws*"
+      simpledeploy.endpoints.2.tls: "off"
+`
+	if err := os.WriteFile(filepath.Join(appDir, "docker-compose.yml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	r.Reconcile(context.Background())
+
+	var got []proxy.Route
+	for _, rt := range r.proxy.(*proxy.MockProxy).Routes() {
+		if rt.Domain == "legacy.example.com" {
+			got = append(got, rt)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("routes = %+v, want 2 (first catch-all + /ws* path route)", got)
+	}
+	for _, rt := range got {
+		if rt.Path == "" && rt.Upstream != "web:80" {
+			t.Errorf("catch-all upstream = %q, want web:80 (first endpoint wins)", rt.Upstream)
+		}
+		if rt.TLS != "auto" {
+			t.Errorf("route %+v TLS = %q, want auto (first endpoint's tls)", rt, rt.TLS)
+		}
+	}
+	logs := buf.String()
+	for _, want := range []string{
+		`legacy: endpoint labels`,
+		`service "web" label simpledeploy.endpoints.1 (legacy.example.com): duplicates service "web" label simpledeploy.endpoints.0`,
+		`tls "off" conflicts with tls "auto"`,
+	} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("logs missing %q; got:\n%s", want, logs)
+		}
 	}
 }

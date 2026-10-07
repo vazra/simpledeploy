@@ -26,6 +26,11 @@ listen_addr: ":443"
 # port is 308-redirected to https://. Leave empty to disable.
 http_listen_addr: ":80"
 
+# Optional extra listen addresses for the HTTPS proxy. Same routes, TLS and
+# certs as listen_addr (routing stays by SNI/Host). Example: gRPC clients
+# that default to port 50051.
+# extra_listen_addrs: [":50051"]
+
 # Management API + dashboard port
 management_port: 8443
 
@@ -104,6 +109,7 @@ git_sync:
 | `apps_dir` | string | `/etc/simpledeploy/apps` | Watched directory for compose files |
 | `listen_addr` | string | `:443` | Reverse proxy listen address (HTTPS) |
 | `http_listen_addr` | string | `:80` (when `tls.mode` is `auto` or `local`) | Plain-HTTP listener that 308-redirects to HTTPS. Set explicitly to `""` to disable. Ignored when `tls.mode: off`. |
+| `extra_listen_addrs` | list of string | `[]` | Additional `host:port` listeners for the HTTPS proxy server, e.g. `[":50051"]`. Every listener serves the same routes, TLS policies and certificates. Must not repeat `listen_addr`, `http_listen_addr` or each other. Open the ports in your firewall. |
 | `management_port` | int | `8443` | Management API port |
 | `management_addr` | string | `127.0.0.1` | Management API bind address. Default keeps the dashboard local-only. Set to `""` (or `0.0.0.0`) to expose on every interface. |
 | `domain` | string | - | Management UI domain |

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
@@ -14,10 +15,15 @@ import (
 
 // EndpointConfig holds config for a single endpoint (domain/port/tls bound to a service).
 type EndpointConfig struct {
-	Domain  string `json:"domain"`
-	Port    string `json:"port"`
-	TLS     string `json:"tls"`
-	Service string `json:"service"`
+	Domain   string `json:"domain"`
+	Port     string `json:"port"`
+	TLS      string `json:"tls"`
+	Service  string `json:"service"`
+	Protocol string `json:"protocol,omitempty"` // "", "http", "h2c" or "grpc"
+	Path     string `json:"path,omitempty"`     // optional Caddy path matcher, e.g. "/ws*"
+	// Index is N from the simpledeploy.endpoints.N.* labels (per service).
+	// Used for deterministic ordering and error messages; not serialized.
+	Index int `json:"-"`
 }
 
 // AppConfig holds the parsed compose file config plus extracted simpledeploy labels.
@@ -87,7 +93,7 @@ type LabelConfig struct {
 	RateLimit       RateLimitLabels
 }
 
-var endpointLabelRe = regexp.MustCompile(`^simpledeploy\.endpoints\.(\d+)\.(domain|port|tls)$`)
+var endpointLabelRe = regexp.MustCompile(`^simpledeploy\.endpoints\.(\d+)\.(domain|port|tls|protocol|path)$`)
 
 // ParseFile parses the compose file at path and returns an AppConfig with appName as the name.
 // simpledeploy.* labels are collected across all services; the first value found wins.
@@ -151,9 +157,18 @@ func ParseFile(path, appName string) (*AppConfig, error) {
 		eps := extractEndpoints(svc.Labels, name)
 		cfg.Endpoints = append(cfg.Endpoints, eps...)
 	}
-	// Stable sort by index (extractEndpoints returns sorted per-service)
+	// Deterministic order: domain, then label index N, then service name.
+	// Services come from a map, so without the tie-breakers the order of
+	// endpoints sharing a domain would vary between parses.
 	sort.SliceStable(cfg.Endpoints, func(i, j int) bool {
-		return cfg.Endpoints[i].Domain < cfg.Endpoints[j].Domain
+		a, b := cfg.Endpoints[i], cfg.Endpoints[j]
+		if a.Domain != b.Domain {
+			return a.Domain < b.Domain
+		}
+		if a.Index != b.Index {
+			return a.Index < b.Index
+		}
+		return a.Service < b.Service
 	})
 
 	for name, svc := range project.Services {
@@ -183,7 +198,7 @@ func ExtractLabels(labels map[string]string) LabelConfig {
 	}
 }
 
-// extractEndpoints scans labels for simpledeploy.endpoints.N.{domain,port,tls}
+// extractEndpoints scans labels for simpledeploy.endpoints.N.{domain,port,tls,protocol,path}
 // and returns EndpointConfigs sorted by index, with Service set to serviceName.
 func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig {
 	byIndex := map[int]*EndpointConfig{}
@@ -194,7 +209,7 @@ func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig 
 		}
 		idx, _ := strconv.Atoi(m[1])
 		if byIndex[idx] == nil {
-			byIndex[idx] = &EndpointConfig{Service: serviceName}
+			byIndex[idx] = &EndpointConfig{Service: serviceName, Index: idx}
 		}
 		switch m[2] {
 		case "domain":
@@ -203,6 +218,10 @@ func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig 
 			byIndex[idx].Port = v
 		case "tls":
 			byIndex[idx].TLS = v
+		case "protocol":
+			byIndex[idx].Protocol = NormalizeProtocol(v)
+		case "path":
+			byIndex[idx].Path = strings.TrimSpace(v)
 		}
 	}
 

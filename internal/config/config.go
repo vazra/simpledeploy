@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +37,10 @@ type Config struct {
 	AppsDir        string          `yaml:"apps_dir"`
 	ListenAddr     string          `yaml:"listen_addr"`
 	HTTPListenAddr string          `yaml:"http_listen_addr"`
+	// ExtraListenAddrs are additional addresses for the HTTPS proxy server
+	// (e.g. [":50051"]). They serve the same routes, TLS policies and certs
+	// as ListenAddr. Empty by default.
+	ExtraListenAddrs []string `yaml:"extra_listen_addrs"`
 	ManagementPort int             `yaml:"management_port"`
 	// ManagementAddr is the bind address for the dashboard listener.
 	// Defaults to "127.0.0.1" so the plain-HTTP dashboard is not exposed
@@ -157,6 +163,9 @@ func (c *Config) Validate() error {
 	if c.GitSync.Enabled && c.GitSync.Remote == "" {
 		return fmt.Errorf("gitsync.remote is required when gitsync.enabled is true")
 	}
+	if err := c.validateExtraListenAddrs(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -215,4 +224,82 @@ func (c *Config) SaveAtomic(path string) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+// effectiveHTTPListenAddr mirrors the serve command's defaulting of
+// http_listen_addr: ":80" when TLS is auto/local and the field is empty,
+// "" for the opt-out sentinels.
+func (c *Config) effectiveHTTPListenAddr() string {
+	a := c.HTTPListenAddr
+	if a == "" && (c.TLS.Mode == "auto" || c.TLS.Mode == "local") {
+		a = ":80"
+	}
+	switch a {
+	case "off", "disabled", "none":
+		return ""
+	}
+	return a
+}
+
+// listenAddr is a parsed host:port with the host normalized: "", "0.0.0.0"
+// and "::" all mean every interface and become "".
+type listenAddr struct {
+	raw  string
+	host string
+	port int
+}
+
+func parseListenAddr(a string) (listenAddr, error) {
+	host, port, err := net.SplitHostPort(a)
+	if err != nil {
+		return listenAddr{}, err
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return listenAddr{}, fmt.Errorf("port must be 1-65535")
+	}
+	switch host {
+	case "0.0.0.0", "::":
+		host = ""
+	}
+	return listenAddr{raw: a, host: strings.ToLower(host), port: n}, nil
+}
+
+// overlaps reports whether two listeners would fight over the same socket:
+// same port and the same host, or either one binds every interface.
+func (l listenAddr) overlaps(o listenAddr) bool {
+	return l.port == o.port && (l.host == o.host || l.host == "" || o.host == "")
+}
+
+// validateExtraListenAddrs requires host:port entries with a numeric port
+// and rejects entries that overlap listen_addr, the effective
+// http_listen_addr or another extra entry (":443", "0.0.0.0:443" and
+// "[::]:443" are the same listener; a wildcard overlaps every host on that
+// port).
+func (c *Config) validateExtraListenAddrs() error {
+	var taken []listenAddr
+	for _, a := range []string{c.ListenAddr, c.effectiveHTTPListenAddr()} {
+		if a == "" {
+			continue
+		}
+		if l, err := parseListenAddr(a); err == nil {
+			taken = append(taken, l)
+		}
+	}
+	for _, a := range c.ExtraListenAddrs {
+		l, err := parseListenAddr(a)
+		if err != nil {
+			if _, _, splitErr := net.SplitHostPort(a); splitErr != nil {
+				return fmt.Errorf("extra_listen_addrs: %q: want host:port (e.g. \":50051\"): %v", a, splitErr)
+			}
+			return fmt.Errorf("extra_listen_addrs: %q: %v", a, err)
+		}
+		for _, t := range taken {
+			if l.overlaps(t) {
+				return fmt.Errorf("extra_listen_addrs: %q duplicates %q (listen_addr, http_listen_addr or another extra address on the same port)", a, t.raw)
+			}
+		}
+		taken = append(taken, l)
+	}
+	return nil
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -284,5 +285,77 @@ func TestLoadConfigRecipesIndexURLDefault(t *testing.T) {
 	want := "https://vazra.github.io/simpledeploy-recipes/index.json"
 	if cfg.RecipesIndexURL != want {
 		t.Errorf("RecipesIndexURL = %q, want %q", cfg.RecipesIndexURL, want)
+	}
+}
+
+func TestLoadConfigExtraListenAddrs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	data := "master_secret: s\nlisten_addr: \":443\"\nextra_listen_addrs: [\":50051\", \"127.0.0.1:50052\"]\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(cfg.ExtraListenAddrs) != 2 || cfg.ExtraListenAddrs[0] != ":50051" || cfg.ExtraListenAddrs[1] != "127.0.0.1:50052" {
+		t.Errorf("ExtraListenAddrs = %v, want [:50051 127.0.0.1:50052]", cfg.ExtraListenAddrs)
+	}
+}
+
+func TestDefaultConfigNoExtraListenAddrs(t *testing.T) {
+	if got := DefaultConfig().ExtraListenAddrs; len(got) != 0 {
+		t.Errorf("default ExtraListenAddrs = %v, want empty", got)
+	}
+}
+
+func TestValidateExtraListenAddrs(t *testing.T) {
+	cases := []struct {
+		name     string
+		listen   string
+		httpAddr string
+		mode     string
+		extra    []string
+		wantErr  string
+	}{
+		{"ok", ":443", "", "auto", []string{":50051"}, ""},
+		{"ok with host", ":443", "", "auto", []string{"0.0.0.0:50051"}, ""},
+		{"empty list", ":443", "", "auto", nil, ""},
+		{"http sentinel off frees :80", ":443", "off", "auto", []string{":80"}, ""},
+		{"no port", ":443", "", "auto", []string{"localhost"}, "want host:port"},
+		{"empty port", ":443", "", "auto", []string{"0.0.0.0:"}, "port must be 1-65535"},
+		{"port out of range", ":443", "", "auto", []string{":70000"}, "port must be 1-65535"},
+		{"non numeric port", ":443", "", "auto", []string{":grpc"}, "port must be 1-65535"},
+		{"duplicates listen_addr", ":443", "", "auto", []string{":443"}, "duplicates"},
+		{"duplicates explicit http_listen_addr", ":443", ":8080", "auto", []string{":8080"}, "duplicates"},
+		{"duplicates default http :80", ":443", "", "local", []string{":80"}, "duplicates"},
+		{"duplicate inside list", ":443", "", "auto", []string{":50051", ":50051"}, "duplicates"},
+		{"wildcard host equals empty host", ":443", "", "auto", []string{"0.0.0.0:443"}, "duplicates"},
+		{"ipv6 wildcard equals empty host", ":443", "", "auto", []string{"[::]:443"}, "duplicates"},
+		{"specific host overlaps wildcard", ":443", "", "auto", []string{"127.0.0.1:443"}, "duplicates"},
+		{"wildcard overlaps default http :80", ":443", "", "auto", []string{"0.0.0.0:80"}, "duplicates"},
+		{"normalized duplicate inside list", ":443", "", "auto", []string{":50051", "0.0.0.0:50051"}, "duplicates"},
+		{"same port on different hosts ok", "127.0.0.1:443", "off", "auto", []string{"10.0.0.1:443"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.MasterSecret = "s"
+			cfg.ListenAddr = tc.listen
+			cfg.HTTPListenAddr = tc.httpAddr
+			cfg.TLS.Mode = tc.mode
+			cfg.ExtraListenAddrs = tc.extra
+			err := cfg.Validate()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "extra_listen_addrs") || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Validate() = %v, want error containing extra_listen_addrs and %q", err, tc.wantErr)
+			}
+		})
 	}
 }

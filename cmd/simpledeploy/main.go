@@ -465,11 +465,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		httpAddr = ""
 	}
 	proxyCfg := proxy.CaddyConfig{
-		ListenAddr:     cfg.ListenAddr,
-		HTTPListenAddr: httpAddr,
-		TLSMode:        cfg.TLS.Mode,
-		TLSEmail:       cfg.TLS.Email,
-		DataDir:        cfg.DataDir,
+		ListenAddr:       cfg.ListenAddr,
+		HTTPListenAddr:   httpAddr,
+		ExtraListenAddrs: cfg.ExtraListenAddrs,
+		TLSMode:          cfg.TLS.Mode,
+		TLSEmail:         cfg.TLS.Email,
+		DataDir:          cfg.DataDir,
 	}
 	caddyProxy := proxy.NewCaddyProxy(proxyCfg)
 	defer func() { _ = caddyProxy.Stop() }()

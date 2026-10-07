@@ -146,3 +146,34 @@ func TestValidate_AllowsInnocentService(t *testing.T) {
 		t.Fatalf("expected zero violations for innocent service, got %v", v)
 	}
 }
+
+func TestValidateComposeSecurityIgnoresEndpointLabels(t *testing.T) {
+	// The reconciler uses ValidateComposeSecurity on apps already on disk;
+	// endpoint label problems must only warn there, never skip the app.
+	cfg := cfgWith(types.ServiceConfig{Name: "web", Image: "nginx"})
+	cfg.Endpoints = []EndpointConfig{{Domain: "a.example.com", Service: "web"}, {Domain: "a.example.com", Service: "web", Index: 1}}
+	if v := ValidateComposeSecurity(cfg); len(v) != 0 {
+		t.Fatalf("ValidateComposeSecurity = %v, want none", v)
+	}
+}
+
+func TestValidate_EndpointLabelsInvalid(t *testing.T) {
+	cfg := cfgWith(types.ServiceConfig{Name: "web", Image: "nginx"})
+	cfg.Endpoints = []EndpointConfig{{Domain: "a.example.com", Service: "web", Protocol: "tcp"}}
+	v := ValidateComposeForDeploy(cfg)
+	if len(v) != 1 || !strings.Contains(v[0], "invalid protocol") {
+		t.Fatalf("got %v, want one invalid protocol violation", v)
+	}
+}
+
+func TestValidate_EndpointLabelsValid(t *testing.T) {
+	cfg := cfgWith(types.ServiceConfig{Name: "co", Image: "example/co"})
+	cfg.Endpoints = []EndpointConfig{
+		{Domain: "co.example.com", Service: "co", Port: "50051", Protocol: "grpc"},
+		{Domain: "co.example.com", Service: "co", Port: "8000", Path: "/ws*"},
+		{Domain: "co.example.com", Service: "co", Port: "8001"},
+	}
+	if v := ValidateComposeForDeploy(cfg); len(v) != 0 {
+		t.Fatalf("unexpected violations: %v", v)
+	}
+}

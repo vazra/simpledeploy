@@ -213,3 +213,94 @@ func TestHandleUpdateEndpoints_MultiService(t *testing.T) {
 		t.Errorf("expected api.example.com, got:\n%s", result)
 	}
 }
+
+func TestHandleUpdateEndpoints_ProtocolAndPath(t *testing.T) {
+	srv, s := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  co:\n    image: example/co\n"), 0644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+	s.UpsertApp(&store.App{Name: "grpcapp", Slug: "grpcapp", ComposePath: composePath, Status: "running"}, nil)
+
+	endpoints := []compose.EndpointConfig{
+		{Domain: "co.example.com", Port: "50051", TLS: "letsencrypt", Service: "co", Protocol: "GRPC"},
+		{Domain: "co.example.com", Port: "8000", TLS: "letsencrypt", Service: "co", Path: "/ws*"},
+		{Domain: "co.example.com", Port: "8001", TLS: "letsencrypt", Service: "co"},
+	}
+	body, _ := json.Marshal(endpoints)
+	req := httptest.NewRequest(http.MethodPut, "/api/apps/grpcapp/endpoints", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	parsed, err := compose.ParseFile(composePath, "grpcapp")
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if len(parsed.Endpoints) != 3 {
+		t.Fatalf("endpoints = %d, want 3", len(parsed.Endpoints))
+	}
+	byPort := map[string]compose.EndpointConfig{}
+	for _, ep := range parsed.Endpoints {
+		byPort[ep.Port] = ep
+	}
+	if byPort["50051"].Protocol != "grpc" {
+		t.Errorf("50051 protocol = %q, want grpc", byPort["50051"].Protocol)
+	}
+	if byPort["8000"].Path != "/ws*" {
+		t.Errorf("8000 path = %q, want /ws*", byPort["8000"].Path)
+	}
+	if byPort["8001"].Protocol != "" || byPort["8001"].Path != "" {
+		t.Errorf("8001 = %+v, want catch-all", byPort["8001"])
+	}
+}
+
+func TestHandleUpdateEndpoints_RejectsBadProtocolPathAndCollisions(t *testing.T) {
+	srv, s := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+	s.UpsertApp(&store.App{Name: "badapp", Slug: "badapp", ComposePath: composePath, Status: "running"}, nil)
+
+	cases := []struct {
+		name string
+		eps  []compose.EndpointConfig
+		want string
+	}{
+		{"protocol", []compose.EndpointConfig{{Domain: "a.example.com", Port: "80", Service: "web", Protocol: "tcp"}}, "invalid protocol"},
+		{"path", []compose.EndpointConfig{{Domain: "a.example.com", Port: "80", Service: "web", Path: "ws"}}, "invalid path"},
+		{"collision", []compose.EndpointConfig{
+			{Domain: "a.example.com", Port: "80", Service: "web"},
+			{Domain: "a.example.com", Port: "81", Service: "web", Protocol: "h2c"},
+		}, "duplicate domain"},
+		{"tls conflict", []compose.EndpointConfig{
+			{Domain: "a.example.com", Port: "80", Service: "web", TLS: "letsencrypt"},
+			{Domain: "a.example.com", Port: "81", Service: "web", Path: "/ws*", TLS: "off"},
+		}, "endpoint 1: tls \"off\" conflicts with tls \"auto\" of endpoint 0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(tc.eps)
+			req := httptest.NewRequest(http.MethodPut, "/api/apps/badapp/endpoints", bytes.NewReader(body))
+			req.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Errorf("body = %q, want substring %q", w.Body.String(), tc.want)
+			}
+		})
+	}
+}

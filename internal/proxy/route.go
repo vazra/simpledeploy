@@ -43,6 +43,8 @@ type Route struct {
 	CertDir    string // directory containing certs for custom TLS
 	RateLimit  *RateLimitConfig
 	AllowedIPs []string // validated IPs and CIDRs
+	Protocol   string   // "http" (default), "h2c" or "grpc"
+	Path       string   // optional Caddy path matcher, e.g. "/ws*"
 }
 
 // RateLimitConfig holds parsed rate-limit settings for a route.
@@ -114,9 +116,29 @@ func ResolveRoutes(app *compose.AppConfig, resolver UpstreamResolver) ([]Route, 
 		certDir = filepath.Join(filepath.Dir(app.ComposePath), "certs")
 	}
 
+	// Endpoints are validated strictly on deploy, but apps already on disk
+	// (older versions, gitsync, restore) may still collide. Keep the first
+	// endpoint per matcher and the first tls mode per domain, in the parser's
+	// deterministic order, so such apps stay routed after an upgrade.
+	seenMatch := map[string]bool{}
+	domainTLS := map[string]string{}
+
 	var routes []Route
 	for _, ep := range app.Endpoints {
 		if ep.Domain == "" {
+			continue
+		}
+
+		protocol := compose.NormalizeProtocol(ep.Protocol)
+		if protocol == "" {
+			protocol = compose.ProtocolHTTP
+		}
+		if !compose.ValidProtocol(protocol) {
+			log.Printf("[proxy] skip endpoint %s for %s: invalid protocol %q", ep.Domain, app.Name, ep.Protocol)
+			continue
+		}
+		if ep.Path != "" && !compose.ValidPath(ep.Path) {
+			log.Printf("[proxy] skip endpoint %s for %s: invalid path %q", ep.Domain, app.Name, ep.Path)
 			continue
 		}
 
@@ -126,9 +148,23 @@ func ResolveRoutes(app *compose.AppConfig, resolver UpstreamResolver) ([]Route, 
 			continue
 		}
 
+		matchKey := compose.EndpointMatchKey(compose.EndpointConfig{Domain: ep.Domain, Protocol: protocol, Path: ep.Path})
+		if seenMatch[matchKey] {
+			log.Printf("[proxy] WARNING: skip %s for %s: same domain/path/grpc matcher as an earlier endpoint", compose.EndpointRef(ep), app.Name)
+			continue
+		}
+
 		tls := ep.TLS
 		if tls == "" {
 			tls = "auto"
+		}
+		if first, ok := domainTLS[ep.Domain]; ok && compose.EffectiveTLS(first) != compose.EffectiveTLS(tls) {
+			log.Printf("[proxy] WARNING: %s for %s: tls %q conflicts with %q on %s, using %q", compose.EndpointRef(ep), app.Name, tls, first, ep.Domain, first)
+			tls = first
+		}
+		seenMatch[matchKey] = true
+		if _, ok := domainTLS[ep.Domain]; !ok {
+			domainTLS[ep.Domain] = tls
 		}
 
 		route := Route{
@@ -139,6 +175,8 @@ func ResolveRoutes(app *compose.AppConfig, resolver UpstreamResolver) ([]Route, 
 			CertDir:    certDir,
 			RateLimit:  rl,
 			AllowedIPs: allowedIPs,
+			Protocol:   protocol,
+			Path:       ep.Path,
 		}
 		routes = append(routes, route)
 	}

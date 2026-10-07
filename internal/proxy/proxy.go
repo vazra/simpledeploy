@@ -19,32 +19,35 @@ type Proxy interface {
 
 // CaddyConfig holds configuration for a CaddyProxy.
 type CaddyConfig struct {
-	ListenAddr     string // e.g. ":443"
-	HTTPListenAddr string // optional HTTP listener for plain-HTTP to HTTPS redirect, e.g. ":80"
-	TLSMode        string // "auto", "custom", "off", "local"
-	TLSEmail       string // ACME email, used when TLSMode is "auto"
-	DataDir        string // data directory for Caddy storage
+	ListenAddr       string   // e.g. ":443"
+	HTTPListenAddr   string   // optional HTTP listener for plain-HTTP to HTTPS redirect, e.g. ":80"
+	ExtraListenAddrs []string // optional extra listeners for the main server, e.g. [":50051"]; same routes and TLS
+	TLSMode          string   // "auto", "custom", "off", "local"
+	TLSEmail         string   // ACME email, used when TLSMode is "auto"
+	DataDir          string   // data directory for Caddy storage
 }
 
 // CaddyProxy is a Proxy backed by Caddy.
 type CaddyProxy struct {
-	mu             sync.Mutex
-	routes         []Route
-	listenAddr     string
-	httpListenAddr string
-	tlsMode        string
-	tlsEmail       string
-	dataDir        string
+	mu               sync.Mutex
+	routes           []Route
+	listenAddr       string
+	extraListenAddrs []string
+	httpListenAddr   string
+	tlsMode          string
+	tlsEmail         string
+	dataDir          string
 }
 
 // NewCaddyProxy creates a CaddyProxy from the given config.
 func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 	return &CaddyProxy{
-		listenAddr:     cfg.ListenAddr,
-		httpListenAddr: cfg.HTTPListenAddr,
-		tlsMode:        cfg.TLSMode,
-		tlsEmail:       cfg.TLSEmail,
-		dataDir:        cfg.DataDir,
+		listenAddr:       cfg.ListenAddr,
+		extraListenAddrs: append([]string(nil), cfg.ExtraListenAddrs...),
+		httpListenAddr:   cfg.HTTPListenAddr,
+		tlsMode:          cfg.TLSMode,
+		tlsEmail:         cfg.TLSEmail,
+		dataDir:          cfg.DataDir,
 	}
 }
 
@@ -103,10 +106,12 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	routes := make([]Route, len(c.routes))
 	copy(routes, c.routes)
 	c.mu.Unlock()
+	routes = orderRoutes(routes)
 
 	// Collect custom TLS cert files and per-route local-TLS domains
 	var loadFiles []interface{}
 	var localTLSDomains []string
+	seenCertDomains := map[string]bool{}
 
 	for _, r := range routes {
 		if r.TLS == "local" {
@@ -136,25 +141,16 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 			map[string]interface{}{"handler": "simpledeploy_ratelimit"},
 			map[string]interface{}{"handler": "simpledeploy_metrics"},
 			headerHandler,
-			map[string]interface{}{
-				"handler": "reverse_proxy",
-				"upstreams": []interface{}{
-					map[string]interface{}{
-						"dial": r.Upstream,
-					},
-				},
-			},
+			reverseProxyHandler(r),
 		}
 		caddyRoutes = append(caddyRoutes, map[string]interface{}{
-			"match": []interface{}{
-				map[string]interface{}{
-					"host": []string{r.Domain},
-				},
-			},
-			"handle": handlers,
+			"match":    []interface{}{routeMatcher(r)},
+			"handle":   handlers,
+			"terminal": true,
 		})
 
-		if r.TLS == "custom" && r.CertDir != "" {
+		if r.TLS == "custom" && r.CertDir != "" && !seenCertDomains[r.Domain] {
+			seenCertDomains[r.Domain] = true
 			loadFiles = append(loadFiles, map[string]interface{}{
 				"certificate": filepath.Join(r.CertDir, r.Domain+".crt"),
 				"key":         filepath.Join(r.CertDir, r.Domain+".key"),
@@ -168,7 +164,7 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	}
 
 	server := map[string]interface{}{
-		"listen": []string{c.listenAddr},
+		"listen": append([]string{c.listenAddr}, c.extraListenAddrs...),
 		"routes": caddyRoutes,
 	}
 
@@ -178,6 +174,11 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		server["automatic_https"] = map[string]interface{}{
 			"disable": true,
 		}
+		// Plain-HTTP listener (TLS terminated in front of SimpleDeploy, or
+		// local testing): also accept HTTP/2 cleartext so gRPC clients can
+		// connect with prior knowledge. TLS listeners negotiate h2 via ALPN
+		// with Caddy's default protocols.
+		server["protocols"] = []string{"h1", "h2", "h2c"}
 	} else {
 		// Caddy only terminates TLS on servers with a connection policy; an
 		// empty policy is enough to make the listener serve TLS and let the

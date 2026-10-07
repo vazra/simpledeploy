@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -452,5 +453,32 @@ func TestHandleRemoveAppDeletesSidecar(t *testing.T) {
 	// Sidecar specifically gone (redundant with above but documents intent).
 	if _, err := os.Stat(sidecarPath); !os.IsNotExist(err) {
 		t.Error("sidecar simpledeploy.yml should be gone after DELETE")
+	}
+}
+
+func TestDeployRejectsDuplicateEndpointMatcher(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	composeContent := "services:\n  web:\n    image: nginx\n    labels:\n" +
+		"      simpledeploy.endpoints.0.domain: \"a.example.com\"\n" +
+		"      simpledeploy.endpoints.0.port: \"80\"\n" +
+		"      simpledeploy.endpoints.1.domain: \"a.example.com\"\n" +
+		"      simpledeploy.endpoints.1.port: \"81\"\n"
+	body, _ := json.Marshal(map[string]string{
+		"name":    "dupapp",
+		"compose": base64.StdEncoding.EncodeToString([]byte(composeContent)),
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/deploy", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `simpledeploy.endpoints.1 (a.example.com): duplicates service \"web\" label simpledeploy.endpoints.0`) {
+		t.Errorf("body = %s, want duplicate violation naming label indexes", w.Body.String())
 	}
 }

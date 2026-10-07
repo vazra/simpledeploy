@@ -22,7 +22,7 @@ func endpointViewJSON(ep *compose.EndpointConfig) []byte {
 	b, _ := json.Marshal(map[string]any{
 		"host": ep.Domain,
 		"tls":  tls,
-		"path": "",
+		"path": ep.Path,
 	})
 	return b
 }
@@ -53,7 +53,11 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 	// not break the proxy reload. Catching it here returns a per-endpoint
 	// error instead of failing the whole batch when Caddy validates routes.
 	seen := make(map[string]bool, len(endpoints))
-	for i, ep := range endpoints {
+	firstOnDomain := make(map[string]int, len(endpoints))
+	for i := range endpoints {
+		ep := &endpoints[i]
+		ep.Protocol = compose.NormalizeProtocol(ep.Protocol)
+		ep.Path = strings.TrimSpace(ep.Path)
 		if ep.Domain == "" {
 			http.Error(w, fmt.Sprintf("endpoint %d: domain is required", i), http.StatusBadRequest)
 			return
@@ -66,11 +70,32 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("endpoint %d: service is required", i), http.StatusBadRequest)
 			return
 		}
-		if seen[ep.Domain] {
-			http.Error(w, fmt.Sprintf("endpoint %d: duplicate domain %s", i, ep.Domain), http.StatusBadRequest)
+		if !compose.ValidProtocol(ep.Protocol) {
+			http.Error(w, fmt.Sprintf("endpoint %d: invalid protocol %q (want http, h2c or grpc)", i, ep.Protocol), http.StatusBadRequest)
 			return
 		}
-		seen[ep.Domain] = true
+		if ep.Path != "" && !compose.ValidPath(ep.Path) {
+			http.Error(w, fmt.Sprintf("endpoint %d: invalid path %q", i, ep.Path), http.StatusBadRequest)
+			return
+		}
+		// Several endpoints may share a domain as long as their matchers
+		// (grpc content-type, path) differ.
+		key := compose.EndpointMatchKey(*ep)
+		if seen[key] {
+			http.Error(w, fmt.Sprintf("endpoint %d: duplicate domain %s (same path and protocol matcher)", i, ep.Domain), http.StatusBadRequest)
+			return
+		}
+		seen[key] = true
+		// Endpoints sharing a domain share one TLS setup, so their tls
+		// modes must agree.
+		if j, ok := firstOnDomain[ep.Domain]; ok {
+			if a, b := compose.EffectiveTLS(ep.TLS), compose.EffectiveTLS(endpoints[j].TLS); a != b {
+				http.Error(w, fmt.Sprintf("endpoint %d: tls %q conflicts with tls %q of endpoint %d on domain %s", i, a, b, j, ep.Domain), http.StatusBadRequest)
+				return
+			}
+		} else {
+			firstOnDomain[ep.Domain] = i
+		}
 	}
 
 	if err := updateComposeEndpoints(app.ComposePath, endpoints); err != nil {
@@ -86,21 +111,20 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 		go func() { _ = s.reconciler.RefreshRoutes(context.Background()) }()
 	}
 
-	// Audit: one row per endpoint using added/removed/changed.
-	// Build lookup maps for old and new by domain.
-	oldByDomain := map[string]compose.EndpointConfig{}
+	// Audit: one row per endpoint using added/removed/changed, keyed by
+	// matcher (domain + grpc + path) so several endpoints per domain work.
+	oldByKey := map[string]compose.EndpointConfig{}
 	for _, ep := range oldEndpoints {
-		oldByDomain[ep.Domain] = ep
+		oldByKey[compose.EndpointMatchKey(ep)] = ep
 	}
-	newByDomain := map[string]compose.EndpointConfig{}
+	newByKey := map[string]compose.EndpointConfig{}
 	for _, ep := range endpoints {
-		newByDomain[ep.Domain] = ep
+		newByKey[compose.EndpointMatchKey(ep)] = ep
 	}
 	appID := app.ID
-	for domain, newEP := range newByDomain {
+	for key, newEP := range newByKey {
 		ep := newEP
-		if _, existed := oldByDomain[domain]; existed {
-			oldEP := oldByDomain[domain]
+		if oldEP, existed := oldByKey[key]; existed {
 			beforeJSON := endpointViewJSON(&oldEP)
 			afterJSON := endpointViewJSON(&ep)
 			_, _ = s.audit.Record(r.Context(), audit.RecordReq{
@@ -122,9 +146,9 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	for domain, oldEP := range oldByDomain {
+	for key, oldEP := range oldByKey {
 		ep := oldEP
-		if _, stillExists := newByDomain[domain]; !stillExists {
+		if _, stillExists := newByKey[key]; !stillExists {
 			beforeJSON := endpointViewJSON(&ep)
 			_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 				Category: "endpoint",
@@ -209,6 +233,12 @@ func updateComposeEndpoints(composePath string, endpoints []compose.EndpointConf
 			}
 			if ie.ep.TLS != "" {
 				addLabel(labelsNode, prefix+".tls", ie.ep.TLS)
+			}
+			if ie.ep.Protocol != "" {
+				addLabel(labelsNode, prefix+".protocol", ie.ep.Protocol)
+			}
+			if ie.ep.Path != "" {
+				addLabel(labelsNode, prefix+".path", ie.ep.Path)
 			}
 		}
 	}
