@@ -645,6 +645,13 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 			log.Printf("[reconciler] SECURITY: skipping %s: %v", name, violations)
 			continue
 		}
+		// Endpoint label problems (collisions, conflicting tls) are rejected
+		// on deploy but only warned about here, so an app written by an older
+		// version keeps serving after an upgrade. ResolveRoutes keeps the
+		// first endpoint per matcher and the first tls mode per domain.
+		if v := compose.ValidateEndpoints(cfg.Endpoints); len(v) > 0 {
+			log.Printf("[reconciler] WARNING: %s: endpoint labels: %v (app kept; first matching endpoint and first tls per domain win)", name, v)
+		}
 		result[name] = cfg
 	}
 	return result, nil

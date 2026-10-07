@@ -46,6 +46,25 @@ func ValidPath(p string) bool {
 	return len(p) <= maxEndpointPathLen && endpointPathRe.MatchString(p)
 }
 
+// EffectiveTLS normalizes an endpoint tls label for comparison: empty and
+// "letsencrypt" mean the default "auto".
+func EffectiveTLS(t string) string {
+	t = strings.ToLower(strings.TrimSpace(t))
+	if t == "" || t == "letsencrypt" {
+		return "auto"
+	}
+	return t
+}
+
+// EndpointRef names an endpoint by its label, e.g.
+// `service "web" label simpledeploy.endpoints.2`.
+func EndpointRef(ep EndpointConfig) string {
+	if ep.Service == "" {
+		return fmt.Sprintf("label simpledeploy.endpoints.%d", ep.Index)
+	}
+	return fmt.Sprintf("service %q label simpledeploy.endpoints.%d", ep.Service, ep.Index)
+}
+
 // EndpointMatchKey identifies the Caddy matcher an endpoint produces.
 // Two endpoints with the same key would shadow each other. h2c and http
 // differ only in upstream transport, so they share a key; grpc adds a
@@ -54,26 +73,36 @@ func EndpointMatchKey(ep EndpointConfig) string {
 	return fmt.Sprintf("%s|grpc=%t|%s", ep.Domain, ep.Protocol == ProtocolGRPC, ep.Path)
 }
 
-// ValidateEndpoints checks protocol/path label values and rejects endpoints
-// whose matchers collide. Returns human-readable violations; empty = valid.
+// ValidateEndpoints checks protocol/path label values, rejects endpoints
+// whose matchers collide and endpoints sharing a domain with different tls
+// modes. Returns human-readable violations; empty = valid.
 func ValidateEndpoints(eps []EndpointConfig) []string {
 	var violations []string
-	seen := map[string]int{}
-	for i, ep := range eps {
+	seen := map[string]EndpointConfig{}
+	domainTLS := map[string]EndpointConfig{}
+	for _, ep := range eps {
+		ref := fmt.Sprintf("%s (%s)", EndpointRef(ep), ep.Domain)
 		if !ValidProtocol(ep.Protocol) {
-			violations = append(violations, fmt.Sprintf("endpoint %d (%s): invalid protocol %q (want http, h2c or grpc)", i, ep.Domain, ep.Protocol))
+			violations = append(violations, fmt.Sprintf("%s: invalid protocol %q (want http, h2c or grpc)", ref, ep.Protocol))
 			continue
 		}
 		if ep.Path != "" && !ValidPath(ep.Path) {
-			violations = append(violations, fmt.Sprintf("endpoint %d (%s): invalid path %q (must start with / and use only letters, digits, . _ ~ %% / * -; max %d chars)", i, ep.Domain, ep.Path, maxEndpointPathLen))
+			violations = append(violations, fmt.Sprintf("%s: invalid path %q (must start with / and use only letters, digits, . _ ~ %% / * -; max %d chars)", ref, ep.Path, maxEndpointPathLen))
 			continue
 		}
 		key := EndpointMatchKey(ep)
-		if j, dup := seen[key]; dup {
-			violations = append(violations, fmt.Sprintf("endpoint %d (%s): duplicates endpoint %d (same domain, path and grpc matcher)", i, ep.Domain, j))
+		if first, dup := seen[key]; dup {
+			violations = append(violations, fmt.Sprintf("%s: duplicates %s (same domain, path and grpc matcher)", ref, EndpointRef(first)))
 			continue
 		}
-		seen[key] = i
+		seen[key] = ep
+		if first, ok := domainTLS[ep.Domain]; ok {
+			if EffectiveTLS(ep.TLS) != EffectiveTLS(first.TLS) {
+				violations = append(violations, fmt.Sprintf("%s: tls %q conflicts with tls %q of %s (endpoints sharing a domain must use the same tls mode)", ref, EffectiveTLS(ep.TLS), EffectiveTLS(first.TLS), EndpointRef(first)))
+			}
+			continue
+		}
+		domainTLS[ep.Domain] = ep
 	}
 	return violations
 }

@@ -240,7 +240,7 @@ func (s *Server) handleImportApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid compose file in bundle", http.StatusBadRequest)
 		return
 	}
-	if violations := compose.ValidateComposeSecurity(parsed); len(violations) > 0 {
+	if violations := compose.ValidateComposeForDeploy(parsed); len(violations) > 0 {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{

@@ -78,11 +78,12 @@ func TestValidateEndpointsViolations(t *testing.T) {
 		eps  []EndpointConfig
 		want string
 	}{
-		{"bad protocol", []EndpointConfig{{Domain: "a.com", Protocol: "tcp"}}, "invalid protocol"},
-		{"bad path", []EndpointConfig{{Domain: "a.com", Path: "ws"}}, "invalid path"},
-		{"duplicate catch-all", []EndpointConfig{{Domain: "a.com", Port: "80"}, {Domain: "a.com", Port: "81", Protocol: "h2c"}}, "duplicates endpoint 0"},
-		{"duplicate grpc", []EndpointConfig{{Domain: "a.com", Protocol: "grpc"}, {Domain: "a.com", Protocol: "grpc"}}, "duplicates endpoint 0"},
-		{"duplicate path", []EndpointConfig{{Domain: "a.com", Path: "/ws*"}, {Domain: "a.com", Path: "/ws*"}}, "duplicates endpoint 0"},
+		{"bad protocol", []EndpointConfig{{Domain: "a.com", Service: "web", Index: 2, Protocol: "tcp"}}, `service "web" label simpledeploy.endpoints.2 (a.com): invalid protocol`},
+		{"bad path", []EndpointConfig{{Domain: "a.com", Service: "web", Index: 3, Path: "ws"}}, `service "web" label simpledeploy.endpoints.3 (a.com): invalid path`},
+		{"duplicate catch-all", []EndpointConfig{{Domain: "a.com", Service: "web", Index: 0, Port: "80"}, {Domain: "a.com", Service: "api", Index: 4, Port: "81", Protocol: "h2c"}}, `service "api" label simpledeploy.endpoints.4 (a.com): duplicates service "web" label simpledeploy.endpoints.0`},
+		{"duplicate grpc", []EndpointConfig{{Domain: "a.com", Service: "co", Index: 0, Protocol: "grpc"}, {Domain: "a.com", Service: "co", Index: 1, Protocol: "grpc"}}, `simpledeploy.endpoints.1 (a.com): duplicates service "co" label simpledeploy.endpoints.0`},
+		{"duplicate path", []EndpointConfig{{Domain: "a.com", Service: "co", Index: 0, Path: "/ws*"}, {Domain: "a.com", Service: "co", Index: 1, Path: "/ws*"}}, `duplicates service "co" label simpledeploy.endpoints.0`},
+		{"tls conflict", []EndpointConfig{{Domain: "a.com", Service: "co", Index: 0, TLS: "auto"}, {Domain: "a.com", Service: "co", Index: 1, Path: "/ws*", TLS: "off"}}, `service "co" label simpledeploy.endpoints.1 (a.com): tls "off" conflicts with tls "auto" of service "co" label simpledeploy.endpoints.0`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -91,5 +92,25 @@ func TestValidateEndpointsViolations(t *testing.T) {
 				t.Fatalf("got %v, want exactly one violation containing %q", v, tc.want)
 			}
 		})
+	}
+}
+
+func TestValidateEndpointsTLSEquivalentValuesOK(t *testing.T) {
+	eps := []EndpointConfig{
+		{Domain: "a.com", Service: "co", Index: 0, Protocol: "grpc"},
+		{Domain: "a.com", Service: "co", Index: 1, Path: "/ws*", TLS: "auto"},
+		{Domain: "a.com", Service: "co", Index: 2, TLS: "letsencrypt"},
+		{Domain: "b.com", Service: "co", Index: 3, TLS: "off"},
+	}
+	if v := ValidateEndpoints(eps); len(v) != 0 {
+		t.Fatalf("unexpected violations: %v", v)
+	}
+}
+
+func TestEffectiveTLS(t *testing.T) {
+	for in, want := range map[string]string{"": "auto", "auto": "auto", "letsencrypt": "auto", " Off ": "off", "local": "local", "custom": "custom"} {
+		if got := EffectiveTLS(in); got != want {
+			t.Errorf("EffectiveTLS(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

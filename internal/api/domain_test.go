@@ -283,6 +283,10 @@ func TestHandleUpdateEndpoints_RejectsBadProtocolPathAndCollisions(t *testing.T)
 			{Domain: "a.example.com", Port: "80", Service: "web"},
 			{Domain: "a.example.com", Port: "81", Service: "web", Protocol: "h2c"},
 		}, "duplicate domain"},
+		{"tls conflict", []compose.EndpointConfig{
+			{Domain: "a.example.com", Port: "80", Service: "web", TLS: "letsencrypt"},
+			{Domain: "a.example.com", Port: "81", Service: "web", Path: "/ws*", TLS: "off"},
+		}, "endpoint 1: tls \"off\" conflicts with tls \"auto\" of endpoint 0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

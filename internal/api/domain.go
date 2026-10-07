@@ -53,6 +53,7 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 	// not break the proxy reload. Catching it here returns a per-endpoint
 	// error instead of failing the whole batch when Caddy validates routes.
 	seen := make(map[string]bool, len(endpoints))
+	firstOnDomain := make(map[string]int, len(endpoints))
 	for i := range endpoints {
 		ep := &endpoints[i]
 		ep.Protocol = compose.NormalizeProtocol(ep.Protocol)
@@ -85,6 +86,16 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		seen[key] = true
+		// Endpoints sharing a domain share one TLS setup, so their tls
+		// modes must agree.
+		if j, ok := firstOnDomain[ep.Domain]; ok {
+			if a, b := compose.EffectiveTLS(ep.TLS), compose.EffectiveTLS(endpoints[j].TLS); a != b {
+				http.Error(w, fmt.Sprintf("endpoint %d: tls %q conflicts with tls %q of endpoint %d on domain %s", i, a, b, j, ep.Domain), http.StatusBadRequest)
+				return
+			}
+		} else {
+			firstOnDomain[ep.Domain] = i
+		}
 	}
 
 	if err := updateComposeEndpoints(app.ComposePath, endpoints); err != nil {

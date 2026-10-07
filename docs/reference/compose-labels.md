@@ -73,6 +73,8 @@ Per domain, routes are tried in this order: `grpc` endpoints, then endpoints wit
 - `protocol: h2c` proxies everything matched by the endpoint over HTTP/2 cleartext (for upstreams that only speak h2c).
 - `h2c`/`grpc` responses are flushed immediately, so server-streaming and bidi RPCs work. Websockets and chunked/streaming HTTP responses (gRPC-Web, SSE) stream on `http` endpoints without extra config.
 - Two endpoints on one domain with the same path and grpc-ness are rejected at deploy (`http` and `h2c` catch-alls count as the same matcher).
+- Endpoints sharing a domain must use the same `tls` mode (empty, `auto` and `letsencrypt` are equivalent); a mismatch is rejected at deploy.
+- Apps already on disk (written by an older version, gitsync or a restore) are never dropped for these problems: the reconciler logs a warning, keeps the first endpoint per matcher (ordered by domain, label index `N`, then service name) and uses the first endpoint's `tls` mode for the domain.
 - With `tls.mode: off` (TLS terminated in front of SimpleDeploy) the proxy listener also accepts h2c, so gRPC clients can connect in plaintext.
 - gRPC clients that default to a non-443 port (e.g. `:50051`) can reach the same routes when that port is listed in `extra_listen_addrs` in `config.yaml` (see [Configuration](/simpledeploy/reference/configuration/)).
 

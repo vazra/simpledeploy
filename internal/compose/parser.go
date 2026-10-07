@@ -21,6 +21,9 @@ type EndpointConfig struct {
 	Service  string `json:"service"`
 	Protocol string `json:"protocol,omitempty"` // "", "http", "h2c" or "grpc"
 	Path     string `json:"path,omitempty"`     // optional Caddy path matcher, e.g. "/ws*"
+	// Index is N from the simpledeploy.endpoints.N.* labels (per service).
+	// Used for deterministic ordering and error messages; not serialized.
+	Index int `json:"-"`
 }
 
 // AppConfig holds the parsed compose file config plus extracted simpledeploy labels.
@@ -154,9 +157,18 @@ func ParseFile(path, appName string) (*AppConfig, error) {
 		eps := extractEndpoints(svc.Labels, name)
 		cfg.Endpoints = append(cfg.Endpoints, eps...)
 	}
-	// Stable sort by index (extractEndpoints returns sorted per-service)
+	// Deterministic order: domain, then label index N, then service name.
+	// Services come from a map, so without the tie-breakers the order of
+	// endpoints sharing a domain would vary between parses.
 	sort.SliceStable(cfg.Endpoints, func(i, j int) bool {
-		return cfg.Endpoints[i].Domain < cfg.Endpoints[j].Domain
+		a, b := cfg.Endpoints[i], cfg.Endpoints[j]
+		if a.Domain != b.Domain {
+			return a.Domain < b.Domain
+		}
+		if a.Index != b.Index {
+			return a.Index < b.Index
+		}
+		return a.Service < b.Service
 	})
 
 	for name, svc := range project.Services {
@@ -197,7 +209,7 @@ func extractEndpoints(labels types.Labels, serviceName string) []EndpointConfig 
 		}
 		idx, _ := strconv.Atoi(m[1])
 		if byIndex[idx] == nil {
-			byIndex[idx] = &EndpointConfig{Service: serviceName}
+			byIndex[idx] = &EndpointConfig{Service: serviceName, Index: idx}
 		}
 		switch m[2] {
 		case "domain":

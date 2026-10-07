@@ -1,0 +1,20 @@
+services:
+  c:
+    image: example/c
+    labels:
+      simpledeploy.endpoints.0.domain: "y.example.com"
+      simpledeploy.endpoints.0.port: "80"
+      simpledeploy.endpoints.1.domain: "x.example.com"
+      simpledeploy.endpoints.1.port: "80"
+      simpledeploy.endpoints.1.path: "/c*"
+  b:
+    image: example/b
+    labels:
+      simpledeploy.endpoints.0.domain: "x.example.com"
+      simpledeploy.endpoints.0.port: "80"
+  a:
+    image: example/a
+    labels:
+      simpledeploy.endpoints.0.domain: "x.example.com"
+      simpledeploy.endpoints.0.port: "80"
+      simpledeploy.endpoints.0.path: "/a*"

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/appbundle"
@@ -247,5 +248,38 @@ func TestBundleImportInvalidSlug(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestBundleImportRejectsConflictingEndpointTLS(t *testing.T) {
+	srv, _ := newDeployTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+
+	dir := t.TempDir()
+	composeContent := "services:\n  web:\n    image: nginx\n    labels:\n" +
+		"      simpledeploy.endpoints.0.domain: \"a.example.com\"\n" +
+		"      simpledeploy.endpoints.0.tls: \"auto\"\n" +
+		"      simpledeploy.endpoints.1.domain: \"a.example.com\"\n" +
+		"      simpledeploy.endpoints.1.path: \"/ws*\"\n" +
+		"      simpledeploy.endpoints.1.tls: \"off\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(composeContent), 0o644); err != nil {
+		t.Fatalf("write compose: %v", err)
+	}
+	zipBytes, err := appbundle.Build(dir, "tls-app", "TLS App", "test")
+	if err != nil {
+		t.Fatalf("build bundle: %v", err)
+	}
+	body, ct := multipartImport(t, zipBytes, "new", "tls-app")
+	req := httptest.NewRequest(http.MethodPost, "/api/apps/import", body)
+	req.Header.Set("Content-Type", ct)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "conflicts with tls") {
+		t.Errorf("body = %s, want tls conflict violation", w.Body.String())
 	}
 }

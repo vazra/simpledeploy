@@ -72,7 +72,7 @@ labels:
   simpledeploy.endpoints.2.port: "8001"
 ```
 
-Route order per domain is fixed: `grpc` endpoints, then path endpoints (longest path first), then the catch-all. Every route is terminal, so the first match wins. Endpoints whose matchers collide (same domain, same path, both or neither `grpc`) are rejected at deploy time.
+Route order per domain is fixed: `grpc` endpoints, then path endpoints (longest path first), then the catch-all. Every route is terminal, so the first match wins. Endpoints whose matchers collide (same domain, same path, both or neither `grpc`), or that share a domain with different `tls` modes, are rejected at deploy time. For apps already on disk the reconciler only warns and keeps the first endpoint (by label index `N`).
 
 ## What Caddy actually gets
 

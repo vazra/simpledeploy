@@ -2,6 +2,7 @@ package compose
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -286,5 +287,40 @@ func TestEndpointConfigJSONOmitsEmptyProtocolAndPath(t *testing.T) {
 	s := string(b)
 	if strings.Contains(s, "protocol") || strings.Contains(s, "path") {
 		t.Errorf("json = %s, want no protocol/path keys", s)
+	}
+}
+
+func TestExtractEndpointsRecordsLabelIndex(t *testing.T) {
+	eps := extractEndpoints(map[string]string{
+		"simpledeploy.endpoints.3.domain": "b.example.com",
+		"simpledeploy.endpoints.0.domain": "a.example.com",
+	}, "web")
+	if len(eps) != 2 || eps[0].Index != 0 || eps[1].Index != 3 {
+		t.Fatalf("eps = %+v, want Index 0 then 3", eps)
+	}
+}
+
+func TestParseEndpointsDeterministicOrder(t *testing.T) {
+	// Services come from a map; endpoint order must not depend on it.
+	for i := 0; i < 20; i++ {
+		cfg, err := ParseFile(testdataPath("same_domain_multi_service.yml"), "multi")
+		if err != nil {
+			t.Fatalf("ParseFile: %v", err)
+		}
+		var got []string
+		for _, ep := range cfg.Endpoints {
+			got = append(got, fmt.Sprintf("%s/%d/%s", ep.Domain, ep.Index, ep.Service))
+		}
+		want := []string{"x.example.com/0/a", "x.example.com/0/b", "x.example.com/1/c", "y.example.com/0/c"}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("run %d: order = %v, want %v", i, got, want)
+		}
+	}
+}
+
+func TestEndpointConfigJSONOmitsIndex(t *testing.T) {
+	b, _ := json.Marshal(EndpointConfig{Domain: "a.example.com", Index: 5})
+	if strings.Contains(string(b), "ndex") {
+		t.Errorf("json = %s, want no index key", b)
 	}
 }

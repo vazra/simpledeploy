@@ -491,3 +491,42 @@ func TestResolveRoutesSkipsInvalidProtocolOrPath(t *testing.T) {
 		t.Fatalf("routes = %+v, want only c.example.com", routes)
 	}
 }
+
+func TestResolveRoutesDedupesMatcherCollisionKeepsFirst(t *testing.T) {
+	app := makeApp("legacy",
+		[]compose.EndpointConfig{
+			{Domain: "a.example.com", Port: "80", Service: "web", Index: 0},
+			{Domain: "a.example.com", Port: "81", Service: "web", Index: 1, Protocol: "h2c"},
+			{Domain: "a.example.com", Port: "82", Service: "web", Index: 2, Protocol: "grpc"},
+		},
+		[]compose.ServiceConfig{{Name: "web"}},
+	)
+	routes, err := ResolveRoutes(app, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 2 || routes[0].Upstream != "web:80" || routes[1].Upstream != "web:82" {
+		t.Fatalf("routes = %+v, want web:80 catch-all and web:82 grpc", routes)
+	}
+}
+
+func TestResolveRoutesConflictingTLSUsesFirst(t *testing.T) {
+	app := makeApp("legacy",
+		[]compose.EndpointConfig{
+			{Domain: "a.example.com", Port: "80", Service: "web", Index: 0, TLS: "custom"},
+			{Domain: "a.example.com", Port: "81", Service: "web", Index: 1, Path: "/ws*", TLS: "off"},
+			{Domain: "b.example.com", Port: "82", Service: "web", Index: 2, TLS: "off"},
+		},
+		[]compose.ServiceConfig{{Name: "web"}},
+	)
+	routes, err := ResolveRoutes(app, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"custom", "custom", "off"}
+	for i, r := range routes {
+		if r.TLS != want[i] {
+			t.Errorf("routes[%d] (%s) TLS = %q, want %q", i, r.Domain, r.TLS, want[i])
+		}
+	}
+}

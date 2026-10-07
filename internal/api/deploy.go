@@ -164,7 +164,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid compose file", http.StatusBadRequest)
 		return
 	}
-	if violations := compose.ValidateComposeSecurity(parsed); len(violations) > 0 {
+	if violations := compose.ValidateComposeForDeploy(parsed); len(violations) > 0 {
 		os.Remove(composePath)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)

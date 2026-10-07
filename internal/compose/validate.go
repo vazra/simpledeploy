@@ -180,10 +180,15 @@ func ValidateComposeSecurity(cfg *AppConfig) []string {
 		}
 	}
 
-	// Endpoint label values (protocol/path) and matcher collisions. Kept
-	// here so every caller of ValidateComposeSecurity (deploy API, bundle
-	// import, reconciler disk scan) rejects bad routing labels too.
-	violations = append(violations, ValidateEndpoints(cfg.Endpoints)...)
-
 	return violations
+}
+
+// ValidateComposeForDeploy is ValidateComposeSecurity plus endpoint label
+// validation (ValidateEndpoints). Used by paths that accept new compose
+// files (deploy API, bundle import) so bad routing labels are rejected up
+// front. The reconciler disk scan only warns on endpoint problems, so an
+// existing app is never dropped from routing after an upgrade.
+func ValidateComposeForDeploy(cfg *AppConfig) []string {
+	violations := ValidateComposeSecurity(cfg)
+	return append(violations, ValidateEndpoints(cfg.Endpoints)...)
 }
