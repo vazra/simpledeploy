@@ -3,7 +3,7 @@ title: Endpoints and routing
 description: How endpoints map (domain, service, port, TLS) to Caddy routes inside the embedded proxy.
 ---
 
-An **endpoint** is a tuple: `(domain, service, port, tls_mode)`. One app can declare multiple endpoints. Each endpoint becomes one Caddy route. Caddy receives all inbound traffic on `:80` and `:443` and matches by `Host` header.
+An **endpoint** is a tuple: `(domain, service, port, tls_mode, protocol, path)`. One app can declare multiple endpoints, and several endpoints may share a domain. Each endpoint becomes one Caddy route. Caddy receives all inbound traffic on `:80` and `:443` and matches by `Host` header, plus the optional path and gRPC content-type matchers.
 
 ## Declaring endpoints
 
@@ -52,6 +52,27 @@ Set per endpoint via `simpledeploy.endpoints.N.tls`:
 - `off`: HTTP only. Caddy's automatic HTTPS is disabled globally when this is the proxy-wide mode.
 
 The proxy-wide mode comes from your config (`tls.mode`). Per-endpoint TLS modes layer on top. See [TLS guide](/simpledeploy/guides/tls/) for the full matrix.
+
+## Protocols and paths
+
+Two optional labels refine an endpoint:
+
+- `simpledeploy.endpoints.N.protocol`: `http` (default), `h2c` or `grpc`. `h2c` and `grpc` proxy to the upstream over HTTP/2 cleartext with immediate flushing. `grpc` additionally only matches native gRPC requests (`Content-Type: application/grpc*`, gRPC-Web excluded).
+- `simpledeploy.endpoints.N.path`: a Caddy path matcher such as `/ws*`.
+
+```yaml
+labels:
+  simpledeploy.endpoints.0.domain: "api.example.com"
+  simpledeploy.endpoints.0.port: "50051"
+  simpledeploy.endpoints.0.protocol: "grpc"
+  simpledeploy.endpoints.1.domain: "api.example.com"
+  simpledeploy.endpoints.1.port: "8000"
+  simpledeploy.endpoints.1.path: "/ws*"
+  simpledeploy.endpoints.2.domain: "api.example.com"
+  simpledeploy.endpoints.2.port: "8001"
+```
+
+Route order per domain is fixed: `grpc` endpoints, then path endpoints (longest path first), then the catch-all. Every route is terminal, so the first match wins. Endpoints whose matchers collide (same domain, same path, both or neither `grpc`) are rejected at deploy time.
 
 ## What Caddy actually gets
 

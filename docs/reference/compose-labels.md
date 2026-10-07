@@ -14,9 +14,9 @@ services:
     ports:
       - "3000:3000"
     labels:
-      simpledeploy.domain: "myapp.example.com"
-      simpledeploy.port: "3000"
-      simpledeploy.tls: "auto"
+      simpledeploy.endpoints.0.domain: "myapp.example.com"
+      simpledeploy.endpoints.0.port: "3000"
+      simpledeploy.endpoints.0.tls: "auto"
       simpledeploy.backup.strategy: "postgres"
       simpledeploy.backup.schedule: "0 2 * * *"
       simpledeploy.backup.target: "s3"
@@ -34,15 +34,47 @@ services:
 
 ## Routing Labels
 
+Routing is configured per endpoint with indexed labels `simpledeploy.endpoints.N.*` (`N` = 0, 1, 2, ... per service). See [Endpoints and routing](/simpledeploy/concepts/endpoints-and-routing/).
+
 | Label | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `simpledeploy.domain` | Yes (for proxy) | - | Domain name for reverse proxy routing |
-| `simpledeploy.port` | No | First port mapping | Container port to proxy to |
-| `simpledeploy.tls` | No | `auto` | TLS mode: `auto`, `custom`, `off` |
+| `simpledeploy.endpoints.N.domain` | Yes (for proxy) | - | Domain name for reverse proxy routing |
+| `simpledeploy.endpoints.N.port` | No | First port mapping | Container port to proxy to |
+| `simpledeploy.endpoints.N.tls` | No | `auto` | TLS mode: `auto`, `local`, `custom`, `off` |
+| `simpledeploy.endpoints.N.protocol` | No | `http` | Upstream protocol: `http`, `h2c` (HTTP/2 cleartext), `grpc` (h2c, only for native gRPC requests) |
+| `simpledeploy.endpoints.N.path` | No | - (all paths) | Caddy path matcher, e.g. `/ws*` (prefix) or `/health` (exact). Must start with `/`; letters, digits, `. _ ~ % / * -`; max 256 chars |
 
-If `simpledeploy.domain` is not set, the app runs but has no proxy route (accessible only via host-mapped ports).
+If no endpoint has a domain, the app runs but has no proxy route (accessible only via host-mapped ports).
 
-If `simpledeploy.port` is not set, SimpleDeploy uses the first port mapping it finds in the compose file.
+If `port` is not set, SimpleDeploy uses the first port mapping it finds in the compose file.
+
+### Several endpoints on one domain (gRPC, websockets, REST)
+
+Endpoints may share a domain when their matchers differ. Example: one service exposing native gRPC, a websocket path and a default HTTP port on the same host:
+
+```yaml
+services:
+  api:
+    image: example/api:1.0
+    labels:
+      simpledeploy.endpoints.0.domain: "api.example.com"
+      simpledeploy.endpoints.0.port: "50051"
+      simpledeploy.endpoints.0.protocol: "grpc"
+      simpledeploy.endpoints.1.domain: "api.example.com"
+      simpledeploy.endpoints.1.port: "8000"
+      simpledeploy.endpoints.1.path: "/ws*"
+      simpledeploy.endpoints.2.domain: "api.example.com"
+      simpledeploy.endpoints.2.port: "8001"
+```
+
+Per domain, routes are tried in this order: `grpc` endpoints, then endpoints with a `path` (longest first), then the catch-all.
+
+- `protocol: grpc` matches requests with `Content-Type: application/grpc*` and proxies over h2c. gRPC-Web (`application/grpc-web*`) is excluded so browsers keep hitting the HTTP/1.1 port.
+- `protocol: h2c` proxies everything matched by the endpoint over HTTP/2 cleartext (for upstreams that only speak h2c).
+- `h2c`/`grpc` responses are flushed immediately, so server-streaming and bidi RPCs work. Websockets and chunked/streaming HTTP responses (gRPC-Web, SSE) stream on `http` endpoints without extra config.
+- Two endpoints on one domain with the same path and grpc-ness are rejected at deploy (`http` and `h2c` catch-alls count as the same matcher).
+- With `tls.mode: off` (TLS terminated in front of SimpleDeploy) the proxy listener also accepts h2c, so gRPC clients can connect in plaintext.
+- gRPC clients that default to a non-443 port (e.g. `:50051`) can reach the same routes when that port is listed in `extra_listen_addrs` in `config.yaml` (see [Configuration](/simpledeploy/reference/configuration/)).
 
 Endpoint services no longer need to publish host ports to be reachable. SimpleDeploy auto-attaches them to a shared `simpledeploy-public` Docker network and reverse-proxies over that. `ports:` still works and, when present, takes precedence over the shared-network path.
 
@@ -168,7 +200,7 @@ If not set, the global `registries` list from the server config applies. Registr
 
 Labels can be placed on any service in the compose file. SimpleDeploy merges labels across all services (first occurrence wins for duplicate keys).
 
-For proxy routing, only one service per app should have `simpledeploy.domain` and `simpledeploy.port`.
+For proxy routing, put `simpledeploy.endpoints.N.*` labels on the service that should receive the traffic. Different services may serve the same domain on different paths or protocols.
 
 For backups, place the backup labels on the service containing the data (e.g., the database service).
 

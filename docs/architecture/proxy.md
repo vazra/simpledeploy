@@ -21,9 +21,12 @@ Located in [/internal/proxy/proxy.go](https://github.com/vazra/simpledeploy/blob
 
 For each `Route`:
 
-- One Caddy route entry with `match.host` set to the route's domain.
-- A handler chain in this exact order: `simpledeploy_ipaccess`, `simpledeploy_ratelimit`, `simpledeploy_metrics`, then `reverse_proxy` to `r.Upstream`.
-- If TLS mode is `custom`, append a load-files entry pointing at `<app_dir>/certs/<domain>.crt` and `.key` with `tags: [domain]`.
+- Routes are first passed through `orderRoutes` ([/internal/proxy/match.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/match.go)): grouped by domain in first-seen order; inside a domain `grpc` routes, then path routes (longest first), then the catch-all.
+- One Caddy route entry per `Route`, `terminal: true`, with matcher from `routeMatcher`: `host`, plus `path` when set, plus for `grpc` a `header` matcher `Content-Type: application/grpc*` and a `not` matcher excluding `application/grpc-web*`.
+- A handler chain in this exact order: `simpledeploy_ipaccess`, `simpledeploy_ratelimit`, `simpledeploy_metrics`, `headers`, then `reverse_proxy` to `r.Upstream`. For `h2c`/`grpc` routes `reverse_proxy` gets `transport: {protocol: http, versions: [h2c]}` and `flush_interval: -1`.
+- If TLS mode is `custom`, append a load-files entry (once per domain) pointing at `<app_dir>/certs/<domain>.crt` and `.key` with `tags: [domain]`.
+- When the listener is plain HTTP (`tls.mode: off` and no per-route `local`), the server sets `protocols: [h1, h2, h2c]` so gRPC clients can use prior-knowledge h2c.
+- The `proxy` server's `listen` is `listen_addr` followed by every `extra_listen_addrs` entry, so all listeners share routes, TLS connection policies and certificates.
 
 The whole thing is then assembled into a single HTTP server listening on the configured `listenAddr` (typically `:443`).
 
