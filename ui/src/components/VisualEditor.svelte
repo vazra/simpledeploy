@@ -5,6 +5,7 @@
   import RepeatableField from './RepeatableField.svelte'
   import { serviceTemplates } from '../lib/serviceTemplates.js'
   import { getImageDefaults, getHealthcheckSuggestion } from '../lib/imageDefaults.js'
+  import { parseEndpointLabels, writeEndpointLabels } from '../lib/endpointLabels.js'
 
   let { compose = {}, slug = '', onchange = () => {}, onerrors = () => {} } = $props()
 
@@ -66,7 +67,6 @@
 
   // ---- SECTION 1: Endpoints (multi-endpoint) ----
   const SD_PREFIX = 'simpledeploy.'
-  const EP_RE = /^simpledeploy\.endpoints\.(\d+)\.(domain|port|tls)$/
 
   function getLabel(svcName, key) {
     return compose.services?.[svcName]?.labels?.[SD_PREFIX + key] ?? ''
@@ -87,24 +87,7 @@
   }
 
   function parseEndpoints() {
-    const eps = []
-    for (const svcName of serviceNames) {
-      const labels = compose.services?.[svcName]?.labels || {}
-      const byIdx = {}
-      for (const [k, v] of Object.entries(labels)) {
-        const m = EP_RE.exec(k)
-        if (!m) continue
-        const idx = parseInt(m[1])
-        const field = m[2]
-        if (!byIdx[idx]) byIdx[idx] = { domain: '', port: '', tls: 'letsencrypt', service: svcName }
-        byIdx[idx][field] = v
-        byIdx[idx].service = svcName
-      }
-      for (const idx of Object.keys(byIdx).sort((a, b) => a - b)) {
-        eps.push(byIdx[idx])
-      }
-    }
-    return eps
+    return parseEndpointLabels(compose.services || {})
   }
 
   let endpoints = $derived(parseEndpoints())
@@ -130,27 +113,7 @@
 
   function writeEndpointsToCompose(eps) {
     const updated = deepClone(compose)
-    for (const svcName of Object.keys(updated.services || {})) {
-      const labels = updated.services[svcName].labels || {}
-      for (const k of Object.keys(labels)) {
-        if (EP_RE.test(k)) delete labels[k]
-      }
-    }
-    const bySvc = {}
-    for (const ep of eps) {
-      if (!bySvc[ep.service]) bySvc[ep.service] = []
-      bySvc[ep.service].push(ep)
-    }
-    for (const [svcName, svcEps] of Object.entries(bySvc)) {
-      if (!updated.services[svcName]) continue
-      if (!updated.services[svcName].labels) updated.services[svcName].labels = {}
-      svcEps.forEach((ep, idx) => {
-        const prefix = `simpledeploy.endpoints.${idx}`
-        if (ep.domain) updated.services[svcName].labels[prefix + '.domain'] = ep.domain
-        if (ep.port) updated.services[svcName].labels[prefix + '.port'] = ep.port
-        if (ep.tls) updated.services[svcName].labels[prefix + '.tls'] = ep.tls
-      })
-    }
+    writeEndpointLabels(updated.services || {}, eps)
     emitChange(updated)
   }
 
