@@ -43,6 +43,8 @@ type Route struct {
 	CertDir    string // directory containing certs for custom TLS
 	RateLimit  *RateLimitConfig
 	AllowedIPs []string // validated IPs and CIDRs
+	Protocol   string   // "http" (default), "h2c" or "grpc"
+	Path       string   // optional Caddy path matcher, e.g. "/ws*"
 }
 
 // RateLimitConfig holds parsed rate-limit settings for a route.
@@ -120,6 +122,19 @@ func ResolveRoutes(app *compose.AppConfig, resolver UpstreamResolver) ([]Route, 
 			continue
 		}
 
+		protocol := compose.NormalizeProtocol(ep.Protocol)
+		if protocol == "" {
+			protocol = compose.ProtocolHTTP
+		}
+		if !compose.ValidProtocol(protocol) {
+			log.Printf("[proxy] skip endpoint %s for %s: invalid protocol %q", ep.Domain, app.Name, ep.Protocol)
+			continue
+		}
+		if ep.Path != "" && !compose.ValidPath(ep.Path) {
+			log.Printf("[proxy] skip endpoint %s for %s: invalid path %q", ep.Domain, app.Name, ep.Path)
+			continue
+		}
+
 		upstream, err := resolveEndpointUpstream(app, ep, resolver)
 		if err != nil {
 			log.Printf("[proxy] skip endpoint %s for %s: %v", ep.Domain, app.Name, err)
@@ -139,6 +154,8 @@ func ResolveRoutes(app *compose.AppConfig, resolver UpstreamResolver) ([]Route, 
 			CertDir:    certDir,
 			RateLimit:  rl,
 			AllowedIPs: allowedIPs,
+			Protocol:   protocol,
+			Path:       ep.Path,
 		}
 		routes = append(routes, route)
 	}

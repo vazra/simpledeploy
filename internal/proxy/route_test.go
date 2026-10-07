@@ -444,3 +444,50 @@ func TestResolveRoutesNilResolverDNSBehavior(t *testing.T) {
 		t.Errorf("Upstream: got %q, want %q", routes[0].Upstream, "web:80")
 	}
 }
+
+func TestResolveRoutesProtocolAndPath(t *testing.T) {
+	app := makeApp("datafi",
+		[]compose.EndpointConfig{
+			{Domain: "co.example.com", Port: "50051", Service: "co", Protocol: "grpc"},
+			{Domain: "co.example.com", Port: "8000", Service: "co", Path: "/ws*"},
+			{Domain: "co.example.com", Port: "8001", Service: "co", Protocol: "H2C"},
+		},
+		[]compose.ServiceConfig{{Name: "co"}},
+	)
+	routes, err := ResolveRoutes(app, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 3 {
+		t.Fatalf("len(routes) = %d, want 3", len(routes))
+	}
+	want := []struct{ upstream, protocol, path string }{
+		{"co:50051", "grpc", ""},
+		{"co:8000", "http", "/ws*"},
+		{"co:8001", "h2c", ""},
+	}
+	for i, w := range want {
+		r := routes[i]
+		if r.Upstream != w.upstream || r.Protocol != w.protocol || r.Path != w.path {
+			t.Errorf("routes[%d] = {Upstream:%q Protocol:%q Path:%q}, want %+v", i, r.Upstream, r.Protocol, r.Path, w)
+		}
+	}
+}
+
+func TestResolveRoutesSkipsInvalidProtocolOrPath(t *testing.T) {
+	app := makeApp("myapp",
+		[]compose.EndpointConfig{
+			{Domain: "a.example.com", Port: "80", Service: "web", Protocol: "tcp"},
+			{Domain: "b.example.com", Port: "80", Service: "web", Path: "nope"},
+			{Domain: "c.example.com", Port: "80", Service: "web"},
+		},
+		[]compose.ServiceConfig{{Name: "web"}},
+	)
+	routes, err := ResolveRoutes(app, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Domain != "c.example.com" {
+		t.Fatalf("routes = %+v, want only c.example.com", routes)
+	}
+}
