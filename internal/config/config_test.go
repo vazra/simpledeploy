@@ -331,6 +331,12 @@ func TestValidateExtraListenAddrs(t *testing.T) {
 		{"duplicates explicit http_listen_addr", ":443", ":8080", "auto", []string{":8080"}, "duplicates"},
 		{"duplicates default http :80", ":443", "", "local", []string{":80"}, "duplicates"},
 		{"duplicate inside list", ":443", "", "auto", []string{":50051", ":50051"}, "duplicates"},
+		{"wildcard host equals empty host", ":443", "", "auto", []string{"0.0.0.0:443"}, "duplicates"},
+		{"ipv6 wildcard equals empty host", ":443", "", "auto", []string{"[::]:443"}, "duplicates"},
+		{"specific host overlaps wildcard", ":443", "", "auto", []string{"127.0.0.1:443"}, "duplicates"},
+		{"wildcard overlaps default http :80", ":443", "", "auto", []string{"0.0.0.0:80"}, "duplicates"},
+		{"normalized duplicate inside list", ":443", "", "auto", []string{":50051", "0.0.0.0:50051"}, "duplicates"},
+		{"same port on different hosts ok", "127.0.0.1:443", "off", "auto", []string{"10.0.0.1:443"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

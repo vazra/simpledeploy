@@ -241,30 +241,65 @@ func (c *Config) effectiveHTTPListenAddr() string {
 	return a
 }
 
-// validateExtraListenAddrs requires host:port entries with a numeric port
-// and rejects exact duplicates of listen_addr, the effective
-// http_listen_addr or another extra entry.
-func (c *Config) validateExtraListenAddrs() error {
-	seen := map[string]bool{}
-	if c.ListenAddr != "" {
-		seen[c.ListenAddr] = true
+// listenAddr is a parsed host:port with the host normalized: "", "0.0.0.0"
+// and "::" all mean every interface and become "".
+type listenAddr struct {
+	raw  string
+	host string
+	port int
+}
+
+func parseListenAddr(a string) (listenAddr, error) {
+	host, port, err := net.SplitHostPort(a)
+	if err != nil {
+		return listenAddr{}, err
 	}
-	if h := c.effectiveHTTPListenAddr(); h != "" {
-		seen[h] = true
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return listenAddr{}, fmt.Errorf("port must be 1-65535")
+	}
+	switch host {
+	case "0.0.0.0", "::":
+		host = ""
+	}
+	return listenAddr{raw: a, host: strings.ToLower(host), port: n}, nil
+}
+
+// overlaps reports whether two listeners would fight over the same socket:
+// same port and the same host, or either one binds every interface.
+func (l listenAddr) overlaps(o listenAddr) bool {
+	return l.port == o.port && (l.host == o.host || l.host == "" || o.host == "")
+}
+
+// validateExtraListenAddrs requires host:port entries with a numeric port
+// and rejects entries that overlap listen_addr, the effective
+// http_listen_addr or another extra entry (":443", "0.0.0.0:443" and
+// "[::]:443" are the same listener; a wildcard overlaps every host on that
+// port).
+func (c *Config) validateExtraListenAddrs() error {
+	var taken []listenAddr
+	for _, a := range []string{c.ListenAddr, c.effectiveHTTPListenAddr()} {
+		if a == "" {
+			continue
+		}
+		if l, err := parseListenAddr(a); err == nil {
+			taken = append(taken, l)
+		}
 	}
 	for _, a := range c.ExtraListenAddrs {
-		_, port, err := net.SplitHostPort(a)
+		l, err := parseListenAddr(a)
 		if err != nil {
-			return fmt.Errorf("extra_listen_addrs: %q: want host:port (e.g. \":50051\"): %v", a, err)
+			if _, _, splitErr := net.SplitHostPort(a); splitErr != nil {
+				return fmt.Errorf("extra_listen_addrs: %q: want host:port (e.g. \":50051\"): %v", a, splitErr)
+			}
+			return fmt.Errorf("extra_listen_addrs: %q: %v", a, err)
 		}
-		n, err := strconv.Atoi(port)
-		if err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("extra_listen_addrs: %q: port must be 1-65535", a)
+		for _, t := range taken {
+			if l.overlaps(t) {
+				return fmt.Errorf("extra_listen_addrs: %q duplicates %q (listen_addr, http_listen_addr or another extra address on the same port)", a, t.raw)
+			}
 		}
-		if seen[a] {
-			return fmt.Errorf("extra_listen_addrs: %q duplicates listen_addr, http_listen_addr or another extra address", a)
-		}
-		seen[a] = true
+		taken = append(taken, l)
 	}
 	return nil
 }
