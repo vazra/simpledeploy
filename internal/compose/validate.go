@@ -180,5 +180,10 @@ func ValidateComposeSecurity(cfg *AppConfig) []string {
 		}
 	}
 
+	// Endpoint label values (protocol/path) and matcher collisions. Kept
+	// here so every caller of ValidateComposeSecurity (deploy API, bundle
+	// import, reconciler disk scan) rejects bad routing labels too.
+	violations = append(violations, ValidateEndpoints(cfg.Endpoints)...)
+
 	return violations
 }
