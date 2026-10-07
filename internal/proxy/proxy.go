@@ -19,32 +19,35 @@ type Proxy interface {
 
 // CaddyConfig holds configuration for a CaddyProxy.
 type CaddyConfig struct {
-	ListenAddr     string // e.g. ":443"
-	HTTPListenAddr string // optional HTTP listener for plain-HTTP to HTTPS redirect, e.g. ":80"
-	TLSMode        string // "auto", "custom", "off", "local"
-	TLSEmail       string // ACME email, used when TLSMode is "auto"
-	DataDir        string // data directory for Caddy storage
+	ListenAddr       string   // e.g. ":443"
+	HTTPListenAddr   string   // optional HTTP listener for plain-HTTP to HTTPS redirect, e.g. ":80"
+	ExtraListenAddrs []string // optional extra listeners for the main server, e.g. [":50051"]; same routes and TLS
+	TLSMode          string   // "auto", "custom", "off", "local"
+	TLSEmail         string   // ACME email, used when TLSMode is "auto"
+	DataDir          string   // data directory for Caddy storage
 }
 
 // CaddyProxy is a Proxy backed by Caddy.
 type CaddyProxy struct {
-	mu             sync.Mutex
-	routes         []Route
-	listenAddr     string
-	httpListenAddr string
-	tlsMode        string
-	tlsEmail       string
-	dataDir        string
+	mu               sync.Mutex
+	routes           []Route
+	listenAddr       string
+	extraListenAddrs []string
+	httpListenAddr   string
+	tlsMode          string
+	tlsEmail         string
+	dataDir          string
 }
 
 // NewCaddyProxy creates a CaddyProxy from the given config.
 func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 	return &CaddyProxy{
-		listenAddr:     cfg.ListenAddr,
-		httpListenAddr: cfg.HTTPListenAddr,
-		tlsMode:        cfg.TLSMode,
-		tlsEmail:       cfg.TLSEmail,
-		dataDir:        cfg.DataDir,
+		listenAddr:       cfg.ListenAddr,
+		extraListenAddrs: append([]string(nil), cfg.ExtraListenAddrs...),
+		httpListenAddr:   cfg.HTTPListenAddr,
+		tlsMode:          cfg.TLSMode,
+		tlsEmail:         cfg.TLSEmail,
+		dataDir:          cfg.DataDir,
 	}
 }
 
@@ -161,7 +164,7 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	}
 
 	server := map[string]interface{}{
-		"listen": []string{c.listenAddr},
+		"listen": append([]string{c.listenAddr}, c.extraListenAddrs...),
 		"routes": caddyRoutes,
 	}
 

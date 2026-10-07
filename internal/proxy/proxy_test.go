@@ -552,3 +552,51 @@ func TestBuildConfigCustomCertLoadedOncePerDomain(t *testing.T) {
 		t.Fatalf("load_files = %d entries, want 1", len(files))
 	}
 }
+
+func TestBuildConfigExtraListenAddrsShareHTTPSServer(t *testing.T) {
+	extra := []string{":50051"}
+	p := NewCaddyProxy(CaddyConfig{
+		ListenAddr:       ":443",
+		ExtraListenAddrs: extra,
+		HTTPListenAddr:   ":80",
+		TLSMode:          "auto",
+		TLSEmail:         "ops@example.com",
+	})
+	extra[0] = ":9999" // NewCaddyProxy must copy the slice
+	p.mu.Lock()
+	p.routes = []Route{{AppSlug: "a", Domain: "co.example.com", Upstream: "co:8001", TLS: "auto"}}
+	p.mu.Unlock()
+
+	cfg := parseConfig(t, p)
+	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	if len(servers) != 2 {
+		t.Fatalf("servers = %d, want 2 (proxy + proxy_http, no separate server for extras)", len(servers))
+	}
+	mainSrv := servers["proxy"].(map[string]interface{})
+	listen := mainSrv["listen"].([]interface{})
+	if len(listen) != 2 || listen[0].(string) != ":443" || listen[1].(string) != ":50051" {
+		t.Errorf("proxy listen = %v, want [:443 :50051]", listen)
+	}
+	if _, ok := mainSrv["tls_connection_policies"]; !ok {
+		t.Error("proxy server must keep tls_connection_policies so the extra listener terminates TLS")
+	}
+	if mainSrv["automatic_https"].(map[string]interface{})["disable_redirects"] != true {
+		t.Error("proxy server must keep automatic_https.disable_redirects=true")
+	}
+	if len(mainSrv["routes"].([]interface{})) != 1 {
+		t.Errorf("proxy routes = %d, want 1", len(mainSrv["routes"].([]interface{})))
+	}
+	httpListen := servers["proxy_http"].(map[string]interface{})["listen"].([]interface{})
+	if len(httpListen) != 1 || httpListen[0].(string) != ":80" {
+		t.Errorf("proxy_http listen = %v, want [:80]", httpListen)
+	}
+}
+
+func TestBuildConfigNoExtraListenAddrs(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
+	server := getServer(t, parseConfig(t, p))
+	listen := server["listen"].([]interface{})
+	if len(listen) != 1 || listen[0].(string) != ":443" {
+		t.Errorf("listen = %v, want [:443]", listen)
+	}
+}

@@ -183,3 +183,61 @@ func TestCaddyProxyGRPCPathAndCatchAll(t *testing.T) {
 		t.Fatalf("echo = %q, %v; want ping", buf, err)
 	}
 }
+
+func TestCaddyProxyExtraListenAddrServesSameRoutes(t *testing.T) {
+	gl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("grpc listen: %v", err)
+	}
+	gs := grpc.NewServer()
+	hs := health.NewServer()
+	healthpb.RegisterHealthServer(gs, hs)
+	go func() { _ = gs.Serve(gl) }()
+	t.Cleanup(gs.Stop)
+
+	catchAll := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "catchall")
+	}))
+	t.Cleanup(catchAll.Close)
+
+	mainAddr, extraAddr := freeAddr(t), freeAddr(t)
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: mainAddr, ExtraListenAddrs: []string{extraAddr}, TLSMode: "off", DataDir: caddyDataDir(t)})
+	routes := []Route{
+		{AppSlug: "demo", Domain: "demo.test", Upstream: strings.TrimPrefix(catchAll.URL, "http://"), TLS: "off", Protocol: "http"},
+		{AppSlug: "demo", Domain: "demo.test", Upstream: gl.Addr().String(), TLS: "off", Protocol: "grpc"},
+	}
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatalf("SetRoutes: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Stop() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, addr := range []string{mainAddr, extraAddr} {
+		conn, err := grpc.NewClient(addr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithAuthority("demo.test"),
+		)
+		if err != nil {
+			t.Fatalf("grpc client %s: %v", addr, err)
+		}
+		resp, err := healthpb.NewHealthClient(conn).Check(ctx, &healthpb.HealthCheckRequest{})
+		conn.Close()
+		if err != nil || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+			t.Fatalf("Check via %s = %v, %v; want SERVING", addr, resp, err)
+		}
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/", nil)
+		req.Host = "demo.test"
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET via %s: %v", addr, err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if string(b) != "catchall" {
+			t.Errorf("GET via %s body = %q, want catchall", addr, b)
+		}
+	}
+}

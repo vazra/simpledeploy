@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +37,10 @@ type Config struct {
 	AppsDir        string          `yaml:"apps_dir"`
 	ListenAddr     string          `yaml:"listen_addr"`
 	HTTPListenAddr string          `yaml:"http_listen_addr"`
+	// ExtraListenAddrs are additional addresses for the HTTPS proxy server
+	// (e.g. [":50051"]). They serve the same routes, TLS policies and certs
+	// as ListenAddr. Empty by default.
+	ExtraListenAddrs []string `yaml:"extra_listen_addrs"`
 	ManagementPort int             `yaml:"management_port"`
 	// ManagementAddr is the bind address for the dashboard listener.
 	// Defaults to "127.0.0.1" so the plain-HTTP dashboard is not exposed
@@ -157,6 +163,9 @@ func (c *Config) Validate() error {
 	if c.GitSync.Enabled && c.GitSync.Remote == "" {
 		return fmt.Errorf("gitsync.remote is required when gitsync.enabled is true")
 	}
+	if err := c.validateExtraListenAddrs(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -215,4 +224,47 @@ func (c *Config) SaveAtomic(path string) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+// effectiveHTTPListenAddr mirrors the serve command's defaulting of
+// http_listen_addr: ":80" when TLS is auto/local and the field is empty,
+// "" for the opt-out sentinels.
+func (c *Config) effectiveHTTPListenAddr() string {
+	a := c.HTTPListenAddr
+	if a == "" && (c.TLS.Mode == "auto" || c.TLS.Mode == "local") {
+		a = ":80"
+	}
+	switch a {
+	case "off", "disabled", "none":
+		return ""
+	}
+	return a
+}
+
+// validateExtraListenAddrs requires host:port entries with a numeric port
+// and rejects exact duplicates of listen_addr, the effective
+// http_listen_addr or another extra entry.
+func (c *Config) validateExtraListenAddrs() error {
+	seen := map[string]bool{}
+	if c.ListenAddr != "" {
+		seen[c.ListenAddr] = true
+	}
+	if h := c.effectiveHTTPListenAddr(); h != "" {
+		seen[h] = true
+	}
+	for _, a := range c.ExtraListenAddrs {
+		_, port, err := net.SplitHostPort(a)
+		if err != nil {
+			return fmt.Errorf("extra_listen_addrs: %q: want host:port (e.g. \":50051\"): %v", a, err)
+		}
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("extra_listen_addrs: %q: port must be 1-65535", a)
+		}
+		if seen[a] {
+			return fmt.Errorf("extra_listen_addrs: %q duplicates listen_addr, http_listen_addr or another extra address", a)
+		}
+		seen[a] = true
+	}
+	return nil
 }
