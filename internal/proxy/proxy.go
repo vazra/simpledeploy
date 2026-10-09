@@ -185,7 +185,9 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 	// Collect custom TLS cert files and per-route local-TLS domains
 	var loadFiles []interface{}
 	var localTLSDomains []string
+	var customTLSDomains []string
 	seenCertDomains := map[string]bool{}
+	seenCustom := map[string]bool{}
 
 	for _, r := range routes {
 		if r.TLS == "local" {
@@ -223,13 +225,18 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 			"terminal": true,
 		})
 
+		if r.TLS == "custom" && !seenCustom[r.Domain] {
+			seenCustom[r.Domain] = true
+			customTLSDomains = append(customTLSDomains, r.Domain)
+		}
 		if r.TLS == "custom" && r.CertDir != "" && !seenCertDomains[r.Domain] {
 			seenCertDomains[r.Domain] = true
 			crt := filepath.Join(r.CertDir, r.Domain+".crt")
 			key := filepath.Join(r.CertDir, r.Domain+".key")
 			// Caddy's file loader fails the whole config load on a missing
-			// file, which would block every later reload. Skip it; the
-			// endpoint falls back to the global TLS automation (or none).
+			// file, which would block every later reload. Skip it; the domain
+			// is in skip_certificates, so it gets TLS errors (never an ACME
+			// or internal-CA cert) until a cert is uploaded.
 			if !fileExists(crt) || !fileExists(key) {
 				log.Printf("[proxy] WARNING: custom cert for %s missing (%s, %s); not loading it", r.Domain, crt, key)
 			} else {
@@ -271,9 +278,16 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 		// The optional HTTPListenAddr block below covers that case when the
 		// user explicitly wants the redirect.
 		server["tls_connection_policies"] = []interface{}{map[string]interface{}{}}
-		server["automatic_https"] = map[string]interface{}{
+		ah := map[string]interface{}{
 			"disable_redirects": true,
 		}
+		// Custom-TLS domains are never managed by automation, even when the
+		// cert file is missing; otherwise Caddy would issue an ACME or
+		// internal-CA cert for them.
+		if len(customTLSDomains) > 0 {
+			ah["skip_certificates"] = append([]string(nil), customTLSDomains...)
+		}
+		server["automatic_https"] = ah
 	}
 
 	servers := map[string]interface{}{
@@ -307,11 +321,9 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 
 	// Optional HTTP listener that 308-redirects every request to HTTPS. Only
 	// meaningful when the main server serves TLS.
+	// The TLS branch above already disabled Caddy's implicit :80 redirect so
+	// it doesn't race with ours.
 	if c.httpListenAddr != "" && c.tlsMode != "off" {
-		// Disable Caddy's implicit :80 redirect so it doesn't race with ours.
-		server["automatic_https"] = map[string]interface{}{
-			"disable_redirects": true,
-		}
 		servers["proxy_http"] = map[string]interface{}{
 			"listen": []string{c.httpListenAddr},
 			"routes": []interface{}{

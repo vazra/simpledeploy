@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -809,5 +810,36 @@ func TestBuildConfigExtraServerIsDeepCopy(t *testing.T) {
 	after, _ := json.Marshal(extra)
 	if string(before) != string(after) {
 		t.Fatalf("mutating proxy leaked into proxy_extra:\n%s\n%s", before, after)
+	}
+}
+
+func TestBuildConfigCustomTLSDomainsSkipAutomation(t *testing.T) {
+	present := writeCertFiles(t, "ok.example.com")
+	missing := t.TempDir()
+	for _, mode := range []string{"auto", "local"} {
+		p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", ExtraListenAddrs: []string{":50051"}, TLSMode: mode, TLSEmail: "ops@example.com"})
+		p.routes = []Route{
+			{Domain: "ok.example.com", Upstream: "a:1", TLS: "custom", CertDir: present},
+			{Domain: "gone.example.com", Upstream: "b:1", TLS: "custom", CertDir: missing},
+			{Domain: "gone.example.com", Upstream: "b:2", TLS: "custom", CertDir: missing, Path: "/x*"},
+			{Domain: "auto.example.com", Upstream: "c:1", TLS: mode},
+		}
+		cfg := parseConfig(t, p)
+		servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+		for _, name := range []string{"proxy", "proxy_extra"} {
+			ah := servers[name].(map[string]interface{})["automatic_https"].(map[string]interface{})
+			got, _ := json.Marshal(ah["skip_certificates"])
+			if string(got) != `["gone.example.com","ok.example.com"]` {
+				t.Errorf("%s/%s skip_certificates = %s, want both custom domains only", mode, name, got)
+			}
+		}
+		// No automation policy names a custom domain explicitly.
+		tlsApp, _ := cfg["apps"].(map[string]interface{})["tls"].(map[string]interface{})
+		raw, _ := json.Marshal(tlsApp["automation"])
+		for _, d := range []string{"gone.example.com", "ok.example.com"} {
+			if strings.Contains(string(raw), d) {
+				t.Errorf("%s: automation mentions custom domain %s: %s", mode, d, raw)
+			}
+		}
 	}
 }

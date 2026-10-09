@@ -37,7 +37,7 @@ services:
       simpledeploy.endpoints.0.tls: "custom"
 ```
 
-Deploy or redeploy. The endpoint will return TLS errors until the cert is uploaded.
+Deploy or redeploy. The endpoint will return TLS errors until the cert is uploaded. Custom-TLS domains are excluded from automatic certificate management (Caddy `skip_certificates`), so SimpleDeploy never requests a Let's Encrypt or internal-CA cert for them, even while the cert file is missing.
 
 ## Upload the cert
 
@@ -74,7 +74,7 @@ curl -X DELETE https://manage.example.com/api/apps/myapp/certs/myapp.example.com
   -H "Authorization: Bearer $SD_API_KEY"
 ```
 
-Deleting also forces a proxy reload. After deletion you must either upload a new cert or switch the endpoint back to `auto`.
+Deleting also forces a proxy reload. After deletion the domain serves TLS errors (other domains are unaffected; the proxy logs a missing-cert warning and keeps reloading normally). Upload a new cert or switch the endpoint back to `auto`.
 
 Cert files edited directly on disk (in the app's `certs/` directory) are picked up on the next route refresh or deploy, since the proxy compares each cert file's size and modification time before deciding to reload.
 
