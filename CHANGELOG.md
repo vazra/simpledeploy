@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/vazra/simpledeploy/compare/v1.4.0...v1.4.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **proxy:** h1/h2-only extra listener server, skip no-op reloads, cert-aware reload, deterministic routes ([#86](https://github.com/vazra/simpledeploy/issues/86)) ([d855a9c](https://github.com/vazra/simpledeploy/commit/d855a9c45ae2e29e7e76dea6ac6b7f873b7e4470))
+
 ## [1.4.0](https://github.com/vazra/simpledeploy/compare/v1.3.0...v1.4.0) (2026-10-07)
 
 
