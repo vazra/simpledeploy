@@ -2,7 +2,11 @@ package proxy
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // --- CaddyProxy config builder tests ---
@@ -537,11 +541,12 @@ func TestBuildConfigTLSAutoKeepsDefaultProtocols(t *testing.T) {
 }
 
 func TestBuildConfigCustomCertLoadedOncePerDomain(t *testing.T) {
+	dir := writeCertFiles(t, "co.example.com")
 	p := newTestProxy("custom", "")
 	p.mu.Lock()
 	p.routes = []Route{
-		{Domain: "co.example.com", Upstream: "co:8001", TLS: "custom", CertDir: "/certs"},
-		{Domain: "co.example.com", Upstream: "co:50051", TLS: "custom", CertDir: "/certs", Protocol: "grpc"},
+		{Domain: "co.example.com", Upstream: "co:8001", TLS: "custom", CertDir: dir},
+		{Domain: "co.example.com", Upstream: "co:50051", TLS: "custom", CertDir: dir, Protocol: "grpc"},
 	}
 	p.mu.Unlock()
 
@@ -553,7 +558,7 @@ func TestBuildConfigCustomCertLoadedOncePerDomain(t *testing.T) {
 	}
 }
 
-func TestBuildConfigExtraListenAddrsShareHTTPSServer(t *testing.T) {
+func TestBuildConfigExtraListenAddrsSeparateServerNoH3(t *testing.T) {
 	extra := []string{":50051"}
 	p := NewCaddyProxy(CaddyConfig{
 		ListenAddr:       ":443",
@@ -569,26 +574,89 @@ func TestBuildConfigExtraListenAddrsShareHTTPSServer(t *testing.T) {
 
 	cfg := parseConfig(t, p)
 	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
-	if len(servers) != 2 {
-		t.Fatalf("servers = %d, want 2 (proxy + proxy_http, no separate server for extras)", len(servers))
+	if len(servers) != 3 {
+		t.Fatalf("servers = %d, want 3 (proxy, proxy_extra, proxy_http)", len(servers))
 	}
 	mainSrv := servers["proxy"].(map[string]interface{})
-	listen := mainSrv["listen"].([]interface{})
-	if len(listen) != 2 || listen[0].(string) != ":443" || listen[1].(string) != ":50051" {
-		t.Errorf("proxy listen = %v, want [:443 :50051]", listen)
+	if listen := mainSrv["listen"].([]interface{}); len(listen) != 1 || listen[0].(string) != ":443" {
+		t.Errorf("proxy listen = %v, want [:443]", listen)
 	}
-	if _, ok := mainSrv["tls_connection_policies"]; !ok {
-		t.Error("proxy server must keep tls_connection_policies so the extra listener terminates TLS")
+	if _, ok := mainSrv["protocols"]; ok {
+		t.Error("proxy server protocols must stay default so :443 keeps h3")
 	}
-	if mainSrv["automatic_https"].(map[string]interface{})["disable_redirects"] != true {
-		t.Error("proxy server must keep automatic_https.disable_redirects=true")
+	extraSrv := servers["proxy_extra"].(map[string]interface{})
+	if listen := extraSrv["listen"].([]interface{}); len(listen) != 1 || listen[0].(string) != ":50051" {
+		t.Errorf("proxy_extra listen = %v, want [:50051]", listen)
 	}
-	if len(mainSrv["routes"].([]interface{})) != 1 {
-		t.Errorf("proxy routes = %d, want 1", len(mainSrv["routes"].([]interface{})))
+	if got, _ := json.Marshal(extraSrv["protocols"]); string(got) != `["h1","h2"]` {
+		t.Errorf("proxy_extra protocols = %s, want [\"h1\",\"h2\"]", got)
+	}
+	for _, k := range []string{"routes", "tls_connection_policies", "automatic_https"} {
+		a, _ := json.Marshal(mainSrv[k])
+		b, _ := json.Marshal(extraSrv[k])
+		if mainSrv[k] == nil || string(a) != string(b) {
+			t.Errorf("proxy_extra %s = %s, want same as proxy %s", k, b, a)
+		}
 	}
 	httpListen := servers["proxy_http"].(map[string]interface{})["listen"].([]interface{})
 	if len(httpListen) != 1 || httpListen[0].(string) != ":80" {
 		t.Errorf("proxy_http listen = %v, want [:80]", httpListen)
+	}
+}
+
+func TestBuildConfigExtraListenAddrsTLSOffKeepsH2C(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":80", ExtraListenAddrs: []string{":50051"}, TLSMode: "off"})
+	servers := parseConfig(t, p)["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	extraSrv := servers["proxy_extra"].(map[string]interface{})
+	if got, _ := json.Marshal(extraSrv["protocols"]); string(got) != `["h1","h2","h2c"]` {
+		t.Errorf("proxy_extra protocols = %s, want h1,h2,h2c", got)
+	}
+}
+
+func TestBuildConfigNoExtraServerWithoutExtras(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
+	servers := parseConfig(t, p)["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	if _, ok := servers["proxy_extra"]; ok {
+		t.Error("proxy_extra must not exist without extra listeners")
+	}
+}
+
+func TestBuildConfigDeterministicAcrossInputOrder(t *testing.T) {
+	routes := []Route{
+		{AppSlug: "w", Domain: "*.example.com", Upstream: "w:1", TLS: "auto"},
+		{AppSlug: "b", Domain: "b.example.com", Upstream: "b:1", TLS: "auto"},
+		{AppSlug: "a", Domain: "a.example.com", Upstream: "a:1", TLS: "custom", CertDir: "/c"},
+		{AppSlug: "a", Domain: "a.example.com", Upstream: "a:2", TLS: "custom", CertDir: "/c", Path: "/x*"},
+		{AppSlug: "c", Domain: "c.example.com", Upstream: "c:1", TLS: "local"},
+		{AppSlug: "d", Domain: "d.example.com", Upstream: "d:1", TLS: "local"},
+	}
+	build := func(rs []Route) string {
+		p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", ExtraListenAddrs: []string{":50051"}, TLSMode: "auto", TLSEmail: "e@x.com"})
+		p.routes = rs
+		b, err := p.BuildConfigJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	want := build(routes)
+	rev := make([]Route, len(routes))
+	for i, r := range routes {
+		rev[len(routes)-1-i] = r
+	}
+	if got := build(rev); got != want {
+		t.Fatalf("config depends on input order:\n%s\n%s", want, got)
+	}
+	// Wildcard host must come after exact hosts so it cannot shadow them.
+	srv := getServer(t, func() map[string]interface{} {
+		var m map[string]interface{}
+		_ = json.Unmarshal([]byte(want), &m)
+		return m
+	}())
+	rs := srv["routes"].([]interface{})
+	last := rs[len(rs)-1].(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})["host"].([]interface{})[0]
+	if last != "*.example.com" {
+		t.Errorf("last route host = %v, want *.example.com", last)
 	}
 }
 
@@ -598,5 +666,180 @@ func TestBuildConfigNoExtraListenAddrs(t *testing.T) {
 	listen := server["listen"].([]interface{})
 	if len(listen) != 1 || listen[0].(string) != ":443" {
 		t.Errorf("listen = %v, want [:443]", listen)
+	}
+}
+
+// countingLoad replaces caddy.Load with a counter.
+func countingLoad(p *CaddyProxy) *int {
+	n := 0
+	p.load = func([]byte, bool) error { n++; return nil }
+	return &n
+}
+
+func TestReloadSkipsIdenticalConfig(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
+	n := countingLoad(p)
+	a := Route{AppSlug: "a", Domain: "a.test", Upstream: "a:1", TLS: "auto"}
+	b := Route{AppSlug: "b", Domain: "b.test", Upstream: "b:1", TLS: "auto"}
+	steps := []struct {
+		routes []Route
+		want   int
+	}{
+		{[]Route{a, b}, 1},
+		{[]Route{b, a}, 1}, // same routes, other order: skipped
+		{[]Route{a}, 2},    // changed: reloads
+	}
+	for i, st := range steps {
+		if err := p.SetRoutes(st.routes); err != nil {
+			t.Fatal(err)
+		}
+		if *n != st.want {
+			t.Fatalf("step %d: loads = %d, want %d", i, *n, st.want)
+		}
+	}
+	if err := p.ForceReload(); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 3 {
+		t.Fatalf("ForceReload: loads = %d, want 3", *n)
+	}
+}
+
+func TestReloadOnCustomCertRewrite(t *testing.T) {
+	dir := t.TempDir()
+	crt := filepath.Join(dir, "c.test.crt")
+	key := filepath.Join(dir, "c.test.key")
+	for _, f := range []string{crt, key} {
+		if err := os.WriteFile(f, []byte("v1"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
+	n := countingLoad(p)
+	routes := []Route{{AppSlug: "c", Domain: "c.test", Upstream: "c:1", TLS: "custom", CertDir: dir}}
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 1 {
+		t.Fatalf("unchanged cert: loads = %d, want 1", *n)
+	}
+	// Rewrite the cert in place (same path, new content and mtime).
+	if err := os.WriteFile(crt, []byte("v2-longer"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	_ = os.Chtimes(crt, future, future)
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 2 {
+		t.Fatalf("rewritten cert: loads = %d, want 2", *n)
+	}
+	// Deleting the cert also changes the key.
+	_ = os.Remove(crt)
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 3 {
+		t.Fatalf("deleted cert: loads = %d, want 3", *n)
+	}
+}
+
+func writeCertFiles(t *testing.T, domain string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, ext := range []string{".crt", ".key"} {
+		if err := os.WriteFile(filepath.Join(dir, domain+ext), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestBuildConfigSkipsMissingCustomCert(t *testing.T) {
+	present := writeCertFiles(t, "ok.example.com")
+	missing := t.TempDir()
+	// Only the key exists for half.example.com: still skipped.
+	if err := os.WriteFile(filepath.Join(missing, "half.example.com.key"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := newTestProxy("auto", "ops@example.com")
+	p.routes = []Route{
+		{Domain: "ok.example.com", Upstream: "a:1", TLS: "custom", CertDir: present},
+		{Domain: "gone.example.com", Upstream: "b:1", TLS: "custom", CertDir: missing},
+		{Domain: "half.example.com", Upstream: "c:1", TLS: "custom", CertDir: missing},
+	}
+	cfg := parseConfig(t, p)
+	tlsApp := cfg["apps"].(map[string]interface{})["tls"].(map[string]interface{})
+	files := tlsApp["certificates"].(map[string]interface{})["load_files"].([]interface{})
+	if len(files) != 1 || files[0].(map[string]interface{})["tags"].([]interface{})[0] != "ok.example.com" {
+		t.Fatalf("load_files = %v, want only ok.example.com", files)
+	}
+	// Routes for endpoints with missing certs are still served.
+	if n := len(getServer(t, cfg)["routes"].([]interface{})); n != 3 {
+		t.Errorf("routes = %d, want 3", n)
+	}
+
+	// All custom certs missing: no certificates block at all.
+	p.routes = p.routes[1:]
+	cfg = parseConfig(t, p)
+	if _, ok := cfg["apps"].(map[string]interface{})["tls"].(map[string]interface{})["certificates"]; ok {
+		t.Error("certificates block must be omitted when every custom cert is missing")
+	}
+}
+
+func TestBuildConfigExtraServerIsDeepCopy(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", ExtraListenAddrs: []string{":50051"}, TLSMode: "auto"})
+	p.routes = []Route{{AppSlug: "a", Domain: "a.test", Upstream: "a:1", TLS: "auto"}}
+	cfg := p.buildConfigFrom(p.snapshotRoutes())
+	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	mainSrv := servers["proxy"].(map[string]interface{})
+	extra := servers["proxy_extra"].(map[string]interface{})
+	before, _ := json.Marshal(extra)
+
+	r0 := mainSrv["routes"].([]interface{})[0].(map[string]interface{})
+	r0["terminal"] = false
+	r0["handle"].([]interface{})[0].(map[string]interface{})["handler"] = "mutated"
+	r0["match"].([]interface{})[0].(map[string]interface{})["host"].([]string)[0] = "mutated.test"
+	mainSrv["tls_connection_policies"].([]interface{})[0].(map[string]interface{})["mutated"] = true
+	mainSrv["automatic_https"].(map[string]interface{})["mutated"] = true
+
+	after, _ := json.Marshal(extra)
+	if string(before) != string(after) {
+		t.Fatalf("mutating proxy leaked into proxy_extra:\n%s\n%s", before, after)
+	}
+}
+
+func TestBuildConfigCustomTLSDomainsSkipAutomation(t *testing.T) {
+	present := writeCertFiles(t, "ok.example.com")
+	missing := t.TempDir()
+	for _, mode := range []string{"auto", "local"} {
+		p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", ExtraListenAddrs: []string{":50051"}, TLSMode: mode, TLSEmail: "ops@example.com"})
+		p.routes = []Route{
+			{Domain: "ok.example.com", Upstream: "a:1", TLS: "custom", CertDir: present},
+			{Domain: "gone.example.com", Upstream: "b:1", TLS: "custom", CertDir: missing},
+			{Domain: "gone.example.com", Upstream: "b:2", TLS: "custom", CertDir: missing, Path: "/x*"},
+			{Domain: "auto.example.com", Upstream: "c:1", TLS: mode},
+		}
+		cfg := parseConfig(t, p)
+		servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+		for _, name := range []string{"proxy", "proxy_extra"} {
+			ah := servers[name].(map[string]interface{})["automatic_https"].(map[string]interface{})
+			got, _ := json.Marshal(ah["skip_certificates"])
+			if string(got) != `["gone.example.com","ok.example.com"]` {
+				t.Errorf("%s/%s skip_certificates = %s, want both custom domains only", mode, name, got)
+			}
+		}
+		// No automation policy names a custom domain explicitly.
+		tlsApp, _ := cfg["apps"].(map[string]interface{})["tls"].(map[string]interface{})
+		raw, _ := json.Marshal(tlsApp["automation"])
+		for _, d := range []string{"gone.example.com", "ok.example.com"} {
+			if strings.Contains(string(raw), d) {
+				t.Errorf("%s: automation mentions custom domain %s: %s", mode, d, raw)
+			}
+		}
 	}
 }

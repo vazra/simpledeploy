@@ -19,7 +19,7 @@ func TestOrderRoutesPerDomain(t *testing.T) {
 	for _, r := range got {
 		ups = append(ups, r.Upstream)
 	}
-	want := []string{"grpc", "wsdeep", "ws", "h2c", "catchall", "b"}
+	want := []string{"grpc", "wsdeep", "h2c", "ws", "catchall", "b"} // equal-length paths tie-break lexically
 	if !reflect.DeepEqual(ups, want) {
 		t.Fatalf("order = %v, want %v", ups, want)
 	}
@@ -84,5 +84,31 @@ func TestReverseProxyHandlerTransport(t *testing.T) {
 	ups := h["upstreams"].([]interface{})
 	if ups[0].(map[string]interface{})["dial"] != "co:8001" {
 		t.Errorf("dial = %v", ups[0])
+	}
+}
+
+func TestOrderRoutesDuplicateKeepsFirstSeen(t *testing.T) {
+	in := []Route{
+		{Domain: "a.com", Upstream: "z-first", Protocol: "http", Path: "/x*"},
+		{Domain: "a.com", Upstream: "a-second", Protocol: "http", Path: "/x*"},
+	}
+	got := orderRoutes(in)
+	if got[0].Upstream != "z-first" {
+		t.Fatalf("order = %v, want first-seen upstream z-first first", got)
+	}
+}
+
+func TestOrderRoutesWildcardAfterExact(t *testing.T) {
+	got := orderRoutes([]Route{
+		{Domain: "*.a.com", Upstream: "w"},
+		{Domain: "z.a.com", Upstream: "z"},
+		{Domain: "b.a.com", Upstream: "b"},
+	})
+	var ups []string
+	for _, r := range got {
+		ups = append(ups, r.Upstream)
+	}
+	if !reflect.DeepEqual(ups, []string{"b", "z", "w"}) {
+		t.Fatalf("order = %v, want [b z w]", ups)
 	}
 }

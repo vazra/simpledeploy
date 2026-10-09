@@ -59,6 +59,7 @@ type Server struct {
 	docker            docker.Client
 	appsDir           string
 	reconciler        reconciler
+	proxyReloader     proxyReloader
 	lockout           *auth.LoginLockout
 	audit             *audit.Recorder
 	trustedProxies    []string

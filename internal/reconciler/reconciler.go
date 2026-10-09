@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -219,8 +220,16 @@ func (r *Reconciler) RefreshRoutes(ctx context.Context) error {
 }
 
 func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
+	// Iterate apps in slug order so route order (and the generated Caddy
+	// config) is deterministic across reloads.
+	slugs := make([]string, 0, len(apps))
+	for slug := range apps {
+		slugs = append(slugs, slug)
+	}
+	sort.Strings(slugs)
 	var routes []proxy.Route
-	for _, app := range apps {
+	for _, slug := range slugs {
+		app := apps[slug]
 		appRoutes, err := proxy.ResolveRoutes(app, r.resolver)
 		if err != nil {
 			continue

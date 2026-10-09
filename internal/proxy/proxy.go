@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
@@ -37,11 +40,16 @@ type CaddyProxy struct {
 	tlsMode          string
 	tlsEmail         string
 	dataDir          string
+
+	loadMu  sync.Mutex
+	lastKey []byte                   // config JSON + cert file fingerprint of the last successful load
+	load    func([]byte, bool) error // caddy.Load; replaceable in tests
 }
 
 // NewCaddyProxy creates a CaddyProxy from the given config.
 func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 	return &CaddyProxy{
+		load:             caddy.Load,
 		listenAddr:       cfg.ListenAddr,
 		extraListenAddrs: append([]string(nil), cfg.ExtraListenAddrs...),
 		httpListenAddr:   cfg.HTTPListenAddr,
@@ -80,38 +88,106 @@ func (c *CaddyProxy) SetRoutes(routes []Route) error {
 
 // Stop stops all Caddy instances.
 func (c *CaddyProxy) Stop() error {
+	c.loadMu.Lock()
+	c.lastKey = nil
+	c.loadMu.Unlock()
 	return caddy.Stop()
 }
 
 // BuildConfigJSON builds and returns the Caddy JSON config. Exported for testing.
 func (c *CaddyProxy) BuildConfigJSON() ([]byte, error) {
-	cfg := c.buildConfig()
-	return json.Marshal(cfg)
+	return json.Marshal(c.buildConfigFrom(c.snapshotRoutes()))
 }
 
-// reload builds the Caddy config and loads it.
+// snapshotRoutes returns a copy of the current routes.
+func (c *CaddyProxy) snapshotRoutes() []Route {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]Route(nil), c.routes...)
+}
+
+// ForceReload reloads Caddy with the current routes even if the generated
+// config is unchanged. Use after files referenced by the config change on
+// disk (e.g. a custom cert upload rewrites the same path).
+func (c *CaddyProxy) ForceReload() error {
+	return c.reloadWith(true)
+}
+
+// reload builds the Caddy config and loads it, skipping the load when the
+// config and the custom cert files it references are unchanged.
+//
+// Every caddy.Load is a full reload. On Linux, Caddy binds a fresh
+// SO_REUSEPORT socket per reload and closes the old one once the old server
+// starts its graceful shutdown; TCP connections the kernel already queued on
+// the old socket (accepted by the kernel, not yet by Caddy) are reset, which
+// clients see as "connection reset by peer" during the TLS handshake. Avoiding
+// no-op reloads (e.g. a redeploy that leaves routes unchanged) removes most of
+// that exposure. Hosts on Linux >= 5.14 can also set
+// net.ipv4.tcp_migrate_req=1 so the kernel migrates those queued connections
+// to the new socket.
 func (c *CaddyProxy) reload() error {
-	data, err := c.BuildConfigJSON()
+	return c.reloadWith(false)
+}
+
+func (c *CaddyProxy) reloadWith(force bool) error {
+	// Build under loadMu so concurrent SetRoutes calls cannot load an older
+	// snapshot after a newer one.
+	c.loadMu.Lock()
+	defer c.loadMu.Unlock()
+	// One snapshot for both the config and the cert fingerprint.
+	routes := c.snapshotRoutes()
+	data, err := json.Marshal(c.buildConfigFrom(routes))
 	if err != nil {
 		return err
 	}
-	return caddy.Load(data, true)
+	// The config only holds cert PATHS; fold file metadata into the key so a
+	// cert rewritten in place still triggers a reload.
+	key := append(append([]byte(nil), data...), certFingerprint(routes)...)
+	if !force && c.lastKey != nil && bytes.Equal(c.lastKey, key) {
+		return nil
+	}
+	if err := c.load(data, true); err != nil {
+		c.lastKey = nil
+		return err
+	}
+	c.lastKey = key
+	return nil
 }
 
-// buildConfig returns the Caddy config as a map.
-func (c *CaddyProxy) buildConfig() map[string]interface{} {
+// certFingerprint returns size+mtime for every custom cert/key file the
+// routes reference, in route order.
+func certFingerprint(routes []Route) []byte {
+	var b bytes.Buffer
+	seen := map[string]bool{}
+	for _, r := range orderRoutes(routes) {
+		if r.TLS != "custom" || r.CertDir == "" || seen[r.Domain] {
+			continue
+		}
+		seen[r.Domain] = true
+		for _, ext := range []string{".crt", ".key"} {
+			path := filepath.Join(r.CertDir, r.Domain+ext)
+			if fi, err := os.Stat(path); err == nil {
+				fmt.Fprintf(&b, "\n%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
+			} else {
+				fmt.Fprintf(&b, "\n%s|missing", path)
+			}
+		}
+	}
+	return b.Bytes()
+}
+
+// buildConfigFrom returns the Caddy config for routes as a map.
+func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 	// Build route entries.
 	var caddyRoutes []interface{}
-	c.mu.Lock()
-	routes := make([]Route, len(c.routes))
-	copy(routes, c.routes)
-	c.mu.Unlock()
 	routes = orderRoutes(routes)
 
 	// Collect custom TLS cert files and per-route local-TLS domains
 	var loadFiles []interface{}
 	var localTLSDomains []string
+	var customTLSDomains []string
 	seenCertDomains := map[string]bool{}
+	seenCustom := map[string]bool{}
 
 	for _, r := range routes {
 		if r.TLS == "local" {
@@ -149,13 +225,27 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 			"terminal": true,
 		})
 
+		if r.TLS == "custom" && !seenCustom[r.Domain] {
+			seenCustom[r.Domain] = true
+			customTLSDomains = append(customTLSDomains, r.Domain)
+		}
 		if r.TLS == "custom" && r.CertDir != "" && !seenCertDomains[r.Domain] {
 			seenCertDomains[r.Domain] = true
-			loadFiles = append(loadFiles, map[string]interface{}{
-				"certificate": filepath.Join(r.CertDir, r.Domain+".crt"),
-				"key":         filepath.Join(r.CertDir, r.Domain+".key"),
-				"tags":        []string{r.Domain},
-			})
+			crt := filepath.Join(r.CertDir, r.Domain+".crt")
+			key := filepath.Join(r.CertDir, r.Domain+".key")
+			// Caddy's file loader fails the whole config load on a missing
+			// file, which would block every later reload. Skip it; the domain
+			// is in skip_certificates, so it gets TLS errors (never an ACME
+			// or internal-CA cert) until a cert is uploaded.
+			if !fileExists(crt) || !fileExists(key) {
+				log.Printf("[proxy] WARNING: custom cert for %s missing (%s, %s); not loading it", r.Domain, crt, key)
+			} else {
+				loadFiles = append(loadFiles, map[string]interface{}{
+					"certificate": crt,
+					"key":         key,
+					"tags":        []string{r.Domain},
+				})
+			}
 		}
 	}
 
@@ -164,7 +254,7 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	}
 
 	server := map[string]interface{}{
-		"listen": append([]string{c.listenAddr}, c.extraListenAddrs...),
+		"listen": []string{c.listenAddr},
 		"routes": caddyRoutes,
 	}
 
@@ -188,22 +278,52 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		// The optional HTTPListenAddr block below covers that case when the
 		// user explicitly wants the redirect.
 		server["tls_connection_policies"] = []interface{}{map[string]interface{}{}}
-		server["automatic_https"] = map[string]interface{}{
+		ah := map[string]interface{}{
 			"disable_redirects": true,
 		}
+		// Custom-TLS domains are never managed by automation, even when the
+		// cert file is missing; otherwise Caddy would issue an ACME or
+		// internal-CA cert for them.
+		if len(customTLSDomains) > 0 {
+			ah["skip_certificates"] = append([]string(nil), customTLSDomains...)
+		}
+		server["automatic_https"] = ah
 	}
 
 	servers := map[string]interface{}{
 		"proxy": server,
 	}
 
+	// Extra listeners (e.g. :50051 for gRPC) run as a separate server with
+	// the same routes and TLS policy but no HTTP/3. If they shared the main
+	// server, its Alt-Svc/h3 state would be tied to long-lived h2 streams on
+	// the side port: during a reload the old server's QUIC listeners close
+	// while those streams keep it alive, and quic-go logs "no port can be
+	// announced" for every request. Certs come from the shared tls app cache.
+	if len(c.extraListenAddrs) > 0 {
+		// Deep copies so later edits to one server never leak into the other.
+		extra := map[string]interface{}{
+			"listen": append([]string(nil), c.extraListenAddrs...),
+			"routes": cloneJSONValue(caddyRoutes),
+		}
+		for _, k := range []string{"tls_connection_policies", "automatic_https"} {
+			if v, ok := server[k]; ok {
+				extra[k] = cloneJSONValue(v)
+			}
+		}
+		if p, ok := server["protocols"]; ok {
+			extra["protocols"] = p // TLS off: h1/h2/h2c, already no h3
+		} else {
+			extra["protocols"] = []string{"h1", "h2"}
+		}
+		servers["proxy_extra"] = extra
+	}
+
 	// Optional HTTP listener that 308-redirects every request to HTTPS. Only
 	// meaningful when the main server serves TLS.
+	// The TLS branch above already disabled Caddy's implicit :80 redirect so
+	// it doesn't race with ours.
 	if c.httpListenAddr != "" && c.tlsMode != "off" {
-		// Disable Caddy's implicit :80 redirect so it doesn't race with ours.
-		server["automatic_https"] = map[string]interface{}{
-			"disable_redirects": true,
-		}
 		servers["proxy_http"] = map[string]interface{}{
 			"listen": []string{c.httpListenAddr},
 			"routes": []interface{}{
@@ -322,4 +442,37 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	}
 
 	return cfg
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+// cloneJSONValue deep-copies the map/slice values used to build Caddy config.
+func cloneJSONValue(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[k] = cloneJSONValue(val)
+		}
+		return out
+	case map[string][]string:
+		out := make(map[string][]string, len(t))
+		for k, val := range t {
+			out[k] = append([]string(nil), val...)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(t))
+		for i, val := range t {
+			out[i] = cloneJSONValue(val)
+		}
+		return out
+	case []string:
+		return append([]string(nil), t...)
+	default:
+		return v
+	}
 }

@@ -109,7 +109,7 @@ git_sync:
 | `apps_dir` | string | `/etc/simpledeploy/apps` | Watched directory for compose files |
 | `listen_addr` | string | `:443` | Reverse proxy listen address (HTTPS) |
 | `http_listen_addr` | string | `:80` (when `tls.mode` is `auto` or `local`) | Plain-HTTP listener that 308-redirects to HTTPS. Set explicitly to `""` to disable. Ignored when `tls.mode: off`. |
-| `extra_listen_addrs` | list of string | `[]` | Additional `host:port` listeners for the HTTPS proxy server, e.g. `[":50051"]`. Every listener serves the same routes, TLS policies and certificates. Must not repeat `listen_addr`, `http_listen_addr` or each other. Open the ports in your firewall. |
+| `extra_listen_addrs` | list of string | `[]` | Additional `host:port` listeners for the HTTPS proxy server, e.g. `[":50051"]`. Every listener serves the same routes, TLS policies and certificates over HTTP/1.1 and HTTP/2 (no HTTP/3). Must not repeat `listen_addr`, `http_listen_addr` or each other. Open the ports (TCP) in your firewall. |
 | `management_port` | int | `8443` | Management API port |
 | `management_addr` | string | `127.0.0.1` | Management API bind address. Default keeps the dashboard local-only. Set to `""` (or `0.0.0.0`) to expose on every interface. |
 | `domain` | string | - | Management UI domain |
