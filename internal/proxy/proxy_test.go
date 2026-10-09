@@ -2,7 +2,10 @@ package proxy
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 // --- CaddyProxy config builder tests ---
@@ -553,7 +556,7 @@ func TestBuildConfigCustomCertLoadedOncePerDomain(t *testing.T) {
 	}
 }
 
-func TestBuildConfigExtraListenAddrsShareHTTPSServer(t *testing.T) {
+func TestBuildConfigExtraListenAddrsSeparateServerNoH3(t *testing.T) {
 	extra := []string{":50051"}
 	p := NewCaddyProxy(CaddyConfig{
 		ListenAddr:       ":443",
@@ -569,48 +572,50 @@ func TestBuildConfigExtraListenAddrsShareHTTPSServer(t *testing.T) {
 
 	cfg := parseConfig(t, p)
 	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
-	if len(servers) != 2 {
-		t.Fatalf("servers = %d, want 2 (proxy + proxy_http, no separate server for extras)", len(servers))
+	if len(servers) != 3 {
+		t.Fatalf("servers = %d, want 3 (proxy, proxy_extra, proxy_http)", len(servers))
 	}
 	mainSrv := servers["proxy"].(map[string]interface{})
-	listen := mainSrv["listen"].([]interface{})
-	if len(listen) != 2 || listen[0].(string) != ":443" || listen[1].(string) != ":50051" {
-		t.Errorf("proxy listen = %v, want [:443 :50051]", listen)
+	if listen := mainSrv["listen"].([]interface{}); len(listen) != 1 || listen[0].(string) != ":443" {
+		t.Errorf("proxy listen = %v, want [:443]", listen)
 	}
-	if _, ok := mainSrv["tls_connection_policies"]; !ok {
-		t.Error("proxy server must keep tls_connection_policies so the extra listener terminates TLS")
+	if _, ok := mainSrv["protocols"]; ok {
+		t.Error("proxy server protocols must stay default so :443 keeps h3")
 	}
-	if mainSrv["automatic_https"].(map[string]interface{})["disable_redirects"] != true {
-		t.Error("proxy server must keep automatic_https.disable_redirects=true")
+	extraSrv := servers["proxy_extra"].(map[string]interface{})
+	if listen := extraSrv["listen"].([]interface{}); len(listen) != 1 || listen[0].(string) != ":50051" {
+		t.Errorf("proxy_extra listen = %v, want [:50051]", listen)
 	}
-	if len(mainSrv["routes"].([]interface{})) != 1 {
-		t.Errorf("proxy routes = %d, want 1", len(mainSrv["routes"].([]interface{})))
+	if got, _ := json.Marshal(extraSrv["protocols"]); string(got) != `["h1","h2"]` {
+		t.Errorf("proxy_extra protocols = %s, want [\"h1\",\"h2\"]", got)
+	}
+	for _, k := range []string{"routes", "tls_connection_policies", "automatic_https"} {
+		a, _ := json.Marshal(mainSrv[k])
+		b, _ := json.Marshal(extraSrv[k])
+		if mainSrv[k] == nil || string(a) != string(b) {
+			t.Errorf("proxy_extra %s = %s, want same as proxy %s", k, b, a)
+		}
 	}
 	httpListen := servers["proxy_http"].(map[string]interface{})["listen"].([]interface{})
 	if len(httpListen) != 1 || httpListen[0].(string) != ":80" {
 		t.Errorf("proxy_http listen = %v, want [:80]", httpListen)
 	}
-	// HTTP/3 only on the main listener; extras serve h1/h2.
-	lp, ok := mainSrv["listen_protocols"].([]interface{})
-	if !ok || len(lp) != 2 {
-		t.Fatalf("listen_protocols = %v, want 2 entries", mainSrv["listen_protocols"])
-	}
-	if lp[0] != nil {
-		t.Errorf("listen_protocols[0] = %v, want null (server default)", lp[0])
-	}
-	if got, _ := json.Marshal(lp[1]); string(got) != `["h1","h2"]` {
-		t.Errorf("listen_protocols[1] = %s, want [\"h1\",\"h2\"]", got)
-	}
-	if _, ok := mainSrv["protocols"]; ok {
-		t.Error("proxy server protocols must stay default so :443 keeps h3")
+}
+
+func TestBuildConfigExtraListenAddrsTLSOffKeepsH2C(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":80", ExtraListenAddrs: []string{":50051"}, TLSMode: "off"})
+	servers := parseConfig(t, p)["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	extraSrv := servers["proxy_extra"].(map[string]interface{})
+	if got, _ := json.Marshal(extraSrv["protocols"]); string(got) != `["h1","h2","h2c"]` {
+		t.Errorf("proxy_extra protocols = %s, want h1,h2,h2c", got)
 	}
 }
 
-func TestBuildConfigNoListenProtocolsWithoutExtras(t *testing.T) {
+func TestBuildConfigNoExtraServerWithoutExtras(t *testing.T) {
 	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
-	server := getServer(t, parseConfig(t, p))
-	if _, ok := server["listen_protocols"]; ok {
-		t.Error("listen_protocols must be unset without extra listeners")
+	servers := parseConfig(t, p)["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	if _, ok := servers["proxy_extra"]; ok {
+		t.Error("proxy_extra must not exist without extra listeners")
 	}
 }
 
@@ -659,5 +664,84 @@ func TestBuildConfigNoExtraListenAddrs(t *testing.T) {
 	listen := server["listen"].([]interface{})
 	if len(listen) != 1 || listen[0].(string) != ":443" {
 		t.Errorf("listen = %v, want [:443]", listen)
+	}
+}
+
+// countingLoad replaces caddy.Load with a counter.
+func countingLoad(p *CaddyProxy) *int {
+	n := 0
+	p.load = func([]byte, bool) error { n++; return nil }
+	return &n
+}
+
+func TestReloadSkipsIdenticalConfig(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
+	n := countingLoad(p)
+	a := Route{AppSlug: "a", Domain: "a.test", Upstream: "a:1", TLS: "auto"}
+	b := Route{AppSlug: "b", Domain: "b.test", Upstream: "b:1", TLS: "auto"}
+	steps := []struct {
+		routes []Route
+		want   int
+	}{
+		{[]Route{a, b}, 1},
+		{[]Route{b, a}, 1}, // same routes, other order: skipped
+		{[]Route{a}, 2},    // changed: reloads
+	}
+	for i, st := range steps {
+		if err := p.SetRoutes(st.routes); err != nil {
+			t.Fatal(err)
+		}
+		if *n != st.want {
+			t.Fatalf("step %d: loads = %d, want %d", i, *n, st.want)
+		}
+	}
+	if err := p.ForceReload(); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 3 {
+		t.Fatalf("ForceReload: loads = %d, want 3", *n)
+	}
+}
+
+func TestReloadOnCustomCertRewrite(t *testing.T) {
+	dir := t.TempDir()
+	crt := filepath.Join(dir, "c.test.crt")
+	key := filepath.Join(dir, "c.test.key")
+	for _, f := range []string{crt, key} {
+		if err := os.WriteFile(f, []byte("v1"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
+	n := countingLoad(p)
+	routes := []Route{{AppSlug: "c", Domain: "c.test", Upstream: "c:1", TLS: "custom", CertDir: dir}}
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 1 {
+		t.Fatalf("unchanged cert: loads = %d, want 1", *n)
+	}
+	// Rewrite the cert in place (same path, new content and mtime).
+	if err := os.WriteFile(crt, []byte("v2-longer"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	_ = os.Chtimes(crt, future, future)
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 2 {
+		t.Fatalf("rewritten cert: loads = %d, want 2", *n)
+	}
+	// Deleting the cert also changes the key.
+	_ = os.Remove(crt)
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	if *n != 3 {
+		t.Fatalf("deleted cert: loads = %d, want 3", *n)
 	}
 }

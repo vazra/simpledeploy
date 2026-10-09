@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
@@ -39,13 +40,15 @@ type CaddyProxy struct {
 	tlsEmail         string
 	dataDir          string
 
-	loadMu     sync.Mutex
-	lastLoaded []byte // last config successfully passed to caddy.Load
+	loadMu  sync.Mutex
+	lastKey []byte                   // config JSON + cert file fingerprint of the last successful load
+	load    func([]byte, bool) error // caddy.Load; replaceable in tests
 }
 
 // NewCaddyProxy creates a CaddyProxy from the given config.
 func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 	return &CaddyProxy{
+		load:             caddy.Load,
 		listenAddr:       cfg.ListenAddr,
 		extraListenAddrs: append([]string(nil), cfg.ExtraListenAddrs...),
 		httpListenAddr:   cfg.HTTPListenAddr,
@@ -85,7 +88,7 @@ func (c *CaddyProxy) SetRoutes(routes []Route) error {
 // Stop stops all Caddy instances.
 func (c *CaddyProxy) Stop() error {
 	c.loadMu.Lock()
-	c.lastLoaded = nil
+	c.lastKey = nil
 	c.loadMu.Unlock()
 	return caddy.Stop()
 }
@@ -96,8 +99,15 @@ func (c *CaddyProxy) BuildConfigJSON() ([]byte, error) {
 	return json.Marshal(cfg)
 }
 
+// ForceReload reloads Caddy with the current routes even if the generated
+// config is unchanged. Use after files referenced by the config change on
+// disk (e.g. a custom cert upload rewrites the same path).
+func (c *CaddyProxy) ForceReload() error {
+	return c.reloadWith(true)
+}
+
 // reload builds the Caddy config and loads it, skipping the load when the
-// config is byte-identical to the last one loaded.
+// config and the custom cert files it references are unchanged.
 //
 // Every caddy.Load is a full reload. On Linux, Caddy binds a fresh
 // SO_REUSEPORT socket per reload and closes the old one once the old server
@@ -109,6 +119,10 @@ func (c *CaddyProxy) BuildConfigJSON() ([]byte, error) {
 // net.ipv4.tcp_migrate_req=1 so the kernel migrates those queued connections
 // to the new socket.
 func (c *CaddyProxy) reload() error {
+	return c.reloadWith(false)
+}
+
+func (c *CaddyProxy) reloadWith(force bool) error {
 	// Build under loadMu so concurrent SetRoutes calls cannot load an older
 	// snapshot after a newer one.
 	c.loadMu.Lock()
@@ -117,15 +131,44 @@ func (c *CaddyProxy) reload() error {
 	if err != nil {
 		return err
 	}
-	if c.lastLoaded != nil && bytes.Equal(c.lastLoaded, data) {
+	// The config only holds cert PATHS; fold file metadata into the key so a
+	// cert rewritten in place still triggers a reload.
+	key := append(append([]byte(nil), data...), c.certFingerprint()...)
+	if !force && c.lastKey != nil && bytes.Equal(c.lastKey, key) {
 		return nil
 	}
-	if err := caddy.Load(data, true); err != nil {
-		c.lastLoaded = nil
+	if err := c.load(data, true); err != nil {
+		c.lastKey = nil
 		return err
 	}
-	c.lastLoaded = data
+	c.lastKey = key
 	return nil
+}
+
+// certFingerprint returns size+mtime for every custom cert/key file the
+// current routes reference, in route order.
+func (c *CaddyProxy) certFingerprint() []byte {
+	c.mu.Lock()
+	routes := make([]Route, len(c.routes))
+	copy(routes, c.routes)
+	c.mu.Unlock()
+	var b bytes.Buffer
+	seen := map[string]bool{}
+	for _, r := range orderRoutes(routes) {
+		if r.TLS != "custom" || r.CertDir == "" || seen[r.Domain] {
+			continue
+		}
+		seen[r.Domain] = true
+		for _, ext := range []string{".crt", ".key"} {
+			path := filepath.Join(r.CertDir, r.Domain+ext)
+			if fi, err := os.Stat(path); err == nil {
+				fmt.Fprintf(&b, "\n%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
+			} else {
+				fmt.Fprintf(&b, "\n%s|missing", path)
+			}
+		}
+	}
+	return b.Bytes()
 }
 
 // buildConfig returns the Caddy config as a map.
@@ -194,7 +237,7 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	}
 
 	server := map[string]interface{}{
-		"listen": append([]string{c.listenAddr}, c.extraListenAddrs...),
+		"listen": []string{c.listenAddr},
 		"routes": caddyRoutes,
 	}
 
@@ -221,21 +264,34 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		server["automatic_https"] = map[string]interface{}{
 			"disable_redirects": true,
 		}
-		// Extra listeners (e.g. :50051 for gRPC) serve h1/h2 only. HTTP/3
-		// stays on the main listener; advertising/serving QUIC on side ports
-		// is not useful and Alt-Svc is announced for the main port only.
-		if len(c.extraListenAddrs) > 0 {
-			lp := make([]interface{}, 0, 1+len(c.extraListenAddrs))
-			lp = append(lp, nil) // main listener: server default protocols
-			for range c.extraListenAddrs {
-				lp = append(lp, []string{"h1", "h2"})
-			}
-			server["listen_protocols"] = lp
-		}
 	}
 
 	servers := map[string]interface{}{
 		"proxy": server,
+	}
+
+	// Extra listeners (e.g. :50051 for gRPC) run as a separate server with
+	// the same routes and TLS policy but no HTTP/3. If they shared the main
+	// server, its Alt-Svc/h3 state would be tied to long-lived h2 streams on
+	// the side port: during a reload the old server's QUIC listeners close
+	// while those streams keep it alive, and quic-go logs "no port can be
+	// announced" for every request. Certs come from the shared tls app cache.
+	if len(c.extraListenAddrs) > 0 {
+		extra := map[string]interface{}{
+			"listen": append([]string(nil), c.extraListenAddrs...),
+			"routes": caddyRoutes,
+		}
+		for _, k := range []string{"tls_connection_policies", "automatic_https"} {
+			if v, ok := server[k]; ok {
+				extra[k] = v
+			}
+		}
+		if p, ok := server["protocols"]; ok {
+			extra["protocols"] = p // TLS off: h1/h2/h2c, already no h3
+		} else {
+			extra["protocols"] = []string{"h1", "h2"}
+		}
+		servers["proxy_extra"] = extra
 	}
 
 	// Optional HTTP listener that 308-redirects every request to HTTPS. Only

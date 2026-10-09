@@ -29,9 +29,9 @@ func routeRank(r Route) int {
 // each domain, sorted by routeRank and then longest path first. Caddy
 // evaluates routes top to bottom and every route is terminal, so the most
 // specific matcher must come first. Domains are sorted (exact hosts before
-// wildcards, then lexically) and ties are broken by path and upstream so the
-// output is deterministic regardless of input order (callers build routes
-// from map iteration). A stable config lets SetRoutes skip no-op reloads.
+// wildcards, then lexically) and equal-length paths lexically; exact duplicates
+// keep input order, which callers make deterministic (apps sorted by slug,
+// endpoints by label index). A stable config lets SetRoutes skip no-op reloads.
 func orderRoutes(in []Route) []Route {
 	groups := map[string][]Route{}
 	var domains []string
@@ -59,10 +59,8 @@ func orderRoutes(in []Route) []Route {
 			if len(g[i].Path) != len(g[j].Path) {
 				return len(g[i].Path) > len(g[j].Path)
 			}
-			if g[i].Path != g[j].Path {
-				return g[i].Path < g[j].Path
-			}
-			return g[i].Upstream < g[j].Upstream
+			// Same domain+path: stable sort keeps first-seen (label/app order).
+			return g[i].Path < g[j].Path
 		})
 		out = append(out, g...)
 	}

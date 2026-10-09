@@ -48,7 +48,7 @@ Deploy or redeploy. The endpoint will return TLS errors until the cert is upload
 1. Open the app in the dashboard.
 2. Endpoints tab, expand `myapp.example.com`.
 3. Click **Upload certificate**, paste the cert and key as PEM.
-4. Save. The endpoint switches to the new cert immediately.
+4. Save. SimpleDeploy reloads the proxy and the endpoint serves the new cert right away.
 
 </Steps>
 </TabItem>
@@ -67,13 +67,15 @@ curl -X PUT https://manage.example.com/api/apps/myapp/certs/myapp.example.com \
 
 ## Replace or delete
 
-Re-uploading replaces the old cert atomically.
+Re-uploading overwrites the cert and key files and forces a proxy reload, so new TLS handshakes use the new cert. Connections already open keep the old cert until they reconnect. If the reload fails (for example the key does not match the cert), the API returns an error and the proxy keeps serving its previous config.
 
 ```bash
 curl -X DELETE https://manage.example.com/api/apps/myapp/certs/myapp.example.com \
   -H "Authorization: Bearer $SD_API_KEY"
 ```
 
-After deletion you must either upload a new cert or switch the endpoint back to `auto`.
+Deleting also forces a proxy reload. After deletion you must either upload a new cert or switch the endpoint back to `auto`.
+
+Cert files edited directly on disk (in the app's `certs/` directory) are picked up on the next route refresh or deploy, since the proxy compares each cert file's size and modification time before deciding to reload.
 
 See also: [TLS and HTTPS](/guides/tls/).

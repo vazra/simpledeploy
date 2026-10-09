@@ -776,6 +776,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetDocker(dc)
 	srv.SetAppsDir(cfg.AppsDir)
 	srv.SetReconciler(rec)
+	srv.SetProxyReloader(caddyProxy)
 	srv.SetLockout(lockout)
 	loginReq := cfg.LoginRateLimit.Requests
 	if loginReq <= 0 {

@@ -692,3 +692,36 @@ func TestAuditLifecycleRemoved(t *testing.T) {
 		t.Errorf("app_slug = %q, want rmapp", e.AppSlug)
 	}
 }
+
+type countingReloader struct{ n int }
+
+func (c *countingReloader) ForceReload() error { c.n++; return nil }
+
+func TestCertUploadDeleteForceProxyReload(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+	rl := &countingReloader{}
+	srv.SetProxyReloader(rl)
+
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertApp(&store.App{Name: "certapp", Slug: "certapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	certPEM, keyPEM := genTestCertPEM(t)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodPut, "/api/apps/certapp/certs/foo.example.com",
+		map[string]string{"cert": certPEM, "key": keyPEM}, cookie))
+	if w.Code != http.StatusOK || rl.n != 1 {
+		t.Fatalf("upload: status=%d reloads=%d, want 200 and 1", w.Code, rl.n)
+	}
+
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodDelete, "/api/apps/certapp/certs/foo.example.com", nil, cookie))
+	if w.Code != http.StatusOK || rl.n != 2 {
+		t.Fatalf("delete: status=%d reloads=%d, want 200 and 2", w.Code, rl.n)
+	}
+}

@@ -231,3 +231,77 @@ func TestCaddyProxyGRPCWebStreamingFlushesThroughCatchAll(t *testing.T) {
 		t.Fatalf("rest = %q, want frame2", rest)
 	}
 }
+
+// TestCaddyProxyExtraListenerTLSNoH3 runs the extra listener as its own
+// server under the internal CA: it must negotiate h2, serve gRPC, and never
+// open a QUIC (h3) socket.
+func TestCaddyProxyExtraListenerTLSNoH3(t *testing.T) {
+	gl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("grpc listen: %v", err)
+	}
+	gs := grpc.NewServer()
+	healthpb.RegisterHealthServer(gs, health.NewServer())
+	go func() { _ = gs.Serve(gl) }()
+	t.Cleanup(gs.Stop)
+
+	// Unique domain: Caddy's cert cache is process-wide, and another test
+	// already issued a demo.test leaf from a different internal CA.
+	mainAddr, extraAddr := freeAddr(t), freeAddr(t)
+	dataDir := caddyDataDir(t)
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: mainAddr, ExtraListenAddrs: []string{extraAddr}, TLSMode: "local", DataDir: dataDir})
+	routes := []Route{{AppSlug: "demo", Domain: "extra-h3.test", Upstream: gl.Addr().String(), TLS: "local", Protocol: "grpc"}}
+	loadWithoutTrustInstall(t, p, routes)
+
+	raw, _ := p.BuildConfigJSON()
+	var cfg map[string]interface{}
+	_ = json.Unmarshal(raw, &cfg)
+	extraSrv := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})["proxy_extra"].(map[string]interface{})
+	if got, _ := json.Marshal(extraSrv["protocols"]); string(got) != `["h1","h2"]` {
+		t.Fatalf("proxy_extra protocols = %s, want h1,h2", got)
+	}
+
+	pool := waitForLocalRoot(t, dataDir)
+	tlsCfg := &tls.Config{RootCAs: pool, ServerName: "extra-h3.test", MinVersion: tls.VersionTLS12}
+
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		c := tlsCfg.Clone()
+		c.NextProtos = []string{"h2", "http/1.1"}
+		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 2 * time.Second}, "tcp", extraAddr, c)
+		if err == nil {
+			proto := conn.ConnectionState().NegotiatedProtocol
+			conn.Close()
+			if proto != "h2" {
+				t.Fatalf("extra listener ALPN = %q, want h2", proto)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("TLS handshake on extra listener never succeeded: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := grpc.NewClient(extraAddr,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
+		grpc.WithAuthority("extra-h3.test"),
+	)
+	if err != nil {
+		t.Fatalf("grpc client: %v", err)
+	}
+	defer conn.Close()
+	resp, err := healthpb.NewHealthClient(conn).Check(ctx, &healthpb.HealthCheckRequest{})
+	if err != nil || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("gRPC ping via extra listener = %v, %v; want SERVING", resp, err)
+	}
+
+	// No QUIC socket on the extra port: binding UDP there must succeed.
+	pc, err := net.ListenPacket("udp", extraAddr)
+	if err != nil {
+		t.Fatalf("extra listener UDP port in use (h3 enabled?): %v", err)
+	}
+	pc.Close()
+}

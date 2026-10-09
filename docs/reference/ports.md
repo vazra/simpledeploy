@@ -13,7 +13,7 @@ SimpleDeploy listens on three TCP ports by default. App container ports are boun
 | `443` | Caddy | HTTPS reverse proxy for all apps with `simpledeploy.domain`. | Yes |
 | `8443` | management API | Dashboard, REST API, WebSockets. | Optional |
 
-The proxy listen address comes from `listen_addr` in `config.yaml` (default `:443`). Caddy automatically opens `:80` when `tls.mode` is `auto` or `local` (via `http_listen_addr`, defaulted to `:80`) so it can solve ACME challenges and 308-redirect plaintext traffic to HTTPS. Add more HTTPS ports with `extra_listen_addrs` (for example `[":50051"]` for gRPC clients that default to that port); they serve exactly the same routes and certificates as `listen_addr`.
+The proxy listen address comes from `listen_addr` in `config.yaml` (default `:443`). Caddy automatically opens `:80` when `tls.mode` is `auto` or `local` (via `http_listen_addr`, defaulted to `:80`) so it can solve ACME challenges and 308-redirect plaintext traffic to HTTPS. Add more HTTPS ports with `extra_listen_addrs` (for example `[":50051"]` for gRPC clients that default to that port); they serve exactly the same routes and certificates as `listen_addr`, over TCP only (HTTP/1.1 and HTTP/2, no HTTP/3).
 
 The management dashboard listens on `management_port` (default `8443`) bound to `management_addr` (default `127.0.0.1`). With the default bind, it is reachable only from the host itself; route external traffic to it through Caddy under a `manage.<domain>` route, or set `management_addr: ""` to expose every interface (legacy behavior, plain HTTP).
 

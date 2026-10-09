@@ -86,3 +86,29 @@ func TestReverseProxyHandlerTransport(t *testing.T) {
 		t.Errorf("dial = %v", ups[0])
 	}
 }
+
+func TestOrderRoutesDuplicateKeepsFirstSeen(t *testing.T) {
+	in := []Route{
+		{Domain: "a.com", Upstream: "z-first", Protocol: "http", Path: "/x*"},
+		{Domain: "a.com", Upstream: "a-second", Protocol: "http", Path: "/x*"},
+	}
+	got := orderRoutes(in)
+	if got[0].Upstream != "z-first" {
+		t.Fatalf("order = %v, want first-seen upstream z-first first", got)
+	}
+}
+
+func TestOrderRoutesWildcardAfterExact(t *testing.T) {
+	got := orderRoutes([]Route{
+		{Domain: "*.a.com", Upstream: "w"},
+		{Domain: "z.a.com", Upstream: "z"},
+		{Domain: "b.a.com", Upstream: "b"},
+	})
+	var ups []string
+	for _, r := range got {
+		ups = append(ups, r.Upstream)
+	}
+	if !reflect.DeepEqual(ups, []string{"b", "z", "w"}) {
+		t.Fatalf("order = %v, want [b z w]", ups)
+	}
+}
