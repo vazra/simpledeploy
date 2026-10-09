@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -37,6 +38,9 @@ type CaddyProxy struct {
 	tlsMode          string
 	tlsEmail         string
 	dataDir          string
+
+	loadMu     sync.Mutex
+	lastLoaded []byte // last config successfully passed to caddy.Load
 }
 
 // NewCaddyProxy creates a CaddyProxy from the given config.
@@ -80,6 +84,9 @@ func (c *CaddyProxy) SetRoutes(routes []Route) error {
 
 // Stop stops all Caddy instances.
 func (c *CaddyProxy) Stop() error {
+	c.loadMu.Lock()
+	c.lastLoaded = nil
+	c.loadMu.Unlock()
 	return caddy.Stop()
 }
 
@@ -89,13 +96,36 @@ func (c *CaddyProxy) BuildConfigJSON() ([]byte, error) {
 	return json.Marshal(cfg)
 }
 
-// reload builds the Caddy config and loads it.
+// reload builds the Caddy config and loads it, skipping the load when the
+// config is byte-identical to the last one loaded.
+//
+// Every caddy.Load is a full reload. On Linux, Caddy binds a fresh
+// SO_REUSEPORT socket per reload and closes the old one once the old server
+// starts its graceful shutdown; TCP connections the kernel already queued on
+// the old socket (accepted by the kernel, not yet by Caddy) are reset, which
+// clients see as "connection reset by peer" during the TLS handshake. Avoiding
+// no-op reloads (e.g. a redeploy that leaves routes unchanged) removes most of
+// that exposure. Hosts on Linux >= 5.14 can also set
+// net.ipv4.tcp_migrate_req=1 so the kernel migrates those queued connections
+// to the new socket.
 func (c *CaddyProxy) reload() error {
+	// Build under loadMu so concurrent SetRoutes calls cannot load an older
+	// snapshot after a newer one.
+	c.loadMu.Lock()
+	defer c.loadMu.Unlock()
 	data, err := c.BuildConfigJSON()
 	if err != nil {
 		return err
 	}
-	return caddy.Load(data, true)
+	if c.lastLoaded != nil && bytes.Equal(c.lastLoaded, data) {
+		return nil
+	}
+	if err := caddy.Load(data, true); err != nil {
+		c.lastLoaded = nil
+		return err
+	}
+	c.lastLoaded = data
+	return nil
 }
 
 // buildConfig returns the Caddy config as a map.
@@ -190,6 +220,17 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 		server["tls_connection_policies"] = []interface{}{map[string]interface{}{}}
 		server["automatic_https"] = map[string]interface{}{
 			"disable_redirects": true,
+		}
+		// Extra listeners (e.g. :50051 for gRPC) serve h1/h2 only. HTTP/3
+		// stays on the main listener; advertising/serving QUIC on side ports
+		// is not useful and Alt-Svc is announced for the main port only.
+		if len(c.extraListenAddrs) > 0 {
+			lp := make([]interface{}, 0, 1+len(c.extraListenAddrs))
+			lp = append(lp, nil) // main listener: server default protocols
+			for range c.extraListenAddrs {
+				lp = append(lp, []string{"h1", "h2"})
+			}
+			server["listen_protocols"] = lp
 		}
 	}
 

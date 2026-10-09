@@ -19,7 +19,7 @@ func TestOrderRoutesPerDomain(t *testing.T) {
 	for _, r := range got {
 		ups = append(ups, r.Upstream)
 	}
-	want := []string{"grpc", "wsdeep", "ws", "h2c", "catchall", "b"}
+	want := []string{"grpc", "wsdeep", "h2c", "ws", "catchall", "b"} // equal-length paths tie-break lexically
 	if !reflect.DeepEqual(ups, want) {
 		t.Fatalf("order = %v, want %v", ups, want)
 	}

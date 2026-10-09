@@ -11,7 +11,7 @@ Caddy runs in-process as a library. There is no Caddyfile. All config is JSON, b
 2. The reconciler calls `ResolveRoutes(app, resolver)` for each app and collects the routes. The resolver (`DockerResolver` in [/internal/proxy/resolver.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/resolver.go)) answers `<service>:<port>` upstreams by looking up the running container's IP on the `simpledeploy-public` network via Docker API; host-port-backed endpoints skip the resolver entirely and resolve to `localhost:<host_port>`.
 3. The reconciler calls `SetRoutes(routes)` with the assembled table.
 4. `SetRoutes` validates every domain against `^[a-zA-Z0-9][a-zA-Z0-9.*-]*$`, registers any per-domain rate-limit and IP-allowlist configs into the package-level registries, then calls `reload()`.
-5. `reload()` runs `buildConfig()` to produce the full JSON, marshals it, and calls `caddy.Load(data, true)`. Caddy hot-reloads in-place; in-flight requests complete on the old config, new requests use the new one.
+5. `reload()` runs `buildConfig()` to produce the full JSON, marshals it, and calls `caddy.Load(data, true)` unless the JSON is byte-identical to the last loaded config (route order is deterministic, so no-op redeploys skip the reload). Caddy hot-reloads in-place; in-flight requests complete on the old config, new requests use the new one. On Linux each reload binds a new `SO_REUSEPORT` socket and closes the old one, so connections queued on the old socket but not yet accepted are reset (`curl: (35) ... Connection reset by peer`). Set `net.ipv4.tcp_migrate_req=1` (kernel 5.14+) to have the kernel migrate them instead.
 
 `Stop()` calls `caddy.Stop()`. The admin endpoint is always disabled (`admin.disabled: true`); the only way to change config is via this code path.
 
@@ -26,7 +26,7 @@ For each `Route`:
 - A handler chain in this exact order: `simpledeploy_ipaccess`, `simpledeploy_ratelimit`, `simpledeploy_metrics`, `headers`, then `reverse_proxy` to `r.Upstream`. For `h2c`/`grpc` routes `reverse_proxy` gets `transport: {protocol: http, versions: [h2c]}` and `flush_interval: -1`.
 - If TLS mode is `custom`, append a load-files entry (once per domain) pointing at `<app_dir>/certs/<domain>.crt` and `.key` with `tags: [domain]`.
 - When the listener is plain HTTP (`tls.mode: off` and no per-route `local`), the server sets `protocols: [h1, h2, h2c]` so gRPC clients can use prior-knowledge h2c.
-- The `proxy` server's `listen` is `listen_addr` followed by every `extra_listen_addrs` entry, so all listeners share routes, TLS connection policies and certificates.
+- The `proxy` server's `listen` is `listen_addr` followed by every `extra_listen_addrs` entry, so all listeners share routes, TLS connection policies and certificates. `listen_protocols` limits extra listeners to `h1`/`h2`; HTTP/3 stays on `listen_addr` only.
 
 The whole thing is then assembled into a single HTTP server listening on the configured `listenAddr` (typically `:443`).
 

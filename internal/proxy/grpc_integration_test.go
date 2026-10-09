@@ -241,3 +241,34 @@ func TestCaddyProxyExtraListenAddrServesSameRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestCaddyProxySkipsNoopReload(t *testing.T) {
+	addr := freeAddr(t)
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: addr, TLSMode: "off", DataDir: caddyDataDir(t)})
+	routes := []Route{
+		{AppSlug: "a", Domain: "a.test", Upstream: "127.0.0.1:1", TLS: "off", Protocol: "http"},
+		{AppSlug: "b", Domain: "b.test", Upstream: "127.0.0.1:2", TLS: "off", Protocol: "http"},
+	}
+	if err := p.SetRoutes(routes); err != nil {
+		t.Fatalf("SetRoutes: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Stop() })
+	first := p.lastLoaded
+	if first == nil {
+		t.Fatal("lastLoaded not recorded")
+	}
+	// Same routes, different order: must not reload.
+	if err := p.SetRoutes([]Route{routes[1], routes[0]}); err != nil {
+		t.Fatalf("SetRoutes: %v", err)
+	}
+	if &p.lastLoaded[0] != &first[0] {
+		t.Error("identical config triggered a reload")
+	}
+	// Changed routes: must reload.
+	if err := p.SetRoutes(routes[:1]); err != nil {
+		t.Fatalf("SetRoutes: %v", err)
+	}
+	if &p.lastLoaded[0] == &first[0] {
+		t.Error("changed config did not reload")
+	}
+}

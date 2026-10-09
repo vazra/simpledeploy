@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
@@ -24,10 +25,13 @@ func routeRank(r Route) int {
 	}
 }
 
-// orderRoutes returns a new slice with routes grouped by domain (domains in
-// first-seen order) and, inside each domain, sorted by routeRank and then
-// longest path first. Caddy evaluates routes top to bottom and every route
-// is terminal, so the most specific matcher must come first.
+// orderRoutes returns a new slice with routes grouped by domain and, inside
+// each domain, sorted by routeRank and then longest path first. Caddy
+// evaluates routes top to bottom and every route is terminal, so the most
+// specific matcher must come first. Domains are sorted (exact hosts before
+// wildcards, then lexically) and ties are broken by path and upstream so the
+// output is deterministic regardless of input order (callers build routes
+// from map iteration). A stable config lets SetRoutes skip no-op reloads.
 func orderRoutes(in []Route) []Route {
 	groups := map[string][]Route{}
 	var domains []string
@@ -38,6 +42,13 @@ func orderRoutes(in []Route) []Route {
 		groups[r.Domain] = append(groups[r.Domain], r)
 	}
 	out := make([]Route, 0, len(in))
+	sort.Slice(domains, func(i, j int) bool {
+		wi, wj := strings.Contains(domains[i], "*"), strings.Contains(domains[j], "*")
+		if wi != wj {
+			return !wi
+		}
+		return domains[i] < domains[j]
+	})
 	for _, d := range domains {
 		g := groups[d]
 		sort.SliceStable(g, func(i, j int) bool {
@@ -45,7 +56,13 @@ func orderRoutes(in []Route) []Route {
 			if ri != rj {
 				return ri < rj
 			}
-			return len(g[i].Path) > len(g[j].Path)
+			if len(g[i].Path) != len(g[j].Path) {
+				return len(g[i].Path) > len(g[j].Path)
+			}
+			if g[i].Path != g[j].Path {
+				return g[i].Path < g[j].Path
+			}
+			return g[i].Upstream < g[j].Upstream
 		})
 		out = append(out, g...)
 	}

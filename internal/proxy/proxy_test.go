@@ -590,6 +590,67 @@ func TestBuildConfigExtraListenAddrsShareHTTPSServer(t *testing.T) {
 	if len(httpListen) != 1 || httpListen[0].(string) != ":80" {
 		t.Errorf("proxy_http listen = %v, want [:80]", httpListen)
 	}
+	// HTTP/3 only on the main listener; extras serve h1/h2.
+	lp, ok := mainSrv["listen_protocols"].([]interface{})
+	if !ok || len(lp) != 2 {
+		t.Fatalf("listen_protocols = %v, want 2 entries", mainSrv["listen_protocols"])
+	}
+	if lp[0] != nil {
+		t.Errorf("listen_protocols[0] = %v, want null (server default)", lp[0])
+	}
+	if got, _ := json.Marshal(lp[1]); string(got) != `["h1","h2"]` {
+		t.Errorf("listen_protocols[1] = %s, want [\"h1\",\"h2\"]", got)
+	}
+	if _, ok := mainSrv["protocols"]; ok {
+		t.Error("proxy server protocols must stay default so :443 keeps h3")
+	}
+}
+
+func TestBuildConfigNoListenProtocolsWithoutExtras(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "auto"})
+	server := getServer(t, parseConfig(t, p))
+	if _, ok := server["listen_protocols"]; ok {
+		t.Error("listen_protocols must be unset without extra listeners")
+	}
+}
+
+func TestBuildConfigDeterministicAcrossInputOrder(t *testing.T) {
+	routes := []Route{
+		{AppSlug: "w", Domain: "*.example.com", Upstream: "w:1", TLS: "auto"},
+		{AppSlug: "b", Domain: "b.example.com", Upstream: "b:1", TLS: "auto"},
+		{AppSlug: "a", Domain: "a.example.com", Upstream: "a:1", TLS: "custom", CertDir: "/c"},
+		{AppSlug: "a", Domain: "a.example.com", Upstream: "a:2", TLS: "custom", CertDir: "/c", Path: "/x*"},
+		{AppSlug: "c", Domain: "c.example.com", Upstream: "c:1", TLS: "local"},
+		{AppSlug: "d", Domain: "d.example.com", Upstream: "d:1", TLS: "local"},
+	}
+	build := func(rs []Route) string {
+		p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", ExtraListenAddrs: []string{":50051"}, TLSMode: "auto", TLSEmail: "e@x.com"})
+		p.routes = rs
+		b, err := p.BuildConfigJSON()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	want := build(routes)
+	rev := make([]Route, len(routes))
+	for i, r := range routes {
+		rev[len(routes)-1-i] = r
+	}
+	if got := build(rev); got != want {
+		t.Fatalf("config depends on input order:\n%s\n%s", want, got)
+	}
+	// Wildcard host must come after exact hosts so it cannot shadow them.
+	srv := getServer(t, func() map[string]interface{} {
+		var m map[string]interface{}
+		_ = json.Unmarshal([]byte(want), &m)
+		return m
+	}())
+	rs := srv["routes"].([]interface{})
+	last := rs[len(rs)-1].(map[string]interface{})["match"].([]interface{})[0].(map[string]interface{})["host"].([]interface{})[0]
+	if last != "*.example.com" {
+		t.Errorf("last route host = %v, want *.example.com", last)
+	}
 }
 
 func TestBuildConfigNoExtraListenAddrs(t *testing.T) {
