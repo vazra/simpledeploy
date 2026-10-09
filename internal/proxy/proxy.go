@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -95,8 +96,14 @@ func (c *CaddyProxy) Stop() error {
 
 // BuildConfigJSON builds and returns the Caddy JSON config. Exported for testing.
 func (c *CaddyProxy) BuildConfigJSON() ([]byte, error) {
-	cfg := c.buildConfig()
-	return json.Marshal(cfg)
+	return json.Marshal(c.buildConfigFrom(c.snapshotRoutes()))
+}
+
+// snapshotRoutes returns a copy of the current routes.
+func (c *CaddyProxy) snapshotRoutes() []Route {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]Route(nil), c.routes...)
 }
 
 // ForceReload reloads Caddy with the current routes even if the generated
@@ -127,13 +134,15 @@ func (c *CaddyProxy) reloadWith(force bool) error {
 	// snapshot after a newer one.
 	c.loadMu.Lock()
 	defer c.loadMu.Unlock()
-	data, err := c.BuildConfigJSON()
+	// One snapshot for both the config and the cert fingerprint.
+	routes := c.snapshotRoutes()
+	data, err := json.Marshal(c.buildConfigFrom(routes))
 	if err != nil {
 		return err
 	}
 	// The config only holds cert PATHS; fold file metadata into the key so a
 	// cert rewritten in place still triggers a reload.
-	key := append(append([]byte(nil), data...), c.certFingerprint()...)
+	key := append(append([]byte(nil), data...), certFingerprint(routes)...)
 	if !force && c.lastKey != nil && bytes.Equal(c.lastKey, key) {
 		return nil
 	}
@@ -146,12 +155,8 @@ func (c *CaddyProxy) reloadWith(force bool) error {
 }
 
 // certFingerprint returns size+mtime for every custom cert/key file the
-// current routes reference, in route order.
-func (c *CaddyProxy) certFingerprint() []byte {
-	c.mu.Lock()
-	routes := make([]Route, len(c.routes))
-	copy(routes, c.routes)
-	c.mu.Unlock()
+// routes reference, in route order.
+func certFingerprint(routes []Route) []byte {
 	var b bytes.Buffer
 	seen := map[string]bool{}
 	for _, r := range orderRoutes(routes) {
@@ -171,14 +176,10 @@ func (c *CaddyProxy) certFingerprint() []byte {
 	return b.Bytes()
 }
 
-// buildConfig returns the Caddy config as a map.
-func (c *CaddyProxy) buildConfig() map[string]interface{} {
+// buildConfigFrom returns the Caddy config for routes as a map.
+func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 	// Build route entries.
 	var caddyRoutes []interface{}
-	c.mu.Lock()
-	routes := make([]Route, len(c.routes))
-	copy(routes, c.routes)
-	c.mu.Unlock()
 	routes = orderRoutes(routes)
 
 	// Collect custom TLS cert files and per-route local-TLS domains
@@ -224,11 +225,20 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 
 		if r.TLS == "custom" && r.CertDir != "" && !seenCertDomains[r.Domain] {
 			seenCertDomains[r.Domain] = true
-			loadFiles = append(loadFiles, map[string]interface{}{
-				"certificate": filepath.Join(r.CertDir, r.Domain+".crt"),
-				"key":         filepath.Join(r.CertDir, r.Domain+".key"),
-				"tags":        []string{r.Domain},
-			})
+			crt := filepath.Join(r.CertDir, r.Domain+".crt")
+			key := filepath.Join(r.CertDir, r.Domain+".key")
+			// Caddy's file loader fails the whole config load on a missing
+			// file, which would block every later reload. Skip it; the
+			// endpoint falls back to the global TLS automation (or none).
+			if !fileExists(crt) || !fileExists(key) {
+				log.Printf("[proxy] WARNING: custom cert for %s missing (%s, %s); not loading it", r.Domain, crt, key)
+			} else {
+				loadFiles = append(loadFiles, map[string]interface{}{
+					"certificate": crt,
+					"key":         key,
+					"tags":        []string{r.Domain},
+				})
+			}
 		}
 	}
 
@@ -277,13 +287,14 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	// while those streams keep it alive, and quic-go logs "no port can be
 	// announced" for every request. Certs come from the shared tls app cache.
 	if len(c.extraListenAddrs) > 0 {
+		// Deep copies so later edits to one server never leak into the other.
 		extra := map[string]interface{}{
 			"listen": append([]string(nil), c.extraListenAddrs...),
-			"routes": caddyRoutes,
+			"routes": cloneJSONValue(caddyRoutes),
 		}
 		for _, k := range []string{"tls_connection_policies", "automatic_https"} {
 			if v, ok := server[k]; ok {
-				extra[k] = v
+				extra[k] = cloneJSONValue(v)
 			}
 		}
 		if p, ok := server["protocols"]; ok {
@@ -419,4 +430,37 @@ func (c *CaddyProxy) buildConfig() map[string]interface{} {
 	}
 
 	return cfg
+}
+
+func fileExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && !fi.IsDir()
+}
+
+// cloneJSONValue deep-copies the map/slice values used to build Caddy config.
+func cloneJSONValue(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[k] = cloneJSONValue(val)
+		}
+		return out
+	case map[string][]string:
+		out := make(map[string][]string, len(t))
+		for k, val := range t {
+			out[k] = append([]string(nil), val...)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(t))
+		for i, val := range t {
+			out[i] = cloneJSONValue(val)
+		}
+		return out
+	case []string:
+		return append([]string(nil), t...)
+	default:
+		return v
+	}
 }

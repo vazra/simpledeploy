@@ -241,4 +241,3 @@ func TestCaddyProxyExtraListenAddrServesSameRoutes(t *testing.T) {
 		}
 	}
 }
-

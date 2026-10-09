@@ -540,11 +540,12 @@ func TestBuildConfigTLSAutoKeepsDefaultProtocols(t *testing.T) {
 }
 
 func TestBuildConfigCustomCertLoadedOncePerDomain(t *testing.T) {
+	dir := writeCertFiles(t, "co.example.com")
 	p := newTestProxy("custom", "")
 	p.mu.Lock()
 	p.routes = []Route{
-		{Domain: "co.example.com", Upstream: "co:8001", TLS: "custom", CertDir: "/certs"},
-		{Domain: "co.example.com", Upstream: "co:50051", TLS: "custom", CertDir: "/certs", Protocol: "grpc"},
+		{Domain: "co.example.com", Upstream: "co:8001", TLS: "custom", CertDir: dir},
+		{Domain: "co.example.com", Upstream: "co:50051", TLS: "custom", CertDir: dir, Protocol: "grpc"},
 	}
 	p.mu.Unlock()
 
@@ -743,5 +744,70 @@ func TestReloadOnCustomCertRewrite(t *testing.T) {
 	}
 	if *n != 3 {
 		t.Fatalf("deleted cert: loads = %d, want 3", *n)
+	}
+}
+
+func writeCertFiles(t *testing.T, domain string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, ext := range []string{".crt", ".key"} {
+		if err := os.WriteFile(filepath.Join(dir, domain+ext), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestBuildConfigSkipsMissingCustomCert(t *testing.T) {
+	present := writeCertFiles(t, "ok.example.com")
+	missing := t.TempDir()
+	// Only the key exists for half.example.com: still skipped.
+	if err := os.WriteFile(filepath.Join(missing, "half.example.com.key"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := newTestProxy("auto", "ops@example.com")
+	p.routes = []Route{
+		{Domain: "ok.example.com", Upstream: "a:1", TLS: "custom", CertDir: present},
+		{Domain: "gone.example.com", Upstream: "b:1", TLS: "custom", CertDir: missing},
+		{Domain: "half.example.com", Upstream: "c:1", TLS: "custom", CertDir: missing},
+	}
+	cfg := parseConfig(t, p)
+	tlsApp := cfg["apps"].(map[string]interface{})["tls"].(map[string]interface{})
+	files := tlsApp["certificates"].(map[string]interface{})["load_files"].([]interface{})
+	if len(files) != 1 || files[0].(map[string]interface{})["tags"].([]interface{})[0] != "ok.example.com" {
+		t.Fatalf("load_files = %v, want only ok.example.com", files)
+	}
+	// Routes for endpoints with missing certs are still served.
+	if n := len(getServer(t, cfg)["routes"].([]interface{})); n != 3 {
+		t.Errorf("routes = %d, want 3", n)
+	}
+
+	// All custom certs missing: no certificates block at all.
+	p.routes = p.routes[1:]
+	cfg = parseConfig(t, p)
+	if _, ok := cfg["apps"].(map[string]interface{})["tls"].(map[string]interface{})["certificates"]; ok {
+		t.Error("certificates block must be omitted when every custom cert is missing")
+	}
+}
+
+func TestBuildConfigExtraServerIsDeepCopy(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", ExtraListenAddrs: []string{":50051"}, TLSMode: "auto"})
+	p.routes = []Route{{AppSlug: "a", Domain: "a.test", Upstream: "a:1", TLS: "auto"}}
+	cfg := p.buildConfigFrom(p.snapshotRoutes())
+	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	mainSrv := servers["proxy"].(map[string]interface{})
+	extra := servers["proxy_extra"].(map[string]interface{})
+	before, _ := json.Marshal(extra)
+
+	r0 := mainSrv["routes"].([]interface{})[0].(map[string]interface{})
+	r0["terminal"] = false
+	r0["handle"].([]interface{})[0].(map[string]interface{})["handler"] = "mutated"
+	r0["match"].([]interface{})[0].(map[string]interface{})["host"].([]string)[0] = "mutated.test"
+	mainSrv["tls_connection_policies"].([]interface{})[0].(map[string]interface{})["mutated"] = true
+	mainSrv["automatic_https"].(map[string]interface{})["mutated"] = true
+
+	after, _ := json.Marshal(extra)
+	if string(before) != string(after) {
+		t.Fatalf("mutating proxy leaked into proxy_extra:\n%s\n%s", before, after)
 	}
 }

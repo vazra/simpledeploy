@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -693,9 +694,12 @@ func TestAuditLifecycleRemoved(t *testing.T) {
 	}
 }
 
-type countingReloader struct{ n int }
+type countingReloader struct {
+	n   int
+	err error
+}
 
-func (c *countingReloader) ForceReload() error { c.n++; return nil }
+func (c *countingReloader) ForceReload() error { c.n++; return c.err }
 
 func TestCertUploadDeleteForceProxyReload(t *testing.T) {
 	srv, s, cookie := newAuditTestServer(t)
@@ -723,5 +727,31 @@ func TestCertUploadDeleteForceProxyReload(t *testing.T) {
 	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodDelete, "/api/apps/certapp/certs/foo.example.com", nil, cookie))
 	if w.Code != http.StatusOK || rl.n != 2 {
 		t.Fatalf("delete: status=%d reloads=%d, want 200 and 2", w.Code, rl.n)
+	}
+}
+
+func TestCertReloadFailureMessage(t *testing.T) {
+	srv, s, cookie := newAuditTestServer(t)
+	srv.SetProxyReloader(&countingReloader{err: errors.New("boom")})
+	dir := t.TempDir()
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertApp(&store.App{Name: "certapp", Slug: "certapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	certPEM, keyPEM := genTestCertPEM(t)
+
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodPut, "/api/apps/certapp/certs/foo.example.com",
+		map[string]string{"cert": certPEM, "key": keyPEM}, cookie))
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "cert saved but proxy reload failed") {
+		t.Fatalf("upload: %d %q", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodDelete, "/api/apps/certapp/certs/foo.example.com", nil, cookie))
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "cert deleted but proxy reload failed") {
+		t.Fatalf("delete: %d %q", w.Code, w.Body.String())
 	}
 }

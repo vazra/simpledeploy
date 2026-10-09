@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,12 +26,14 @@ func (s *Server) SetProxyReloader(p proxyReloader) { s.proxyReloader = p }
 
 // reloadProxyForCert forces a proxy reload so cert changes apply immediately.
 // Returns false (and writes an error response) when the reload failed.
-func (s *Server) reloadProxyForCert(w http.ResponseWriter) bool {
+func (s *Server) reloadProxyForCert(w http.ResponseWriter, action string) bool {
 	if s.proxyReloader == nil {
 		return true
 	}
 	if err := s.proxyReloader.ForceReload(); err != nil {
-		httpError(w, fmt.Errorf("cert saved but proxy reload failed: %w", err), http.StatusInternalServerError)
+		// Log the detail; return a fixed message (no internal error text).
+		log.Printf("[api] cert %s but proxy reload failed: %v", action, err)
+		http.Error(w, "cert "+action+" but proxy reload failed", http.StatusInternalServerError)
 		return false
 	}
 	return true
@@ -96,7 +99,7 @@ func (s *Server) handleUploadCert(w http.ResponseWriter, r *http.Request) {
 	// Audit: record only domain; never log cert/key bodies.
 	s.recordAudit(r, app, "endpoint", "cert_uploaded", nil, map[string]any{"domain": domain})
 
-	if !s.reloadProxyForCert(w) {
+	if !s.reloadProxyForCert(w, "saved") {
 		return
 	}
 
@@ -128,7 +131,7 @@ func (s *Server) handleDeleteCert(w http.ResponseWriter, r *http.Request) {
 
 	s.recordAudit(r, app, "endpoint", "cert_removed", map[string]any{"domain": domain}, nil)
 
-	if !s.reloadProxyForCert(w) {
+	if !s.reloadProxyForCert(w, "deleted") {
 		return
 	}
 
