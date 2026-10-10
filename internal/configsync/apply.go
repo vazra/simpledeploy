@@ -73,14 +73,14 @@ func (s *Syncer) ApplyAppSidecar(slug string, loaded *LoadedApp) error {
 	}
 	keepIDs := make(map[int64]struct{}, len(data.AlertRules))
 	for i, r := range data.AlertRules {
-		var whID int64
-		if r.Webhook != "" {
-			id, ok := whByName[r.Webhook]
-			if !ok {
-				log.Printf("configsync ApplyAppSidecar %s: alert_rules[%d] references unknown webhook %q; skipping", slug, i, r.Webhook)
-				continue
-			}
-			whID = id
+		if r.Webhook == "" {
+			log.Printf("configsync ApplyAppSidecar %s: alert_rules[%d] has no webhook; skipping", slug, i)
+			continue
+		}
+		whID, ok := whByName[r.Webhook]
+		if !ok {
+			log.Printf("configsync ApplyAppSidecar %s: alert_rules[%d] references unknown webhook %q; skipping", slug, i, r.Webhook)
+			continue
 		}
 		k := ruleKey{r.Metric, r.Operator, r.Threshold, r.DurationSec, whID}
 		if prev, ok := existingByKey[k]; ok {

@@ -8,7 +8,10 @@ import (
 	"github.com/vazra/simpledeploy/internal/metrics"
 )
 
-// InsertMetrics batch-inserts metric points in a single transaction.
+// InsertMetrics batch-inserts metric points in a single transaction. Points
+// whose app no longer exists (deleted between collection and flush) are
+// skipped: inserting them would fail the foreign key and, with it, the whole
+// batch. Points with a nil AppID (system metrics) are always kept.
 func (s *Store) InsertMetrics(points []metrics.MetricPoint) error {
 	if len(points) == 0 {
 		return nil
@@ -22,7 +25,8 @@ func (s *Store) InsertMetrics(points []metrics.MetricPoint) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO metrics
 			(app_id, container_id, ts, tier, cpu_pct, mem_bytes, mem_limit, net_rx, net_tx, disk_read, disk_write)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+		WHERE ?1 IS NULL OR EXISTS (SELECT 1 FROM apps WHERE id = ?1)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
@@ -166,6 +170,9 @@ func (s *Store) QueryMetrics(appID *int64, rangeStr string) ([]metrics.MetricPoi
 
 // AggregateMetrics reads points from sourceTier older than olderThan,
 // groups by app_id, container_id, and time bucket, inserts as destTier.
+// Orphan rows (app_id of an app deleted while foreign keys were not enforced)
+// are not carried into destTier, since that insert would violate the foreign
+// key and abort the rollup; the source DELETE still removes them.
 func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Time) error {
 	if err := validateMetricsTier(destTier); err != nil {
 		return err
@@ -198,6 +205,7 @@ func (s *Store) AggregateMetrics(sourceTier, destTier string, olderThan time.Tim
 			avg(disk_write)
 		FROM metrics
 		WHERE tier = ? AND ts < ?
+		  AND (app_id IS NULL OR app_id IN (SELECT id FROM apps))
 		GROUP BY app_id, container_id, bucket_ts
 	`, bucket)
 

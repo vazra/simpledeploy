@@ -7,7 +7,10 @@ import (
 	"github.com/vazra/simpledeploy/internal/metrics"
 )
 
-// InsertRequestMetrics batch-inserts request metric points in a single transaction.
+// InsertRequestMetrics batch-inserts request metric points in a single
+// transaction. Points whose app no longer exists (deleted between the request
+// and the flush) are skipped so one stale point cannot fail the whole batch on
+// the foreign key.
 func (s *Store) InsertRequestMetrics(points []metrics.RequestMetricPoint) error {
 	if len(points) == 0 {
 		return nil
@@ -21,7 +24,8 @@ func (s *Store) InsertRequestMetrics(points []metrics.RequestMetricPoint) error 
 	stmt, err := tx.Prepare(`
 		INSERT INTO request_metrics
 			(app_id, ts, tier, count, error_count, avg_latency, max_latency)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+		WHERE EXISTS (SELECT 1 FROM apps WHERE id = ?1)
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
@@ -96,7 +100,9 @@ func (s *Store) QueryRequestMetrics(appID int64, rangeStr string) ([]metrics.Req
 }
 
 // AggregateRequestMetrics reads points from sourceTier older than olderThan,
-// groups by app_id and time bucket, inserts as destTier.
+// groups by app_id and time bucket, inserts as destTier. Orphan rows (app
+// deleted while foreign keys were not enforced) are dropped instead of carried
+// into destTier, where the insert would violate the foreign key.
 func (s *Store) AggregateRequestMetrics(sourceTier, destTier string, olderThan time.Time) error {
 	if err := validateMetricsTier(destTier); err != nil {
 		return err
@@ -125,6 +131,7 @@ func (s *Store) AggregateRequestMetrics(sourceTier, destTier string, olderThan t
 			max(max_latency)
 		FROM request_metrics
 		WHERE tier = ? AND ts < ?
+		  AND app_id IN (SELECT id FROM apps)
 		GROUP BY app_id, bucket_ts
 	`, bucket)
 

@@ -620,10 +620,12 @@ func (s *Syncer) ImportAppSidecarWithOptions(data *AppSidecar, opts ImportOption
 	if err := s.store.DeleteAlertRulesForApp(app.ID); err != nil {
 		return fmt.Errorf("ImportAppSidecar: delete alert rules: %w", err)
 	}
-	for _, r := range data.AlertRules {
-		var whID int64
-		if r.Webhook != "" {
-			whID = whByName[r.Webhook]
+	for i, r := range data.AlertRules {
+		whID, ok := whByName[r.Webhook]
+		if r.Webhook == "" || !ok {
+			// A rule needs a webhook (foreign key); skip rather than abort the import.
+			log.Printf("configsync ImportAppSidecar %s: alert_rules[%d] has no known webhook; skipping", data.App.Slug, i)
+			continue
 		}
 		rule := &store.AlertRule{
 			AppID:       &app.ID,
