@@ -56,7 +56,7 @@ brew upgrade simpledeploy
 ### Direct binary
 
 ```bash
-VERSION=1.4.2   # target version # x-release-please-version
+VERSION=1.4.3   # target version # x-release-please-version
 ARCH=amd64      # or arm64
 FILE="simpledeploy_${VERSION}_linux_${ARCH}.tar.gz"
 curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/${FILE}"
@@ -78,14 +78,14 @@ sudo docker compose pull
 sudo docker compose up -d
 ```
 
-The container restarts with the new image. To pin a specific version, edit `image:` in `docker-compose.yml` (e.g. `ghcr.io/vazra/simpledeploy:1.4.2`) before `up -d`. <!-- x-release-please-version -->
+The container restarts with the new image. To pin a specific version, edit `image:` in `docker-compose.yml` (e.g. `ghcr.io/vazra/simpledeploy:1.4.3`) before `up -d`. <!-- x-release-please-version -->
 
 ### From source
 
 ```bash
 cd /opt/simpledeploy
 git fetch --tags
-git checkout v1.4.2   # x-release-please-version
+git checkout v1.4.3   # x-release-please-version
 make build
 sudo install -m 755 ./bin/simpledeploy /usr/local/bin/simpledeploy
 ```
