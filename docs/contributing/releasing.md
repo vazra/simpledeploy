@@ -9,7 +9,7 @@ SimpleDeploy releases through `release-please` (driven by Conventional Commits) 
 
 When the PR queue contains shippable changes (any `feat:` or `fix:` since the last tag), a release-please PR is open against `main` with a generated CHANGELOG bump. Merging that PR cuts a release.
 
-Patch releases for security fixes can be cut anytime by manually editing the release-please PR's version bump.
+Patch releases for security fixes can be cut anytime by manually editing the release-please PR's version bump. Security fixes are developed and merged through a private advisory fork; see [Security process](/contributing/security-process/) for the steps, including the follow-up `fix:` PR needed to trigger release-please after an advisory merge.
 
 ## What gets built
 
@@ -51,4 +51,4 @@ For a hotfix without other queued changes:
 
 ## Post-mortem releases
 
-For incident-driven security releases, follow [`SECURITY.md`](https://github.com/vazra/simpledeploy/blob/main/SECURITY.md) for coordinated disclosure.
+For incident-driven security releases, follow [`SECURITY.md`](https://github.com/vazra/simpledeploy/blob/main/SECURITY.md) for coordinated disclosure and [Security process](/contributing/security-process/) for the maintainer steps (advisory, private fork, release, CVE, publication).
