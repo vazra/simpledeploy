@@ -521,7 +521,7 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 	k, err := s.store.CreateAPIKey(user.ID, hash, body.Name, body.ExpiresAt)
 	if errors.Is(err, store.ErrAPIKeyNameTaken) {
-		http.Error(w, "an API key with this name already exists; choose a different name", http.StatusConflict)
+		http.Error(w, "an API key with this name already exists; choose a different name or revoke the existing key first", http.StatusConflict)
 		return
 	}
 	if err != nil {
