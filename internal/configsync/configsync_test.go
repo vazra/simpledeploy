@@ -1660,3 +1660,50 @@ func TestDeleteAppSidecarNoOpNoHook(t *testing.T) {
 		t.Fatalf("expected exactly 1 hook call after deleting real sidecar, got %d", gotCalls)
 	}
 }
+
+func TestAtomicWriteFile_CleansStaleTmpOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	old := time.Now().Add(-2 * staleTmpAge)
+
+	staleNew := filepath.Join(dir, "config.yml.123.tmp")
+	staleLegacy := filepath.Join(dir, "config.yml.tmp")
+	fresh := filepath.Join(dir, "config.yml.456.tmp")
+	other := filepath.Join(dir, "secrets.yml.789.tmp")
+	for _, p := range []string{staleNew, staleLegacy, fresh, other} {
+		if err := os.WriteFile(p, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []string{staleNew, staleLegacy, other} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := atomicWriteFile(path, []byte("a: 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range []string{staleNew, staleLegacy} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("stale %s not removed", filepath.Base(p))
+		}
+	}
+	for _, p := range []string{fresh, other} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s should be kept: %v", filepath.Base(p), err)
+		}
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 3 { // config.yml + fresh + other
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("unexpected dir contents: %v", names)
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0644 {
+		t.Errorf("mode = %o, want 644", info.Mode().Perm())
+	}
+}

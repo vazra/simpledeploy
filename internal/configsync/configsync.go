@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -927,36 +928,49 @@ func atomicWriteYAMLMode(path string, mode os.FileMode, v any) error {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 
-	// Unique temp name so concurrent writers (e.g. the server's debounced
-	// sync and a CLI command in another process) never share a temp file.
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(v); err != nil {
+		return fmt.Errorf("yaml encode %s: %w", path, err)
+	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("yaml encode close %s: %w", path, err)
+	}
+	return atomicWriteFile(path, buf.Bytes(), mode)
+}
+
+// staleTmpAge is how old a leftover temp file must be before
+// atomicWriteFile removes it. Generous enough that a concurrent writer's
+// in-flight temp file is never touched.
+const staleTmpAge = time.Minute
+
+// atomicWriteFile writes data to a uniquely named temp file next to path,
+// fsyncs, and renames it over path. Unique temp names keep concurrent
+// writers (e.g. the server's debounced sync and a CLI command in another
+// process) from clobbering each other. The parent directory must exist.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	cleanStaleTmp(path)
+
 	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("create tmp for %s: %w", path, err)
 	}
 	tmp := f.Name()
-	// Re-chmod in case umask stripped bits.
+	fail := func(format string, err error) error {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf(format, tmp, err)
+	}
+	// CreateTemp uses 0600; set the requested mode explicitly.
 	if err := os.Chmod(tmp, mode); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("chmod tmp %s: %w", tmp, err)
+		return fail("chmod tmp %s: %w", err)
 	}
-
-	enc := yaml.NewEncoder(f)
-	enc.SetIndent(2)
-	if err := enc.Encode(v); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("yaml encode %s: %w", path, err)
-	}
-	if err := enc.Close(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("yaml encode close %s: %w", path, err)
+	if _, err := f.Write(data); err != nil {
+		return fail("write tmp %s: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return fmt.Errorf("fsync %s: %w", tmp, err)
+		return fail("fsync %s: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
@@ -967,6 +981,36 @@ func atomicWriteYAMLMode(path string, mode os.FileMode, v any) error {
 		return fmt.Errorf("rename %s -> %s: %w", tmp, path, err)
 	}
 	return nil
+}
+
+// cleanStaleTmp best-effort removes temp files for path left behind by a
+// crashed writer: "<name>.*.tmp" (current scheme) and "<name>.tmp" (legacy),
+// only when older than staleTmpAge.
+func cleanStaleTmp(path string) {
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(path), globEscape(filepath.Base(path))+".*.tmp"))
+	matches = append(matches, path+".tmp")
+	for _, m := range matches {
+		info, err := os.Lstat(m)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		if time.Since(info.ModTime()) > staleTmpAge {
+			_ = os.Remove(m)
+		}
+	}
+}
+
+// globEscape escapes filepath.Match metacharacters in s.
+func globEscape(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '*', '?', '[', '\\':
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // readYAML reads and decodes a YAML file into T. Returns (nil, nil) if the file does not exist.
