@@ -95,7 +95,7 @@ Prefer a vitest over a new E2E spec when the logic can be exercised with mocks. 
 
 | Job | Trigger | What it does |
 |-----|---------|--------------|
-| `lint` | push + PR | `golangci-lint` |
+| `lint` | push + PR | `golangci-lint run` (config schema check skipped to avoid network flakes; run `golangci-lint config verify` locally after editing `.golangci.yml`) |
 | `test` | push + PR | `make ui-build`, then `go test -race ./...` |
 | `test-ui` | push + PR | `cd ui && npm ci && npm test` (vitest) |
 | `govulncheck` | push + PR | `govulncheck ./...`; fails on any called vulnerability except the allowlisted docker/docker advisories GO-2026-4887 and GO-2026-4883 (no fixed release yet). The log lists the called advisory IDs. Findings in packages or modules that are imported or required but not called do not fail the job and are not listed; run `govulncheck -show verbose ./...` locally to see them |

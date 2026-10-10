@@ -6,6 +6,7 @@ import starlightOpenAPI, { openAPISidebarGroups } from "starlight-openapi";
 import starlightBlog from "starlight-blog";
 import starlightLinksValidator from "starlight-links-validator";
 import starlightImageZoom from "starlight-image-zoom";
+import { unified } from "@astrojs/markdown-remark";
 import remarkPrefixBase from "./plugins/remark-prefix-base.mjs";
 
 const githubRepo = "https://github.com/vazra/simpledeploy";
@@ -15,7 +16,12 @@ export default defineConfig({
   site: "https://vazra.github.io",
   base: siteBase,
   markdown: {
-    remarkPlugins: [[remarkPrefixBase, { base: siteBase }]],
+    // Astro 7 defaults to the Satteri Markdown processor, which does not run
+    // remark plugins. Keep the unified (remark) pipeline so
+    // remark-prefix-base keeps rewriting internal links in .md and .mdx.
+    processor: unified({
+      remarkPlugins: [[remarkPrefixBase, { base: siteBase }]],
+    }),
   },
   integrations: [
     svelte(),
@@ -103,11 +109,11 @@ export default defineConfig({
         },
         {
           label: "Core Concepts",
-          autogenerate: { directory: "concepts" },
+          items: [{ autogenerate: { directory: "concepts" } }],
         },
         {
           label: "Guides",
-          autogenerate: { directory: "guides" },
+          items: [{ autogenerate: { directory: "guides" } }],
         },
         {
           label: "Playground",
@@ -130,23 +136,23 @@ export default defineConfig({
         },
         {
           label: "Operations",
-          autogenerate: { directory: "operations" },
+          items: [{ autogenerate: { directory: "operations" } }],
         },
         {
           label: "Integrations",
-          autogenerate: { directory: "integrations" },
+          items: [{ autogenerate: { directory: "integrations" } }],
         },
         {
           label: "Architecture",
-          autogenerate: { directory: "architecture" },
+          items: [{ autogenerate: { directory: "architecture" } }],
         },
         {
           label: "Contributing",
-          autogenerate: { directory: "contributing" },
+          items: [{ autogenerate: { directory: "contributing" } }],
         },
         {
           label: "Community",
-          autogenerate: { directory: "community" },
+          items: [{ autogenerate: { directory: "community" } }],
         },
         {
           label: "FAQ",
