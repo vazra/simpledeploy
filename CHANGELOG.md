@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/vazra/simpledeploy/compare/v1.4.1...v1.4.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **cli:** persist CLI user/apikey/registry changes to global sidecars ([#88](https://github.com/vazra/simpledeploy/issues/88)) ([c81bbe8](https://github.com/vazra/simpledeploy/commit/c81bbe8b8bfe5fa106212b1945a5ed72b0a8a134))
+
 ## [1.4.1](https://github.com/vazra/simpledeploy/compare/v1.4.0...v1.4.1) (2026-10-09)
 
 
