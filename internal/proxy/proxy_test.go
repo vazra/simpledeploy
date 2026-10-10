@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,12 +86,12 @@ func TestBuildConfigWithRoutes(t *testing.T) {
 			t.Errorf("route[%d] host: got %q, want %q", i, host, wantDomains[i])
 		}
 
-		// handlers: [ipaccess, ratelimit, metrics, headers, timeouts, reverse_proxy]
+		// handlers: [ipaccess, ratelimit, metrics, headers x3, timeouts, reverse_proxy]
 		handleList := r["handle"].([]interface{})
-		if len(handleList) != 6 {
-			t.Fatalf("route[%d] handle: got %d handlers, want 6", i, len(handleList))
+		if len(handleList) != 8 {
+			t.Fatalf("route[%d] handle: got %d handlers, want 8", i, len(handleList))
 		}
-		rp := handleList[5].(map[string]interface{})
+		rp := handleList[7].(map[string]interface{})
 		dial := rp["upstreams"].([]interface{})[0].(map[string]interface{})["dial"].(string)
 		if dial != wantDials[i] {
 			t.Errorf("route[%d] dial: got %q, want %q", i, dial, wantDials[i])
@@ -126,17 +127,73 @@ func TestBuildConfigHandlerOrder(t *testing.T) {
 	r := routes[0].(map[string]interface{})
 	handleList := r["handle"].([]interface{})
 
-	// Expect 6 handlers: ipaccess, ratelimit, metrics, headers, timeouts, reverse_proxy
-	if len(handleList) != 6 {
-		t.Fatalf("handle: got %d handlers, want 6", len(handleList))
+	// Expect ipaccess, ratelimit, metrics, one headers handler per default
+	// security header (no HSTS on a plain-HTTP route), timeouts, reverse_proxy.
+	wantOrder := []string{"simpledeploy_ipaccess", "simpledeploy_ratelimit", "simpledeploy_metrics", "headers", "headers", "headers", "timeouts", "reverse_proxy"}
+	if len(handleList) != len(wantOrder) {
+		t.Fatalf("handle: got %d handlers, want %d", len(handleList), len(wantOrder))
 	}
 
-	wantOrder := []string{"simpledeploy_ipaccess", "simpledeploy_ratelimit", "simpledeploy_metrics", "headers", "timeouts", "reverse_proxy"}
 	for i, want := range wantOrder {
 		h := handleList[i].(map[string]interface{})
 		got := h["handler"].(string)
 		if got != want {
 			t.Errorf("handler[%d]: got %q, want %q", i, got, want)
+		}
+	}
+}
+
+// Each default security header gets its own headers handler that sets it
+// only when the app's response lacks it (require with a null value), so app
+// values are kept. HSTS only on TLS routes.
+func TestBuildConfigSecurityHeadersOnlyWhenMissing(t *testing.T) {
+	p := newTestProxy("auto", "ops@example.com")
+	p.routes = []Route{
+		{Domain: "plain.example.com", Upstream: "a:1", TLS: "off"},
+		{Domain: "secure.example.com", Upstream: "b:1", TLS: "auto"},
+	}
+	routes := getServer(t, parseConfig(t, p))["routes"].([]interface{})
+	want := map[string][][2]string{
+		"plain.example.com": {
+			{"X-Content-Type-Options", "nosniff"},
+			{"X-Frame-Options", "SAMEORIGIN"},
+			{"Referrer-Policy", "strict-origin-when-cross-origin"},
+		},
+		"secure.example.com": {
+			{"X-Content-Type-Options", "nosniff"},
+			{"X-Frame-Options", "SAMEORIGIN"},
+			{"Referrer-Policy", "strict-origin-when-cross-origin"},
+			{"Strict-Transport-Security", "max-age=31536000; includeSubDomains"},
+		},
+	}
+	for _, rt := range routes {
+		route := rt.(map[string]interface{})
+		host := route["match"].([]interface{})[0].(map[string]interface{})["host"].([]interface{})[0].(string)
+		var got [][2]string
+		for _, h := range route["handle"].([]interface{}) {
+			hm := h.(map[string]interface{})
+			if hm["handler"] != "headers" {
+				continue
+			}
+			resp := hm["response"].(map[string]interface{})
+			if _, ok := resp["deferred"]; ok {
+				t.Errorf("%s: deferred must not be set (require already defers): %v", host, resp)
+			}
+			set := resp["set"].(map[string]interface{})
+			req := resp["require"].(map[string]interface{})["headers"].(map[string]interface{})
+			if len(set) != 1 || len(req) != 1 {
+				t.Fatalf("%s: want one header per handler, got set=%v require=%v", host, set, req)
+			}
+			for name, vals := range set {
+				v, ok := req[name]
+				if !ok || v != nil {
+					t.Errorf("%s %s: require = %v, want {%q: null} (only when missing)", host, name, req, name)
+				}
+				got = append(got, [2]string{name, vals.([]interface{})[0].(string)})
+			}
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want[host]) {
+			t.Errorf("%s headers = %v, want %v", host, got, want[host])
 		}
 	}
 }

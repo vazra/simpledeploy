@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -40,15 +42,23 @@ func (m *RequestMetrics) Validate() error                 { return nil }
 
 func (m *RequestMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	start := time.Now()
-	rw := &statusRecorder{ResponseWriter: w, status: 200}
+	rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	err := next.ServeHTTP(rw, r)
 	latency := float64(time.Since(start).Milliseconds())
+
+	status := rw.status
+	if err != nil && !rw.wroteHeader {
+		// Nothing reached the client yet: Caddy's error handling writes the
+		// response (e.g. 502 when the upstream cannot be dialed) outside this
+		// recorder, so take the status from the error.
+		status = errorStatus(r, err)
+	}
 
 	if RequestStatsCh != nil {
 		select {
 		case RequestStatsCh <- RequestStatEvent{
 			Domain:     r.Host,
-			StatusCode: rw.status,
+			StatusCode: status,
 			LatencyMs:  latency,
 			Method:     r.Method,
 			Path:       NormalizePath(r.URL.Path),
@@ -59,7 +69,26 @@ func (m *RequestMetrics) ServeHTTP(w http.ResponseWriter, r *http.Request, next 
 	return err
 }
 
-// statusRecorder captures the response status code.
+// statusClientClosedRequest is the nginx-style status Caddy uses when the
+// client went away before a response.
+const statusClientClosedRequest = 499
+
+// errorStatus returns the status for a request whose handler chain returned
+// err without writing a response: the HandlerError's status (as Caddy's
+// error handling writes it), 499 when the client went away, else 500.
+func errorStatus(r *http.Request, err error) int {
+	if he, ok := errors.AsType[caddyhttp.HandlerError](err); ok && he.StatusCode != 0 {
+		return he.StatusCode
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
+		return statusClientClosedRequest
+	}
+	return http.StatusInternalServerError
+}
+
+// statusRecorder captures the final response status code (200 until one is
+// written). Informational 1xx responses (100 Continue, 103 Early Hints) are
+// skipped; 101 Switching Protocols is final.
 type statusRecorder struct {
 	http.ResponseWriter
 	status      int
@@ -67,11 +96,18 @@ type statusRecorder struct {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	if !r.wroteHeader {
+	if !r.wroteHeader && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
 		r.status = code
 		r.wroteHeader = true
 	}
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Write marks the response as sent; without a prior status it is the
+// implicit 200.
+func (r *statusRecorder) Write(b []byte) (int, error) {
+	r.wroteHeader = true
+	return r.ResponseWriter.Write(b)
 }
 
 // Unwrap returns the underlying ResponseWriter for http.ResponseController.

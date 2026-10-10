@@ -76,13 +76,26 @@ Route order per domain is fixed: `grpc` endpoints, then path endpoints (longest 
 
 ## What Caddy actually gets
 
-Routes are built in [/internal/proxy/proxy.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/proxy.go) (`buildConfig`) and pushed via `caddy.Load()` after every reconcile. Each route gets a 4-handler chain in this order:
+Routes are built in [/internal/proxy/proxy.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/proxy.go) (`buildConfig`) and pushed via `caddy.Load()` after every reconcile. Each route gets a handler chain in this order:
 
 1. `simpledeploy_ipaccess` (allowlist match against `simpledeploy.access.allow`)
 2. `simpledeploy_ratelimit` (per-domain token bucket, configured via `simpledeploy.ratelimit.*`)
-3. `simpledeploy_metrics` (records request count, latency, status code into the `request_stats` table)
-4. `reverse_proxy` to the resolved upstream
+3. `simpledeploy_metrics` (records request count, latency and status code for the app's request stats, including the `502` visitors get when the app cannot be reached)
+4. `headers` (safe-default security headers, see below)
+5. `timeouts` (HTTP routes only: cuts uploads that stall for a minute)
+6. `reverse_proxy` to the resolved upstream
 
 <Aside type="caution">
 Domains are validated against `^[a-zA-Z0-9][a-zA-Z0-9.*-]*$` before being passed to Caddy. Wildcards are allowed (`*.example.com`), but anything fancier is rejected to avoid Caddy config injection.
 </Aside>
+
+### Default security headers
+
+SimpleDeploy adds these headers to your app's responses, but only when your app does not already send them. If your app sets its own value (for example `X-Frame-Options: DENY`), that value is kept.
+
+| Header | Default value | When |
+|--------|---------------|------|
+| `X-Content-Type-Options` | `nosniff` | Always |
+| `X-Frame-Options` | `SAMEORIGIN` | Always |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Always |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Endpoints whose `tls` is not `off` |

@@ -296,6 +296,47 @@ func certFingerprint(routes []Route) []byte {
 	return b.Bytes()
 }
 
+// securityHeader is a response header SimpleDeploy adds to app responses
+// that do not set it.
+type securityHeader struct{ name, value string }
+
+// defaultSecurityHeaders go on every app route, in this order.
+var defaultSecurityHeaders = []securityHeader{
+	{"X-Content-Type-Options", "nosniff"},
+	{"X-Frame-Options", "SAMEORIGIN"},
+	{"Referrer-Policy", "strict-origin-when-cross-origin"},
+}
+
+// hstsHeader is added only on TLS routes; on plain-HTTP routes it would lock
+// visitors into HTTPS for hosts that never serve it.
+var hstsHeader = securityHeader{"Strict-Transport-Security", "max-age=31536000; includeSubDomains"}
+
+// securityHeaderHandlers returns one Caddy headers handler per safe-default
+// security header for r. Each sets its header when the response is written,
+// and only if the app's response does not already carry it: a response
+// `require` whose header value is null matches only a missing field. So an
+// app that sends its own value keeps it. One handler per header because a
+// handler's require gates all of its operations at once.
+func securityHeaderHandlers(r Route) []interface{} {
+	hdrs := defaultSecurityHeaders
+	if r.TLS != "off" && r.TLS != "" {
+		hdrs = append(hdrs[:len(hdrs):len(hdrs)], hstsHeader)
+	}
+	out := make([]interface{}, 0, len(hdrs))
+	for _, h := range hdrs {
+		out = append(out, map[string]interface{}{
+			"handler": "headers",
+			"response": map[string]interface{}{
+				"require": map[string]interface{}{
+					"headers": map[string]interface{}{h.name: nil},
+				},
+				"set": map[string]interface{}{h.name: []string{h.value}},
+			},
+		})
+	}
+	return out
+}
+
 // buildConfigFrom returns the Caddy config for routes as a map.
 func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 	// Build route entries.
@@ -313,25 +354,6 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 		if r.TLS == "local" {
 			localTLSDomains = append(localTLSDomains, r.Domain)
 		}
-		// Inject safe-default security headers on responses from each app.
-		// Defer (rather than overwrite) so an app that already sets these
-		// keeps its own value. HSTS is only added when the route uses TLS;
-		// adding it on plain-HTTP routes would lock victims into HTTPS for
-		// hosts that never serve it.
-		headerHandler := map[string]interface{}{
-			"handler": "headers",
-			"response": map[string]interface{}{
-				"deferred": true,
-				"set": map[string]interface{}{
-					"X-Content-Type-Options": []string{"nosniff"},
-					"X-Frame-Options":        []string{"SAMEORIGIN"},
-					"Referrer-Policy":        []string{"strict-origin-when-cross-origin"},
-				},
-			},
-		}
-		if r.TLS != "off" && r.TLS != "" {
-			headerHandler["response"].(map[string]interface{})["set"].(map[string]interface{})["Strict-Transport-Security"] = []string{"max-age=31536000; includeSubDomains"}
-		}
 		// Bind the access/ratelimit handlers to this route's domain so they
 		// apply its rules even when another route domain (e.g. a second
 		// wildcard) also matches the request host.
@@ -340,8 +362,8 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 			map[string]interface{}{"handler": "simpledeploy_ipaccess", "domain": ruleKey},
 			map[string]interface{}{"handler": "simpledeploy_ratelimit", "domain": ruleKey},
 			map[string]interface{}{"handler": "simpledeploy_metrics"},
-			headerHandler,
 		}
+		handlers = append(handlers, securityHeaderHandlers(r)...)
 		// The server-wide body idle timeout is off (see buildConfigFrom's
 		// server block); apply it per route, except to gRPC/h2c streams.
 		if !isH2CUpstream(r) {

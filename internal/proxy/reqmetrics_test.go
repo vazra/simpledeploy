@@ -1,6 +1,9 @@
 package proxy
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -102,6 +105,95 @@ func TestRequestMetricsNilChannel(t *testing.T) {
 	// should not panic
 	if err := m.ServeHTTP(w, req, nopHandler{}); err != nil {
 		t.Fatalf("ServeHTTP: %v", err)
+	}
+}
+
+// The recorded status is the one the client gets: the status written by the
+// chain, else the status of the error Caddy turns into a response.
+func TestRequestMetricsRecordsErrorStatus(t *testing.T) {
+	errDial := errors.New("dial tcp 10.0.0.1:80: connect: connection refused")
+	cases := []struct {
+		name    string
+		next    caddyhttp.HandlerFunc
+		ctxDone bool // client went away before the chain returned
+		want    int
+	}{
+		{"handler error 502", func(http.ResponseWriter, *http.Request) error {
+			return caddyhttp.Error(http.StatusBadGateway, errDial)
+		}, false, http.StatusBadGateway},
+		{"wrapped handler error", func(http.ResponseWriter, *http.Request) error {
+			return fmt.Errorf("proxy: %w", caddyhttp.Error(http.StatusGatewayTimeout, errDial))
+		}, false, http.StatusGatewayTimeout},
+		{"plain error", func(http.ResponseWriter, *http.Request) error {
+			return errDial
+		}, false, http.StatusInternalServerError},
+		{"handler error without status", func(http.ResponseWriter, *http.Request) error {
+			return caddyhttp.HandlerError{Err: errDial}
+		}, false, http.StatusInternalServerError},
+		{"handler error 499", func(http.ResponseWriter, *http.Request) error {
+			return caddyhttp.Error(499, context.Canceled)
+		}, false, 499},
+		{"client cancel error", func(http.ResponseWriter, *http.Request) error {
+			return fmt.Errorf("read body: %w", context.Canceled)
+		}, false, 499},
+		{"error after client left", func(http.ResponseWriter, *http.Request) error {
+			return errDial
+		}, true, 499},
+		{"client cancel written as 499", func(w http.ResponseWriter, _ *http.Request) error {
+			w.WriteHeader(499) // what reverse_proxy does on context.Canceled
+			return nil
+		}, false, 499},
+		{"status written before error", func(w http.ResponseWriter, _ *http.Request) error {
+			w.WriteHeader(http.StatusOK)
+			return caddyhttp.Error(http.StatusBadGateway, errDial)
+		}, false, http.StatusOK},
+		{"body written before error", func(w http.ResponseWriter, _ *http.Request) error {
+			_, _ = w.Write([]byte("partial"))
+			return errDial
+		}, false, http.StatusOK},
+		{"early hints then error", func(w http.ResponseWriter, _ *http.Request) error {
+			w.WriteHeader(http.StatusEarlyHints)
+			return caddyhttp.Error(http.StatusBadGateway, errDial)
+		}, false, http.StatusBadGateway},
+		{"100 continue then status", func(w http.ResponseWriter, _ *http.Request) error {
+			w.WriteHeader(http.StatusContinue)
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return nil
+		}, false, http.StatusRequestEntityTooLarge},
+		{"early hints only", func(w http.ResponseWriter, _ *http.Request) error {
+			w.WriteHeader(http.StatusEarlyHints)
+			return nil // net/http then sends an implicit 200
+		}, false, http.StatusOK},
+		{"websocket upgrade", func(w http.ResponseWriter, _ *http.Request) error {
+			w.WriteHeader(http.StatusSwitchingProtocols)
+			return nil
+		}, false, http.StatusSwitchingProtocols},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ch := make(chan RequestStatEvent, 1)
+			RequestStatsCh = ch
+			defer func() { RequestStatsCh = nil }()
+
+			req := httptest.NewRequest("GET", "/", nil)
+			if tc.ctxDone {
+				ctx, cancel := context.WithCancel(req.Context())
+				cancel()
+				req = req.WithContext(ctx)
+			}
+			var nextErr error
+			next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+				nextErr = tc.next(w, r)
+				return nextErr
+			})
+			if err := (&RequestMetrics{}).ServeHTTP(httptest.NewRecorder(), req, next); err != nextErr {
+				t.Errorf("returned error %v, want the chain's error %v unchanged", err, nextErr)
+			}
+			ev := <-ch
+			if ev.StatusCode != tc.want {
+				t.Errorf("StatusCode = %d, want %d", ev.StatusCode, tc.want)
+			}
+		})
 	}
 }
 

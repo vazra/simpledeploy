@@ -41,7 +41,7 @@ The metrics API picks the lowest-resolution tier whose retention covers the requ
 
 ## Request stats
 
-A separate code path in the proxy package (the `simpledeploy_metrics` Caddy module) records every HTTP request: app slug, method, path, status, latency. These rows go into `request_stats` and follow a similar tier and prune cadence.
+A separate code path in the proxy package (the `simpledeploy_metrics` Caddy module) records every HTTP request: app slug, method, path, status, latency. Per-app request counts, error counts and latency go into the `request_metrics` table and follow a similar tier and prune cadence. The status is the one the client got, including the `502`/`504` Caddy returns when the app cannot be reached and `499` when the client disconnected. Statuses `>= 500` count toward `error_count`, which drives the dashboard's error rate; `499` and other 4xx do not. Details: [proxy](/architecture/proxy/#simpledeploy_metrics).
 
 ## Pruning
 
