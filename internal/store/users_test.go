@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -268,5 +269,39 @@ func TestSuperAdminBypassesAppAccess(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("expected super_admin to have access without explicit grant")
+	}
+}
+
+func TestCreateAPIKey_RejectsDuplicateNamePerUser(t *testing.T) {
+	s := newTestStore(t)
+	a, err := s.CreateUser("alice", "h", "super_admin", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.CreateUser("bob", "h", "viewer", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateAPIKey(a.ID, "hash1", "ci", nil); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	_, err = s.CreateAPIKey(a.ID, "hash2", "ci", nil)
+	if !errors.Is(err, ErrAPIKeyNameTaken) {
+		t.Fatalf("duplicate create err = %v, want ErrAPIKeyNameTaken", err)
+	}
+	keys, _ := s.ListAPIKeysByUser(a.ID)
+	if len(keys) != 1 {
+		t.Fatalf("got %d keys, want 1", len(keys))
+	}
+	// Same name for a different user is fine.
+	if _, err := s.CreateAPIKey(b.ID, "hash3", "ci", nil); err != nil {
+		t.Fatalf("other user same name: %v", err)
+	}
+	// Name is reusable after the original is revoked.
+	if err := s.DeleteAPIKey(keys[0].ID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateAPIKey(a.ID, "hash4", "ci", nil); err != nil {
+		t.Fatalf("recreate after revoke: %v", err)
 	}
 }

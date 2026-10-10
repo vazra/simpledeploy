@@ -418,3 +418,20 @@ func TestRevokeAPIKey(t *testing.T) {
 		t.Errorf("status = %q, want ok", resp["status"])
 	}
 }
+
+func TestCreateAPIKey_DuplicateNameConflict(t *testing.T) {
+	srv, _, cookie := setupUserTestServer(t)
+
+	for i, want := range []int{http.StatusCreated, http.StatusConflict} {
+		req := authedRequest(t, http.MethodPost, "/api/apikeys",
+			map[string]string{"name": "dup"}, cookie)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		if w.Code != want {
+			t.Fatalf("create #%d status = %d, want %d; body: %s", i+1, w.Code, want, w.Body.String())
+		}
+		if want == http.StatusConflict && !strings.Contains(w.Body.String(), "already exists") {
+			t.Errorf("conflict body = %q", w.Body.String())
+		}
+	}
+}
