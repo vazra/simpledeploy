@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from 'svelte'
-  import yaml from 'js-yaml'
+  import * as yaml from 'js-yaml'
   import Button from './Button.svelte'
   import YamlEditor from './YamlEditor.svelte'
   import VisualEditor from './VisualEditor.svelte'
