@@ -57,7 +57,7 @@ jobs:
 
       - name: Install SimpleDeploy CLI
         env:
-          SD_VERSION: "1.4.2" # x-release-please-version
+          SD_VERSION: "1.4.3" # x-release-please-version
         run: |
           base="https://github.com/vazra/simpledeploy/releases/download/v${SD_VERSION}"
           file="simpledeploy_${SD_VERSION}_linux_amd64.tar.gz"

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.3](https://github.com/vazra/simpledeploy/compare/v1.4.2...v1.4.3) (2026-10-10)
+
+
+### Bug Fixes
+
+* security hardening (GHSA-37rh-vqmp-h9rf) ([2a365ad](https://github.com/vazra/simpledeploy/commit/2a365adddde38e4fd8aa4fc0cf26c907f2bce7a7))
+
 ## [1.4.2](https://github.com/vazra/simpledeploy/compare/v1.4.1...v1.4.2) (2026-10-10)
 
 
