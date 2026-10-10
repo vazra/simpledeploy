@@ -829,7 +829,7 @@ func TestCreateAlertRuleRejectsUnsupportedMetricOrOperator(t *testing.T) {
 			t.Errorf("%s %s: status = %d body = %q, want 400 %q", tc.metric, tc.op, w.Code, w.Body.String(), tc.want)
 		}
 	}
-	for _, m := range []string{"cpu_pct", "mem_pct", "mem_bytes"} {
+	for _, m := range []string{"cpu_pct", "mem_pct", "mem_bytes", "backup_failed", "backup_success", "backup_missed", "backup_all"} {
 		req := authedRequest(t, http.MethodPost, "/api/alerts/rules", map[string]any{
 			"metric": m, "operator": ">=", "threshold": 1.0,
 			"duration_sec": 60, "webhook_id": whID, "enabled": true,

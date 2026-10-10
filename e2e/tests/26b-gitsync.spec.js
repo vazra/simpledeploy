@@ -147,34 +147,18 @@ test.describe('Git sync: roundtrip + conflict', () => {
   test.beforeAll(async () => {
     const bin = getBinaryPath();
 
-    // 1. Create bare repo and push initial empty commit
+    // 1. Create an empty bare repo: SimpleDeploy refuses to push into a
+    // remote that already has commits, and pushes the initial commit itself.
     bareRepoPath = join(tmpdir(), `sd-gitsync-bare-${Date.now()}.git`);
-    execFileSync('git', ['init', '--bare', bareRepoPath]);
-
-    const initDir = mkdtempSync(join(tmpdir(), 'sd-gitsync-init-'));
-    const gitEnvInit = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'test',
-      GIT_AUTHOR_EMAIL: 'test@test',
-      GIT_COMMITTER_NAME: 'test',
-      GIT_COMMITTER_EMAIL: 'test@test',
-    };
-    try {
-      execFileSync('git', ['init'], { cwd: initDir, env: gitEnvInit });
-      execFileSync('git', ['checkout', '-b', 'main'], { cwd: initDir, env: gitEnvInit });
-      execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: initDir, env: gitEnvInit });
-      execFileSync('git', ['remote', 'add', 'origin', `file://${bareRepoPath}`], { cwd: initDir, env: gitEnvInit });
-      execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: initDir, env: gitEnvInit });
-    } finally {
-      rmSync(initDir, { recursive: true, force: true });
-    }
+    execFileSync('git', ['init', '--bare', '-b', 'main', bareRepoPath]);
 
     // 2. Allocate ports, write config with gitsync block
     const mgmtPort = await getAvailablePort();
     const proxyPort = await getAvailablePort();
     const dataDir = mkdtempSync(join(tmpdir(), 'sd-e2e-gs-data-'));
     const appsDir = mkdtempSync(join(tmpdir(), 'sd-e2e-gs-apps-'));
-    const configPath = join(dataDir, 'config.yml');
+    // Not data_dir/config.yml: that path is SimpleDeploy's own global sidecar.
+    const configPath = join(dataDir, 'server-config.yaml');
     const logPath = join(dataDir, 'server.log');
 
     const configContent = [
@@ -191,7 +175,7 @@ test.describe('Git sync: roundtrip + conflict', () => {
       `  window: "60s"`,
       `  burst: 5000`,
       `  by: "ip"`,
-      `gitsync:`,
+      `git_sync:`,
       `  enabled: true`,
       `  remote: "file://${bareRepoPath}"`,
       `  branch: main`,
@@ -277,7 +261,7 @@ test.describe('Git sync: roundtrip + conflict', () => {
     // Deploy nginx app via API
     const deployRes = await api('POST', '/api/apps/deploy', {
       name: APP_SLUG,
-      compose: COMPOSE_NGINX,
+      compose: Buffer.from(COMPOSE_NGINX).toString('base64'),
     });
     expect(deployRes.ok, `deploy failed: ${JSON.stringify(deployRes.data)}`).toBe(true);
 
@@ -306,11 +290,10 @@ test.describe('Git sync: roundtrip + conflict', () => {
     execFileSync('git', ['clone', `file://${bareRepoPath}`, cloneDir]);
 
     const composePath = join(cloneDir, APP_SLUG, 'docker-compose.yml');
-    const sidecarPath = join(cloneDir, APP_SLUG, 'simpledeploy.yml');
     const globalPath = join(cloneDir, '_global.yml');
 
     expect(existsSync(composePath), `${APP_SLUG}/docker-compose.yml missing from remote`).toBe(true);
-    expect(existsSync(sidecarPath), `${APP_SLUG}/simpledeploy.yml missing from remote`).toBe(true);
+    // The per-app sidecar is written once the app has settings (test 2 adds an alert rule).
     expect(existsSync(globalPath), '_global.yml missing from remote').toBe(true);
 
     const globalContent = readFileSync(globalPath, 'utf-8');
@@ -332,13 +315,16 @@ test.describe('Git sync: roundtrip + conflict', () => {
     expect(webhookId, 'webhookId must be set from previous test').toBeTruthy();
 
     // Create alert rule so simpledeploy.yml has alert_rules
+    const appsRes = await api('GET', '/api/apps', null);
+    const app = (appsRes.data || []).find((a) => (a.Slug || a.slug) === APP_SLUG);
+    expect(app, `app ${APP_SLUG} not found`).toBeTruthy();
     const ruleRes = await api('POST', '/api/alerts/rules', {
-      app_slug: APP_SLUG,
+      app_id: app.ID ?? app.id,
       webhook_id: webhookId,
-      metric: 'cpu',
-      condition: '>',
+      metric: 'cpu_pct',
+      operator: '>',
       threshold: 80,
-      duration: '5m',
+      duration_sec: 300,
       enabled: true,
     });
     expect(ruleRes.ok, `alert rule create failed: ${JSON.stringify(ruleRes.data)}`).toBe(true);
@@ -380,7 +366,7 @@ test.describe('Git sync: roundtrip + conflict', () => {
       const r = await api('GET', '/api/alerts/rules', null);
       if (!r.ok || !Array.isArray(r.data)) return null;
       const found = r.data.find(
-        (x) => (x.app_slug || x.AppSlug) === APP_SLUG && (x.metric || x.Metric) === 'cpu',
+        (x) => (x.app_slug || x.AppSlug) === APP_SLUG && (x.metric || x.Metric) === 'cpu_pct',
       );
       if (!found) return null;
       const thresh = found.threshold ?? found.Threshold;
@@ -398,6 +384,10 @@ test.describe('Git sync: roundtrip + conflict', () => {
     expect(cloneDir, 'cloneDir must be set from previous tests').toBeTruthy();
     expect(webhookId, 'webhookId must be set from test 1').toBeTruthy();
 
+    // Let the post-pull window from test 2 close: dashboard writes right
+    // after a pull are treated as re-renders of the pulled files.
+    await new Promise((r) => setTimeout(r, 3_000));
+
     // Pull latest into clone so it's up to date
     execFileSync('git', ['pull'], { cwd: cloneDir });
 
@@ -405,8 +395,11 @@ test.describe('Git sync: roundtrip + conflict', () => {
     const globalPath = join(cloneDir, '_global.yml');
     expect(existsSync(globalPath), '_global.yml missing from clone').toBe(true);
     let globalContent = readFileSync(globalPath, 'utf-8');
-    // Replace the webhook name (may be gs-slack or from earlier renames)
-    globalContent = globalContent.replace(/name: \S+/, 'name: from-remote');
+    // Replace the webhook name (may be gs-slack or from earlier renames).
+    // Anchor on the webhooks list: a bare /name:/ also matches "username:".
+    const renamed = globalContent.replace(/(webhooks:\s*\n\s*- name: )\S+/, '$1from-remote');
+    expect(renamed, 'webhook entry not found in _global.yml').not.toBe(globalContent);
+    globalContent = renamed;
     writeFileSync(globalPath, globalContent);
 
     const gitEnv = {

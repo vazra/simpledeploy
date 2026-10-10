@@ -364,10 +364,11 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rule)
 }
 
-// alertMetrics and alertOperators are what the alert evaluator understands;
-// a rule with anything else would be stored but never fire.
+// alertMetrics and alertOperators are what the alert evaluator and the
+// backup event dispatcher understand; a rule with anything else would be
+// stored but never fire.
 var (
-	alertMetrics   = []string{"cpu_pct", "mem_pct", "mem_bytes"}
+	alertMetrics   = []string{"cpu_pct", "mem_pct", "mem_bytes", "backup_failed", "backup_success", "backup_missed", "backup_all"}
 	alertOperators = []string{">", "<", ">=", "<="}
 )
 
