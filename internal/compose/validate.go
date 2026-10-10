@@ -263,7 +263,7 @@ func volumeHostBind(v types.VolumeConfig) (device string, ro, ok bool) {
 	opts := v.DriverOpts
 	device = strings.TrimSpace(opts["device"])
 	typ := strings.ToLower(strings.TrimSpace(opts["type"]))
-	if !filepath.IsAbs(device) || !(typ == "none" || hasMountOpt(opts["o"], "bind") || hasMountOpt(opts["o"], "rbind")) {
+	if !filepath.IsAbs(device) || (typ != "none" && !hasMountOpt(opts["o"], "bind") && !hasMountOpt(opts["o"], "rbind")) {
 		return "", false, false
 	}
 	return device, hasMountOpt(opts["o"], "ro"), true
