@@ -1473,6 +1473,17 @@ func TestGitsyncStampsAuditRowsOnSuccess(t *testing.T) {
 	drainCommits(t, s, 5*time.Second)
 	newSHA := waitForHeadUpdate(t, s, prevSHA, 5*time.Second)
 
+	// Rows are stamped after the push, which follows the HEAD update.
+	waitFor(t, 5*time.Second, "audit rows stamped synced", func() bool {
+		for _, id := range []int64{id1, id2} {
+			e, err := st.GetActivity(ctx, id)
+			if err != nil || e.SyncStatus == nil || *e.SyncStatus != "synced" {
+				return false
+			}
+		}
+		return true
+	})
+
 	// Both rows must be marked synced with the new SHA.
 	e1, err := st.GetActivity(ctx, id1)
 	if err != nil {
@@ -1560,8 +1571,10 @@ func TestGitsyncStampsAuditRowsOnFailure(t *testing.T) {
 	writeFile(t, filepath.Join(appsDir, "app1", "docker-compose.yml"), "version: 'push-fail'\n")
 	s.EnqueueCommit(nil, "failure-stamp-test")
 	drainCommits(t, s, 5*time.Second)
-	// Give worker time to finish processing.
-	time.Sleep(200 * time.Millisecond)
+	waitFor(t, 5*time.Second, "audit row stamped failed", func() bool {
+		e, err := st.GetActivity(ctx, id1)
+		return err == nil && e.SyncStatus != nil && *e.SyncStatus == "failed"
+	})
 
 	e1, err := st.GetActivity(ctx, id1)
 	if err != nil {
