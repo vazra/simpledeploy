@@ -62,7 +62,7 @@ git_sync:
 | `poll_interval` | no | How often to pull from remote. Default `60s`. |
 | `webhook_secret` | no | HMAC secret for verifying GitHub-compatible webhook pushes. |
 | `poll_enabled` | no | Whether to run the poll loop. Default `true`. |
-| `auto_push_enabled` | no | Whether to auto-commit and push local changes. Default `true`. |
+| `auto_push_enabled` | no | Whether to push local changes to the remote. When `false` (pull-only), changes are still committed locally. Default `true`. |
 | `auto_apply_enabled` | no | Whether to auto-apply fetched remote changes. Default `true`. |
 | `webhook_enabled` | no | Whether the webhook endpoint is active. Default `true`. |
 
@@ -76,7 +76,11 @@ Controls whether the background poll loop runs on `poll_interval`. Set to `false
 
 ### `auto_push_enabled`
 
-Controls whether local config changes (deploys, env edits, sidecar updates) are automatically committed and pushed to the remote. Set to `false` for a pull-only setup where the remote is the source of truth and local changes are never pushed back. This is useful when you manage config entirely through the git repo and want to prevent the server from writing back. Dashboard edits made in this mode stay uncommitted in `apps_dir`; git refuses to apply remote commits over them, and the Git Sync page shows that error until the local changes are committed or discarded.
+Controls whether local config changes (deploys, env edits, sidecar updates) are pushed to the remote. Set to `false` for a pull-only setup where the remote is the source of truth and local changes are never pushed back. This is useful when you manage config entirely through the git repo and want to prevent the server from writing back.
+
+In pull-only mode, dashboard changes are still committed to the local repository in `apps_dir`, with the same files and bot commit message as auto-push, but the commits are not pushed. Before applying remote commits, SimpleDeploy also commits any other uncommitted changes to synced files, including new app folders, so git can apply the pull. The remote commits are applied and the local commits are replayed on top of them; when both sides changed the same file, [conflict behavior](#conflict-behavior) decides which version is kept. Apart from the initial commit to an empty remote on first run, nothing is pushed in this mode. If you turn auto-push back on later, the next push includes these local commits.
+
+A pull can still be blocked by changes git sync does not commit itself, such as edits to other files tracked in the repository, or symlinks at synced paths. The Git Sync page then shows a `rebase refused` error with git's output. Commit or remove those changes, then sync again. With auto-apply on, each poll also retries the pull.
 
 ### `auto_apply_enabled`
 
@@ -151,7 +155,9 @@ Local state wins on conflict. If a remote change conflicts with a local change, 
 
 Conflicts usually mean two operators edited the same file at the same time. To apply the remote change, re-enter it through the UI after reviewing what was lost.
 
-One exception: a local bot commit that only restored access grants (it stays unpushed when `auto_push_enabled` is off) never overrides remote edits. On conflict the remote file is taken and its access list is restored again, so remote changes such as alert thresholds still apply.
+With `auto_push_enabled` off, local commits are never pushed, so they are replayed on every pull. A local change therefore keeps taking precedence over later remote edits to the same part of that file.
+
+Two kinds of local bot commits never override remote edits: one that only restored access grants, and one that only holds synced files SimpleDeploy rewrote from its database after applying a pull (for example a hand-formatted `simpledeploy.yml` saved back in SimpleDeploy's own format). Both stay unpushed when `auto_push_enabled` is off. On conflict the remote file is taken (and its access list restored again), so remote changes such as alert thresholds still apply.
 
 ## CLI
 

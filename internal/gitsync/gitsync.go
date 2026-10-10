@@ -81,7 +81,7 @@ type Config struct {
 
 	// Behaviour toggles. All default to true via the resolver.
 	PollEnabled      bool // false: poll loop is not started
-	AutoPushEnabled  bool // false: EnqueueCommit is a no-op
+	AutoPushEnabled  bool // false: pull-only; local changes are committed but never pushed
 	AutoApplyEnabled bool // false: fetch-only; use ApplyPending to apply
 	WebhookEnabled   bool // false: /api/git/webhook returns 404
 }
@@ -202,6 +202,9 @@ type Syncer struct {
 	recentConflicts []Conflict
 	dropped         int64
 	commitsBehind   int
+	// pullRewrites holds repo-relative managed paths written while a pull
+	// was being imported and not changed locally since (see pending.go).
+	pullRewrites map[string]bool
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -291,19 +294,20 @@ func (g *Syncer) Stop() error {
 	return nil
 }
 
-// EnqueueCommit marks the working tree dirty and requests a commit-and-push.
-// Non-blocking; drops if the channel is full. Coalesces naturally via buffered channel.
-// No-op when AutoPushEnabled=false.
+// EnqueueCommit marks the working tree dirty and requests a commit, pushed
+// when AutoPushEnabled (pull-only mode keeps it local). Non-blocking; drops
+// if the channel is full. Coalesces naturally via buffered channel.
+// While a pull is being imported the request is not queued; the paths are
+// recorded as rewrites of pulled files and committed before the next rebase.
 func (g *Syncer) EnqueueCommit(paths []string, reason string) {
 	if !g.cfg.Enabled {
 		return
 	}
-	if !g.cfg.AutoPushEnabled {
-		return
-	}
 	if g.suppress.Load() {
+		g.notePullRewrites(paths)
 		return
 	}
+	g.forgetPullRewrites(paths)
 	select {
 	case g.commitCh <- commitReq{paths: paths, reason: reason}:
 	default:
@@ -485,6 +489,7 @@ func (g *Syncer) initRepo() error {
 	}
 	// Existing repo: persist safety config (best effort), then validate remote.
 	ensureRepoSafetyConfig(g.cfg.AppsDir)
+	ensureRepoIdentity(g.cfg.AppsDir, g.cfg.authorName(), g.cfg.authorEmail())
 	repo, err := git.PlainOpen(g.cfg.AppsDir)
 	if err != nil {
 		return fmt.Errorf("gitsync: open existing repo: %w", err)
@@ -650,7 +655,8 @@ func (g *Syncer) stageAllowed(wt *git.Worktree) error {
 			return nil
 		}
 		rel, _ := filepath.Rel(g.cfg.AppsDir, path)
-		if isAllowedPath(rel) {
+		// Rewrites of pulled files are left for commitPending.
+		if isAllowedPath(rel) && !g.isPullRewrite(filepath.ToSlash(rel)) {
 			_, addErr := wt.Add(rel)
 			return addErr
 		}
@@ -667,7 +673,7 @@ func (g *Syncer) stageAllowed(wt *git.Worktree) error {
 	}
 	for rel, fs := range st {
 		if fs.Worktree == git.Deleted {
-			if isAllowedPath(rel) {
+			if isAllowedPath(rel) && !g.isPullRewrite(filepath.ToSlash(rel)) {
 				if _, err := wt.Remove(rel); err != nil {
 					log.Printf("[gitsync] stage removal %s: %v", rel, err)
 				}
@@ -703,7 +709,9 @@ func isAllowedPath(rel string) bool {
 	return false
 }
 
-// doCommit stages allowed paths and commits if there are changes, then pushes.
+// doCommit stages allowed paths and commits if there are changes, then
+// pushes when AutoPushEnabled. In pull-only mode the commit stays local and
+// audit rows stay pending (they record pushes).
 func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 	if g.repo == nil {
 		return
@@ -751,11 +759,11 @@ func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 	// Capture pending audit IDs before the push so any rows written concurrently
 	// during the push window are not stamped with this commit's SHA.
 	var pendingIDs []int64
-	if g.st != nil {
+	if g.st != nil && g.cfg.AutoPushEnabled {
 		pendingIDs, _ = g.st.PendingSyncAuditIDs(ctx)
 	}
 
-	msg := buildCommitMessage("chore(simpledeploy): sync config", req.reason)
+	msg := buildCommitMessage(syncCommitSubject, req.reason)
 	now := time.Now()
 	sig := &object.Signature{Name: g.cfg.authorName(), Email: g.cfg.authorEmail(), When: now}
 	_, err = wt.Commit(msg, &git.CommitOptions{
@@ -771,6 +779,9 @@ func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 	}
 	g.updateHeadSHA()
 
+	if !g.cfg.AutoPushEnabled {
+		return
+	}
 	if pushErr := g.doPushWithRetry(); pushErr != nil {
 		log.Printf("[gitsync] push: %v", pushErr)
 		g.setError(pushErr.Error())
@@ -826,7 +837,9 @@ func (g *Syncer) ApplyPending(ctx context.Context) error {
 }
 
 // fetchAndInspect fetches from origin and updates CommitsBehind in Status.
-// Returns (true, nil) when new commits were fetched, (false, nil) when already up-to-date.
+// Returns (true, nil) when new commits were fetched or earlier fetched
+// commits are still not applied (e.g. a failed apply, retried on the next
+// poll), (false, nil) when local HEAD already contains origin.
 func (g *Syncer) fetchAndInspect() (fetched bool, err error) {
 	auth, err := g.buildAuth()
 	if err != nil {
@@ -843,10 +856,16 @@ func (g *Syncer) fetchAndInspect() (fetched bool, err error) {
 		return false, fmt.Errorf("gitsync: fetch: %w", fetchErr)
 	}
 	if fetchErr == git.NoErrAlreadyUpToDate {
-		g.setLastSync(nil)
+		// Nothing new on the remote, but an earlier fetch may not have been
+		// applied yet (fetch-only mode, or an apply that failed).
+		behind := g.countCommitsBehind()
 		g.mu.Lock()
-		g.commitsBehind = 0
+		g.commitsBehind = behind
 		g.mu.Unlock()
+		if behind > 0 {
+			return true, nil
+		}
+		g.setLastSync(nil)
 		return false, nil
 	}
 
@@ -916,7 +935,16 @@ func (g *Syncer) countCommitsBehind() int {
 // managed paths are not imported and their paths are not passed to the
 // reconciler, access grants in pulled sidecars are never applied (DB and
 // files are reset to the pre-pull grants), and _global.yml is never imported.
+//
+// Uncommitted changes to managed paths are committed first (commitPending),
+// so git can rebase; local commits are pushed only when AutoPushEnabled.
 func (g *Syncer) applyFetched(ctx context.Context) error {
+	pending, err := g.commitPending()
+	if err != nil {
+		err = fmt.Errorf("gitsync: commit local changes before applying the pull: %w", err)
+		g.setError(err.Error())
+		return err
+	}
 	prevSHA := g.currentHeadSHA()
 	snap := g.snapshotAccess()
 
@@ -950,6 +978,9 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 	g.setLastSync(nil)
 
 	if newSHA == prevSHA {
+		if pending.local {
+			g.pushAfterApply("local changes")
+		}
 		return nil
 	}
 
@@ -998,11 +1029,10 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 		}
 	}
 
-	if chk.committed && g.cfg.AutoPushEnabled {
-		if pushErr := g.doPushWithRetry(); pushErr != nil {
-			log.Printf("[gitsync] push access restore: %v", pushErr)
-			g.setError(pushErr.Error())
-		}
+	// A commit of pull rewrites alone is not pushed here; it goes out with
+	// the next push, so a pull does not echo straight back to the remote.
+	if chk.committed || pending.local {
+		g.pushAfterApply("local commits after pull")
 	}
 
 	// Blocked apps' paths are left out of the reconcile; the rest still applies.
@@ -1022,6 +1052,18 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 		return errors.New(msg)
 	}
 	return nil
+}
+
+// pushAfterApply pushes local commits made while applying a pull when
+// AutoPushEnabled. Pull-only mode keeps them local.
+func (g *Syncer) pushAfterApply(what string) {
+	if !g.cfg.AutoPushEnabled {
+		return
+	}
+	if err := g.doPushWithRetry(); err != nil {
+		log.Printf("[gitsync] push %s: %v", what, err)
+		g.setError(err.Error())
+	}
 }
 
 // unblockedPaths returns the paths that do not belong to a blocked app. A
@@ -1515,6 +1557,9 @@ func (g *Syncer) doPushWithRetry() error {
 	if fetchErr != nil && fetchErr != git.NoErrAlreadyUpToDate {
 		return fmt.Errorf("push retry fetch: %w (initial push: %v)", fetchErr, err)
 	}
+	if _, pendErr := g.commitPending(); pendErr != nil {
+		return fmt.Errorf("push retry: commit local changes: %w (initial push: %v)", pendErr, err)
+	}
 	prevSHA := g.currentHeadSHA()
 	snap := g.snapshotAccess()
 	if _, _, rebaseErr := rebaseServerWins(g.cfg.AppsDir, g.cfg.branch()); rebaseErr != nil {
@@ -1591,6 +1636,22 @@ func ensureRepoSafetyConfig(appsDir string) {
 	if out, err := gitExec(appsDir, "config", "core.symlinks", "false"); err != nil {
 		log.Printf("[gitsync] warning: could not persist core.symlinks=false in %s (sync continues; every git call still passes it): %v %s",
 			appsDir, err, strings.TrimSpace(string(out)))
+	}
+}
+
+// ensureRepoIdentity sets a repo-level user.name / user.email when git has
+// none at any level, so system git can create commits: a rebase that
+// replays local commits (common in pull-only mode) needs a committer.
+// Best effort, like ensureRepoSafetyConfig.
+func ensureRepoIdentity(appsDir, name, email string) {
+	for _, kv := range [][2]string{{"user.name", name}, {"user.email", email}} {
+		if out, err := gitExec(appsDir, "config", "--get", kv[0]); err == nil && strings.TrimSpace(string(out)) != "" {
+			continue
+		}
+		if out, err := gitExec(appsDir, "config", kv[0], kv[1]); err != nil {
+			log.Printf("[gitsync] warning: could not set %s in %s: %v %s",
+				kv[0], appsDir, err, strings.TrimSpace(string(out)))
+		}
 	}
 }
 
