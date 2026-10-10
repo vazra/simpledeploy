@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/store"
@@ -806,5 +807,37 @@ func TestClearAlertHistory_RequiresSuperAdmin(t *testing.T) {
 	srv.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("unauth status = %d, want 401", w.Code)
+	}
+}
+
+func TestCreateAlertRuleRejectsUnsupportedMetricOrOperator(t *testing.T) {
+	srv, _, cookie := setupAlertTestServer(t)
+	wh := createTestWebhook(t, srv, cookie, "valwh")
+	whID := int64(wh["id"].(float64))
+	for _, tc := range []struct{ metric, op, want string }{
+		{"disk", ">", "unsupported metric"},
+		{"request_error_rate", ">", "unsupported metric"},
+		{"cpu_pct", "!=", "unsupported operator"},
+	} {
+		req := authedRequest(t, http.MethodPost, "/api/alerts/rules", map[string]any{
+			"metric": tc.metric, "operator": tc.op, "threshold": 1.0,
+			"duration_sec": 60, "webhook_id": whID, "enabled": true,
+		}, cookie)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
+			t.Errorf("%s %s: status = %d body = %q, want 400 %q", tc.metric, tc.op, w.Code, w.Body.String(), tc.want)
+		}
+	}
+	for _, m := range []string{"cpu_pct", "mem_pct", "mem_bytes"} {
+		req := authedRequest(t, http.MethodPost, "/api/alerts/rules", map[string]any{
+			"metric": m, "operator": ">=", "threshold": 1.0,
+			"duration_sec": 60, "webhook_id": whID, "enabled": true,
+		}, cookie)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Errorf("%s: status = %d, want 201", m, w.Code)
+		}
 	}
 }

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/alerts"
@@ -320,6 +322,10 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "metric, operator and webhook_id required", http.StatusBadRequest)
 		return
 	}
+	if msg := validateAlertRuleFields(req.Metric, req.Operator); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
 	if !s.canMutateForApp(w, r, req.AppID) {
 		return
 	}
@@ -358,6 +364,24 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rule)
 }
 
+// alertMetrics and alertOperators are what the alert evaluator understands;
+// a rule with anything else would be stored but never fire.
+var (
+	alertMetrics   = []string{"cpu_pct", "mem_pct", "mem_bytes"}
+	alertOperators = []string{">", "<", ">=", "<="}
+)
+
+// validateAlertRuleFields returns a user-facing error message, or "".
+func validateAlertRuleFields(metric, op string) string {
+	if !slices.Contains(alertMetrics, metric) {
+		return fmt.Sprintf("unsupported metric %q: use one of %s", metric, strings.Join(alertMetrics, ", "))
+	}
+	if !slices.Contains(alertOperators, op) {
+		return fmt.Sprintf("unsupported operator %q: use one of %s", op, strings.Join(alertOperators, " "))
+	}
+	return ""
+}
+
 func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -386,6 +410,10 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if msg := validateAlertRuleFields(req.Metric, req.Operator); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 	// Authorise against both the existing rule's app (so a manage user
