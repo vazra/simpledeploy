@@ -53,6 +53,8 @@ Architecture details per package: `docs/architecture/`.
 - **Community recipes.** Catalog fetched from `recipes_index_url` with 10min TTL + stale-on-error. See `docs/contributing/community-recipes.md`.
 - **Audit recording.** Mutating paths emit a row to `audit_log` via `audit.Recorder` in the same tx. Pre-rendered summaries in `internal/audit/render`.
 - **Realtime events.** Notify-only pub/sub at `GET /api/events`; REST is source of truth. See `docs/architecture/realtime.md`.
+- **Compose validation guard.** `compose.ParseFile`/`ParseContent` interpolate `.env` like docker compose; `ValidateComposeSecurity` runs in API handlers, reconciler scan, and `deployer.checkComposeFile` before every `compose up`. See `docs/architecture/deployer.md`.
+- **Symlink-safe app files.** Read/write compose, `.env`, sidecars via `internal/fsutil` (`ReadRegularFile`, `WriteFileAtomic`), not `os.ReadFile`/`os.WriteFile`.
 
 ## Testing
 

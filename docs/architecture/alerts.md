@@ -32,7 +32,9 @@ Firings write to `alert_history` with a snapshot of the rule fields at firing ti
 
 The dispatcher posts JSON to the webhook URL. Payload includes rule id, metric, threshold, observed value, app slug (if any), timestamp, and a human-readable message. See [the webhooks guide](/guides/alerts/webhooks/) for the full schema.
 
-Network safety: by default the dispatcher refuses URLs that resolve to private, link-local, or loopback addresses. Set `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS=1` to opt out (only for trusted internal targets).
+Templates (builtin and custom) are Go `text/template`s that render JSON. Before execution, `jsonSafeEvent` JSON-escapes every string field of the event (app name and slug, metric, display values, operator, status), so templates place fields directly inside quotes and app names with quotes, backslashes or newlines keep the payload valid. Numeric fields and `FiredAt` are passed as-is.
+
+Network safety: by default the dispatcher refuses URLs that resolve to reserved addresses, and the dialer re-checks the resolved IP at connect time (DNS rebinding). `isReservedIP` covers loopback, RFC 1918, link-local, multicast, unspecified, CGNAT (`100.64.0.0/10`), IETF/TEST-NET/benchmarking ranges, class E, IPv6 unique-local and discard, and the NAT64 local-use prefix `64:ff9b:1::/48`. Addresses in the well-known NAT64 prefix `64:ff9b::/96` are judged by the IPv4 address they embed, so DNS64 hosts can still reach public targets. Set `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS=1` to opt out (only for trusted internal targets). The S3 backup target uses a similar list (`SIMPLEDEPLOY_ALLOW_PRIVATE_S3`, see [Backup architecture](/architecture/backup/)).
 
 Failed dispatches retry with exponential backoff up to a small bound; persistent failures are recorded but not retried indefinitely.
 

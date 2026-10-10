@@ -15,10 +15,11 @@ internal/
   alerts/              rule evaluator + webhook dispatch (SSRF-guarded)
   backup/              Strategy + Target interfaces, cron scheduler
   client/              HTTP client used by the CLI
-  compose/             Compose YAML parser + label extraction
+  compose/             Compose YAML parser, label extraction, security validator
   config/              YAML config loader
   deployer/            shells out to `docker compose` via CommandRunner
   docker/              Docker SDK wrapper + MockClient
+  fsutil/              symlink-safe reads + atomic writes for app files
   logbuf/              ring buffer io.Writer + WS fan-out
   metrics/             Docker stats + gopsutil collector + rollup
   proxy/               Caddy embedding, route builder, custom modules

@@ -50,13 +50,25 @@ In the UI: open the app, **Logs** tab, pick the unhealthy service, scroll to the
 
 ## Deploy fails with "compose file rejected"
 
-**Symptom:** Deploy refused with a validation error.
+**Symptom:** Deploy, rollback, pull or scale refused with a list of violations (`compose file contains disallowed directives`, or `Stopped before starting: the compose file breaks these security rules:` in the deploy log). An app added through git sync or SSH never starts.
 
-**Diagnose:** Read the exact error message in the deploy logs. SimpleDeploy validates compose files and rejects dangerous directives.
+**Diagnose:** The dashboard and API show each violation. For files picked up from disk, check the server log:
 
-**Fix:** Remove the offending directive. See [Security hardening - Deployment safety](/operations/security-hardening/#deployment-safety) for the full reject list (`privileged`, `network_mode: host`, `cap_add: SYS_ADMIN`, bind mounts of `/etc`/`/proc`/`docker.sock`, etc.).
+```bash
+journalctl -u simpledeploy | grep "SECURITY: skipping"
+```
 
-If you genuinely need one of these (rare), there is no override. File an issue explaining the use case.
+The check runs with `${VARS}` filled in from the app's `.env`, so a value there can cause a violation too.
+
+**Fix:** Remove or change the offending setting and deploy again. The full list is in [Compose security validation](/reference/compose-labels/#compose-security-validation). If an app needs a host folder under a protected path (for example a media library under `/home`), add that folder to `allowed_bind_paths` in `config.yaml` and restart SimpleDeploy. Other rules have no override; if you genuinely need one, file an issue explaining the use case.
+
+## App still serves traffic but redeploys are refused
+
+**Symptom:** After an upgrade, an app keeps working, but redeploy, pull and scale fail with violations, and saving endpoints, IP access or `.env` returns `409` with "this app's compose file no longer passes security checks". The log shows `keeping routes for the running app; fix its compose file before the next deploy`.
+
+**What it means:** The app was deployed before the current compose rules. It keeps its routes only while its compose file is unchanged.
+
+**Fix:** Edit the compose file so it passes the checks (see the entry above) and redeploy. Any change to the file ends the route retention: a file that still fails stays offline until it is fixed.
 
 ## TLS certificate fails to issue
 
@@ -107,7 +119,8 @@ sudo chmod 0600 /var/lib/simpledeploy/simpledeploy.db
 **Fix:**
 - Behind Cloudflare with WS disabled: enable WebSockets in Cloudflare dashboard for the management hostname.
 - Behind nginx/another proxy: ensure `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection upgrade;` are set.
-- Origin mismatch: the management UI must be served from the same hostname as the API. Cross-origin WS is rejected by design.
+- Origin mismatch: the management UI must be served from the same hostname and port as the API. Cross-origin WS is rejected by design. A proxy that drops the port from `Host` still works when the browser sends `Sec-Fetch-Site: same-origin`.
+- Close code `1008` ("authorization changed"): sockets re-check the session every 60 seconds and close after logout, a password or role change, API key revocation, or lost app access. Sign in again, or ask an admin to restore access.
 - Idle timeout: connections close after 5 minutes idle. The UI auto-reconnects.
 
 ## High memory usage
@@ -162,6 +175,7 @@ curl -s http://localhost:2019/config/ | jq '.apps.http.servers'
 **Fix:**
 - Container not running: redeploy. Check container logs for crash loop.
 - Missing endpoint label: add `simpledeploy.endpoint=example.com` to the service in `compose.yaml`.
+- Domain claimed by two apps: the log shows `domain is already served by app "..."`. See [409 domain already used by another app](#409-domain-already-used-by-another-app).
 - Wrong port: confirm the service `expose:` or `ports:` matches what the app listens on.
 - DNS not resolving: `dig +short example.com` should match server IP.
 
@@ -175,6 +189,15 @@ curl -s http://localhost:2019/config/ | jq '.apps.http.servers'
 - Login flood (10/min): wait 60s. Check for misconfigured auto-login scripts.
 - Per-app rate limit: tune `simpledeploy.ratelimit.*` labels on the affected app.
 - Behind a proxy: set `trusted_proxies` in config so rate limiting uses real client IPs.
+- Restore returns `too many restores in progress, try again later`: at most 4 restores run at once (uploads and backup history together). Wait for one to finish. See [Concurrent restores](/guides/backups/restore/#concurrent-restores).
+
+## 409 domain already used by another app
+
+**Symptom:** Saving endpoints or `.env` values, or restoring or rolling back to a compose version, returns `409` with `domain ... is already used by app "..."` (or `by another app`), `is reserved for the SimpleDeploy dashboard`, or `is a wildcard domain; only a super admin can add one`.
+
+**What it means:** Each domain is served by one app, even on different paths. The dashboard `domain` and wildcard domains are reserved for super admins.
+
+**Fix:** Remove the domain from the other app first, or pick another domain. If two compose files on disk (for example from git sync) claim the same domain, the app created first keeps it and the other app's routes on it are dropped with a log warning.
 
 ## Backup failed
 
@@ -193,6 +216,37 @@ curl -H "Authorization: Bearer $SD_API_KEY" \
 - S3 bucket not reachable: check region, endpoint URL, network.
 - Strategy script crashed: check the run logs for the exact error from `pg_dump`/`tar`.
 - Disk full on local target: free space or move target to S3.
+- Restore fails with `backup archive exceeds the restore size limit`: raise `SIMPLEDEPLOY_RESTORE_MAX_GB`. See [Restore size limits](/guides/backups/restore/#size-limits).
+
+## S3 endpoint refused as a private address
+
+**Symptom:** Saving an S3 backup config, **Test S3**, or a backup run fails with `S3 endpoint points to a private or reserved network address`.
+
+**What it means:** Custom S3 endpoints on loopback, private, link-local or CGNAT/Tailscale addresses (for example MinIO on the same server or LAN) are refused by default. Public S3 services need nothing extra.
+
+**Fix:** Start the server with `SIMPLEDEPLOY_ALLOW_PRIVATE_S3=1` (for example `Environment=SIMPLEDEPLOY_ALLOW_PRIVATE_S3=1` in the systemd unit) and restart. Set it in your shell too for `simpledeploy backup run` and `simpledeploy restore`. See [Environment variables](/reference/env-vars/).
+
+## Git sync: "rebase refused"
+
+**Symptom:** The Git Sync page shows `rebase refused: apps_dir has uncommitted or untracked changes that the pull would overwrite`.
+
+**What it means:** Local files in `apps_dir` differ from git (common with `auto_push_enabled: false`, where dashboard edits stay uncommitted), and git will not apply remote commits over them.
+
+**Diagnose:**
+
+```bash
+sudo git -C /etc/simpledeploy/apps status
+```
+
+**Fix:** Commit the changes (or turn on [`auto_push_enabled`](/operations/git-sync/#auto_push_enabled)), or discard them, for example with `git stash -u` to keep a copy. Then sync again.
+
+## Startup warning about master_secret
+
+**Symptom:** The log shows `WARNING: master_secret is still the example placeholder ...` or `master_secret is shorter than 32 characters`.
+
+**What it means:** The config still has an example value from the docs (or a weak one). With a placeholder, sessions are signed with a random key from `data_dir/session-signing.key`, but stored credentials are still encrypted with the public value.
+
+**Fix:** Generate a new secret with `openssl rand -hex 32`, put it in `config.yaml`, and restart. Then re-enter registry and S3 credentials and re-create API keys; everyone signs in again. See [Generating a master secret](/operations/security-hardening/#generating-a-master-secret).
 
 ## Forgot admin password
 

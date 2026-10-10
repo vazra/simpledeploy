@@ -34,6 +34,10 @@ We will not pursue legal action or report you to law enforcement for security re
 - Avoids accessing, modifying, or destroying data that is not yours.
 - Discloses to us privately first via the channels above.
 
+## Published advisories
+
+Fixed vulnerabilities are announced as [GitHub security advisories](https://github.com/vazra/simpledeploy/security/advisories) once a release containing the fix is available. Upgrade to the latest release to stay protected.
+
 ## Supported versions
 
 Only the latest **minor release** of the `main` branch receives security fixes. Older minors are not patched. Operators are expected to upgrade within a reasonable window after a security release.

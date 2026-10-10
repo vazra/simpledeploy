@@ -22,7 +22,7 @@ SimpleDeploy keeps the dashboard fresh without polling by broadcasting tiny noti
 - `internal/events/bus.go` is the in-process bus. Subscribers get a buffered channel and an unsubscribe function. On overflow the oldest event is dropped and a stale flag is set so the WS handler can emit a synthetic `resync` frame.
 - `internal/events/topics.go` defines the topic constants and the audit-category-to-topic mapping.
 - `internal/audit/recorder.go` wraps every mutation, then publishes the matching topics best-effort (publish errors never block or fail the originating change).
-- `internal/api/events_ws.go` upgrades `GET /api/events`, applies a per-connection topic filter, gates `sub` frames on the caller's role and `user_app_access`, and pings every 30s.
+- `internal/api/events_ws.go` upgrades `GET /api/events`, applies a per-connection topic filter, gates `sub` frames on the caller's role and `user_app_access`, pings every 30s, and re-checks authorization every 60s.
 - `ui/src/lib/stores/realtime.svelte.js` opens one WebSocket per tab, queues subscribes until open, and re-subscribes plus refetches all registered fns after every reconnect.
 
 ## Topics
@@ -62,7 +62,9 @@ No payload data ever ships in events. The UI runs its existing REST refetch when
 
 ## Authorization
 
-Topic ACL is computed when the WS opens. `super_admin` sees every global topic; everyone else sees `global:apps`, `global:backups`, `global:alerts`, `global:audit` plus `app:<slug>` for any slug they have `user_app_access` on. A `sub` for a forbidden topic returns `{op:"err", reason:"forbidden"}`. When an `access` or `user` audit event affects the connected user, the server closes the socket so the client reconnects with fresh authz.
+Topic ACL is computed when the WS opens. `super_admin` sees every global topic; everyone else sees `global:apps`, `global:backups`, `global:alerts` plus `app:<slug>` for any slug they have `user_app_access` on. A `sub` for a forbidden topic returns `{op:"err", reason:"forbidden"}`. When an `access` or `user` audit event affects the connected user, the server closes the socket so the client reconnects with fresh authz.
+
+The upgrade requires a matching `Origin` (host and port) or `Sec-Fetch-Site: same-origin`, like the log sockets (`checkWebSocketOrigin`, see [Auth](/architecture/auth/#cross-origin-protection)). Every 60s the socket re-runs `wsAuthStillValid`: if the user is gone, their role changed, or the session token or API key used to connect is no longer valid, it closes with code 1008. `app:` topics the user lost access to are dropped with an `err` frame. The app log, deploy log and process log sockets run the same 60s check and close on failure.
 
 ## Non-goals
 
