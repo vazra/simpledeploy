@@ -162,7 +162,7 @@ Internal error messages (SQL errors, file paths, Docker output) are never expose
 
 ### Response Headers
 
-All responses include:
+All dashboard and API responses include:
 
 ```
 X-Frame-Options: DENY
@@ -173,6 +173,8 @@ Strict-Transport-Security: max-age=63072000  (when the request arrived over HTTP
 ```
 
 Behind a TLS-terminating proxy listed in `trusted_proxies`, `X-Forwarded-Proto: https` counts as HTTPS for HSTS and for the session cookie's `Secure` flag. The header is ignored from untrusted peers.
+
+Responses from your apps get `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin` and, on TLS endpoints, `Strict-Transport-Security: max-age=31536000; includeSubDomains`, each only when the app does not send that header itself. See [default security headers](/concepts/endpoints-and-routing/#default-security-headers).
 
 ### Request Size Limits
 
