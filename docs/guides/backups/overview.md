@@ -23,7 +23,7 @@ Configure via the API or UI. The S3 target config:
 
 ```json
 {
-  "endpoint": "s3.amazonaws.com",
+  "endpoint": "https://s3.amazonaws.com",
   "bucket": "my-backups",
   "prefix": "simpledeploy/",
   "access_key": "AKIA...",

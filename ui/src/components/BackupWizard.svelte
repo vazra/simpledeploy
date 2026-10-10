@@ -38,15 +38,38 @@
   let showCustomPre = $state(false)
   let showCustomPost = $state(false)
 
-  // S3 config
-  let s3 = $state({
-    endpoint: '',
-    bucket: '',
-    prefix: '',
-    access_key: '',
-    secret_key: '',
-    region: 'us-east-1',
-  })
+  // S3 config. Keys match the server's S3Config JSON (snake_case).
+  const S3_FIELDS = ['endpoint', 'bucket', 'prefix', 'access_key', 'secret_key', 'region']
+  // Key names older API clients stored (Go field names). Read when editing
+  // such a config so its values show up in the form.
+  const S3_LEGACY_KEYS = {
+    endpoint: 'Endpoint',
+    bucket: 'Bucket',
+    prefix: 'Prefix',
+    access_key: 'AccessKey',
+    secret_key: 'SecretKey',
+    region: 'Region',
+  }
+  function emptyS3() {
+    return { endpoint: '', bucket: '', prefix: '', access_key: '', secret_key: '', region: 'us-east-1' }
+  }
+  let s3 = $state(emptyS3())
+
+  // Only the known fields, always with the snake_case keys the server reads.
+  function s3Payload() {
+    return Object.fromEntries(S3_FIELDS.map(k => [k, s3[k] ?? '']))
+  }
+
+  // Pick known fields from a stored config, accepting either key spelling.
+  function s3FromStored(parsed) {
+    const out = {}
+    if (!parsed || typeof parsed !== 'object') return out
+    for (const k of S3_FIELDS) {
+      const v = parsed[k] || parsed[S3_LEGACY_KEYS[k]]
+      if (typeof v === 'string' && v) out[k] = v
+    }
+    return out
+  }
 
   // Detected paths for volume/sqlite strategies
   let detectedPaths = $state([])
@@ -87,7 +110,7 @@
     showCustomPost = false
     showAllStrategies = false
     manualContainer = ''
-    s3 = { endpoint: '', bucket: '', prefix: '', access_key: '', secret_key: '', region: 'us-east-1' }
+    s3 = emptyS3()
   }
 
   function populateFromConfig(cfg) {
@@ -107,7 +130,9 @@
     if (cfg.target === 's3' && cfg.target_config_json) {
       try {
         const parsed = typeof cfg.target_config_json === 'string' ? JSON.parse(cfg.target_config_json) : cfg.target_config_json
-        s3 = { ...s3, ...parsed }
+        // Start from the defaults rather than reading s3: this runs inside
+        // the open/reset $effect, and reading s3 there would re-trigger it.
+        s3 = { ...emptyS3(), ...s3FromStored(parsed) }
       } catch {}
     }
 
@@ -178,12 +203,23 @@
   async function testS3Connection() {
     testingS3 = true
     s3TestResult = null
-    const res = await api.testS3({ ...s3 })
+    const res = await api.testS3(s3Payload())
     testingS3 = false
-    if (res.error) {
-      s3TestResult = { ok: false, message: res.error }
-    } else {
-      s3TestResult = { ok: true, message: 'Connection successful' }
+    s3TestResult = s3TestOutcome(res)
+  }
+
+  // The server answers 4xx for invalid input (res.error) and 200 with
+  // { ok, error } once it has tried to reach the bucket. Only ok === true
+  // counts as success.
+  function s3TestOutcome(res) {
+    if (res.error) return { ok: false, message: res.error }
+    if (res.data?.ok === true) return { ok: true, message: 'Connection successful' }
+    const reason = res.data?.error
+    return {
+      ok: false,
+      message: reason
+        ? `Connection failed: ${reason}`
+        : 'Connection failed. Check the endpoint, bucket name, and keys.',
     }
   }
 
@@ -221,7 +257,7 @@
       retention_mode: retentionMode,
       retention_days: retentionMode === 'days' ? retentionDays : 0,
       verify_upload: verifyUpload,
-      target_config_json: selectedTarget === 's3' ? JSON.stringify(s3) : '',
+      target_config_json: selectedTarget === 's3' ? JSON.stringify(s3Payload()) : '',
       pre_hooks: JSON.stringify(hooks.pre),
       post_hooks: JSON.stringify(hooks.post),
       paths: selectedPaths.length > 0 ? JSON.stringify(selectedPaths) : '',
