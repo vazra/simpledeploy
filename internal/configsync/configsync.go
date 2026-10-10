@@ -927,11 +927,13 @@ func atomicWriteYAMLMode(path string, mode os.FileMode, v any) error {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	// Unique temp name so concurrent writers (e.g. the server's debounced
+	// sync and a CLI command in another process) never share a temp file.
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
-		return fmt.Errorf("open tmp %s: %w", tmp, err)
+		return fmt.Errorf("create tmp for %s: %w", path, err)
 	}
+	tmp := f.Name()
 	// Re-chmod in case umask stripped bits.
 	if err := os.Chmod(tmp, mode); err != nil {
 		f.Close()
