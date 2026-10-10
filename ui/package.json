@@ -16,7 +16,7 @@
     "chartjs-adapter-date-fns": "^3.0.0",
     "date-fns": "^4.4.0",
     "diff": "^8.0.4",
-    "js-yaml": "^4.3.2",
+    "js-yaml": "^5.4.3",
     "svelte-spa-router": "^5.1.1",
     "tailwindcss": "^4.2.2"
   },
