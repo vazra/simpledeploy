@@ -45,9 +45,27 @@ func (s *Store) GetDBStats() (DBStats, error) {
 }
 
 // VacuumDB runs VACUUM on the SQLite database to reclaim unused space.
+//
+// It also converts databases created before auto_vacuum was set up correctly
+// to auto_vacuum=INCREMENTAL, so the daily IncrementalVacuum can reclaim free
+// pages from then on. SQLite only changes the auto_vacuum mode of an existing
+// file during a VACUUM, and only when the pragma was set on the same
+// connection first, hence the dedicated conn. VACUUM rewrites the whole file
+// anyway, so the conversion adds no extra cost.
 func (s *Store) VacuumDB() error {
-	_, err := s.db.Exec("VACUUM")
-	return err
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire conn: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "PRAGMA auto_vacuum=INCREMENTAL"); err != nil {
+		return fmt.Errorf("set auto_vacuum: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, "VACUUM"); err != nil {
+		return fmt.Errorf("vacuum: %w", err)
+	}
+	return nil
 }
 
 // GetAuditRetentionDays returns the configured audit log retention in days.

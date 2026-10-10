@@ -190,11 +190,17 @@ func scanAudit(s auditScanner) (AuditEntry, error) {
 	return e, nil
 }
 
+// auditInsertSQL resolves app_id, actor_user_id and compose_version_id
+// through their parent tables, so a reference to a row deleted before the
+// audit write lands (app purged, user removed, version pruned) is stored as
+// NULL. That matches the columns' ON DELETE SET NULL and keeps the event
+// (app_slug and actor_name are denormalized) instead of failing the insert on
+// the foreign key and losing it.
 const auditInsertSQL = `
 INSERT INTO audit_log
   (app_id, app_slug, actor_user_id, actor_name, actor_source, ip, category, action, target, summary, before_json, after_json, error, compose_version_id, sync_status)
 VALUES
-  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ((SELECT id FROM apps WHERE id = ?), ?, (SELECT id FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM compose_versions WHERE id = ?), ?)
 RETURNING id`
 
 // RecordAudit inserts a new audit_log row and returns its id.
