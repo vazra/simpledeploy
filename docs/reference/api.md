@@ -294,7 +294,7 @@ Create backup configuration.
   "strategy": "postgres",
   "target": "s3",
   "schedule_cron": "0 2 * * *",
-  "target_config_json": "{\"endpoint\":\"s3.amazonaws.com\",\"bucket\":\"backups\",\"prefix\":\"simpledeploy/\",\"access_key\":\"...\",\"secret_key\":\"...\",\"region\":\"us-east-1\"}",
+  "target_config_json": "{\"endpoint\":\"https://s3.amazonaws.com\",\"bucket\":\"backups\",\"prefix\":\"simpledeploy/\",\"access_key\":\"...\",\"secret_key\":\"...\",\"region\":\"us-east-1\"}",
   "retention_count": 7
 }
 ```

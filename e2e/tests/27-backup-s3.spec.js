@@ -14,9 +14,10 @@ import { startMinIO, dockerAvailable } from '../helpers/minio.js';
 const POSTGRES_SLUG = 'e2e-postgres';
 const BUCKET = 'e2e-backups';
 
-// S3Config in internal/backup/s3.go has NO json tags, so encoding/json
-// serializes fields using Go field names (PascalCase). The API encrypts
-// this JSON with master_secret before storage, and decrypts at use time.
+// S3Config in internal/backup/s3.go reads snake_case keys (what the UI
+// sends) and still accepts the older Go field names (PascalCase) used here.
+// The API encrypts this JSON with master_secret before storage, and
+// decrypts at use time.
 function s3TargetJSON({ endpoint, bucket, accessKey, secretKey, region = 'us-east-1', prefix = '' }) {
   return JSON.stringify({
     Endpoint: endpoint,
