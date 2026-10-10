@@ -1085,13 +1085,19 @@ func runAPIKeyCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	_, err = db.CreateAPIKey(userID, hash, name, nil)
+	if errors.Is(err, store.ErrAPIKeyNameTaken) {
+		return fmt.Errorf("user %d already has an API key named %q; choose a different --name or revoke the existing key first", userID, name)
+	}
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("API key created: %s\n", plaintext)
 	fmt.Println("Save this key - it won't be shown again.")
-	return persistGlobalSidecars(cfg, db)
+	if err := persistGlobalSidecars(cfg, db); err != nil {
+		return fmt.Errorf("the API key above IS valid now but is NOT persisted; it will be deleted on next server restart unless you run `simpledeploy config export` after fixing this: %w", err)
+	}
+	return nil
 }
 
 func runAPIKeyList(cmd *cobra.Command, args []string) error {
@@ -1154,15 +1160,16 @@ func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
 func persistGlobalSidecars(cfg *config.Config, db *store.Store) error {
 	s := configsync.New(db, cfg.AppsDir, cfg.DataDir)
 	if err := s.WriteGlobal(); err != nil {
-		return fmt.Errorf("DB updated but writing %s failed: %w\n"+
+		return fmt.Errorf("DB updated but writing global sidecars (config.yml, secrets.yml) in %s failed: %w\n"+
 			"the change will be reverted on next server restart; fix the error and run `simpledeploy config export` to persist it",
-			filepath.Join(cfg.DataDir, "config.yml"), err)
+			cfg.DataDir, err)
 	}
 	if err := s.WriteRedactedGlobal(); err != nil {
 		// Redacted copy is only upsert-imported (gitsync), never pruned from,
 		// so a failure here cannot revert the change.
 		fmt.Fprintf(os.Stderr, "warning: write redacted global sidecar: %v\n", err)
 	}
+	s.EnsureSecretsGitignore()
 	return nil
 }
 

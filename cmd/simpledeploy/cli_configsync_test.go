@@ -245,12 +245,97 @@ func TestCLIRegistryAddRemovePersistsToSidecars(t *testing.T) {
 	if g := env.loadGlobal(t); len(g.Sidecar.Registries) != 0 {
 		t.Fatalf("registry still in config.yml: %+v", g.Sidecar.Registries)
 	}
+
+	env.reconcile(t)
+	db = env.openDB(t)
+	regs, _ = db.ListRegistries()
+	db.Close()
+	if len(regs) != 0 {
+		t.Fatalf("removed registry reappeared after ReconcileDBFromFS: %+v", regs)
+	}
 }
 
-func TestCLIPersistFailureReturnsError(t *testing.T) {
+func TestCLIWritesSidecarModesAndGitignore(t *testing.T) {
 	env := newCLITestEnv(t)
+	// Start from no files so modes come from the CLI write itself.
+	for _, f := range []string{"config.yml", "secrets.yml"} {
+		_ = os.Remove(filepath.Join(env.dataDir, f))
+	}
 
-	// Make secrets.yml unwritable by replacing it with a non-empty directory.
+	if err := runCmd(t, usersCreateCmd, runUsersCreate, map[string]string{
+		"username": "dave", "password": "hunter2-long-pass", "role": "viewer",
+	}); err != nil {
+		t.Fatalf("users create: %v", err)
+	}
+	for name, want := range map[string]os.FileMode{"config.yml": 0o644, "secrets.yml": 0o600} {
+		info, err := os.Stat(filepath.Join(env.dataDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s mode = %o, want %o", name, got, want)
+		}
+	}
+	gi, err := os.ReadFile(filepath.Join(env.dataDir, ".gitignore"))
+	if err != nil || !strings.Contains(string(gi), "secrets.yml") {
+		t.Errorf("data_dir .gitignore missing secrets.yml: %q, %v", gi, err)
+	}
+}
+
+func TestCLIRedactedWriteFailureIsNonFatal(t *testing.T) {
+	env := newCLITestEnv(t)
+	// Block _global.yml with a non-empty directory so its rename fails.
+	if err := os.MkdirAll(filepath.Join(env.appsDir, "_global.yml", "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := runCmd(t, usersCreateCmd, runUsersCreate, map[string]string{
+		"username": "erin", "password": "hunter2-long-pass", "role": "viewer",
+	}); err != nil {
+		t.Fatalf("users create should succeed when only redacted write fails: %v", err)
+	}
+	if c, s := hasUser(env.loadGlobal(t), "erin"); !c || !s {
+		t.Fatalf("user not persisted: config=%v secrets=%v", c, s)
+	}
+}
+
+func TestCLIAPIKeyCreateRejectsDuplicateName(t *testing.T) {
+	env := newCLITestEnv(t)
+	flags := map[string]string{"name": "ci", "user-id": strconv.FormatInt(env.adminID, 10)}
+	if err := runCmd(t, apikeyCreateCmd, runAPIKeyCreate, flags); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	err := runCmd(t, apikeyCreateCmd, runAPIKeyCreate, flags)
+	if err == nil || !strings.Contains(err.Error(), `already has an API key named "ci"`) {
+		t.Fatalf("duplicate create err = %v", err)
+	}
+	db := env.openDB(t)
+	keys, _ := db.ListAPIKeysByUser(env.adminID)
+	db.Close()
+	if len(keys) != 1 {
+		t.Fatalf("got %d keys, want 1", len(keys))
+	}
+}
+
+func TestCLIAPIKeyCreatePersistFailureSaysKeyIsValid(t *testing.T) {
+	env := newCLITestEnv(t)
+	blockSecrets(t, env)
+	err := runCmd(t, apikeyCreateCmd, runAPIKeyCreate, map[string]string{
+		"name": "ci", "user-id": strconv.FormatInt(env.adminID, 10),
+	})
+	if err == nil {
+		t.Fatal("expected error when sidecar write fails")
+	}
+	for _, want := range []string{"IS valid now", "simpledeploy config export"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %v", want, err)
+		}
+	}
+}
+
+// blockSecrets makes secrets.yml unwritable by replacing it with a non-empty
+// directory, so WriteGlobal fails.
+func blockSecrets(t *testing.T, env *cliTestEnv) {
+	t.Helper()
 	secrets := filepath.Join(env.dataDir, "secrets.yml")
 	if err := os.Remove(secrets); err != nil {
 		t.Fatal(err)
@@ -258,6 +343,12 @@ func TestCLIPersistFailureReturnsError(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(secrets, "x"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestCLIPersistFailureReturnsError(t *testing.T) {
+	env := newCLITestEnv(t)
+
+	blockSecrets(t, env)
 
 	err := runCmd(t, usersCreateCmd, runUsersCreate, map[string]string{
 		"username": "carol", "password": "hunter2-long-pass", "role": "viewer",
@@ -265,7 +356,7 @@ func TestCLIPersistFailureReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when sidecar write fails")
 	}
-	if !strings.Contains(err.Error(), "reverted on next server restart") {
+	if !strings.Contains(err.Error(), "reverted on next server restart") || !strings.Contains(err.Error(), "global sidecars") {
 		t.Fatalf("error does not explain consequence: %v", err)
 	}
 }
