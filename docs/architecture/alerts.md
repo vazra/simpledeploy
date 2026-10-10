@@ -9,7 +9,7 @@ The alerts package (`internal/alerts/`) evaluates user-defined rules against cur
 
 A rule is `(metric, op, threshold, duration_seconds, scope)`:
 
-- **metric**: `cpu`, `memory`, `disk`, `request_rate`, `request_error_rate`, `deploy_failure`, `backup_failure`
+- **metric**: `cpu_pct` (CPU percent, 100 = one core), `mem_pct` (memory as a percent of the container limit), `mem_bytes` (memory in bytes). Backup event rules use `backup_failed`, `backup_success`, `backup_missed` or `backup_all` (any backup event); they fire when the backup scheduler reports that event for the rule's app. The API rejects other metrics and operators.
 - **op**: `>`, `<`, `>=`, `<=`
 - **threshold**: numeric value (percent, count, etc.)
 - **duration**: condition must hold continuously for this many seconds

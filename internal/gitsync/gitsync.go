@@ -966,14 +966,7 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 	g.commitsBehind = 0
 	g.mu.Unlock()
 
-	// Record conflicts.
-	for _, c := range conflicts {
-		c.ResolvedAt = time.Now()
-		g.recordConflict(c)
-		if g.st != nil {
-			_ = g.st.InsertConflictAlert(c.Path, c.RemoteSHA, c.Description)
-		}
-	}
+	g.recordConflicts(conflicts)
 
 	g.setLastSync(nil)
 
@@ -1562,9 +1555,11 @@ func (g *Syncer) doPushWithRetry() error {
 	}
 	prevSHA := g.currentHeadSHA()
 	snap := g.snapshotAccess()
-	if _, _, rebaseErr := rebaseServerWins(g.cfg.AppsDir, g.cfg.branch()); rebaseErr != nil {
+	conflicts, _, rebaseErr := rebaseServerWins(g.cfg.AppsDir, g.cfg.branch())
+	if rebaseErr != nil {
 		return fmt.Errorf("push retry rebase: %w (initial push: %v)", rebaseErr, err)
 	}
+	g.recordConflicts(conflicts)
 	g.updateHeadSHA()
 	// The rebase brought remote commits into the working tree; run the same
 	// symlink and access checks as a regular pull.
@@ -1572,6 +1567,18 @@ func (g *Syncer) doPushWithRetry() error {
 		g.securePulledTree(prevSHA, newSHA, snap)
 	}
 	return g.doPush()
+}
+
+// recordConflicts surfaces server-wins conflict resolutions in status and as
+// conflict alerts, for both pulls and push retries.
+func (g *Syncer) recordConflicts(conflicts []Conflict) {
+	for _, c := range conflicts {
+		c.ResolvedAt = time.Now()
+		g.recordConflict(c)
+		if g.st != nil {
+			_ = g.st.InsertConflictAlert(c.Path, c.RemoteSHA, c.Description)
+		}
+	}
 }
 
 func (g *Syncer) buildAuth() (interface {
