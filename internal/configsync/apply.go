@@ -261,6 +261,7 @@ func (s *Syncer) ApplyGlobalSidecar(loaded *LoadedGlobal) error {
 	}
 	for _, w := range existingWebhooks {
 		if _, keep := wantWebhooks[w.Name]; !keep {
+			log.Printf("[fs-auth] WARN: deleting webhook %q from DB: not present in config.yml", w.Name)
 			if err := s.store.DeleteWebhook(w.ID); err != nil {
 				return fmt.Errorf("ApplyGlobalSidecar: delete webhook %q: %w", w.Name, err)
 			}
@@ -295,6 +296,7 @@ func (s *Syncer) ApplyGlobalSidecar(loaded *LoadedGlobal) error {
 	}
 	for _, u := range existingUsers {
 		if _, keep := wantUsers[u.Username]; !keep {
+			log.Printf("[fs-auth] WARN: deleting user %q from DB: not present in config.yml", u.Username)
 			if err := s.store.DeleteUser(u.ID); err != nil {
 				return fmt.Errorf("ApplyGlobalSidecar: delete user %q: %w", u.Username, err)
 			}
@@ -328,6 +330,7 @@ func (s *Syncer) ApplyGlobalSidecar(loaded *LoadedGlobal) error {
 				if _, keep := wantKeys[u.Username+"|"+k.Name]; keep {
 					continue
 				}
+				log.Printf("[fs-auth] WARN: deleting api key %q (user %q) from DB: not present in config.yml/secrets.yml", k.Name, u.Username)
 				if err := s.store.DeleteAPIKey(k.ID, 0); err != nil {
 					return fmt.Errorf("ApplyGlobalSidecar: delete api key %d: %w", k.ID, err)
 				}
@@ -360,6 +363,7 @@ func (s *Syncer) ApplyGlobalSidecar(loaded *LoadedGlobal) error {
 	}
 	for _, r := range existingRegs {
 		if _, keep := wantRegs[r.ID]; !keep {
+			log.Printf("[fs-auth] WARN: deleting registry %q (%s) from DB: not present in config.yml", r.Name, r.ID)
 			if err := s.store.DeleteRegistry(r.ID); err != nil {
 				return fmt.Errorf("ApplyGlobalSidecar: delete registry %q: %w", r.ID, err)
 			}
