@@ -82,14 +82,16 @@ Stores in any S3-compatible service (AWS, MinIO, DigitalOcean Spaces, Backblaze 
 
 ```go
 type S3Config struct {
-    Endpoint  string // empty for AWS S3
-    Bucket    string
-    Prefix    string // optional key prefix (e.g. "backups/myapp")
-    AccessKey string
-    SecretKey string
-    Region    string // defaults to "us-east-1"
+    Endpoint  string `json:"endpoint"`   // empty for AWS S3
+    Bucket    string `json:"bucket"`
+    Prefix    string `json:"prefix"`     // optional key prefix (e.g. "backups/myapp")
+    AccessKey string `json:"access_key"`
+    SecretKey string `json:"secret_key"`
+    Region    string `json:"region"`     // defaults to "us-east-1"
 }
 ```
+
+`target_config_json` (and the `test-s3` body) uses the snake_case keys the UI sends. `S3Config.UnmarshalJSON` also accepts the Go field names (`AccessKey`, `SecretKey`; the other fields match case-insensitively) because configs created before the struct had tags were stored that way. Every decode path (config validation, `test-s3`, the download presigner, the scheduler's target factory) decodes into `S3Config` with `encoding/json`, so they all share this parsing.
 
 Uses AWS SDK v2 with the `feature/s3/manager` Uploader for `PutObject`. The manager handles non-seekable readers (strategies stream through a `gzip.Writer` piped from `pg_dump`/`mysqldump`/`tar` stdout, which are not seekable — the plain `PutObject` would fail trying to compute a payload hash). Path-style addressing is enabled when a custom `Endpoint` is set so MinIO, DigitalOcean Spaces, and Backblaze B2 all work.
 

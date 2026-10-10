@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,13 +23,43 @@ import (
 )
 
 // S3Config holds connection settings for an S3-compatible object store.
+//
+// Its JSON form (backup_configs.target_config_json and the test-s3 request
+// body) uses the snake_case keys the UI and docs send: endpoint, bucket,
+// prefix, access_key, secret_key, region. UnmarshalJSON also accepts the Go
+// field names (Endpoint, AccessKey, ...) that older clients sent before the
+// struct had tags, so configs stored that way keep working.
 type S3Config struct {
-	Endpoint  string
-	Bucket    string
-	Prefix    string
-	AccessKey string
-	SecretKey string
-	Region    string
+	Endpoint  string `json:"endpoint"`
+	Bucket    string `json:"bucket"`
+	Prefix    string `json:"prefix"`
+	AccessKey string `json:"access_key"`
+	SecretKey string `json:"secret_key"`
+	Region    string `json:"region"`
+}
+
+// UnmarshalJSON decodes snake_case keys and falls back to the legacy
+// AccessKey/SecretKey keys when the snake_case ones are missing or empty.
+// The other legacy keys (Endpoint, Bucket, ...) already match their tags
+// because encoding/json matches keys case-insensitively.
+func (c *S3Config) UnmarshalJSON(data []byte) error {
+	type s3ConfigFields S3Config // same fields, no UnmarshalJSON method
+	var aux struct {
+		s3ConfigFields
+		LegacyAccessKey string `json:"AccessKey"`
+		LegacySecretKey string `json:"SecretKey"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*c = S3Config(aux.s3ConfigFields)
+	if c.AccessKey == "" {
+		c.AccessKey = aux.LegacyAccessKey
+	}
+	if c.SecretKey == "" {
+		c.SecretKey = aux.LegacySecretKey
+	}
+	return nil
 }
 
 // S3Target stores backups in an S3-compatible object store.
