@@ -274,6 +274,11 @@ master_secret: "<output of openssl rand -hex 32>"
 
 ## Breaking Changes on Upgrade
 
+### Upgrading to the next release after 1.4.3
+
+- **Header names with a dot are no longer passed to apps.** The built-in proxy (Caddy 2.11.7) drops request headers whose names contain `.`, as it already did for `_`. An app that reads such a header must switch to a name made of letters, digits and `-`. The same applies to `simpledeploy.ratelimit.by: header:NAME`: with `.` or `_` in the name, every request shares one bucket.
+- **Stalled uploads are cut after a minute.** A request body to an `http` endpoint that sends no data for one minute is closed (slow-client protection). Normal slow uploads that keep sending are not affected, and `grpc`/`h2c` endpoints have no such limit.
+
 ### Upgrading to the next release after 1.4.2
 
 - **Placeholder `master_secret` values are flagged.** If your config still contains an example value from the docs (for example `change-me-to-a-random-string`), the server logs a warning at startup and signs sessions with a random key stored in `data_dir/session-signing.key` instead of the public value (everyone signs in again once). Stored credentials are still encrypted with the public value, so replace it with `openssl rand -hex 32` soon, then re-enter registry and S3 credentials and re-create API keys.
