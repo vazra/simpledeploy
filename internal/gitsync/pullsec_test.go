@@ -841,3 +841,32 @@ func TestStartToleratesRepoSafetyConfigFailure(t *testing.T) {
 		t.Fatal("committed symlink checked out as a symlink without the persisted core.symlinks=false")
 	}
 }
+
+// A conflict resolved during a push retry (remote moved, same file edited
+// on both sides) is surfaced in status like a conflict found on pull.
+func TestPushRetryRecordsConflicts(t *testing.T) {
+	e := newSecEnv(t, func(e *secEnv) {
+		seedApp(t, e.st, e.appsDir, "app1")
+	}, nil)
+
+	pushFromClone(t, e.bareDir, func(dir string) {
+		writeFile(t, filepath.Join(dir, "app1", "docker-compose.yml"), "services:\n  web:\n    image: nginx:remote\n")
+	})
+
+	writeFile(t, filepath.Join(e.appsDir, "app1", "docker-compose.yml"), "services:\n  web:\n    image: nginx:local\n")
+	prev := e.gs.Status().HeadSHA
+	e.gs.EnqueueCommit([]string{filepath.Join(e.appsDir, "app1", "docker-compose.yml")}, "local edit")
+	drainCommits(t, e.gs, 10*time.Second)
+	waitForHeadUpdate(t, e.gs, prev, 10*time.Second)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, c := range e.gs.Status().RecentConflicts {
+			if c.Path == "app1/docker-compose.yml" {
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("conflict from push retry not recorded; status conflicts = %+v", e.gs.Status().RecentConflicts)
+}
