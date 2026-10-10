@@ -1011,6 +1011,9 @@ func runUsersCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := persistGlobalSidecars(cfg, db); err != nil {
+		return err
+	}
 
 	fmt.Printf("created user %q (id=%d, role=%s)\n", user.Username, user.ID, user.Role)
 	return nil
@@ -1054,6 +1057,9 @@ func runUsersDelete(cmd *cobra.Command, args []string) error {
 	if err := db.DeleteUser(id); err != nil {
 		return err
 	}
+	if err := persistGlobalSidecars(cfg, db); err != nil {
+		return err
+	}
 
 	fmt.Printf("deleted user %d\n", id)
 	return nil
@@ -1085,7 +1091,7 @@ func runAPIKeyCreate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("API key created: %s\n", plaintext)
 	fmt.Println("Save this key - it won't be shown again.")
-	return nil
+	return persistGlobalSidecars(cfg, db)
 }
 
 func runAPIKeyList(cmd *cobra.Command, args []string) error {
@@ -1127,8 +1133,36 @@ func runAPIKeyRevoke(cmd *cobra.Command, args []string) error {
 	if err := db.DeleteAPIKey(id, 0); err != nil { // CLI is admin context
 		return err
 	}
+	if err := persistGlobalSidecars(cfg, db); err != nil {
+		return err
+	}
 
 	fmt.Printf("revoked API key %d\n", id)
+	return nil
+}
+
+// persistGlobalSidecars writes global DB state (users, api keys, registries,
+// webhooks, db backup config) to {data_dir}/config.yml + secrets.yml and the
+// redacted {apps_dir}/_global.yml.
+//
+// CLI commands open the DB in their own process, where the server's mutation
+// hook (which schedules sidecar writes) is not installed. Without this, the
+// server's boot-time ReconcileDBFromFS treats the change as absent from
+// config.yml and reverts it. Files are rendered from the DB after the
+// mutation, so a running server's watcher re-applying them is a no-op for
+// rows that already match.
+func persistGlobalSidecars(cfg *config.Config, db *store.Store) error {
+	s := configsync.New(db, cfg.AppsDir, cfg.DataDir)
+	if err := s.WriteGlobal(); err != nil {
+		return fmt.Errorf("DB updated but writing %s failed: %w\n"+
+			"the change will be reverted on next server restart; fix the error and run `simpledeploy config export` to persist it",
+			filepath.Join(cfg.DataDir, "config.yml"), err)
+	}
+	if err := s.WriteRedactedGlobal(); err != nil {
+		// Redacted copy is only upsert-imported (gitsync), never pruned from,
+		// so a failure here cannot revert the change.
+		fmt.Fprintf(os.Stderr, "warning: write redacted global sidecar: %v\n", err)
+	}
 	return nil
 }
 
@@ -1626,6 +1660,9 @@ func runRegistryAdd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := persistGlobalSidecars(cfg, db); err != nil {
+		return err
+	}
 	fmt.Printf("added registry %q (%s) id=%s\n", reg.Name, reg.URL, reg.ID)
 	return nil
 }
@@ -1790,6 +1827,9 @@ func runRegistryRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("registry %q not found: %w", name, err)
 	}
 	if err := db.DeleteRegistry(reg.ID); err != nil {
+		return err
+	}
+	if err := persistGlobalSidecars(cfg, db); err != nil {
 		return err
 	}
 	fmt.Printf("removed registry %q\n", name)
