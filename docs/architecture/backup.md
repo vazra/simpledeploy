@@ -93,6 +93,12 @@ type S3Config struct {
 
 Uses AWS SDK v2 with the `feature/s3/manager` Uploader for `PutObject`. The manager handles non-seekable readers (strategies stream through a `gzip.Writer` piped from `pg_dump`/`mysqldump`/`tar` stdout, which are not seekable — the plain `PutObject` would fail trying to compute a payload hash). Path-style addressing is enabled when a custom `Endpoint` is set so MinIO, DigitalOcean Spaces, and Backblaze B2 all work.
 
+Custom endpoints are restricted to public addresses unless `SIMPLEDEPLOY_ALLOW_PRIVATE_S3=1`:
+
+- `ValidateS3Endpoint` runs when a config is created or updated and on `test-s3`. The endpoint must be an `http(s)://` URL, and every address its host resolves to must be public (`isReservedIP`: loopback, private, link-local, CGNAT, multicast, documentation and other reserved ranges; NAT64 `64:ff9b::/96` judged by the embedded IPv4).
+- `NewS3Target` installs an HTTP client whose dialer checks each IP right before `connect()` (`s3DialControl`), so DNS changes after validation are covered. A blocked dial fails with `ErrS3EndpointBlocked` and is not retried.
+- `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` are honoured. Connections to the configured proxy skip the dial check (the proxy resolves the endpoint), so when the endpoint is proxied `NewS3Target` re-runs `ValidateS3Endpoint` every time the target is built.
+
 ## Scheduler (`internal/backup/scheduler.go`)
 
 Orchestrates everything. Created at startup, receives registered strategies and target factories.
@@ -112,21 +118,35 @@ sched.Start() // loads configs, schedules cron jobs
 2. Create run record (status=`running`)
 3. Look up strategy and target factory by name
 4. Instantiate target from `TargetConfigJSON`
-5. Get app name for container naming
-6. Call `strategy.Backup()` to get data stream
-7. Call `target.Upload()` to store it
-8. Update run to `success` with size and file path
-9. Prune old runs beyond `RetentionCount`
-10. On any error: update run to `failed` with error message
+5. Get app name for container naming (compose project `simpledeploy-<slug>`)
+6. Validate the paths for `volume`/`sqlite` (`validateRunPaths`), before any hook runs
+7. Call `strategy.Backup()` to get data stream
+8. Call `target.Upload()` to store it
+9. Update run to `success` with size and file path
+10. Prune old runs beyond `RetentionCount`
+11. On any error: update run to `failed` with error message
 
 ### Restore Flow (`RunRestore`)
 
 1. Fetch run and its config from DB
-2. Get strategy and target
+2. Get strategy and target; resolve the container and paths as for a backup, then validate the paths
 3. Call `target.Download()` to retrieve data
-4. Call `strategy.Restore()` to apply it
+4. If the run has a checksum, spool the download to a temp file while hashing it, and fail on mismatch before anything is applied (`Pipeline.RunRestore`)
+5. Call `strategy.Restore()` to apply it, with `MaxDecompressedBytes` from `runRestoreMaxBytes()`
 
 Both backup and restore run asynchronously (fired via `go` in API handlers).
+
+## Restore safety
+
+**Container scoping.** `POST /api/apps/{slug}/backups/upload-restore` resolves its `container` field with `resolveRestoreContainer`: it lists containers labelled `com.docker.compose.project=simpledeploy-<slug>` (re-checking the label) and accepts only an exact container name, an ID or ID prefix of 12+ characters, or a compose service name from that list. Empty falls back to the slug or to the app's only container. Anything else is a `400` listing the app's services. Restores from a backup run use the container detected from the app's own compose file (falling back to the app name).
+
+**Archive validation and staging.** `volume`, `sqlite` and `redis` restores pass the stream through `validateTarStream` (`tarsafe.go`) before anything is extracted or the container is stopped. It copies the archive to a spool file and walks every tar header (`checkTarEntry` rejects empty or absolute names, `..` traversal, NUL bytes, symlinks and hardlinks, and device/fifo entries). Spool files live in the directory set by `SetSpoolDir`, which `serve` and the CLI backup commands point at `{data_dir}/tmp` (created and kept 0700), else the system temp dir. Each file is 0600, unlinked right after creation where the OS allows it, and removed on close. A checksum-verified spool from `RunRestore` is validated in place instead of copied. Uploads are saved to `{data_dir}/tmp` too, after a restore slot is acquired.
+
+**Size limits.** `MaxDecompressedBytes` caps both the raw archive and its decompressed stream (including bytes after the tar end marker); going over fails with `errArchiveTooLarge` instead of truncating. `0` means 8 GiB, negative (`NoDecompressedLimit`) means no cap. Uploads use `UploadRestoreMaxBytes()` (8 GiB, or `SIMPLEDEPLOY_RESTORE_MAX_GB`); backup-run restores use `runRestoreMaxBytes()` (no cap unless the variable is set). postgres, mysql and redis also wrap their gzip reader with `limitedGzip`.
+
+**Concurrency.** `Server.restoreSem` (capacity 4) is shared by upload restores and `POST /api/backups/restore/{id}`. A full semaphore returns `429` with "too many restores in progress, try again later"; uploads are rejected before they touch disk.
+
+**Config validation.** `validateBackupConfig` runs on create and update and returns `400` with a readable message: `ValidateCron` (same parser as the scheduler), `ValidatePathsConfig` (absolute, clean, not `/`, no control characters, no element starting with `-`; SQLite paths must name a file and may not contain quotes, backslash, backtick or `$`), and `ValidateS3Endpoint`. The volume strategy also passes `--` to `tar` so no path is read as a flag.
 
 ## Database Schema
 
@@ -163,12 +183,14 @@ All require auth via `authMiddleware`.
 | Method | Path | Handler | Purpose |
 |--------|------|---------|---------|
 | GET | `/api/apps/{slug}/backups/configs` | `handleListBackupConfigs` | List configs for app |
-| POST | `/api/apps/{slug}/backups/configs` | `handleCreateBackupConfig` | Create config |
+| POST | `/api/apps/{slug}/backups/configs` | `handleCreateBackupConfig` | Create config (validated) |
+| PUT | `/api/backups/configs/{id}` | `handleUpdateBackupConfig` | Update config (validated) |
 | DELETE | `/api/backups/configs/{id}` | `handleDeleteBackupConfig` | Delete config |
 | GET | `/api/apps/{slug}/backups/runs` | `handleListBackupRuns` | List runs across all app configs |
 | POST | `/api/apps/{slug}/backups/run` | `handleTriggerBackup` | Trigger backup (first config) |
 | POST | `/api/backups/configs/{id}/run` | `handleTriggerBackupConfig` | Trigger backup for specific config |
-| POST | `/api/backups/restore/{id}` | `handleRestore` | Restore from a run (202 async) |
+| POST | `/api/backups/restore/{id}` | `handleRestore` | Restore from a run (202 async, 429 when 4 restores run) |
+| POST | `/api/apps/{slug}/backups/upload-restore` | `handleUploadRestore` | Restore an uploaded file into one of the app's containers (202 async) |
 | GET | `/api/backups/summary` | `handleBackupSummary` | Cross-app dashboard data |
 | GET | `/api/apps/{slug}/backups/detect` | `handleDetectStrategies` | Auto-detect available strategies |
 | POST | `/api/backups/test-s3` | `handleTestS3` | Validate S3 credentials |
@@ -292,6 +314,9 @@ internal/backup/
   strategy.go       Strategy interface
   target.go         Target interface
   scheduler.go      Scheduler (cron, RunBackup, RunRestore)
+  pipeline.go       Hooks + checksum-verified restore spooling
+  paths.go          Path and cron validation
+  tarsafe.go        Restore archive validation, spool files, size cap
   postgres.go       PostgreSQL strategy (pg_dump/psql)
   volume.go         Volume strategy (tar)
   local.go          Local filesystem target
