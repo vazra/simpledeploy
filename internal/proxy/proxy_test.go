@@ -85,12 +85,12 @@ func TestBuildConfigWithRoutes(t *testing.T) {
 			t.Errorf("route[%d] host: got %q, want %q", i, host, wantDomains[i])
 		}
 
-		// handlers: [ipaccess, ratelimit, metrics, headers, reverse_proxy]
+		// handlers: [ipaccess, ratelimit, metrics, headers, timeouts, reverse_proxy]
 		handleList := r["handle"].([]interface{})
-		if len(handleList) != 5 {
-			t.Fatalf("route[%d] handle: got %d handlers, want 5", i, len(handleList))
+		if len(handleList) != 6 {
+			t.Fatalf("route[%d] handle: got %d handlers, want 6", i, len(handleList))
 		}
-		rp := handleList[4].(map[string]interface{})
+		rp := handleList[5].(map[string]interface{})
 		dial := rp["upstreams"].([]interface{})[0].(map[string]interface{})["dial"].(string)
 		if dial != wantDials[i] {
 			t.Errorf("route[%d] dial: got %q, want %q", i, dial, wantDials[i])
@@ -126,12 +126,12 @@ func TestBuildConfigHandlerOrder(t *testing.T) {
 	r := routes[0].(map[string]interface{})
 	handleList := r["handle"].([]interface{})
 
-	// Expect 5 handlers: ipaccess, ratelimit, metrics, headers, reverse_proxy
-	if len(handleList) != 5 {
-		t.Fatalf("handle: got %d handlers, want 5", len(handleList))
+	// Expect 6 handlers: ipaccess, ratelimit, metrics, headers, timeouts, reverse_proxy
+	if len(handleList) != 6 {
+		t.Fatalf("handle: got %d handlers, want 6", len(handleList))
 	}
 
-	wantOrder := []string{"simpledeploy_ipaccess", "simpledeploy_ratelimit", "simpledeploy_metrics", "headers", "reverse_proxy"}
+	wantOrder := []string{"simpledeploy_ipaccess", "simpledeploy_ratelimit", "simpledeploy_metrics", "headers", "timeouts", "reverse_proxy"}
 	for i, want := range wantOrder {
 		h := handleList[i].(map[string]interface{})
 		got := h["handler"].(string)
@@ -1085,5 +1085,50 @@ func TestSetRoutesSkipsInvalidDomainKeepsOthers(t *testing.T) {
 	}
 	if IPAccessRules.Allowed("a.test", reqFrom("", "5.5.5.5:1")) {
 		t.Error("valid app's allowlist not applied")
+	}
+}
+
+// Every listener keeps a 1 MiB header limit, and the body idle timeout is
+// applied per route so gRPC/h2c streams are exempt.
+func TestBuildConfigRequestLimits(t *testing.T) {
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", ExtraListenAddrs: []string{":50051"}, HTTPListenAddr: ":80", TLSMode: "auto"})
+	p.routes = []Route{
+		{Domain: "web.test", Upstream: "web:80"},
+		{Domain: "co.test", Upstream: "co:50051", Protocol: "grpc"},
+		{Domain: "h2.test", Upstream: "h2:8080", Protocol: "h2c"},
+	}
+	cfg := parseConfig(t, p)
+	servers := cfg["apps"].(map[string]interface{})["http"].(map[string]interface{})["servers"].(map[string]interface{})
+	for _, name := range []string{"proxy", "proxy_extra", "proxy_http"} {
+		srv := servers[name].(map[string]interface{})
+		if got := srv["max_header_bytes"]; got != float64(1<<20) {
+			t.Errorf("%s max_header_bytes = %v, want %d", name, got, 1<<20)
+		}
+	}
+	for _, name := range []string{"proxy", "proxy_extra"} {
+		srv := servers[name].(map[string]interface{})
+		if got := srv["read_idle_timeout"]; got != float64(-1) {
+			t.Errorf("%s read_idle_timeout = %v, want -1 (per-route instead)", name, got)
+		}
+		for _, rt := range srv["routes"].([]interface{}) {
+			route := rt.(map[string]interface{})
+			host := route["match"].([]interface{})[0].(map[string]interface{})["host"].([]interface{})[0]
+			var timeouts map[string]interface{}
+			for _, h := range route["handle"].([]interface{}) {
+				if hm := h.(map[string]interface{}); hm["handler"] == "timeouts" {
+					timeouts = hm
+				}
+			}
+			switch host {
+			case "web.test":
+				if timeouts == nil || timeouts["read_timeout"] != float64(time.Minute) {
+					t.Errorf("%s %s timeouts handler = %v, want read_timeout %d", name, host, timeouts, int64(time.Minute))
+				}
+			default:
+				if timeouts != nil {
+					t.Errorf("%s %s: gRPC/h2c route must not get a body idle timeout, got %v", name, host, timeouts)
+				}
+			}
+		}
 	}
 }

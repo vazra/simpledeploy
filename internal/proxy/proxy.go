@@ -10,10 +10,23 @@ import (
 	"regexp"
 	"sort"
 	"sync"
+	"time"
 
 	caddy "github.com/caddyserver/caddy/v2"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 )
+
+// maxRequestHeaderBytes caps request headers on every proxy listener. Caddy
+// defaults to 16 KiB, which refuses apps with large cookies or tokens with
+// a 431 that never reaches the app or SimpleDeploy's metrics; keep Go's
+// 1 MiB default instead.
+const maxRequestHeaderBytes = 1 << 20
+
+// requestBodyIdleTimeout is how long an upload to an HTTP route may stall
+// before the connection is closed (slowloris protection). gRPC and h2c
+// routes get no idle limit: a client-streaming or bidi RPC can legitimately
+// stay quiet for a long time. A variable so tests can shorten it.
+var requestBodyIdleTimeout = time.Minute
 
 // Proxy manages reverse-proxy routes.
 type Proxy interface {
@@ -328,8 +341,16 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 			map[string]interface{}{"handler": "simpledeploy_ratelimit", "domain": ruleKey},
 			map[string]interface{}{"handler": "simpledeploy_metrics"},
 			headerHandler,
-			reverseProxyHandler(r),
 		}
+		// The server-wide body idle timeout is off (see buildConfigFrom's
+		// server block); apply it per route, except to gRPC/h2c streams.
+		if !isH2CUpstream(r) {
+			handlers = append(handlers, map[string]interface{}{
+				"handler":      "timeouts",
+				"read_timeout": int64(requestBodyIdleTimeout),
+			})
+		}
+		handlers = append(handlers, reverseProxyHandler(r))
 		caddyRoutes = append(caddyRoutes, map[string]interface{}{
 			"match":    []interface{}{routeMatcher(r)},
 			"handle":   handlers,
@@ -365,8 +386,13 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 	}
 
 	server := map[string]interface{}{
-		"listen": []string{c.listenAddr},
-		"routes": caddyRoutes,
+		"listen":           []string{c.listenAddr},
+		"routes":           caddyRoutes,
+		"max_header_bytes": maxRequestHeaderBytes,
+		// Caddy's server-wide request body idle timeout (1m by default)
+		// would reset quiet gRPC client-streaming and bidi RPCs. Turn it
+		// off here; HTTP routes get it back through a timeouts handler.
+		"read_idle_timeout": -1,
 	}
 
 	needsLocalTLS := len(localTLSDomains) > 0
@@ -417,7 +443,7 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 			"listen": append([]string(nil), c.extraListenAddrs...),
 			"routes": cloneJSONValue(caddyRoutes),
 		}
-		for _, k := range []string{"tls_connection_policies", "automatic_https"} {
+		for _, k := range []string{"tls_connection_policies", "automatic_https", "max_header_bytes", "read_idle_timeout"} {
 			if v, ok := server[k]; ok {
 				extra[k] = cloneJSONValue(v)
 			}
@@ -436,7 +462,8 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 	// it doesn't race with ours.
 	if c.httpListenAddr != "" && c.tlsMode != "off" {
 		servers["proxy_http"] = map[string]interface{}{
-			"listen": []string{c.httpListenAddr},
+			"listen":           []string{c.httpListenAddr},
+			"max_header_bytes": maxRequestHeaderBytes,
 			"routes": []interface{}{
 				map[string]interface{}{
 					"handle": []interface{}{

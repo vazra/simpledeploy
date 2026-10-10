@@ -220,3 +220,57 @@ func TestParseForRoutesRefusesSymlinkedCompose(t *testing.T) {
 		t.Fatal("ParseForRoutes read a symlinked compose file")
 	}
 }
+
+func TestRawRefsCoverJobsAndPreStartHooks(t *testing.T) {
+	_, appsDir := testApps(t)
+	outside := filepath.Join(t.TempDir(), "base.yml")
+	writeFile(t, outside, "services:\n  base:\n    image: busybox\n")
+	job := "services:\n  web:\n    image: nginx\njobs:\n  task:\n    image: busybox\n    triggers:\n      manual: true\n"
+	cases := map[string]struct{ compose, want string }{
+		"job extends file": {job + "    extends:\n      file: " + outside + "\n      service: base\n", `job "task": extends file`},
+		"job label_file":   {job + "    label_file: " + outside + "\n", `job "task": label_file`},
+		"hook label_file": {"services:\n  web:\n    image: nginx\n    pre_start:\n      - command: [\"true\"]\n        label_file: " + outside + "\n",
+			`service "web" pre_start hook 1: label_file`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			wantViolation(t, parseViolations(t, appsDir, "app", tc.compose), tc.want)
+		})
+	}
+
+	// A job may extend a service from a file inside the app folder.
+	writeFile(t, filepath.Join(appsDir, "app", "common", "base.yml"), "services:\n  base:\n    image: alpine\n")
+	path := writeApp(t, appsDir, "app", "services:\n  web:\n    image: nginx\njobs:\n  task:\n    triggers:\n      manual: true\n    extends:\n      file: common/base.yml\n      service: base\n", "")
+	cfg, err := ParseFile(path, "app")
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	if img := cfg.Project.Jobs["task"].Image; img != "alpine" {
+		t.Errorf("job image = %q, want alpine", img)
+	}
+}
+
+func TestParseForRoutesDropsJobAndHookFileRefs(t *testing.T) {
+	_, appsDir := testApps(t)
+	outside := filepath.Join(t.TempDir(), "base.yml")
+	writeFile(t, outside, "services:\n  base:\n    image: busybox\n")
+	c := "services:\n  web:\n    image: nginx\n    labels:\n      simpledeploy.endpoints.0.domain: app.example.com\n" +
+		"    pre_start:\n      - label_file: " + outside + "\n" +
+		"jobs:\n  task:\n    image: busybox\n    triggers:\n      manual: true\n    label_file: " + outside + "\n" +
+		"    extends:\n      file: " + outside + "\n      service: base\n"
+	path := writeApp(t, appsDir, "app", c, "")
+	var ve *ViolationError
+	if _, err := ParseFile(path, "app"); !errors.As(err, &ve) {
+		t.Fatalf("ParseFile: want ViolationError, got %v", err)
+	}
+	cfg, err := ParseForRoutes(path, "app")
+	if err != nil {
+		t.Fatalf("ParseForRoutes: %v", err)
+	}
+	if len(cfg.Endpoints) != 1 || cfg.Endpoints[0].Domain != "app.example.com" {
+		t.Errorf("endpoints = %+v, want app.example.com", cfg.Endpoints)
+	}
+	if _, ok := cfg.Project.Jobs["task"]; !ok {
+		t.Error("job task dropped")
+	}
+}

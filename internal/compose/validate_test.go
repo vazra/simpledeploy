@@ -17,14 +17,14 @@ func cfgWith(svc types.ServiceConfig) *AppConfig {
 }
 
 func TestValidate_Privileged(t *testing.T) {
-	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", Privileged: true}))
+	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{Privileged: true}}))
 	if len(v) == 0 {
 		t.Fatal("expected violation for privileged")
 	}
 }
 
 func TestValidate_NetworkHost(t *testing.T) {
-	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", NetworkMode: "host"}))
+	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{NetworkMode: "host"}}))
 	if len(v) == 0 {
 		t.Fatal("expected violation for network_mode host")
 	}
@@ -34,7 +34,7 @@ func TestValidate_DangerousCaps(t *testing.T) {
 	cases := []string{"ALL", "SYS_ADMIN", "SYS_MODULE", "DAC_READ_SEARCH", "BPF", "NET_RAW", "CAP_SYS_ADMIN"}
 	for _, c := range cases {
 		t.Run(c, func(t *testing.T) {
-			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", CapAdd: []string{c}}))
+			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{CapAdd: []string{c}}}))
 			if len(v) == 0 {
 				t.Fatalf("expected violation for cap %q", c)
 			}
@@ -46,7 +46,7 @@ func TestValidate_DangerousSecurityOpt(t *testing.T) {
 	cases := []string{"apparmor=unconfined", "seccomp=unconfined", "label=disable"}
 	for _, c := range cases {
 		t.Run(c, func(t *testing.T) {
-			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", SecurityOpt: []string{c}}))
+			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{SecurityOpt: []string{c}}}))
 			if len(v) == 0 {
 				t.Fatalf("expected violation for security_opt %q", c)
 			}
@@ -55,21 +55,21 @@ func TestValidate_DangerousSecurityOpt(t *testing.T) {
 }
 
 func TestValidate_UsernsHost(t *testing.T) {
-	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", UserNSMode: "host"}))
+	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{UserNSMode: "host"}}))
 	if len(v) == 0 {
 		t.Fatal("expected violation for userns_mode host")
 	}
 }
 
 func TestValidate_VolumesFromBlocked(t *testing.T) {
-	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", VolumesFrom: []string{"other"}}))
+	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{VolumesFrom: []string{"other"}}}))
 	if len(v) == 0 {
 		t.Fatal("expected violation for volumes_from")
 	}
 }
 
 func TestValidate_PidContainer(t *testing.T) {
-	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", Pid: "container:foo"}))
+	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{Pid: "container:foo"}}))
 	if len(v) == 0 {
 		t.Fatal("expected violation for pid container:")
 	}
@@ -81,8 +81,10 @@ func TestValidate_DangerousBindMounts(t *testing.T) {
 		t.Run(src, func(t *testing.T) {
 			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{
 				Name: "x",
-				Volumes: []types.ServiceVolumeConfig{
-					{Type: "bind", Source: src, Target: "/x"},
+				ContainerSpec: types.ContainerSpec{
+					Volumes: []types.ServiceVolumeConfig{
+						{Type: "bind", Source: src, Target: "/x"},
+					},
 				},
 			}))
 			if len(v) == 0 {
@@ -95,8 +97,10 @@ func TestValidate_DangerousBindMounts(t *testing.T) {
 func TestValidate_RootBindMount(t *testing.T) {
 	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{
 		Name: "x",
-		Volumes: []types.ServiceVolumeConfig{
-			{Type: "bind", Source: "/", Target: "/host"},
+		ContainerSpec: types.ContainerSpec{
+			Volumes: []types.ServiceVolumeConfig{
+				{Type: "bind", Source: "/", Target: "/host"},
+			},
 		},
 	}))
 	found := false
@@ -138,10 +142,12 @@ func TestValidate_AllowsInnocentService(t *testing.T) {
 	// A bind inside the app's own folder is allowed even though the folder
 	// lives under a protected system path (/var/lib).
 	cfg := cfgWith(types.ServiceConfig{
-		Name:  "web",
-		Image: "nginx:alpine",
-		Volumes: []types.ServiceVolumeConfig{
-			{Type: "bind", Source: "/var/lib/simpledeploy/apps/web/data", Target: "/data"},
+		Name: "web",
+		ContainerSpec: types.ContainerSpec{
+			Image: "nginx:alpine",
+			Volumes: []types.ServiceVolumeConfig{
+				{Type: "bind", Source: "/var/lib/simpledeploy/apps/web/data", Target: "/data"},
+			},
 		},
 	})
 	cfg.ComposePath = "/var/lib/simpledeploy/apps/web/docker-compose.yml"
@@ -154,7 +160,7 @@ func TestValidate_AllowsInnocentService(t *testing.T) {
 func TestValidateComposeSecurityIgnoresEndpointLabels(t *testing.T) {
 	// The reconciler uses ValidateComposeSecurity on apps already on disk;
 	// endpoint label problems must only warn there, never skip the app.
-	cfg := cfgWith(types.ServiceConfig{Name: "web", Image: "nginx"})
+	cfg := cfgWith(types.ServiceConfig{Name: "web", ContainerSpec: types.ContainerSpec{Image: "nginx"}})
 	cfg.Endpoints = []EndpointConfig{{Domain: "a.example.com", Service: "web"}, {Domain: "a.example.com", Service: "web", Index: 1}}
 	if v := ValidateComposeSecurity(cfg); len(v) != 0 {
 		t.Fatalf("ValidateComposeSecurity = %v, want none", v)
@@ -162,7 +168,7 @@ func TestValidateComposeSecurityIgnoresEndpointLabels(t *testing.T) {
 }
 
 func TestValidate_EndpointLabelsInvalid(t *testing.T) {
-	cfg := cfgWith(types.ServiceConfig{Name: "web", Image: "nginx"})
+	cfg := cfgWith(types.ServiceConfig{Name: "web", ContainerSpec: types.ContainerSpec{Image: "nginx"}})
 	cfg.Endpoints = []EndpointConfig{{Domain: "a.example.com", Service: "web", Protocol: "tcp"}}
 	v := ValidateComposeForDeploy(cfg)
 	if len(v) != 1 || !strings.Contains(v[0], "invalid protocol") {
@@ -171,7 +177,7 @@ func TestValidate_EndpointLabelsInvalid(t *testing.T) {
 }
 
 func TestValidate_EndpointLabelsValid(t *testing.T) {
-	cfg := cfgWith(types.ServiceConfig{Name: "co", Image: "example/co"})
+	cfg := cfgWith(types.ServiceConfig{Name: "co", ContainerSpec: types.ContainerSpec{Image: "example/co"}})
 	cfg.Endpoints = []EndpointConfig{
 		{Domain: "co.example.com", Service: "co", Port: "50051", Protocol: "grpc"},
 		{Domain: "co.example.com", Service: "co", Port: "8000", Path: "/ws*"},

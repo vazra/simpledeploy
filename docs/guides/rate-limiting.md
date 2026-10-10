@@ -42,7 +42,7 @@ labels:
   simpledeploy.ratelimit.by: "header:X-API-Key"
 ```
 
-Each unique `X-API-Key` value gets its own bucket. Requests with no header share one bucket.
+Each unique `X-API-Key` value gets its own bucket. Requests with no header share one bucket. Use a header name made of letters, digits and `-` only: the proxy drops headers whose names contain `_` or `.`, so such a header never arrives and every request lands in the shared bucket.
 
 ## Per-path (cheap fairness)
 
