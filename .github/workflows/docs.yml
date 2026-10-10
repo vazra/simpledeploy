@@ -19,9 +19,11 @@ on:
 permissions:
   contents: read
 
+# PR builds get their own group so they neither cancel each other nor a
+# deploy from main; deploys from main queue instead of being cancelled.
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
