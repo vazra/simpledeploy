@@ -30,6 +30,12 @@ jobs:
           # The v6 action doesn't understand v2 version strings; keep the
           # action version in sync with the CLI version.
           version: v2.11.4
+          # Skip `golangci-lint config verify`: it fetches the JSON schema
+          # over the network and intermittently fails CI on fetch errors.
+          # `golangci-lint run` still fails on a config it cannot parse;
+          # run `golangci-lint config verify` locally after editing
+          # .golangci.yml.
+          verify: false
 
   test:
     runs-on: ubuntu-latest
