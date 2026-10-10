@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { serviceTemplates } from '../serviceTemplates.js';
+import { appTemplates } from '../appTemplates.js';
 
 describe('serviceTemplates integrity', () => {
   it('every template has required fields', () => {
@@ -63,5 +64,25 @@ describe('serviceTemplates integrity', () => {
         expect(vol.includes(':/'), `${t.id}: volume "${vol}" missing ":/"`).toBe(true);
       }
     }
+  });
+});
+
+describe('minio service template', () => {
+  // Regression: minio/minio no longer exists on Docker Hub (and quay.io/minio
+  // requires login), so the service template now uses pgsty/silo.
+  it('does not use the removed official MinIO images', () => {
+    for (const t of serviceTemplates) {
+      const img = t.config.image;
+      expect(/^(docker\.io\/)?minio\/(minio|mc)([:@]|$)/.test(img), `${t.id}: ${img}`).toBe(false);
+      expect(img.startsWith('quay.io/minio/'), `${t.id}: ${img}`).toBe(false);
+    }
+  });
+
+  it('pins the same pgsty/silo release as the MinIO app template', () => {
+    const svc = serviceTemplates.find((t) => t.id === 'minio');
+    const app = appTemplates.find((t) => t.id === 'minio');
+    expect(svc.config.image).toMatch(/^pgsty\/silo:RELEASE\./);
+    expect(svc.config.image).toBe(app.compose.services.minio.image);
+    expect(svc.config.command).toBe('server /data --console-address ":9001"');
   });
 });

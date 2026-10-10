@@ -301,9 +301,10 @@ export const serviceTemplates = [
     id: 'minio',
     name: 'MinIO',
     icon: '🪣',
-    description: 'S3-compatible object storage',
+    description: 'S3-compatible object storage (MinIO-compatible Silo build)',
     config: {
-      image: 'minio/minio:RELEASE.2024-10-13T13-34-11Z',
+      // pgsty/silo: maintained drop-in MinIO fork (official images gone).
+      image: 'pgsty/silo:RELEASE.2026-09-16T00-00-00Z',
       environment: {
         MINIO_ROOT_USER: 'admin',
         MINIO_ROOT_PASSWORD: 'changeme-at-least-8-chars',

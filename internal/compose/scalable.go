@@ -18,7 +18,7 @@ var statefulImagePrefixes = []string{
 	"neo4j", "arangodb", "surrealdb",
 	"influxdb", "victoriametrics", "timescale", "questdb", "prometheus",
 	"qdrant", "weaviate", "milvus",
-	"minio", "seaweedfs",
+	"minio", "silo", "seaweedfs",
 	"cockroach", "tidb", "yugabyte",
 }
 

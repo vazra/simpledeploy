@@ -418,3 +418,45 @@ describe('appTemplates integrity', () => {
     expect(advanced).toEqual(['authelia', 'poste-io']);
   });
 });
+
+describe('MinIO template image', () => {
+  // Regression: MinIO deleted minio/minio and minio/mc from Docker Hub and
+  // quay.io/minio/* requires login, so deploying the template failed with
+  // "pull access denied". The template now runs pgsty/silo (drop-in fork).
+  const SILO_RE = /^pgsty\/silo:RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/;
+
+  function collectImages(node, out) {
+    if (node == null || typeof node !== 'object') return out;
+    if (Array.isArray(node)) {
+      for (const item of node) collectImages(item, out);
+      return out;
+    }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === 'image' && typeof v === 'string') out.push(v);
+      else collectImages(v, out);
+    }
+    return out;
+  }
+
+  it('no app template references the removed official MinIO images', () => {
+    for (const t of appTemplates) {
+      for (const img of collectImages(t.compose, [])) {
+        expect(/^(docker\.io\/)?minio\/(minio|mc)([:@]|$)/.test(img), `${t.id}: ${img}`).toBe(false);
+        expect(img.startsWith('quay.io/minio/'), `${t.id}: ${img}`).toBe(false);
+      }
+    }
+  });
+
+  it('minio template pins a pgsty/silo release and keeps MinIO semantics', () => {
+    const tpl = appTemplates.find((t) => t.id === 'minio');
+    expect(tpl).toBeTruthy();
+    const svc = tpl.compose.services.minio;
+    expect(svc.image).toMatch(SILO_RE);
+    expect(svc.command).toBe('server /data --console-address :9001');
+    expect(svc.environment.MINIO_ROOT_USER).toBe('{{root_user}}');
+    expect(svc.environment.MINIO_ROOT_PASSWORD).toBe('{{root_password}}');
+    expect(svc.volumes).toEqual(['minio-data:/data']);
+    expect(svc.labels['simpledeploy.endpoints.0.port']).toBe('9000');
+    expect(svc.labels['simpledeploy.endpoints.1.port']).toBe('9001');
+  });
+});

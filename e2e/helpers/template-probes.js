@@ -57,7 +57,8 @@ export const templateProbes = {
   },
   'minio': {
     probes: [
-      { hostVar: 'console_domain', path: '/', statusMin: 200, statusMax: 200, bodyIncludes: 'MinIO Console' },
+      // pgsty/silo (MinIO fork) serves the console as "SILO Console".
+      { hostVar: 'console_domain', path: '/', statusMin: 200, statusMax: 200, bodyIncludes: 'SILO Console' },
     ],
   },
   'meilisearch': {

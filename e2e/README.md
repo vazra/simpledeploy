@@ -83,7 +83,7 @@ Security fixture compose files in `fixtures/security/` are used for validation t
 
 Some specs spin up their own fixture containers via docker CLI and tear them down in `afterAll`. They're NOT managed by simpledeploy.
 
-- **MinIO** (`helpers/minio.js`, used by `27-backup-s3.spec.js`) — runs `minio/minio:latest` on a random localhost port, creates a bucket via `minio/mc`. Use for testing the S3 target without real AWS credentials. Returns `{endpoint, accessKey, secretKey, bucket, mc(), listObjects(), stop()}`.
+- **MinIO** (`helpers/minio.js`, used by `27-backup-s3.spec.js`): runs `pgsty/silo` (maintained drop-in MinIO fork; official `minio/minio` images are gone) pinned to the same tag as the MinIO templates, on a random localhost port, and creates a bucket via the `mc` client bundled in that image. Use for testing the S3 target without real AWS credentials. Returns `{endpoint, accessKey, secretKey, bucket, mc(), listObjects(), stop()}`.
 - **Registry** (`helpers/registry.js`, used by `29b-private-registry.spec.js`) — runs `registry:2` with htpasswd auth on a random localhost port. Helper `pushImage(reg, from, toName)` handles pull→tag→login→push→logout. `startRegistry()` returns `{host, user, pass, stop()}`. Docker Desktop treats `127.0.0.0/8` as insecure by default; Linux Docker does too, so plain HTTP to `localhost:<port>` works.
 
 ## Helpers

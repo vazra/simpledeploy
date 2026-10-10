@@ -809,7 +809,7 @@ export const appTemplates = [
     icon: '🪣',
     category: 'storage',
     description: 'S3-compatible object storage with a web console.',
-    tags: ['s3', 'storage', 'minio', 'objects'],
+    tags: ['s3', 'storage', 'minio', 'silo', 'objects'],
     nameSuggestion: 'minio',
     advanced: false,
     variables: [
@@ -834,7 +834,10 @@ export const appTemplates = [
     compose: {
       services: {
         minio: {
-          image: 'minio/minio:RELEASE.2025-09-07T16-13-09Z',
+          // Official MinIO images are no longer published (Docker Hub repo
+          // deleted, quay.io requires login). pgsty/silo is a maintained,
+          // drop-in MinIO fork: same MINIO_* env, ports, /data, health URLs.
+          image: 'pgsty/silo:RELEASE.2026-09-16T00-00-00Z',
           restart: 'unless-stopped',
           command: 'server /data --console-address :9001',
           environment: {
@@ -872,6 +875,7 @@ export const appTemplates = [
     },
     notes: [
       'Create access keys in the console after first login.',
+      'Runs Silo, a community-maintained MinIO-compatible build, because MinIO no longer publishes free container images. Existing MinIO data and S3 clients work unchanged.',
     ],
   },
 
