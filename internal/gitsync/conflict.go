@@ -13,11 +13,17 @@ package gitsync
 //     "theirs" = the local commits being reapplied.
 //
 // We want local (server) to win, so during a rebase we use `--theirs` for
-// conflicted files. The exception is a local "restore access grants" commit
-// (unpushed in pull-only mode): it only reverts pulled access lists, so its
-// conflicts take the remote file and securePulledTree re-applies the access
-// restore afterwards. Otherwise the remote's other edits to that sidecar
-// (e.g. alert thresholds) would be dropped on every later pull.
+// conflicted files. The exception is a local commit that only follows up on
+// an earlier pull (unpushed in pull-only mode): a "restore access grants"
+// commit, which only reverts pulled access lists, or a "rewrite pulled
+// config" commit, which only holds pulled files SimpleDeploy re-rendered.
+// Their conflicts take the remote file; securePulledTree re-applies the
+// access restore and the import re-renders the file afterwards. Otherwise
+// the remote's later edits to that file (e.g. alert thresholds) would be
+// dropped on every pull.
+//
+// The rebase needs a clean working tree; applyFetched commits pending
+// changes to managed paths first (see pending.go).
 
 import (
 	"bytes"
@@ -43,10 +49,14 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 	}
 
 	// git refuses to start when the working tree has uncommitted changes;
-	// report it instead of treating it as a conflict-free no-op.
+	// report it instead of treating it as a conflict-free no-op. Changes to
+	// managed files are committed before the rebase, so what is left is
+	// something git sync does not commit.
 	if bytes.Contains(out, []byte("cannot rebase")) || bytes.Contains(out, []byte("commit or stash")) ||
 		bytes.Contains(out, []byte("would be overwritten")) || bytes.Contains(out, []byte("could not detach HEAD")) {
-		return nil, "", fmt.Errorf("gitsync: rebase refused: apps_dir has uncommitted or untracked changes that the pull would overwrite; commit or remove them (or enable auto_push) and sync again: %s", bytes.TrimSpace(out))
+		return nil, "", fmt.Errorf("gitsync: rebase refused: apps_dir has uncommitted or untracked changes that the pull would overwrite, "+
+			"in files git sync does not commit itself (files outside the synced config files, or symlinks); "+
+			"commit or remove them in apps_dir and sync again: %s", bytes.TrimSpace(out))
 	}
 
 	// Check if it's a conflict situation.
@@ -71,7 +81,7 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 			break
 		}
 
-		takeRemote := replayingAccessRestore(appsDir)
+		takeRemote := replayingPullFollowUp(appsDir)
 		for _, f := range conflictFiles {
 			if takeRemote {
 				if err := takeUpstreamSide(appsDir, f); err != nil {
@@ -81,19 +91,20 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 				continue
 			}
 			// Take local side (--theirs in rebase = our server commits).
-			if _, cherr := gitExec(appsDir, "checkout", "--theirs", "--", f); cherr != nil {
+			deleted, err := takeLocalSide(appsDir, f)
+			if err != nil {
 				_, _ = gitExec(appsDir, "rebase", "--abort")
-				return nil, "", fmt.Errorf("gitsync: checkout --theirs %s: %w", f, cherr)
+				return nil, "", err
 			}
-			if _, addErr := gitExec(appsDir, "add", "--", f); addErr != nil {
-				_, _ = gitExec(appsDir, "rebase", "--abort")
-				return nil, "", fmt.Errorf("gitsync: add %s: %w", f, addErr)
+			kept := "version"
+			if deleted {
+				kept = "deletion"
 			}
 			remoteSHA, _ := gitRemoteFileSHA(appsDir, "origin/"+branch, f)
 			conflicts = append(conflicts, Conflict{
 				Path:        f,
 				RemoteSHA:   remoteSHA,
-				Description: fmt.Sprintf("server-wins: kept local version of %s", filepath.Base(f)),
+				Description: fmt.Sprintf("server-wins: kept local %s of %s", kept, filepath.Base(f)),
 			})
 		}
 
@@ -131,16 +142,22 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 	return conflicts, sha, shaErr
 }
 
-// replayingAccessRestore reports whether the commit a stopped rebase is
-// replaying is a simpledeploy "restore access grants" commit.
-func replayingAccessRestore(appsDir string) bool {
+// replayingPullFollowUp reports whether the commit a stopped rebase is
+// replaying is a simpledeploy commit that only follows up on an earlier
+// pull: "restore access grants" or "rewrite pulled config". Such commits
+// carry no local edit, so on conflict the remote version wins.
+func replayingPullFollowUp(appsDir string) bool {
 	out, err := gitExec(appsDir, "log", "-1", "--format=%B", "REBASE_HEAD", "--")
 	if err != nil {
 		return false
 	}
 	msg := string(out)
 	subject, _, _ := strings.Cut(msg, "\n")
-	return strings.TrimSpace(subject) == restoreAccessSubject && isBotCommit(msg)
+	switch strings.TrimSpace(subject) {
+	case restoreAccessSubject, pulledRewriteSubject:
+		return isBotCommit(msg)
+	}
+	return false
 }
 
 // takeUpstreamSide resolves a conflicted path with the version being rebased
@@ -156,6 +173,45 @@ func takeUpstreamSide(appsDir, f string) error {
 		return fmt.Errorf("gitsync: add %s: %w\n%s", f, err, out)
 	}
 	return nil
+}
+
+// takeLocalSide resolves a conflicted path with the local commit being
+// replayed ("theirs" during a rebase). When that commit deleted the path
+// (modify/delete) the deletion is kept; deleted reports that case.
+func takeLocalSide(appsDir, f string) (deleted bool, err error) {
+	if !hasIndexStage(appsDir, f, 3) {
+		if out, err := gitExec(appsDir, "rm", "-q", "-f", "--", f); err != nil {
+			return false, fmt.Errorf("gitsync: keep local deletion of %s: %w\n%s", f, err, out)
+		}
+		return true, nil
+	}
+	if out, err := gitExec(appsDir, "checkout", "--theirs", "--", f); err != nil {
+		return false, fmt.Errorf("gitsync: checkout --theirs %s: %w\n%s", f, err, out)
+	}
+	if out, err := gitExec(appsDir, "add", "--", f); err != nil {
+		return false, fmt.Errorf("gitsync: add %s: %w\n%s", f, err, out)
+	}
+	return false, nil
+}
+
+// hasIndexStage reports whether the conflicted path f has an index entry at
+// the given merge stage (2 = rebase target, 3 = commit being replayed).
+func hasIndexStage(appsDir, f string, stage int) bool {
+	out, err := gitExec(appsDir, "--literal-pathspecs", "ls-files", "-u", "-z", "--", f)
+	if err != nil {
+		return true // unknown: let checkout report the real error
+	}
+	// Each entry: "<mode> <sha> <stage>\t<path>\x00".
+	for _, entry := range strings.Split(string(out), "\x00") {
+		meta, path, ok := strings.Cut(entry, "\t")
+		if !ok || path != f {
+			continue
+		}
+		if fields := strings.Fields(meta); len(fields) == 3 && fields[2] == fmt.Sprint(stage) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasStagedChanges reports whether the index differs from HEAD. Errors count

@@ -230,7 +230,7 @@ curl -H "Authorization: Bearer $SD_API_KEY" \
 
 **Symptom:** The Git Sync page shows `rebase refused: apps_dir has uncommitted or untracked changes that the pull would overwrite`.
 
-**What it means:** Local files in `apps_dir` differ from git (common with `auto_push_enabled: false`, where dashboard edits stay uncommitted), and git will not apply remote commits over them.
+**What it means:** Files in `apps_dir` that git sync does not commit itself (files outside the synced config files, or symlinks) differ from git, and git will not apply remote commits over them. Changes SimpleDeploy makes to synced config files are committed automatically before each pull, also in pull-only mode.
 
 **Diagnose:**
 
@@ -238,7 +238,7 @@ curl -H "Authorization: Bearer $SD_API_KEY" \
 sudo git -C /etc/simpledeploy/apps status
 ```
 
-**Fix:** Commit the changes (or turn on [`auto_push_enabled`](/operations/git-sync/#auto_push_enabled)), or discard them, for example with `git stash -u` to keep a copy. Then sync again.
+**Fix:** Commit or remove those files in `apps_dir` (for example `git stash -u` keeps a copy), then sync again.
 
 ## Startup warning about master_secret
 

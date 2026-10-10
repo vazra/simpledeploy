@@ -1100,8 +1100,9 @@ func TestPollDisabledSkipsPollLoop(t *testing.T) {
 	}
 }
 
-// TestAutoPushDisabledDropsEnqueue: EnqueueCommit is a no-op when AutoPushEnabled=false.
-func TestAutoPushDisabledDropsEnqueue(t *testing.T) {
+// TestAutoPushDisabledStillEnqueues: with AutoPushEnabled=false local changes
+// are still committed (doCommit skips only the push), so EnqueueCommit queues.
+func TestAutoPushDisabledStillEnqueues(t *testing.T) {
 	s := &Syncer{
 		cfg: Config{
 			Enabled:         true,
@@ -1110,9 +1111,9 @@ func TestAutoPushDisabledDropsEnqueue(t *testing.T) {
 		commitCh: make(chan commitReq, commitChanSize),
 	}
 
-	s.EnqueueCommit(nil, "should be dropped")
-	if len(s.commitCh) != 0 {
-		t.Fatal("expected commit to be dropped when AutoPushEnabled=false")
+	s.EnqueueCommit(nil, "local commit")
+	if len(s.commitCh) != 1 {
+		t.Fatal("expected commit to be queued when AutoPushEnabled=false")
 	}
 }
 
