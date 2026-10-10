@@ -53,7 +53,14 @@ Record findings in a draft security advisory (below), not in a public issue.
 ### 1. Intake and triage
 
 1. Reports arrive through private vulnerability reporting (an advisory in triage) or `security@vazra.us`. Acknowledge within the times in `SECURITY.md`.
-2. Reproduce, then rate severity with a CVSS vector and pick CWE IDs.
+2. Reproduce, then rate severity with a CVSS vector and pick CWE IDs. Set the score with `cvss_vector_string` on its own; GitHub derives the severity from it:
+
+   ```bash
+   gh api -X PATCH repos/vazra/simpledeploy/security-advisories/GHSA-xxxx-xxxx-xxxx \
+     -f cvss_vector_string='CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H'
+   ```
+
+   Send either `severity` or `cvss_vector_string`, never both in one request: sending `"severity": null` together with a vector clears the severity and ignores the vector, which on a published advisory shows no severity until fixed. The `cvss_severities` field is not accepted by this endpoint.
 3. For an internal finding, open a draft advisory yourself: GitHub **Security > Advisories > New draft security advisory**, or:
 
    ```bash
