@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.4.4](https://github.com/vazra/simpledeploy/compare/v1.4.3...v1.4.4) (2026-10-10)
+
+
+### Bug Fixes
+
+* backup wizard S3 credentials and connection test ([#106](https://github.com/vazra/simpledeploy/issues/106)) ([808b166](https://github.com/vazra/simpledeploy/commit/808b166c5969df08000a6f202be446a20a143dee))
+* **deps:** update Go dependencies (compose-go 2.16, Caddy 2.11.7) ([#112](https://github.com/vazra/simpledeploy/issues/112)) ([ed49367](https://github.com/vazra/simpledeploy/commit/ed493670613ab4ddd01c7073d1a4fb00f6d5370c))
+* **gitsync:** keep pulls working in pull-only mode ([#108](https://github.com/vazra/simpledeploy/issues/108)) ([009b832](https://github.com/vazra/simpledeploy/commit/009b832178b62995fcf9f075e4b5420a43e50e5a))
+* replace removed minio/minio image with pgsty/silo ([#109](https://github.com/vazra/simpledeploy/issues/109)) ([b8a5b74](https://github.com/vazra/simpledeploy/commit/b8a5b74eb7e39193c86a64a8185e8a98879f1dde))
+
 ## [1.4.3](https://github.com/vazra/simpledeploy/compare/v1.4.2...v1.4.3) (2026-10-10)
 
 
