@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"net/http"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -42,6 +40,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/recipes"
 	"github.com/vazra/simpledeploy/internal/reconciler"
 	"github.com/vazra/simpledeploy/internal/store"
+	"sync"
 	"sync/atomic"
 )
 
@@ -85,7 +84,7 @@ var serveCmd = &cobra.Command{
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Generate default config file",
+	Short: "Generate default config file with a random master_secret",
 	RunE:  runInit,
 }
 
@@ -259,6 +258,8 @@ var configImportCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "/etc/simpledeploy/config.yaml", "config file path")
 
+	initCmd.Flags().Bool("force", false, "replace an existing config file entirely with defaults and a new master_secret (credentials encrypted with the old secret become unreadable)")
+
 	applyCmd.Flags().StringP("file", "f", "", "compose file path")
 	applyCmd.Flags().StringP("dir", "d", "", "directory of app subdirectories")
 	applyCmd.Flags().String("name", "", "app name (required with -f)")
@@ -362,16 +363,6 @@ func envDuration(name string, def time.Duration) time.Duration {
 	return def
 }
 
-func scanAndTee(r *os.File, orig *os.File, buf *logbuf.Buffer) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Fprintln(orig, line)
-		_, _ = buf.Write([]byte(line))
-	}
-}
-
 func runServe(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
@@ -390,17 +381,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	dbPath := filepath.Join(cfg.DataDir, "simpledeploy.db")
 	logBuf := logbuf.New(cfg.LogBufferSize)
 
-	// Redirect stdout/stderr through pipes so ALL output (including Caddy/zap)
-	// gets captured into the log buffer while still printing to the terminal.
-	origStdout := os.Stdout
-	origStderr := os.Stderr
-	stdoutR, stdoutW, _ := os.Pipe()
-	stderrR, stderrW, _ := os.Pipe()
-	os.Stdout = stdoutW
-	os.Stderr = stderrW
-	log.SetOutput(stderrW)
-	go scanAndTee(stdoutR, origStdout, logBuf)
-	go scanAndTee(stderrR, origStderr, logBuf)
+	// Capture ALL output (including Caddy/zap) into the log buffer while
+	// still printing to the terminal. Registered first so it is undone last,
+	// after every other deferred cleanup has logged.
+	defer captureProcessOutput(logBuf)()
 
 	log.Printf("simpledeploy starting (data_dir=%s)", cfg.DataDir)
 
@@ -411,6 +395,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	jwtSecret := cfg.MasterSecret
+	if cfg.PlaceholderMasterSecret() {
+		// A documented example value is public; sign sessions with a random
+		// key kept in data_dir so a public value never signs sessions.
+		key, err := loadOrCreateSessionKey(cfg.DataDir)
+		if err != nil {
+			return fmt.Errorf("session signing key: %w", err)
+		}
+		jwtSecret = key
+	}
 	if jwtSecret == "" {
 		// Auto-generate a random secret and persist it
 		generated, err := auth.GenerateRandomSecret(32)
@@ -565,6 +558,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 				log.Printf("[gitsync] init failed (continuing without git sync): %v", gsErr)
 			} else {
 				gitSyncer = gs
+				// Access grants are dashboard-managed from here on, including
+				// the boot-time FS reload below.
+				syncer.SetAccessFromDashboardOnly(true)
 				syncer.SetSidecarWriteHook(func(path, reason string) {
 					if path == "" {
 						gs.EnqueueCommit(nil, reason)
@@ -610,20 +606,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	reqStatsCh := make(chan proxy.RequestStatEvent, 1000)
 	proxy.RequestStatsCh = reqStatsCh
 
-	domainLookup := func(domain string) (int64, error) {
-		host, _, _ := strings.Cut(domain, ":")
-		apps, err := db.ListApps()
-		if err != nil {
-			return 0, err
-		}
-		for _, a := range apps {
-			if a.Domain == host {
-				return a.ID, nil
-			}
-		}
-		return 0, fmt.Errorf("unknown domain: %s", domain)
-	}
-	reqWriter := metrics.NewRequestMetricsWriter(db, reqStatsCh, domainLookup, 200)
+	// Cached domain->appID map: the writer resolves every proxied request,
+	// so it must not hit SQLite per request.
+	domainIDs := newDomainCache(db.ListApps)
+	reqWriter := metrics.NewRequestMetricsWriter(db, reqStatsCh, domainIDs.Lookup, 200)
 	reqRollup := metrics.NewReqMetricsRollupManager(db, tiers)
 
 	ctx, cancel := context.WithCancel(cmd.Context())
@@ -643,6 +629,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		if startErr := gitSyncer.Start(ctx); startErr != nil {
 			log.Printf("[gitsync] start failed (continuing without git sync): %v", startErr)
 			gitSyncer = nil
+			syncer.SetAccessFromDashboardOnly(false)
 		} else {
 			defer func() { _ = gitSyncer.Stop() }()
 		}
@@ -720,6 +707,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Printf("No users found. Create one at: POST http://localhost:%d/api/setup\n", cfg.ManagementPort)
 	}
 
+	backup.SetSpoolDir(filepath.Join(cfg.DataDir, "tmp"))
 	backupSched := backup.NewScheduler(db, nil)
 	backupSched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
 	backupSched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
@@ -777,6 +765,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetAppsDir(cfg.AppsDir)
 	srv.SetReconciler(rec)
 	srv.SetProxyReloader(caddyProxy)
+	srv.SetReservedDomains(cfg.Domain)
 	srv.SetLockout(lockout)
 	loginReq := cfg.LoginRateLimit.Requests
 	if loginReq <= 0 {
@@ -825,24 +814,67 @@ func runServe(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-func runInit(cmd *cobra.Command, args []string) error {
-	cfg := config.DefaultConfig()
-	data, err := cfg.Marshal()
+// teeFlushTimeout bounds how long captureProcessOutput's restore waits for
+// buffered output to reach the original streams.
+const teeFlushTimeout = 2 * time.Second
+
+// captureProcessOutput routes os.Stdout, os.Stderr and the log package
+// through pipes into buf while still writing to the original streams. The
+// returned func restores the originals, closes the pipe write ends and waits
+// (bounded) for the tee goroutines to flush, so errors printed on the way
+// out still reach the terminal or journald.
+func captureProcessOutput(buf *logbuf.Buffer) func() {
+	origStdout, origStderr, origLog := os.Stdout, os.Stderr, log.Writer()
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+		log.Printf("log capture disabled: %v", err)
+		return func() {}
 	}
-
-	dir := filepath.Dir(cfgFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		stdoutR.Close()
+		stdoutW.Close()
+		log.Printf("log capture disabled: %v", err)
+		return func() {}
 	}
+	os.Stdout, os.Stderr = stdoutW, stderrW
+	log.SetOutput(stderrW)
 
-	// 0600: config.yaml contains master_secret.
-	if err := os.WriteFile(cfgFile, data, 0o600); err != nil {
-		return fmt.Errorf("write config: %w", err)
+	// logbuf.Tee never stops draining (over-long lines are truncated for the
+	// buffer only); a stalled reader would block every stdout/stderr write.
+	var wg sync.WaitGroup
+	tee := func(r, orig *os.File) {
+		defer wg.Done()
+		defer r.Close()
+		logbuf.Tee(r, orig, buf, logbuf.DefaultTeeLineCap)
 	}
+	wg.Add(2)
+	go tee(stdoutR, origStdout)
+	go tee(stderrR, origStderr)
 
-	fmt.Printf("config written to %s\n", cfgFile)
+	return func() {
+		os.Stdout, os.Stderr = origStdout, origStderr
+		log.SetOutput(origLog)
+		stdoutW.Close()
+		stderrW.Close()
+		done := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(teeFlushTimeout):
+		}
+	}
+}
+
+func runInit(cmd *cobra.Command, args []string) error {
+	force, _ := cmd.Flags().GetBool("force")
+	if err := writeInitConfig(cfgFile, force); err != nil {
+		return err
+	}
+	fmt.Printf("config written to %s (with a freshly generated master_secret; back it up somewhere safe)\n", cfgFile)
 	return nil
 }
 
@@ -1165,8 +1197,8 @@ func persistGlobalSidecars(cfg *config.Config, db *store.Store) error {
 			cfg.DataDir, err)
 	}
 	if err := s.WriteRedactedGlobal(); err != nil {
-		// Redacted copy is only upsert-imported (gitsync), never pruned from,
-		// so a failure here cannot revert the change.
+		// The redacted copy is push-only (gitsync never imports it), so a
+		// failure here cannot revert the change.
 		fmt.Fprintf(os.Stderr, "warning: write redacted global sidecar: %v\n", err)
 	}
 	s.EnsureSecretsGitignore()
@@ -1174,6 +1206,8 @@ func persistGlobalSidecars(cfg *config.Config, db *store.Store) error {
 }
 
 func newBackupScheduler(cfg *config.Config, db *store.Store) *backup.Scheduler {
+	// Stage restore archives on the data disk, as serve does.
+	backup.SetSpoolDir(filepath.Join(cfg.DataDir, "tmp"))
 	sched := backup.NewScheduler(db, nil)
 	sched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
 	sched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
@@ -1307,6 +1341,14 @@ func runLogs(cmd *cobra.Command, args []string) error {
 
 	containerName := fmt.Sprintf("simpledeploy-%s-%s", appName, service)
 
+	// TTY containers emit raw bytes; only non-TTY logs carry the 8-byte
+	// stream framing, so inspect before choosing how to read.
+	info, err := dc.ContainerInspect(cmd.Context(), containerName)
+	if err != nil {
+		return fmt.Errorf("inspect container: %w", err)
+	}
+	tty := info.Config != nil && info.Config.Tty
+
 	reader, err := dc.ContainerLogs(cmd.Context(), containerName, container.LogsOptions{
 		ShowStdout: true, ShowStderr: true,
 		Follow: follow, Tail: tail, Timestamps: true,
@@ -1316,22 +1358,8 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	defer reader.Close()
 
-	hdr := make([]byte, 8)
-	for {
-		if _, err := io.ReadFull(reader, hdr); err != nil {
-			break
-		}
-		size := binary.BigEndian.Uint32(hdr[4:8])
-		line := make([]byte, size)
-		if _, err := io.ReadFull(reader, line); err != nil {
-			break
-		}
-
-		streamType := "stdout"
-		if hdr[0] == 2 {
-			streamType = "stderr"
-		}
-		fmt.Printf("[%s] %s", streamType, string(line))
+	if err := printContainerLogs(os.Stdout, reader, tty); err != nil && cmd.Context().Err() == nil {
+		return err
 	}
 	return nil
 }

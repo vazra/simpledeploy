@@ -100,7 +100,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Action:   "login_succeeded",
 	})
 
-	secure := s.tlsMode != "off"
+	secure := s.tlsMode != "off" || auth.RequestIsHTTPS(r, s.trustedProxies)
 	// Always SameSite=Strict regardless of TLS mode. Lax allows top-level
 	// GET navigations to carry the cookie, which on a misconfigured TLS-off
 	// install opens minor CSRF surface; Strict closes it. This breaks
@@ -135,7 +135,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 			_ = s.store.BumpTokenVersion(claims.UserID)
 		}
 	}
-	secure := s.tlsMode != "off"
+	secure := s.tlsMode != "off" || auth.RequestIsHTTPS(r, s.trustedProxies)
 	// Always SameSite=Strict regardless of TLS mode. Lax allows top-level
 	// GET navigations to carry the cookie, which on a misconfigured TLS-off
 	// install opens minor CSRF surface; Strict closes it. This breaks

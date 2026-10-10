@@ -152,7 +152,7 @@
           The on-disk <span class="font-mono">.env</span> and <span class="font-mono">simpledeploy.secrets.yml</span> will be preserved. The compose and sidecar will be replaced.
         </div>
         {#if errorMsg}
-          <div data-testid="import-error" class="text-xs text-danger bg-danger/10 border border-danger/30 rounded-md px-3 py-2">
+          <div data-testid="import-error" class="text-xs text-danger bg-danger/10 border border-danger/30 rounded-md px-3 py-2 whitespace-pre-line break-words">
             {errorMsg}
           </div>
         {/if}
@@ -218,7 +218,7 @@
         </div>
 
         {#if errorMsg}
-          <div data-testid="import-error" class="text-xs text-danger bg-danger/10 border border-danger/30 rounded-md px-3 py-2">
+          <div data-testid="import-error" class="text-xs text-danger bg-danger/10 border border-danger/30 rounded-md px-3 py-2 whitespace-pre-line break-words">
             {errorMsg}
           </div>
         {/if}

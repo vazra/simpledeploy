@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/config"
+	"github.com/vazra/simpledeploy/internal/fsutil"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -68,11 +69,18 @@ func (s *Syncer) EnsureSecretsGitignore() {
 	}
 }
 
+// ensureGitignore appends missing lines to {dir}/.gitignore. A symlinked
+// .gitignore (apps_dir may hold git-pulled content) is refused rather than
+// followed, and the file is replaced atomically instead of appended in place.
 func ensureGitignore(dir string, lines []string) error {
 	path := filepath.Join(dir, ".gitignore")
 	var existing string
-	if data, err := os.ReadFile(path); err == nil {
+	perm := os.FileMode(0644)
+	if data, err := fsutil.ReadRegularFile(path); err == nil {
 		existing = string(data)
+		if fi, statErr := os.Lstat(path); statErr == nil {
+			perm = fi.Mode().Perm()
+		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
@@ -86,13 +94,7 @@ func ensureGitignore(dir string, lines []string) error {
 		return nil
 	}
 	block := "\n# simpledeploy: never commit secrets\n" + strings.Join(add, "\n") + "\n"
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(block)
-	return err
+	return fsutil.WriteFileAtomic(path, []byte(existing+block), perm)
 }
 
 // ReconcileDBFromFS scans the apps directory and applies each per-app sidecar

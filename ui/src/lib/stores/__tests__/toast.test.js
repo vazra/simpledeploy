@@ -57,4 +57,12 @@ describe('toast store', () => {
     vi.advanceTimersByTime(2);
     expect(get(toasts)).toHaveLength(0);
   });
+
+  it('keeps multi-line errors (refusal reasons) visible longer', () => {
+    toasts.error('refused:\n- service "web": privileged not allowed');
+    vi.advanceTimersByTime(4001);
+    expect(get(toasts)).toHaveLength(1);
+    vi.advanceTimersByTime(8000);
+    expect(get(toasts)).toHaveLength(0);
+  });
 });

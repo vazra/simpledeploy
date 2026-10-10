@@ -49,13 +49,9 @@ domain: manage.yourdomain.com    # management UI domain
 tls:
   mode: auto
   email: you@example.com         # for Let's Encrypt
-master_secret: "generate-a-random-string-here"
 ```
 
-Generate a master secret:
-```bash
-openssl rand -hex 32
-```
+`init` already wrote a random `master_secret`; keep it. To replace it by hand, use `openssl rand -hex 32` (placeholder values from the docs are flagged at startup).
 
 ### 3. Create Directories
 

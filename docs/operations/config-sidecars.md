@@ -3,7 +3,7 @@ title: Config sidecars and sidecar-based recovery
 description: How SimpleDeploy mirrors every user-editable setting to YAML files on disk, and how to recover a wiped database from those files.
 ---
 
-To sync sidecar files to a remote git repository automatically, see [Git sync](./git-sync).
+To sync sidecar files to a remote git repository automatically, see [Git sync](/operations/git-sync/).
 
 SimpleDeploy continuously mirrors every user-editable setting to plain YAML files called **config sidecars**. If the SQLite database is ever wiped, the server automatically imports the sidecars on the next start. No backup job needed for configuration; the live copy is always on disk.
 
@@ -54,19 +54,21 @@ After every mutation (API call that changes a mirrored setting), the server sche
 
 ## How recovery works
 
-**Global sidecar import** — on startup, if the `users` table is empty and `{data_dir}/config.yml` exists, the global sidecar is imported automatically. A log line confirms:
+**Global sidecar import**: on startup, if the `users` table is empty and `{data_dir}/config.yml` exists, the global sidecar is imported automatically. A log line confirms:
 
 ```
 [configsync] imported global sidecar into empty DB
 ```
 
-**Per-app sidecar import** — during each reconcile pass, any app whose compose file is present on disk but has no DB-side config (no alert rules, no backup configs, no access grants) has its `simpledeploy.yml` imported. Log line:
+**Per-app sidecar import**: during each reconcile pass, any app whose compose file is present on disk but has no DB-side config (no alert rules, no backup configs, no access grants) has its `simpledeploy.yml` imported. Log line:
 
 ```
 [configsync] imported sidecar for my-app
 ```
 
 Neither import overwrites a healthy DB. If the DB already has data for a given app or user, it is left untouched.
+
+With [git sync](/operations/git-sync/) enabled, access grants are managed in the dashboard only: the `access` list in a pulled or hand-edited `simpledeploy.yml` is never applied, and the server rewrites a pulled file's `access` list back to the dashboard's grants. Disaster-recovery imports into an empty DB from sidecars already on disk still restore grants. Sidecar and data-dir files must be regular files; symlinks are refused.
 
 ## Recovery procedure
 
@@ -119,10 +121,10 @@ simpledeploy config import --force --wipe
 
 ## Cautions
 
-**Losing `master_secret` with a wiped DB** — registry credentials and S3 backup target configs are unrecoverable. Users, API keys, alert rules, and webhooks are still restored. Keep `master_secret` in a password manager separate from the host.
+**Losing `master_secret` with a wiped DB**: registry credentials and S3 backup target configs are unrecoverable. Users, API keys, alert rules, and webhooks are still restored. Keep `master_secret` in a password manager separate from the host.
 
-**Sidecar files contain sensitive data** — bcrypt password hashes, encrypted credential blobs. File mode is `0600` by default. Do not commit them to a public repo. A forthcoming Git sync feature will handle automated sync with redaction.
+**Sidecar files contain sensitive data**: bcrypt password hashes, encrypted credential blobs. File mode is `0600` by default. Do not commit them to a public repo. [Git sync](/operations/git-sync/) commits the app folders and the redacted `_global.yml`, never `{data_dir}/config.yml`.
 
-**Hand-editing sidecars** — supported. Edits take effect on the next startup or reconcile pass. Malformed YAML fails the import with a log line and leaves the DB unchanged.
+**Hand-editing sidecars**: supported. Edits take effect on the next startup or reconcile pass. Malformed YAML fails the import with a log line and leaves the DB unchanged.
 
-**DB wins over sidecar** — if the same app or user already exists in the DB, the sidecar is ignored for that record. Sidecars are authoritative only when the DB is empty for that entity.
+**DB wins over sidecar**: if the same app or user already exists in the DB, the sidecar is ignored for that record. Sidecars are authoritative only when the DB is empty for that entity.

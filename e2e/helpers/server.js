@@ -99,7 +99,7 @@ export async function startServer(binPath, overrides = {}) {
   const proc = spawn(binPath, ['serve', '--config', configPath], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS: '1', ...fastEnv, ...mirrorEnv },
+    env: { ...process.env, SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS: '1', SIMPLEDEPLOY_ALLOW_PRIVATE_S3: '1', ...fastEnv, ...mirrorEnv },
   });
 
   proc.stdout.pipe(logStream);

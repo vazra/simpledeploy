@@ -25,6 +25,7 @@ var testConnMessages = map[string]string{
 	"branch_missing": "Connected, but the configured branch does not exist on the remote.",
 	"empty_repo":     "Repository is empty. Saving will push your current SimpleDeploy configs as the initial commit.",
 	"network":        "Could not reach remote (network error).",
+	"invalid_config": "Remote URL or branch is not allowed. Use an https://, http://, ssh://, git:// or file:// URL, an absolute local path, or user@host:path, and a plain branch name.",
 	"unknown":        "Connection failed.",
 }
 

@@ -17,10 +17,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,11 +32,13 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 
 	"github.com/vazra/simpledeploy/internal/configsync"
+	"github.com/vazra/simpledeploy/internal/fsutil"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -226,6 +231,9 @@ func New(cfg Config, st *store.Store, cs *configsync.Syncer, rec Reconciler) (*S
 	if cfg.Remote == "" {
 		return nil, errors.New("gitsync: Remote required")
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return &Syncer{
 		cfg:      cfg,
 		st:       st,
@@ -245,6 +253,13 @@ func (g *Syncer) Start(ctx context.Context) error {
 	if err := g.initRepo(); err != nil {
 		g.setError(err.Error())
 		return err
+	}
+
+	// With git sync on, access grants are managed in the dashboard only:
+	// sidecar files re-read by the watcher or the boot-time reload must not
+	// change them.
+	if g.cs != nil {
+		g.cs.SetAccessFromDashboardOnly(true)
 	}
 
 	wctx, cancel := context.WithCancel(ctx)
@@ -270,6 +285,9 @@ func (g *Syncer) Stop() error {
 	// Signal the worker to stop accepting new work.
 	g.cancel()
 	g.wg.Wait()
+	if g.cs != nil {
+		g.cs.SetAccessFromDashboardOnly(false)
+	}
 	return nil
 }
 
@@ -465,7 +483,8 @@ func (g *Syncer) initRepo() error {
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
 		return g.initFresh()
 	}
-	// Existing repo: validate remote.
+	// Existing repo: persist safety config (best effort), then validate remote.
+	ensureRepoSafetyConfig(g.cfg.AppsDir)
 	repo, err := git.PlainOpen(g.cfg.AppsDir)
 	if err != nil {
 		return fmt.Errorf("gitsync: open existing repo: %w", err)
@@ -506,13 +525,14 @@ func (g *Syncer) initFresh() error {
 	if out, err := gitExec(g.cfg.AppsDir, "init", "-b", g.cfg.branch()); err != nil {
 		return fmt.Errorf("gitsync: git init: %w\n%s", err, out)
 	}
+	ensureRepoSafetyConfig(g.cfg.AppsDir)
 	repo, err := git.PlainOpen(g.cfg.AppsDir)
 	if err != nil {
 		return fmt.Errorf("gitsync: open after init: %w", err)
 	}
 
 	// Write .gitignore.
-	if err := os.WriteFile(filepath.Join(g.cfg.AppsDir, ".gitignore"), []byte(gitignoreContent), 0600); err != nil {
+	if err := fsutil.WriteFileAtomic(filepath.Join(g.cfg.AppsDir, ".gitignore"), []byte(gitignoreContent), 0600); err != nil {
 		return fmt.Errorf("gitsync: write .gitignore: %w", err)
 	}
 
@@ -857,15 +877,31 @@ func (g *Syncer) countCommitsBehind() int {
 		return 0
 	}
 
-	// Walk from remoteRef back to localRef.
+	// Stop at local HEAD or at the merge base, so local-only commits (e.g.
+	// an unpushed access restore in pull-only mode) do not make the walk
+	// count the entire remote history.
+	stop := map[plumbing.Hash]bool{localRef.Hash(): true}
+	if localCommit, err := g.repo.CommitObject(localRef.Hash()); err == nil {
+		if remoteCommit, err := g.repo.CommitObject(remoteRef.Hash()); err == nil {
+			if bases, err := remoteCommit.MergeBase(localCommit); err == nil {
+				for _, b := range bases {
+					stop[b.Hash] = true
+				}
+			}
+		}
+	}
+	if stop[remoteRef.Hash()] {
+		return 0 // remote is an ancestor of local HEAD
+	}
+
+	// Walk from remoteRef back to localRef / merge base.
 	logIter, err := g.repo.Log(&git.LogOptions{From: remoteRef.Hash()})
 	if err != nil {
 		return 0
 	}
-	localHash := localRef.Hash()
 	count := 0
 	_ = logIter.ForEach(func(c *object.Commit) error {
-		if c.Hash == localHash {
+		if stop[c.Hash] {
 			return fmt.Errorf("stop")
 		}
 		count++
@@ -875,8 +911,14 @@ func (g *Syncer) countCommitsBehind() int {
 }
 
 // applyFetched rebases with server-wins conflict resolution, imports sidecars, and reconciles.
+//
+// Pulled content is less trusted than the dashboard: apps with symlinked
+// managed paths are not imported and their paths are not passed to the
+// reconciler, access grants in pulled sidecars are never applied (DB and
+// files are reset to the pre-pull grants), and _global.yml is never imported.
 func (g *Syncer) applyFetched(ctx context.Context) error {
-	prevSHA := g.headSHA
+	prevSHA := g.currentHeadSHA()
+	snap := g.snapshotAccess()
 
 	// Rebase via shell fallback (go-git rebase with conflict resolution is limited).
 	conflicts, newSHA, pullErr := rebaseServerWins(g.cfg.AppsDir, g.cfg.branch())
@@ -911,12 +953,6 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 		return nil
 	}
 
-	// Compute changed paths between prevSHA and newSHA.
-	changedPaths, err := g.diffPaths(prevSHA, newSHA)
-	if err != nil {
-		log.Printf("[gitsync] diff paths: %v", err)
-	}
-
 	// Import sidecar changes; suppress new commits during this window.
 	// Keep suppress active for suppressTail after import so that the
 	// configsync debouncer (500ms) cannot fire a WriteAppSidecar ->
@@ -927,40 +963,480 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 		time.AfterFunc(suppressTail, func() { g.suppress.Store(false) })
 	}()
 
-	if g.cs == nil {
-		goto afterImport
-	}
-	for _, p := range changedPaths {
-		switch {
-		case strings.HasSuffix(p, "/simpledeploy.yml"):
-			slug := strings.TrimSuffix(strings.TrimPrefix(p, "/"), "/simpledeploy.yml")
-			if idx := strings.LastIndex(slug, "/"); idx >= 0 {
-				slug = slug[idx+1:]
+	chk := g.securePulledTree(prevSHA, newSHA, snap)
+	changedPaths := chk.changed
+	_, rootBlocked := chk.blocked[""]
+
+	if g.cs != nil && !rootBlocked {
+		for _, p := range changedPaths {
+			if p == "_global.yml" {
+				log.Printf("[gitsync] _global.yml changed on remote; not applied (users, roles, registries, webhooks and DB backup settings are managed in the dashboard only)")
+				continue
+			}
+			slug, ok := appSidecarSlug(p)
+			if !ok {
+				continue
+			}
+			if _, bad := chk.blocked[slug]; bad {
+				continue
 			}
 			sidecar, readErr := g.cs.ReadAppSidecar(slug)
-			if readErr == nil && sidecar != nil {
-				if importErr := g.cs.ImportAppSidecar(sidecar); importErr != nil {
-					log.Printf("[gitsync] import app sidecar %s: %v", slug, importErr)
-				}
+			if readErr != nil {
+				log.Printf("[gitsync] read app sidecar %s: %v", slug, readErr)
+				continue
 			}
-		case p == "_global.yml":
-			global, readErr := g.cs.ReadRedactedGlobal()
-			if readErr == nil && global != nil {
-				if importErr := g.cs.ImportRedactedGlobal(global); importErr != nil {
-					log.Printf("[gitsync] import redacted global: %v", importErr)
-				}
+			if sidecar == nil {
+				continue
+			}
+			// The directory decides which app a sidecar belongs to, never
+			// the slug written inside the (remote-controlled) file.
+			sidecar.App.Slug = slug
+			// Access grants are dashboard-managed: never apply them from a pull.
+			if importErr := g.cs.ImportAppSidecarWithOptions(sidecar, configsync.ImportOptions{SkipAccess: true}); importErr != nil {
+				log.Printf("[gitsync] import app sidecar %s: %v", slug, importErr)
 			}
 		}
 	}
 
-afterImport:
-	if g.rec != nil {
-		if recErr := g.rec.ReconcileAfterSync(ctx, changedPaths); recErr != nil {
+	if chk.committed && g.cfg.AutoPushEnabled {
+		if pushErr := g.doPushWithRetry(); pushErr != nil {
+			log.Printf("[gitsync] push access restore: %v", pushErr)
+			g.setError(pushErr.Error())
+		}
+	}
+
+	// Blocked apps' paths are left out of the reconcile; the rest still applies.
+	recPaths := changedPaths
+	if len(chk.blocked) > 0 {
+		recPaths = unblockedPaths(changedPaths, chk.blocked)
+	}
+	if g.rec != nil && (len(chk.blocked) == 0 || len(recPaths) > 0) {
+		if recErr := g.rec.ReconcileAfterSync(ctx, recPaths); recErr != nil {
 			log.Printf("[gitsync] reconcile after sync: %v", recErr)
 		}
 	}
 
+	if len(chk.blocked) > 0 {
+		msg := symlinkMessage(chk.blocked)
+		g.setError(msg)
+		return errors.New(msg)
+	}
 	return nil
+}
+
+// unblockedPaths returns the paths that do not belong to a blocked app. A
+// blocked apps_dir root ("" key) blocks every path.
+func unblockedPaths(paths []string, blocked map[string][]string) []string {
+	if _, root := blocked[""]; root {
+		return nil
+	}
+	var out []string
+	for _, p := range paths {
+		if key, ok := symlinkKey(p); ok && key != "" {
+			if _, bad := blocked[key]; bad {
+				continue
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// appSidecarSlug returns the app slug for a repo-relative "<slug>/simpledeploy.yml" path.
+func appSidecarSlug(rel string) (string, bool) {
+	slug, file, ok := strings.Cut(rel, "/")
+	if !ok || file != "simpledeploy.yml" || slug == "" || strings.HasPrefix(slug, ".") {
+		return "", false
+	}
+	return slug, true
+}
+
+// managedRootFiles and managedAppFiles are the paths under apps_dir that
+// gitsync tracks or configsync reads. None of them may be a symlink.
+var (
+	managedRootFiles = []string{"_global.yml", ".gitignore"}
+	managedAppFiles  = []string{"docker-compose.yml", ".env", "simpledeploy.yml", "simpledeploy.secrets.yml"}
+)
+
+// symlinkScope selects what findManagedSymlinks inspects.
+type symlinkScope struct {
+	changed []string // repo-relative paths the pull changed
+	tracked []string // repo-relative paths git records as symlinks (mode 120000)
+	all     bool     // inspect every app and root file; used when the diff is unknown
+}
+
+// symlinkKey maps a repo-relative path to the blocked-map key: "" for the
+// root-level managed files, else the top-level entry (app slug). Paths under
+// hidden top-level entries are never app config and are skipped.
+func symlinkKey(rel string) (string, bool) {
+	top, _, _ := strings.Cut(rel, "/")
+	if slices.Contains(managedRootFiles, rel) {
+		return "", true
+	}
+	if top == "" || strings.HasPrefix(top, ".") || slices.Contains(managedRootFiles, top) {
+		return "", false
+	}
+	return top, true
+}
+
+// findManagedSymlinks reports managed paths under appsDir that a pull made
+// (or left) a symlink. Disk checks use Lstat, so links are reported and
+// never followed. It inspects:
+//   - for every app touched by scope.changed: the app dir itself and its
+//     managedAppFiles; root-level managed files only when they changed;
+//   - every path in scope.tracked, whether or not it is a link on disk
+//     (core.symlinks=false checks it out as a plain file, but any git run
+//     with symlinks enabled would turn it into one).
+//
+// Links git does not track and the pull did not touch (e.g. an operator's
+// symlinked app folder) are left alone. scope.all inspects every app and
+// root file instead of only the touched ones. Offending repo-relative paths
+// are keyed by app slug; root-level files are keyed by "".
+func findManagedSymlinks(appsDir string, scope symlinkScope) (map[string][]string, error) {
+	out := map[string][]string{}
+	add := func(key, rel string) {
+		if !slices.Contains(out[key], rel) {
+			out[key] = append(out[key], rel)
+		}
+	}
+	isLink := func(rel string) bool {
+		fi, err := os.Lstat(filepath.Join(appsDir, filepath.FromSlash(rel)))
+		return err == nil && fi.Mode()&os.ModeSymlink != 0
+	}
+
+	for _, rel := range scope.tracked {
+		if key, ok := symlinkKey(rel); ok {
+			add(key, rel)
+		}
+	}
+
+	roots := map[string]bool{}
+	apps := map[string]bool{}
+	var err error
+	if scope.all {
+		for _, name := range managedRootFiles {
+			roots[name] = true
+		}
+		var entries []os.DirEntry
+		entries, err = os.ReadDir(appsDir)
+		for _, e := range entries {
+			if key, ok := symlinkKey(e.Name()); ok && key != "" {
+				apps[key] = true
+			}
+		}
+	} else {
+		for _, rel := range scope.changed {
+			key, ok := symlinkKey(rel)
+			switch {
+			case !ok:
+			case key == "":
+				roots[rel] = true
+			default:
+				apps[key] = true
+			}
+		}
+	}
+
+	for name := range roots {
+		if isLink(name) {
+			add("", name)
+		}
+	}
+	for slug := range apps {
+		if isLink(slug) {
+			add(slug, slug)
+			continue
+		}
+		for _, f := range managedAppFiles {
+			if rel := slug + "/" + f; isLink(rel) {
+				add(slug, rel)
+			}
+		}
+	}
+	for _, paths := range out {
+		sort.Strings(paths)
+	}
+	return out, err
+}
+
+// trackedSymlinks returns the repo-relative paths that commit sha records
+// as symlinks (mode 120000).
+func (g *Syncer) trackedSymlinks(sha string) ([]string, error) {
+	commit, err := g.repo.CommitObject(plumbing.NewHash(sha))
+	if err != nil {
+		return nil, fmt.Errorf("commit %s: %w", sha, err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, err
+	}
+	w := object.NewTreeWalker(tree, true, nil)
+	defer w.Close()
+	var out []string
+	for {
+		name, entry, err := w.Next()
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		if entry.Mode == filemode.Symlink {
+			out = append(out, name)
+		}
+	}
+}
+
+// symlinkMessage renders an operator-facing error for findManagedSymlinks
+// output. It describes what applyFetched does: blocked apps get no sidecar
+// import and are left out of the reconcile paths; a blocked apps_dir root
+// blocks every app.
+func symlinkMessage(blocked map[string][]string) string {
+	var apps, paths []string
+	for slug, ps := range blocked {
+		if slug != "" {
+			apps = append(apps, slug)
+		}
+		paths = append(paths, ps...)
+	}
+	sort.Strings(apps)
+	sort.Strings(paths)
+	skipped := "the sync skipped the settings import and reconcile for all apps"
+	if _, root := blocked[""]; !root {
+		skipped = "the sync skipped the settings import for app(s) " + strings.Join(apps, ", ") +
+			"; other changes from this pull were applied"
+	}
+	return fmt.Sprintf("gitsync: symlinks are not allowed in synced app folders (found: %s); %s. "+
+		"Access grants stay as set in the dashboard. Replace the symlink with a regular file in the repository and push again.",
+		strings.Join(paths, ", "), skipped)
+}
+
+// pulledTreeCheck is the result of securePulledTree.
+type pulledTreeCheck struct {
+	changed   []string            // repo-relative paths changed by the rebase
+	blocked   map[string][]string // app slug ("" = apps_dir root) -> offending symlink paths
+	committed bool                // an access restore was committed locally
+}
+
+// restoreAccessSubject is the subject of the local commit that reverts
+// access changes pulled from the remote.
+const restoreAccessSubject = "chore(simpledeploy): restore access grants"
+
+// accessSnapshot maps app slug -> sorted usernames with access.
+type accessSnapshot map[string][]string
+
+// snapshotAccess records user_app_access per app before a rebase, so grants
+// changed while pulled files are on disk can be put back. Returns nil when
+// the DB cannot be read.
+func (g *Syncer) snapshotAccess() accessSnapshot {
+	if g.st == nil {
+		return nil
+	}
+	apps, err := g.st.ListAppsWithOptions(store.ListAppsOptions{IncludeArchived: true})
+	if err != nil {
+		log.Printf("[gitsync] snapshot access grants: %v", err)
+		return nil
+	}
+	snap := make(accessSnapshot, len(apps))
+	for _, a := range apps {
+		users, err := g.st.ListAccessForApp(a.ID)
+		if err != nil {
+			log.Printf("[gitsync] snapshot access grants for %s: %v", a.Slug, err)
+			return nil
+		}
+		snap[a.Slug] = sortedUnique(users)
+	}
+	return snap
+}
+
+func sortedUnique(in []string) []string {
+	out := slices.Clone(in)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// restoreDBAccess resets user_app_access for slugs to snap. Apps created
+// after the snapshot get no grants.
+func (g *Syncer) restoreDBAccess(slugs []string, snap accessSnapshot) {
+	if g.st == nil || snap == nil || len(slugs) == 0 {
+		return
+	}
+	apps, err := g.st.ListAppsWithOptions(store.ListAppsOptions{IncludeArchived: true})
+	if err != nil {
+		log.Printf("[gitsync] restore access grants: %v", err)
+		return
+	}
+	ids := make(map[string]int64, len(apps))
+	for _, a := range apps {
+		ids[a.Slug] = a.ID
+	}
+	for _, slug := range slugs {
+		id, ok := ids[slug]
+		if !ok {
+			continue
+		}
+		have, err := g.st.ListAccessForApp(id)
+		if err != nil {
+			log.Printf("[gitsync] restore access grants for %s: %v", slug, err)
+			continue
+		}
+		want := snap[slug]
+		if slices.Equal(sortedUnique(have), want) {
+			continue
+		}
+		if err := g.st.ReplaceAppAccess(id, want); err != nil {
+			log.Printf("[gitsync] restore access grants for %s: %v", slug, err)
+			continue
+		}
+		log.Printf("[gitsync] %s: access grants changed while pulled files were applied; restored the dashboard access list", slug)
+	}
+}
+
+// accessRestoreSlugs returns the apps whose sidecar the rebase changed, or
+// every app folder when the diff is unknown.
+func (g *Syncer) accessRestoreSlugs(changed []string, all bool) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(slug string) {
+		if !seen[slug] {
+			seen[slug] = true
+			out = append(out, slug)
+		}
+	}
+	if all {
+		entries, err := os.ReadDir(g.cfg.AppsDir)
+		if err != nil {
+			log.Printf("[gitsync] list apps for access restore: %v", err)
+		}
+		for _, e := range entries {
+			if key, ok := symlinkKey(e.Name()); ok && key != "" {
+				add(key)
+			}
+		}
+		return out
+	}
+	for _, p := range changed {
+		if slug, ok := appSidecarSlug(p); ok {
+			add(slug)
+		}
+	}
+	return out
+}
+
+// securePulledTree runs the checks every rebase onto origin (prevSHA ->
+// newSHA) needs, before anything imports the pulled files:
+//   - symlinks at managed paths the rebase touched, and paths git tracks as
+//     symlinks, are reported (and never followed). When the diff or the
+//     tracked list is unavailable every app is checked;
+//   - for every app whose simpledeploy.yml changed (blocked apps included),
+//     user_app_access is reset to snap (the grants before the rebase) and
+//     the file's access list is rewritten to match, then committed locally.
+//     Access grants are dashboard-managed; without the file rewrite a later
+//     DR import would apply the pulled list. snap may be nil, in which case
+//     the current DB grants are used.
+func (g *Syncer) securePulledTree(prevSHA, newSHA string, snap accessSnapshot) pulledTreeCheck {
+	changedPaths, diffErr := g.diffPaths(prevSHA, newSHA)
+	if diffErr != nil {
+		log.Printf("[gitsync] diff paths: %v", diffErr)
+	}
+	tracked, trackErr := g.trackedSymlinks(newSHA)
+	if trackErr != nil {
+		log.Printf("[gitsync] list tracked symlinks: %v", trackErr)
+	}
+	blocked, err := findManagedSymlinks(g.cfg.AppsDir, symlinkScope{
+		changed: changedPaths,
+		tracked: tracked,
+		all:     prevSHA == "" || diffErr != nil || trackErr != nil,
+	})
+	if err != nil {
+		log.Printf("[gitsync] symlink check: %v", err)
+	}
+	chk := pulledTreeCheck{changed: changedPaths, blocked: blocked}
+	if len(blocked) > 0 {
+		log.Printf("[gitsync] %s", symlinkMessage(blocked))
+	}
+
+	slugs := g.accessRestoreSlugs(changedPaths, prevSHA == "" || diffErr != nil)
+	g.restoreDBAccess(slugs, snap)
+	if g.cs == nil {
+		return chk
+	}
+
+	// Symlinked sidecars are refused by configsync's file helpers.
+	var restored []string
+	for _, slug := range slugs {
+		p := slug + "/simpledeploy.yml"
+		var changed bool
+		var err error
+		if snap != nil {
+			changed, err = g.cs.RestoreSidecarAccessTo(slug, snap[slug])
+		} else {
+			changed, err = g.cs.RestoreSidecarAccess(slug)
+		}
+		if err != nil {
+			log.Printf("[gitsync] restore access in %s: %v", p, err)
+			continue
+		}
+		if changed {
+			log.Printf("[gitsync] %s: access grants changed on remote were not applied; kept the dashboard access list", p)
+			restored = append(restored, p)
+		}
+	}
+	if len(restored) == 0 {
+		return chk
+	}
+
+	committed, err := g.commitLocal(restored, restoreAccessSubject,
+		"access grants are managed in the dashboard; access changes pulled from the remote were reverted")
+	if err != nil {
+		log.Printf("[gitsync] commit access restore: %v", err)
+	}
+	chk.committed = committed
+	for _, p := range restored {
+		c := Conflict{
+			Path:        p,
+			ResolvedAt:  time.Now(),
+			Description: "access grants changed on remote were not applied; access is managed in the dashboard",
+		}
+		g.recordConflict(c)
+		if g.st != nil {
+			_ = g.st.InsertConflictAlert(c.Path, c.RemoteSHA, c.Description)
+		}
+	}
+	return chk
+}
+
+// commitLocal stages relPaths and commits them without pushing. Returns
+// true when a commit was created.
+func (g *Syncer) commitLocal(relPaths []string, subject, reason string) (bool, error) {
+	wt, err := g.repo.Worktree()
+	if err != nil {
+		return false, err
+	}
+	for _, rel := range relPaths {
+		if !isAllowedPath(filepath.FromSlash(rel)) {
+			continue
+		}
+		if _, err := wt.Add(rel); err != nil {
+			return false, fmt.Errorf("add %s: %w", rel, err)
+		}
+	}
+	st, err := wt.Status()
+	if err != nil {
+		return false, err
+	}
+	if !hasStagedAllowedChanges(st) {
+		return false, nil
+	}
+	sig := &object.Signature{Name: g.cfg.authorName(), Email: g.cfg.authorEmail(), When: time.Now()}
+	if _, err := wt.Commit(buildCommitMessage(subject, reason), &git.CommitOptions{
+		Author:    sig,
+		Committer: sig,
+	}); err != nil {
+		return false, err
+	}
+	g.updateHeadSHA()
+	return true, nil
 }
 
 func (g *Syncer) diffPaths(fromSHA, toSHA string) ([]string, error) {
@@ -1039,10 +1515,17 @@ func (g *Syncer) doPushWithRetry() error {
 	if fetchErr != nil && fetchErr != git.NoErrAlreadyUpToDate {
 		return fmt.Errorf("push retry fetch: %w (initial push: %v)", fetchErr, err)
 	}
+	prevSHA := g.currentHeadSHA()
+	snap := g.snapshotAccess()
 	if _, _, rebaseErr := rebaseServerWins(g.cfg.AppsDir, g.cfg.branch()); rebaseErr != nil {
 		return fmt.Errorf("push retry rebase: %w (initial push: %v)", rebaseErr, err)
 	}
 	g.updateHeadSHA()
+	// The rebase brought remote commits into the working tree; run the same
+	// symlink and access checks as a regular pull.
+	if newSHA := g.currentHeadSHA(); newSHA != prevSHA {
+		g.securePulledTree(prevSHA, newSHA, snap)
+	}
 	return g.doPush()
 }
 
@@ -1059,11 +1542,14 @@ func buildAuth(cfg Config) (interface {
 	Name() string
 }, error) {
 	remote := cfg.Remote
-	if strings.HasPrefix(remote, "git@") || strings.HasPrefix(remote, "ssh://") {
+	if err := ValidateRemoteURL(remote); err != nil {
+		return nil, fmt.Errorf("gitsync: %w", err)
+	}
+	if isSSHRemote(remote) {
 		if cfg.SSHKeyPath == "" {
 			return nil, errors.New("gitsync: SSHKeyPath required for SSH remote")
 		}
-		pubkeys, err := ssh.NewPublicKeysFromFile("git", cfg.SSHKeyPath, "")
+		pubkeys, err := ssh.NewPublicKeysFromFile(sshUser(remote), cfg.SSHKeyPath, "")
 		if err != nil {
 			return nil, fmt.Errorf("gitsync: load SSH key: %w", err)
 		}
@@ -1092,6 +1578,26 @@ func ValidateRemote(cfg Config) error {
 		return nil
 	}
 	return fmt.Errorf("%s: %s", res.Code, res.RawError)
+}
+
+// ensureRepoSafetyConfig persists repo-level settings that keep pulled
+// content inert: committed symlinks are checked out as plain files.
+// gitExec passes the same values as -c overrides on every invocation; the
+// persisted copy also covers operators running git by hand in apps_dir.
+// Failure is logged, not fatal: system git may refuse the repo (e.g.
+// "dubious ownership") while go-git still works, and sync stays safe
+// because of the -c overrides.
+func ensureRepoSafetyConfig(appsDir string) {
+	if out, err := gitExec(appsDir, "config", "core.symlinks", "false"); err != nil {
+		log.Printf("[gitsync] warning: could not persist core.symlinks=false in %s (sync continues; every git call still passes it): %v %s",
+			appsDir, err, strings.TrimSpace(string(out)))
+	}
+}
+
+func (g *Syncer) currentHeadSHA() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.headSHA
 }
 
 func (g *Syncer) updateHeadSHA() {

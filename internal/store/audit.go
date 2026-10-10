@@ -46,6 +46,15 @@ type ActivityFilter struct {
 	Limit         int
 	AllowedAppIDs []int64 // nil = unrestricted; empty slice = only system (app_id IS NULL) rows
 	ActorUserID   *int64  // when set with AllowedAppIDs, restricts the app_id IS NULL branch to own auth events
+	// CurrentAppID scopes rows to the live incarnation of an app. It keeps
+	// rows with app_id = CurrentAppID and app_id IS NULL rows that belong to
+	// this incarnation: rows not older than the apps row's created_at, and
+	// rows from the app's most recent lifecycle/created event onward (that
+	// event and the first compose change are recorded before the reconciler
+	// inserts the apps row), provided that event is newer than the slug's
+	// latest lifecycle/purged row. Rows left behind by a purged app that
+	// used the same slug are excluded.
+	CurrentAppID *int64
 }
 
 // nullableInt returns nil for nil pointer, else the value as any for SQL binding.
@@ -252,6 +261,35 @@ FROM audit_log WHERE id = ?`, id)
 	return e, nil
 }
 
+// currentAppScopeCond implements ActivityFilter.CurrentAppID. It binds the
+// app id three times.
+const currentAppScopeCond = `(app_id = ? OR (app_id IS NULL AND (
+	created_at >= (SELECT created_at FROM apps WHERE id = ?)
+	OR id >= (SELECT c.id FROM audit_log c
+		WHERE c.app_id IS NULL AND c.category = 'lifecycle' AND c.action = 'created'
+		AND c.app_slug = (SELECT slug FROM apps WHERE id = ?)
+		AND c.id > COALESCE((SELECT MAX(p.id) FROM audit_log p
+			WHERE p.app_id IS NULL AND p.category = 'lifecycle' AND p.action = 'purged'
+			AND p.app_slug = c.app_slug), 0)
+		ORDER BY c.id DESC LIMIT 1))))`
+
+// ActivityInAppFeed reports whether audit row id is part of the activity
+// feed of app appID as non-admins see it: same slug, scoped to the app's
+// current incarnation (ActivityFilter{AppSlug, CurrentAppID}).
+func (s *Store) ActivityInAppFeed(ctx context.Context, id, appID int64) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM audit_log
+WHERE id = ? AND app_slug = (SELECT slug FROM apps WHERE id = ?) AND `+currentAppScopeCond,
+		id, appID, appID, appID, appID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("activity in app feed: %w", err)
+	}
+	return true, nil
+}
+
 // ListActivity returns audit_log rows matching the filter, ordered by id DESC.
 // before_json and after_json are always NULL in list results (use GetActivity for full row).
 // Returns entries and a cursor (nextBefore) for the next page; 0 means no more pages.
@@ -278,6 +316,10 @@ func (s *Store) ListActivity(ctx context.Context, f ActivityFilter) (entries []A
 	if f.AppSlug != "" {
 		conds = append(conds, "app_slug = ?")
 		args = append(args, f.AppSlug)
+	}
+	if f.CurrentAppID != nil {
+		conds = append(conds, currentAppScopeCond)
+		args = append(args, *f.CurrentAppID, *f.CurrentAppID, *f.CurrentAppID)
 	}
 	if len(f.Categories) > 0 {
 		placeholders := strings.Repeat("?,", len(f.Categories))

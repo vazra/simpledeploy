@@ -56,11 +56,16 @@ brew upgrade simpledeploy
 ### Direct binary
 
 ```bash
-curl -L https://github.com/vazra/simpledeploy/releases/download/v1.3.0/simpledeploy-linux-amd64 \
-  -o /usr/local/bin/simpledeploy.new
-chmod +x /usr/local/bin/simpledeploy.new
-mv /usr/local/bin/simpledeploy /usr/local/bin/simpledeploy.old
-mv /usr/local/bin/simpledeploy.new /usr/local/bin/simpledeploy
+VERSION=1.4.2   # target version # x-release-please-version
+ARCH=amd64      # or arm64
+FILE="simpledeploy_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/${FILE}"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/checksums.txt"
+grep " ${FILE}$" checksums.txt | sha256sum -c - \
+  && tar xzf "$FILE" simpledeploy \
+  && sudo install -m 0755 simpledeploy /usr/local/bin/simpledeploy.new \
+  && sudo mv /usr/local/bin/simpledeploy /usr/local/bin/simpledeploy.old \
+  && sudo mv /usr/local/bin/simpledeploy.new /usr/local/bin/simpledeploy
 ```
 
 Keeping `.old` around makes rollback instant.
@@ -73,14 +78,14 @@ sudo docker compose pull
 sudo docker compose up -d
 ```
 
-The container restarts with the new image. To pin a specific version, edit `image:` in `docker-compose.yml` (e.g. `ghcr.io/vazra/simpledeploy:1.3.0`) before `up -d`.
+The container restarts with the new image. To pin a specific version, edit `image:` in `docker-compose.yml` (e.g. `ghcr.io/vazra/simpledeploy:1.4.2`) before `up -d`. <!-- x-release-please-version -->
 
 ### From source
 
 ```bash
 cd /opt/simpledeploy
 git fetch --tags
-git checkout v1.3.0
+git checkout v1.4.2   # x-release-please-version
 make build
 sudo install -m 755 ./bin/simpledeploy /usr/local/bin/simpledeploy
 ```

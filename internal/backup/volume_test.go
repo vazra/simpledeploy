@@ -1,6 +1,12 @@
 package backup
 
 import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -124,6 +130,58 @@ func TestVolumeStrategy_Detect(t *testing.T) {
 	}
 }
 
+func TestVolumeStrategy_DetectCleansPaths(t *testing.T) {
+	cfg := &compose.AppConfig{
+		Name: "myapp",
+		Services: []compose.ServiceConfig{{
+			Name: "app",
+			Volumes: []compose.VolumeMount{
+				{Source: "data", Target: "/data/", Type: "volume"},
+				{Source: "./cfg", Target: "/etc//app", Type: "bind"},
+			},
+		}},
+	}
+	got := NewVolumeStrategy().Detect(cfg)
+	if len(got) != 1 {
+		t.Fatalf("detected %d services, want 1", len(got))
+	}
+	want := []string{"/data", "/etc/app"}
+	for i, p := range got[0].Paths {
+		if p != want[i] {
+			t.Errorf("path %d = %q, want %q", i, p, want[i])
+		}
+	}
+	if err := ValidatePaths("volume", got[0].Paths); err != nil {
+		t.Errorf("detected paths fail validation: %v", err)
+	}
+}
+
 func TestVolumeStrategy_Interface(t *testing.T) {
 	var _ Strategy = NewVolumeStrategy()
+}
+
+// The restore guards below fail before any docker command runs, so these
+// tests need no docker daemon. The container name is one that cannot exist.
+const noSuchContainer = "sd-test-no-such-container"
+
+func TestVolumeStrategy_BackupRejectsUnsafePaths(t *testing.T) {
+	s := NewVolumeStrategy()
+	for _, p := range []string{"relative/dir", "/data/-rf", "/data\n/etc"} {
+		_, err := s.Backup(context.Background(), BackupOpts{ContainerName: noSuchContainer, Paths: []string{p}})
+		if err == nil || !strings.Contains(err.Error(), "backup path") {
+			t.Errorf("Backup(%q) err = %v, want backup path error", p, err)
+		}
+	}
+}
+
+func TestVolumeStrategy_RestoreRejectsOversizeArchive(t *testing.T) {
+	data := makeTarGz(t, []*tar.Header{{Name: "data/big.bin", Size: 64 << 10, Typeflag: tar.TypeReg}})
+	err := NewVolumeStrategy().Restore(context.Background(), RestoreOpts{
+		ContainerName:        noSuchContainer,
+		Reader:               io.NopCloser(bytes.NewReader(data)),
+		MaxDecompressedBytes: 16 << 10,
+	})
+	if !errors.Is(err, errArchiveTooLarge) {
+		t.Fatalf("expected errArchiveTooLarge, got %v", err)
+	}
 }

@@ -33,6 +33,7 @@ var extraReservedRanges = func() []*net.IPNet {
 		"::1/128",         // IPv6 loopback
 		"100::/64",        // IPv6 discard
 		"fc00::/7",        // IPv6 unique-local
+		"64:ff9b:1::/48",  // NAT64 local-use prefix (RFC 8215)
 	}
 	out := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
@@ -43,12 +44,21 @@ var extraReservedRanges = func() []*net.IPNet {
 	return out
 }()
 
+// nat64WellKnown is the RFC 6052 NAT64 prefix. DNS64 resolvers on
+// IPv6-only hosts map every IPv4 target into it, so it cannot be blocked
+// as a whole.
+var nat64WellKnown = &net.IPNet{IP: net.ParseIP("64:ff9b::"), Mask: net.CIDRMask(96, 128)}
+
 // isReservedIP returns true if ip falls in any private, loopback, link-local,
 // multicast, unspecified, or otherwise reserved range that should never be
-// reachable from a webhook dispatcher.
+// reachable from a webhook dispatcher. Addresses in the NAT64 well-known
+// prefix are judged by the IPv4 address they embed (last 32 bits).
 func isReservedIP(ip net.IP) bool {
 	if ip == nil {
 		return true
+	}
+	if len(ip) == net.IPv6len && ip.To4() == nil && nat64WellKnown.Contains(ip) {
+		return isReservedIP(net.IP(ip[12:16]))
 	}
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
@@ -62,11 +72,44 @@ func isReservedIP(ip net.IP) bool {
 	return false
 }
 
+// builtinTemplates render JSON payloads. Every string field of the event is
+// JSON-escaped before execution (see jsonSafeEvent), so values can be placed
+// between quotes without breaking the JSON structure.
 var builtinTemplates = map[string]string{
 	"slack":    `{"text":"[{{.Status}}] {{.AppName}} - {{.MetricDisplay}} {{.Operator}} {{.ThresholdDisplay}} (current: {{.ValueDisplay}})"}`,
 	"telegram": `{"text":"[{{.Status}}] {{.AppName}}\n{{.MetricDisplay}} {{.Operator}} {{.ThresholdDisplay}} (current: {{.ValueDisplay}})","parse_mode":"HTML"}`,
 	"discord":  `{"content":"[{{.Status}}] {{.AppName}} - {{.MetricDisplay}} {{.Operator}} {{.ThresholdDisplay}} (current: {{.ValueDisplay}})"}`,
 	"custom":   `{"app":"{{.AppName}}","metric":"{{.Metric}}","value":{{printf "%.2f" .Value}},"threshold":{{printf "%.2f" .Threshold}},"status":"{{.Status}}"}`,
+}
+
+// jsonEscape returns s encoded as the inside of a JSON string literal
+// (without the surrounding quotes).
+func jsonEscape(s string) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(s); err != nil {
+		return ""
+	}
+	out := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	return string(out[1 : len(out)-1])
+}
+
+// jsonSafeEvent returns a copy of e with every string field JSON-escaped.
+// App names, metric labels and backup error messages can contain quotes,
+// backslashes or newlines (an app display name may even come from a git
+// pull); escaping them keeps both builtin and custom JSON templates valid.
+// Numeric fields and FiredAt are left as-is.
+func jsonSafeEvent(e AlertEvent) AlertEvent {
+	e.AppName = jsonEscape(e.AppName)
+	e.AppSlug = jsonEscape(e.AppSlug)
+	e.Metric = jsonEscape(e.Metric)
+	e.MetricDisplay = jsonEscape(e.MetricDisplay)
+	e.ValueDisplay = jsonEscape(e.ValueDisplay)
+	e.ThresholdDisplay = jsonEscape(e.ThresholdDisplay)
+	e.Operator = jsonEscape(e.Operator)
+	e.Status = jsonEscape(e.Status)
+	return e
 }
 
 type WebhookDispatcher struct {
@@ -178,7 +221,7 @@ func (d *WebhookDispatcher) Send(webhook store.Webhook, event AlertEvent) error 
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, event); err != nil {
+	if err := tmpl.Execute(&buf, jsonSafeEvent(event)); err != nil {
 		return fmt.Errorf("execute template: %w", err)
 	}
 

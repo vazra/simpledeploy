@@ -75,6 +75,35 @@ func (s *Server) authorizeTopic(user *AuthUser, topic string, allowed map[string
 	return false
 }
 
+// revokedAppTopics removes app:<slug> subscriptions the user can no longer
+// access and returns them. DB checks run without holding mu so event
+// delivery is not blocked.
+func (s *Server) revokedAppTopics(user *AuthUser, mu *sync.Mutex, subs map[string]bool) []string {
+	mu.Lock()
+	var appTopics []string
+	for t := range subs {
+		if strings.HasPrefix(t, "app:") {
+			appTopics = append(appTopics, t)
+		}
+	}
+	mu.Unlock()
+
+	var lost []string
+	for _, t := range appTopics {
+		if !s.canSubscribeApp(user, strings.TrimPrefix(t, "app:")) {
+			lost = append(lost, t)
+		}
+	}
+	if len(lost) > 0 {
+		mu.Lock()
+		for _, t := range lost {
+			delete(subs, t)
+		}
+		mu.Unlock()
+	}
+	return lost
+}
+
 // handleEventsWS is the realtime notify-only WebSocket. Clients subscribe to
 // topics; server pushes type+topic frames. No payload data flows over the
 // socket; UI refetches via REST.
@@ -103,6 +132,7 @@ func (s *Server) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 	})
 
 	allowed := s.allowedTopics(user)
+	wsAuth := s.newWSAuth(r)
 
 	var (
 		mu       sync.Mutex // protects subs and conn writes
@@ -170,12 +200,25 @@ func (s *Server) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 	pingT := time.NewTicker(wsPingPeriod)
 	defer pingT.Stop()
 
+	// Periodic authz recheck, like the logs WS: close when the user is gone
+	// or their session/role changed, and drop app topics they lost.
+	authT := time.NewTicker(wsAuthRecheckInterval())
+	defer authT.Stop()
+
 	for {
 		select {
 		case <-closeReq:
 			return
 		case <-r.Context().Done():
 			return
+		case <-authT.C:
+			if !s.wsAuthStillValid(wsAuth) {
+				closeWSRevoked(conn)
+				return
+			}
+			for _, topic := range s.revokedAppTopics(user, &mu, subs) {
+				_ = writeFrame(outboundFrame{Op: "err", Topic: topic, Reason: "forbidden"})
+			}
 		case <-pingT.C:
 			mu.Lock()
 			_ = conn.SetWriteDeadline(time.Now().Add(wsWriteWait))

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"sync"
 
 	caddy "github.com/caddyserver/caddy/v2"
@@ -40,7 +41,9 @@ type CaddyProxy struct {
 	tlsMode          string
 	tlsEmail         string
 	dataDir          string
+	owners           map[string]string // normalized domain -> app slug serving it; guarded by mu
 
+	// loadMu serializes config loads and whole SetRoutes updates.
 	loadMu  sync.Mutex
 	lastKey []byte                   // config JSON + cert file fingerprint of the last successful load
 	load    func([]byte, bool) error // caddy.Load; replaceable in tests
@@ -61,29 +64,137 @@ func NewCaddyProxy(cfg CaddyConfig) *CaddyProxy {
 
 var validDomainRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.*-]*$`)
 
-// SetRoutes stores routes, configures rate limiters, and reloads Caddy config.
+// SetRoutes stores routes, configures rate limiters and IP allowlists, and
+// reloads Caddy config. Routes with an invalid domain, or on a domain another
+// app serves, are dropped with a warning (see claimDomains), so one app's bad
+// endpoint cannot block route updates for every other app. If the new config
+// fails to load, routes, domain owners and rules revert to the set Caddy is
+// still running.
 func (c *CaddyProxy) SetRoutes(routes []Route) error {
+	valid := make([]Route, 0, len(routes))
 	for _, r := range routes {
 		if !validDomainRe.MatchString(r.Domain) {
-			return fmt.Errorf("invalid domain %q", r.Domain)
+			log.Printf("[proxy] WARNING: skip route of app %q: invalid domain %q", r.AppSlug, r.Domain)
+			continue
 		}
+		valid = append(valid, r)
 	}
+	routes = valid
 
+	// Held for the whole update so no other load runs between applying the
+	// new state and restoring the old one on failure.
+	c.loadMu.Lock()
+	defer c.loadMu.Unlock()
+
+	// Registries are updated under mu so concurrent readers never see rules
+	// from one route set next to routes from another.
 	c.mu.Lock()
-	c.routes = routes
+	prevRoutes, prevOwners := c.routes, c.owners
+	prevRules := snapshotRouteRules()
+	kept, owners := claimDomains(routes, c.owners)
+	c.routes = kept
+	c.owners = owners
+	registerRouteRules(kept)
 	c.mu.Unlock()
 
+	if err := c.reloadLocked(false); err != nil {
+		c.mu.Lock()
+		c.routes, c.owners = prevRoutes, prevOwners
+		prevRules.restore()
+		c.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// claimDomains keeps one app per domain so an app can never take over, or
+// clear the IP allowlist / rate limit of, a domain another app serves.
+// Domains compare case-insensitively, ignoring a trailing dot. The owner is
+// the app that owned the domain in prev if it still claims it, otherwise the
+// app with the lowest AppID (slug breaks ties), which is also the rule after
+// a restart; the choice never depends on route order. Other apps' routes on that
+// domain are dropped with a warning. Returns kept routes in input order and
+// the new owner map.
+func claimDomains(routes []Route, prev map[string]string) ([]Route, map[string]string) {
+	claimants := map[string]map[string]int64{} // domain -> slug -> lowest AppID
 	for _, r := range routes {
-		if r.RateLimit != nil {
-			RateLimiters.Set(r.Domain, r.RateLimit)
+		key := normalizeDomain(r.Domain)
+		apps := claimants[key]
+		if apps == nil {
+			apps = map[string]int64{}
+			claimants[key] = apps
 		}
-		if r.AllowedIPs != nil {
-			IPAccessRules.Set(r.Domain, r.AllowedIPs)
-		} else {
-			IPAccessRules.Remove(r.Domain)
+		if id, ok := apps[r.AppSlug]; !ok || r.AppID < id {
+			apps[r.AppSlug] = r.AppID
 		}
 	}
-	return c.reload()
+
+	owners := make(map[string]string, len(claimants))
+	for key, apps := range claimants {
+		slugs := make([]string, 0, len(apps))
+		for slug := range apps {
+			slugs = append(slugs, slug)
+		}
+		sort.Slice(slugs, func(i, j int) bool {
+			if a, b := apps[slugs[i]], apps[slugs[j]]; a != b {
+				return a < b
+			}
+			return slugs[i] < slugs[j]
+		})
+		owner, ok := prev[key]
+		if _, claims := apps[owner]; !ok || !claims {
+			owner = slugs[0]
+		}
+		owners[key] = owner
+		for _, slug := range slugs {
+			if slug != owner {
+				log.Printf("[proxy] WARNING: skip routes for %s of app %q: domain is already served by app %q", key, slug, owner)
+			}
+		}
+	}
+
+	kept := make([]Route, 0, len(routes))
+	for _, r := range routes {
+		if owners[normalizeDomain(r.Domain)] == r.AppSlug {
+			kept = append(kept, r)
+		}
+	}
+	return kept, owners
+}
+
+// registerRouteRules replaces the per-domain IP allowlists and rate limiters
+// with the ones routes define. claimDomains leaves one app per domain, and an
+// app's routes share its config, so the first route carrying one defines it.
+func registerRouteRules(routes []Route) {
+	limits := map[string]*RateLimitConfig{}
+	allow := map[string][]string{}
+	for _, r := range routes {
+		key := normalizeDomain(r.Domain)
+		if _, ok := limits[key]; !ok && r.RateLimit != nil {
+			limits[key] = r.RateLimit
+		}
+		if _, ok := allow[key]; !ok && r.AllowedIPs != nil {
+			allow[key] = r.AllowedIPs
+		}
+	}
+	RateLimiters.Replace(limits)
+	IPAccessRules.Replace(allow)
+}
+
+// routeRules is a copy of the package-level rule registries.
+type routeRules struct {
+	allow  map[string]*parsedAllowlist
+	limits map[string]*domainLimiter
+}
+
+func snapshotRouteRules() routeRules {
+	return routeRules{allow: IPAccessRules.snapshot(), limits: RateLimiters.snapshot()}
+}
+
+// restore puts the copied rules back; limiters keep their counters.
+func (s routeRules) restore() {
+	IPAccessRules.restore(s.allow)
+	RateLimiters.restore(s.limits)
 }
 
 // Stop stops all Caddy instances.
@@ -110,11 +221,15 @@ func (c *CaddyProxy) snapshotRoutes() []Route {
 // config is unchanged. Use after files referenced by the config change on
 // disk (e.g. a custom cert upload rewrites the same path).
 func (c *CaddyProxy) ForceReload() error {
-	return c.reloadWith(true)
+	c.loadMu.Lock()
+	defer c.loadMu.Unlock()
+	return c.reloadLocked(true)
 }
 
-// reload builds the Caddy config and loads it, skipping the load when the
-// config and the custom cert files it references are unchanged.
+// reloadLocked builds the Caddy config and loads it, skipping the load
+// (unless force) when the config and the custom cert files it references are
+// unchanged. Callers hold loadMu, so concurrent updates cannot load an older
+// snapshot after a newer one.
 //
 // Every caddy.Load is a full reload. On Linux, Caddy binds a fresh
 // SO_REUSEPORT socket per reload and closes the old one once the old server
@@ -125,15 +240,7 @@ func (c *CaddyProxy) ForceReload() error {
 // that exposure. Hosts on Linux >= 5.14 can also set
 // net.ipv4.tcp_migrate_req=1 so the kernel migrates those queued connections
 // to the new socket.
-func (c *CaddyProxy) reload() error {
-	return c.reloadWith(false)
-}
-
-func (c *CaddyProxy) reloadWith(force bool) error {
-	// Build under loadMu so concurrent SetRoutes calls cannot load an older
-	// snapshot after a newer one.
-	c.loadMu.Lock()
-	defer c.loadMu.Unlock()
+func (c *CaddyProxy) reloadLocked(force bool) error {
 	// One snapshot for both the config and the cert fingerprint.
 	routes := c.snapshotRoutes()
 	data, err := json.Marshal(c.buildConfigFrom(routes))
@@ -212,9 +319,13 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 		if r.TLS != "off" && r.TLS != "" {
 			headerHandler["response"].(map[string]interface{})["set"].(map[string]interface{})["Strict-Transport-Security"] = []string{"max-age=31536000; includeSubDomains"}
 		}
+		// Bind the access/ratelimit handlers to this route's domain so they
+		// apply its rules even when another route domain (e.g. a second
+		// wildcard) also matches the request host.
+		ruleKey := normalizeDomain(r.Domain)
 		handlers := []interface{}{
-			map[string]interface{}{"handler": "simpledeploy_ipaccess"},
-			map[string]interface{}{"handler": "simpledeploy_ratelimit"},
+			map[string]interface{}{"handler": "simpledeploy_ipaccess", "domain": ruleKey},
+			map[string]interface{}{"handler": "simpledeploy_ratelimit", "domain": ruleKey},
 			map[string]interface{}{"handler": "simpledeploy_metrics"},
 			headerHandler,
 			reverseProxyHandler(r),
@@ -285,7 +396,7 @@ func (c *CaddyProxy) buildConfigFrom(routes []Route) map[string]interface{} {
 		// cert file is missing; otherwise Caddy would issue an ACME or
 		// internal-CA cert for them.
 		if len(customTLSDomains) > 0 {
-			ah["skip_certificates"] = append([]string(nil), customTLSDomains...)
+			ah["skip_certificates"] = customTLSDomains
 		}
 		server["automatic_https"] = ah
 	}

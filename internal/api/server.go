@@ -60,6 +60,7 @@ type Server struct {
 	appsDir           string
 	reconciler        reconciler
 	proxyReloader     proxyReloader
+	reservedDomains   map[string]bool // endpoint domains apps may not use (dashboard)
 	lockout           *auth.LoginLockout
 	audit             *audit.Recorder
 	trustedProxies    []string
@@ -81,7 +82,7 @@ type Server struct {
 	cs                *configsync.Syncer
 	recipesCache      *recipes.Cache
 	bus               *events.Bus
-	// restoreSem caps concurrent upload-restore goroutines to bound memory
+	// restoreSem caps concurrent restores (upload and from backup runs) to bound memory
 	// pressure on the docker daemon (and host disk when the input expands
 	// via gzip). Buffered channel acts as a semaphore.
 	restoreSem chan struct{}
@@ -274,7 +275,9 @@ func (s *Server) routes() {
 	// Deploy / remove / compose
 	// App creation and deletion are super_admin-only (manage cannot create or delete apps).
 	s.mux.Handle("POST /api/apps/deploy", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleDeploy))))
-	s.mux.Handle("POST /api/apps/validate-compose", s.authMiddleware(http.HandlerFunc(s.handleValidateCompose)))
+	// Only the deploy wizard (super_admin) validates compose; parsing resolves
+	// includes/env_file on the host, so it is not exposed to other roles.
+	s.mux.Handle("POST /api/apps/validate-compose", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleValidateCompose))))
 	s.mux.Handle("DELETE /api/apps/{slug}", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handleRemoveApp))))
 	s.mux.Handle("GET /api/apps/archived", s.authMiddleware(http.HandlerFunc(s.handleListArchived)))
 	s.mux.Handle("POST /api/apps/{slug}/purge", s.authMiddleware(s.superAdminMiddleware(http.HandlerFunc(s.handlePurge))))
@@ -426,7 +429,27 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Handler() http.Handler {
-	return securityHeaders(maxBodySize(recoverPanic(s.mux)))
+	// CrossOriginProtection rejects state-changing requests a browser sends
+	// from another origin (Sec-Fetch-Site / Origin checks). SameSite=Strict
+	// alone does not cover sibling subdomains, which count as same-site.
+	// Non-browser clients (CLI, curl, git webhooks) send neither header and
+	// pass through; GET/HEAD/OPTIONS are always allowed.
+	cop := http.NewCrossOriginProtection()
+	// Browsers that predate Sec-Fetch-Site fall back to Origin vs Host; a
+	// proxy that rewrites Host would then fail, so trust the configured
+	// dashboard domain explicitly. Plain http:// only when TLS is off.
+	schemes := []string{"https://"}
+	if s.tlsMode == "off" {
+		schemes = append(schemes, "http://")
+	}
+	for _, d := range s.reservedDomainList() {
+		for _, scheme := range schemes {
+			if err := cop.AddTrustedOrigin(scheme + d); err != nil {
+				log.Printf("[api] trusted origin %s%s: %v", scheme, d, err)
+			}
+		}
+	}
+	return s.securityHeaders(maxBodySize(recoverPanic(cop.Handler(s.mux))))
 }
 
 // recoverPanic catches handler panics, logs a sanitized message server-side,
@@ -484,14 +507,16 @@ func maxBodySize(next http.Handler) http.Handler {
 }
 
 // securityHeaders adds standard security headers to all responses.
-func securityHeaders(next http.Handler) http.Handler {
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		if r.TLS != nil {
-			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		// No includeSubDomains: the dashboard may share a parent domain with
+		// apps that intentionally serve plain HTTP (tls: off).
+		if auth.RequestIsHTTPS(r, s.trustedProxies) {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000")
 		}
 		next.ServeHTTP(w, r)
 	})

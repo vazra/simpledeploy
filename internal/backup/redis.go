@@ -123,20 +123,28 @@ func (s *RedisStrategy) waitForSaveSince(ctx context.Context, container, initial
 func (s *RedisStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 	container := opts.ContainerName
 
-	// Stop the container
-	if out, err := exec.CommandContext(ctx, "docker", "stop", container).CombinedOutput(); err != nil {
-		return fmt.Errorf("docker stop: %w: %s", err, out)
+	// The backup is gzip(tar(dump.rdb)) as produced by 'docker cp ... -'.
+	// docker cp extracts that tar into the container, so run the same
+	// tar-slip / symlink / size checks as volume restore. Validate before
+	// stopping the container so a rejected archive causes no downtime.
+	safe, err := validateTarStream(opts.Reader, opts.MaxDecompressedBytes)
+	if err != nil {
+		return fmt.Errorf("reject restore archive: %w", err)
 	}
-
-	// Decompress and write to temp file, then docker cp in
-	gr, err := gzip.NewReader(opts.Reader)
+	defer safe.Close()
+	gr, err := gzip.NewReader(safe)
 	if err != nil {
 		return fmt.Errorf("gzip reader: %w", err)
 	}
 	defer gr.Close()
 
-	// docker cp reads from stdin as a tar archive; we pipe the decompressed rdb
-	// We need to create a tar with the rdb file and pipe it to docker cp
+	// Stop the container
+	if out, err := exec.CommandContext(ctx, "docker", "stop", container).CombinedOutput(); err != nil {
+		return fmt.Errorf("docker stop: %w: %s", err, out)
+	}
+
+	// docker cp reads the decompressed tar from stdin and extracts it
+	// into /data/.
 	cmd := exec.CommandContext(ctx, "docker", "cp", "-", container+":/data/")
 	cmd.Stdin = limitedGzip(gr, opts.MaxDecompressedBytes)
 

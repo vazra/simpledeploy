@@ -155,7 +155,7 @@ Reverse-proxy HTTP helpers. `fetchViaProxy(host, path, opts)` wraps curl under t
 
 ### `helpers/webhook.js`
 
-Local HTTP listener for testing alert webhook dispatch. Server runs `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS=1` so the dispatcher accepts `127.0.0.1`.
+Local HTTP listener for testing alert webhook dispatch. Server runs `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS=1` so the dispatcher accepts `127.0.0.1`. It also sets `SIMPLEDEPLOY_ALLOW_PRIVATE_S3=1` so the S3 backup specs can use a local MinIO endpoint.
 
 ```js
 const receiver = await startWebhookReceiver();

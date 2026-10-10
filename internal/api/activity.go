@@ -125,12 +125,17 @@ func (s *Server) handleAppActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	// Filter by slug so rows recorded with only AppSlug (when AppID was not
 	// available at handler time) are included. Slug is unique among live apps.
-	_ = app
 	f := store.ActivityFilter{
 		AppSlug:    slug,
 		Categories: parseCategories(r),
 		Limit:      parseLimit(r, 50, 200),
 		Before:     parseBefore(r),
+	}
+	// A slug can be reused after a purge, and the purged app's rows keep
+	// the slug with app_id nulled. Non-admins only see this incarnation's
+	// rows; super_admin keeps the full slug history.
+	if user := GetAuthUser(r); user == nil || user.Role != "super_admin" {
+		f.CurrentAppID = &app.ID
 	}
 	entries, next, err := s.store.ListActivity(r.Context(), f)
 	if err != nil {
@@ -176,25 +181,45 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	// Mirror the non-admin filter applied to ListActivity:
+	// Mirror the non-admin filters applied to the activity feeds:
 	//   - super_admin: any row
 	//   - other roles: app-scoped row only if the caller has access to the app;
-	//     system-scoped row (AppID == nil) only if the caller is the actor.
+	//     a row without app_id if the caller is the actor, or if it is listed
+	//     in the feed of a live app the caller can access (slug-only rows,
+	//     same scope as handleAppActivity).
 	user := GetAuthUser(r)
 	if user.Role != "super_admin" {
-		if e.AppID != nil {
+		switch {
+		case e.AppID != nil:
 			if !s.checkAppAccessByID(w, r, *e.AppID) {
 				return
 			}
-		} else {
-			if e.ActorUserID == nil || *e.ActorUserID != user.ID {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
+		case e.ActorUserID != nil && *e.ActorUserID == user.ID:
+		case s.inAccessibleAppFeed(r, user.ID, e):
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(e)
+}
+
+// inAccessibleAppFeed reports whether a row without app_id is listed in the
+// app activity feed (handleAppActivity) of an app userID can access.
+func (s *Server) inAccessibleAppFeed(r *http.Request, userID int64, e store.AuditEntry) bool {
+	if e.AppSlug == "" {
+		return false
+	}
+	app, err := s.store.GetAppBySlug(e.AppSlug)
+	if err != nil {
+		return false
+	}
+	if ok, _ := s.store.HasAppAccessByID(userID, app.ID); !ok {
+		return false
+	}
+	ok, err := s.store.ActivityInAppFeed(r.Context(), e.ID, app.ID)
+	return err == nil && ok
 }
 
 func (s *Server) handleGetAuditConfig(w http.ResponseWriter, r *http.Request) {

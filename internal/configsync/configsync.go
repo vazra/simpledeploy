@@ -12,12 +12,15 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/vazra/simpledeploy/internal/fsutil"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -52,7 +55,22 @@ type Syncer struct {
 	// would otherwise race with in-flight DB mutations and revert state.
 	selfWriteMu sync.Mutex
 	selfWrites  map[string]time.Time
+
+	// accessFromDashboard makes ApplyAppSidecar leave user_app_access alone.
+	// Set while git sync runs; see SetAccessFromDashboardOnly.
+	accessFromDashboard atomic.Bool
 }
+
+// SetAccessFromDashboardOnly controls whether ApplyAppSidecar (file watcher,
+// boot-time FS reload, bundle import) applies the sidecar's access list. Git
+// sync enables it: access grants are then managed in the dashboard only, so
+// a sidecar edited on disk or pulled from the remote cannot change them.
+// Disaster-recovery imports (ImportAppSidecar, ImportAppSidecarIfMissing)
+// still restore grants.
+func (s *Syncer) SetAccessFromDashboardOnly(on bool) { s.accessFromDashboard.Store(on) }
+
+// AccessFromDashboardOnly reports the SetAccessFromDashboardOnly setting.
+func (s *Syncer) AccessFromDashboardOnly() bool { return s.accessFromDashboard.Load() }
 
 // MarkSelfWrite records that path was just written by the syncer itself.
 // IsSelfWrite returns true if path was self-written within the given window
@@ -118,6 +136,18 @@ func New(st *store.Store, appsDir, dataDir string) *Syncer {
 
 // AppsDir returns the apps directory the syncer was configured with.
 func (s *Syncer) AppsDir() string { return s.appsDir }
+
+// appFilePath returns {apps_dir}/{slug}/{name} after verifying that neither
+// the app directory nor the file is a symlink (and that slug does not escape
+// apps_dir). App directories can hold content pulled from a git remote, so
+// sidecar reads and writes must never be redirected outside apps_dir.
+func (s *Syncer) appFilePath(slug, name string) (string, error) {
+	path := filepath.Join(s.appsDir, slug, name)
+	if err := fsutil.EnsureNoSymlinks(s.appsDir, path); err != nil {
+		return "", fmt.Errorf("refusing %s: %w", path, err)
+	}
+	return path, nil
+}
 
 // DataDir returns the data directory the syncer was configured with.
 func (s *Syncer) DataDir() string { return s.dataDir }
@@ -285,7 +315,10 @@ func (s *Syncer) WriteAppSidecar(slug string) error {
 	if err := s.WriteAppSecrets(slug, secrets); err != nil {
 		return fmt.Errorf("WriteAppSidecar %s: write secrets: %w", slug, err)
 	}
-	path := filepath.Join(s.appsDir, slug, appSidecarName)
+	path, err := s.appFilePath(slug, appSidecarName)
+	if err != nil {
+		return fmt.Errorf("WriteAppSidecar %s: %w", slug, err)
+	}
 	s.MarkSelfWrite(path)
 	if err := atomicWriteYAMLMode(path, 0644, *sidecar); err != nil {
 		return err
@@ -521,9 +554,13 @@ func (s *Syncer) WriteGlobal() error {
 }
 
 // ReadAppSidecar reads the app sidecar from disk. Returns (nil, nil) if the file does not exist.
-// Unknown YAML keys are tolerated (logged as warnings).
+// Unknown YAML keys are tolerated (logged as warnings). A symlinked app
+// directory or sidecar file is refused with an error.
 func (s *Syncer) ReadAppSidecar(slug string) (*AppSidecar, error) {
-	path := filepath.Join(s.appsDir, slug, appSidecarName)
+	path, err := s.appFilePath(slug, appSidecarName)
+	if err != nil {
+		return nil, err
+	}
 	return readYAML[AppSidecar](path)
 }
 
@@ -533,10 +570,26 @@ func (s *Syncer) ReadGlobal() (*GlobalSidecar, error) {
 	return readYAML[GlobalSidecar](path)
 }
 
+// ImportOptions tunes ImportAppSidecarWithOptions.
+type ImportOptions struct {
+	// SkipAccess leaves user_app_access untouched. Set it for sidecars pulled
+	// from a git remote: access grants are managed in the dashboard and must
+	// never change because of a pull. Disaster-recovery imports (empty DB,
+	// `config import`) leave it false so grants are restored.
+	SkipAccess bool
+}
+
 // ImportAppSidecar performs idempotent upserts for all rows in data into the store.
-// Existing alert_rules and backup_configs for the app are replaced wholesale.
+// Existing alert_rules, backup_configs and access grants for the app are
+// replaced wholesale. Intended for disaster recovery; see
+// ImportAppSidecarWithOptions for untrusted (git-pulled) input.
 // The caller must ensure the app exists in the DB before calling.
 func (s *Syncer) ImportAppSidecar(data *AppSidecar) error {
+	return s.ImportAppSidecarWithOptions(data, ImportOptions{})
+}
+
+// ImportAppSidecarWithOptions is ImportAppSidecar with options.
+func (s *Syncer) ImportAppSidecarWithOptions(data *AppSidecar, opts ImportOptions) error {
 	if data == nil {
 		return nil
 	}
@@ -623,6 +676,10 @@ func (s *Syncer) ImportAppSidecar(data *AppSidecar) error {
 		}
 	}
 
+	if opts.SkipAccess {
+		return nil
+	}
+
 	// Full-replace access grants for this app.
 	usernames := make([]string, 0, len(data.Access))
 	for _, a := range data.Access {
@@ -633,6 +690,84 @@ func (s *Syncer) ImportAppSidecar(data *AppSidecar) error {
 	}
 
 	return nil
+}
+
+// RestoreSidecarAccess rewrites the access list in {apps_dir}/{slug}/simpledeploy.yml
+// to match user_app_access in the DB, leaving every other field as found on
+// disk. Returns true when the file was rewritten; a missing sidecar returns
+// (false, nil). An app that is not in the DB has no grants.
+//
+// gitsync calls this after every pull so the access list on disk never
+// carries a pulled change that a later import could apply (e.g. the DR
+// import in ImportAppSidecarIfMissing). It does not call the write hook; the
+// caller commits the result.
+func (s *Syncer) RestoreSidecarAccess(slug string) (bool, error) {
+	want, err := s.dbAccessForSlug(slug)
+	if err != nil {
+		return false, fmt.Errorf("RestoreSidecarAccess %s: %w", slug, err)
+	}
+	return s.RestoreSidecarAccessTo(slug, want)
+}
+
+// RestoreSidecarAccessTo is RestoreSidecarAccess with an explicit username
+// list instead of the current DB grants.
+func (s *Syncer) RestoreSidecarAccessTo(slug string, usernames []string) (bool, error) {
+	path, err := s.appFilePath(slug, appSidecarName)
+	if err != nil {
+		return false, err
+	}
+	data, err := readYAML[AppSidecar](path)
+	if err != nil || data == nil {
+		return false, err
+	}
+
+	want := slices.Clone(usernames)
+	slices.Sort(want)
+	want = slices.Compact(want)
+	have := make([]string, 0, len(data.Access))
+	for _, a := range data.Access {
+		have = append(have, a.Username)
+	}
+	slices.Sort(have)
+	have = slices.Compact(have)
+	if slices.Equal(have, want) {
+		return false, nil
+	}
+
+	data.Access = nil
+	for _, u := range want {
+		data.Access = append(data.Access, AccessEntry{Username: u})
+	}
+	if err := atomicWriteYAMLMode(path, 0644, *data); err != nil {
+		return false, fmt.Errorf("RestoreSidecarAccess %s: %w", slug, err)
+	}
+	return true, nil
+}
+
+// dbAccessForSlug returns the sorted usernames granted access to slug. An app
+// missing from the DB has no grants; other DB errors are returned so callers
+// never mistake a failed lookup for "no access".
+func (s *Syncer) dbAccessForSlug(slug string) ([]string, error) {
+	app, err := s.store.GetAppBySlug(slug)
+	if err != nil {
+		apps, listErr := s.store.ListAppsWithOptions(store.ListAppsOptions{IncludeArchived: true})
+		if listErr != nil {
+			return nil, err
+		}
+		for _, a := range apps {
+			if a.Slug == slug {
+				return nil, err // exists, so the lookup itself failed
+			}
+		}
+		return []string{}, nil
+	}
+	users, err := s.store.ListAccessForApp(app.ID)
+	if err != nil {
+		return nil, err
+	}
+	users = append([]string{}, users...)
+	slices.Sort(users)
+	return slices.Compact(users), nil
 }
 
 // ImportGlobal performs idempotent upserts for all rows in data into the store.
@@ -813,6 +948,9 @@ func (s *Syncer) WriteRedactedGlobal() error {
 	}
 
 	path := filepath.Join(s.appsDir, redactedGlobalSidecar)
+	if err := fsutil.EnsureNoSymlinks(s.appsDir, path); err != nil {
+		return fmt.Errorf("WriteRedactedGlobal: %w", err)
+	}
 	s.MarkSelfWrite(path)
 	if err := atomicWriteYAML(path, sidecar); err != nil {
 		return err
@@ -824,6 +962,9 @@ func (s *Syncer) WriteRedactedGlobal() error {
 // ReadRedactedGlobal reads the redacted global sidecar. Returns (nil, nil) if missing.
 func (s *Syncer) ReadRedactedGlobal() (*RedactedGlobalSidecar, error) {
 	path := filepath.Join(s.appsDir, redactedGlobalSidecar)
+	if err := fsutil.EnsureNoSymlinks(s.appsDir, path); err != nil {
+		return nil, err
+	}
 	return readYAML[RedactedGlobalSidecar](path)
 }
 
@@ -831,6 +972,10 @@ func (s *Syncer) ReadRedactedGlobal() (*RedactedGlobalSidecar, error) {
 // Preserves existing password hashes, encrypted registry credentials, and webhook URLs.
 // Does NOT delete users/registries/webhooks that are absent from the file.
 // Does NOT touch api_keys.
+//
+// Not used on the git pull path: _global.yml is push-only. Content pulled
+// from a remote must never change users, roles, registries, webhooks or DB
+// backup settings, so do not wire this to remote-controlled input.
 func (s *Syncer) ImportRedactedGlobal(data *RedactedGlobalSidecar) error {
 	if data == nil {
 		return nil
@@ -919,6 +1064,8 @@ func atomicWriteYAML(path string, v any) error {
 
 // atomicWriteYAMLMode writes v to path atomically with the given file mode.
 // Directory is created with 0755 for non-secret files (mode>=0644), 0700 otherwise.
+// The temp file gets a random name (O_EXCL) and the final rename replaces a
+// symlink at path rather than following it.
 func atomicWriteYAMLMode(path string, mode os.FileMode, v any) error {
 	dirMode := os.FileMode(0700)
 	if mode&0044 != 0 {
@@ -1014,9 +1161,10 @@ func globEscape(s string) string {
 }
 
 // readYAML reads and decodes a YAML file into T. Returns (nil, nil) if the file does not exist.
-// Unknown keys are tolerated (logged as warnings).
+// Unknown keys are tolerated (logged as warnings). Symlinks and other
+// non-regular files are refused.
 func readYAML[T any](path string) (*T, error) {
-	data, err := os.ReadFile(path)
+	data, err := fsutil.ReadRegularFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}

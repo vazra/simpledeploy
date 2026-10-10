@@ -52,7 +52,7 @@ git_sync:
 | Field | Required | Description |
 |---|---|---|
 | `enabled` | yes | Set to `true` to start the sync worker. |
-| `remote` | yes | Git remote URL (SSH or HTTPS). |
+| `remote` | yes | Git remote URL: `https://`, `http://`, `ssh://`, `git://`, `file://`, an absolute local path, or `user@host:path`. Transport helpers (`ext::`, `fd::`) and values starting with `-` are rejected. |
 | `branch` | yes | Branch to push to and pull from. |
 | `author_name` | no | Commit author name. Defaults to `SimpleDeploy`. |
 | `author_email` | no | Commit author email. |
@@ -76,7 +76,7 @@ Controls whether the background poll loop runs on `poll_interval`. Set to `false
 
 ### `auto_push_enabled`
 
-Controls whether local config changes (deploys, env edits, sidecar updates) are automatically committed and pushed to the remote. Set to `false` for a pull-only setup where the remote is the source of truth and local changes are never pushed back. This is useful when you manage config entirely through the git repo and want to prevent the server from writing back.
+Controls whether local config changes (deploys, env edits, sidecar updates) are automatically committed and pushed to the remote. Set to `false` for a pull-only setup where the remote is the source of truth and local changes are never pushed back. This is useful when you manage config entirely through the git repo and want to prevent the server from writing back. Dashboard edits made in this mode stay uncommitted in `apps_dir`; git refuses to apply remote commits over them, and the Git Sync page shows that error until the local changes are committed or discarded.
 
 ### `auto_apply_enabled`
 
@@ -134,11 +134,24 @@ SimpleDeploy verifies the `X-Hub-Signature-256` header using your secret. Gitea 
 
 The poll worker runs on `poll_interval` (default 60s) regardless of webhook configuration. When a webhook arrives, an immediate sync runs; the poll continues as a safety net. There is no harm in running both.
 
+## What a pull can and cannot change
+
+Anyone who can push to the remote can change what your apps run, so pulled
+content is treated as less trusted than the dashboard:
+
+- **Compose files** are checked with the same [security validation](/reference/compose-labels/#compose-security-validation) as a dashboard deploy before anything starts.
+- **Per-app sidecars** (`simpledeploy.yml`) apply alert rules and backup configs, but never change who can access an app. If a pulled sidecar edits its `access` list, SimpleDeploy reverts that list in git with a bot commit and shows a conflict entry. While git sync is on, hand edits to the `access` list on disk are ignored too. Grant or revoke access from the dashboard.
+- **`_global.yml` is push-only.** Users, roles, registries, webhooks and DB backup settings never change because of a pull; remote edits to this file are ignored and overwritten the next time global settings change.
+- **Symlinks** are never followed. The repo is checked out with `core.symlinks=false`, so a symlink committed to the repo lands as a plain file, and a symlinked compose file or sidecar is never deployed or read. If the repo tracks a symlink, or an app the pull touched has a symlinked folder or managed file, the Git Sync page shows an error naming the paths and the sync skips importing that app's `simpledeploy.yml` settings. The rest of the pull still applies: other apps' settings are imported and changed apps are reconciled. The blocked app's pulled files stay checked out, so its regular (non-symlink) files are still picked up by the normal file watcher; its access grants stay as set in the dashboard. A symlinked `_global.yml` or `.gitignore` at the repo root skips the settings import and reconcile for the whole pull. Local symlinks git does not track, in apps the pull did not touch, are left alone.
+- **Branch names** must be plain (letters, digits, `.`, `_`, `/`, `-`; no leading `-` or `..`).
+
 ## Conflict behavior
 
 Local state wins on conflict. If a remote change conflicts with a local change, SimpleDeploy logs the conflict to `alert_history` and surfaces it on the Git Sync page. The remote change is not applied.
 
 Conflicts usually mean two operators edited the same file at the same time. To apply the remote change, re-enter it through the UI after reviewing what was lost.
+
+One exception: a local bot commit that only restored access grants (it stays unpushed when `auto_push_enabled` is off) never overrides remote edits. On conflict the remote file is taken and its access list is restored again, so remote changes such as alert thresholds still apply.
 
 ## CLI
 

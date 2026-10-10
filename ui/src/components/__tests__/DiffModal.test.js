@@ -46,4 +46,21 @@ describe('DiffModal', () => {
     await fireEvent.keyDown(window, { key: 'Escape' });
     expect(onCancel).toHaveBeenCalled();
   });
+
+  it('shows the refusal reason when error is set', () => {
+    const { getByTestId } = render(DiffModal, { oldText: 'a', newText: 'b', error: 'refused:\n- service "web": privileged not allowed' });
+    const box = getByTestId('diff-error');
+    expect(box).toHaveTextContent('not deployed');
+    expect(box).toHaveTextContent('privileged not allowed');
+  });
+
+  it('has no error box by default', () => {
+    const { queryByTestId } = render(DiffModal, { oldText: 'a', newText: 'b' });
+    expect(queryByTestId('diff-error')).toBeNull();
+  });
+
+  it('disables confirm while busy', () => {
+    const { getByText } = render(DiffModal, { oldText: 'a', newText: 'b', busy: true });
+    expect(getByText('Deploying...').closest('button')).toBeDisabled();
+  });
 });

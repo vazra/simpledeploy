@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,6 +17,8 @@ import (
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/configsync"
+	"github.com/vazra/simpledeploy/internal/fsutil"
+	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -87,8 +90,8 @@ func (s *Server) handleImportAppPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	appDir := filepath.Join(s.appsDir, slug)
-	curCompose, _ := os.ReadFile(filepath.Join(appDir, "docker-compose.yml"))
-	curSidecar, _ := os.ReadFile(filepath.Join(appDir, "simpledeploy.yml"))
+	curCompose, _ := fsutil.ReadRegularFile(filepath.Join(appDir, "docker-compose.yml"))
+	curSidecar, _ := fsutil.ReadRegularFile(filepath.Join(appDir, "simpledeploy.yml"))
 
 	resp["current"] = map[string]any{
 		"compose": string(curCompose),
@@ -101,11 +104,11 @@ func (s *Server) handleImportAppPreview(w http.ResponseWriter, r *http.Request) 
 	inBackups := countBackupConfigs(bundle.Sidecar)
 
 	resp["changes"] = map[string]any{
-		"compose_changed":           !bytes.Equal(curCompose, bundle.Compose),
-		"sidecar_changed":           !bytes.Equal(curSidecar, bundle.Sidecar),
-		"alert_rule_count_current":  curAlerts,
-		"alert_rule_count_incoming": inAlerts,
-		"alert_rule_count_delta":    inAlerts - curAlerts,
+		"compose_changed":              !bytes.Equal(curCompose, bundle.Compose),
+		"sidecar_changed":              !bytes.Equal(curSidecar, bundle.Sidecar),
+		"alert_rule_count_current":     curAlerts,
+		"alert_rule_count_incoming":    inAlerts,
+		"alert_rule_count_delta":       inAlerts - curAlerts,
 		"backup_config_count_current":  curBackups,
 		"backup_config_count_incoming": inBackups,
 		"backup_config_count_delta":    inBackups - curBackups,
@@ -153,10 +156,16 @@ func (s *Server) handleExportApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
+	// appbundle.Build reads with fsutil.ReadRegularFile, so a linked file in
+	// the app folder is refused instead of pulling a host file into the zip.
 	appDir := filepath.Join(s.appsDir, slug)
 	zipBytes, err := appbundle.Build(appDir, app.Slug, app.Name, s.buildVersion)
 	if err != nil {
 		log.Printf("[export] build %s: %v", slug, err)
+		if errors.Is(err, fsutil.ErrNotRegular) {
+			http.Error(w, "the app folder has a linked file (docker-compose.yml, simpledeploy.yml or .env); replace it with a regular file", http.StatusConflict)
+			return
+		}
 		http.Error(w, "failed to build bundle", http.StatusInternalServerError)
 		return
 	}
@@ -222,20 +231,39 @@ func (s *Server) handleImportApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate compose security.
-	tmp, err := os.CreateTemp("", "import-compose-*.yml")
+	// Same port pinning as handleDeploy: published ports listen on
+	// 127.0.0.1 so traffic has to pass Caddy's allowlist and rate limits.
+	composeData := bundle.Compose
+	if os.Getenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK") != "true" {
+		composeData = mirror.RewritePortsLoopback(composeData)
+	}
+	if injected, _, ierr := compose.InjectSharedNetwork(composeData, "simpledeploy-public"); ierr == nil {
+		composeData = injected
+	}
+
+	appDir := filepath.Join(s.appsDir, slug)
+	composePath := filepath.Join(appDir, "docker-compose.yml")
+
+	// Validate exactly what will run: the final compose bytes in the real
+	// app folder, with the .env that will sit next to them (the bundle's
+	// env.example for a new app, otherwise the app's current .env).
+	dotEnv, err := compose.ReadDotEnv(appDir)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		http.Error(w, dotEnvProblem, http.StatusBadRequest)
 		return
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(bundle.Compose); err != nil {
-		tmp.Close()
-		http.Error(w, "internal error", http.StatusInternalServerError)
+	if mode == "new" && len(bundle.EnvExample) > 0 {
+		dotEnv = bundle.EnvExample
+	}
+	parsed, err := compose.ParseContent(composeData, composePath, slug, dotEnv)
+	if errors.Is(err, compose.ErrDotEnv) {
+		http.Error(w, dotEnvProblem, http.StatusBadRequest)
 		return
 	}
-	tmp.Close()
-	parsed, err := compose.ParseFile(tmp.Name(), slug)
+	if v, ok := violationsOf(err); ok {
+		writeViolations(w, http.StatusBadRequest, "compose file contains disallowed directives", v)
+		return
+	}
 	if err != nil {
 		http.Error(w, "invalid compose file in bundle", http.StatusBadRequest)
 		return
@@ -264,33 +292,30 @@ func (s *Server) handleImportApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	composeData := bundle.Compose
-	if injected, _, ierr := compose.InjectSharedNetwork(composeData, "simpledeploy-public"); ierr == nil {
-		composeData = injected
-	}
-
-	appDir := filepath.Join(s.appsDir, slug)
 	if err := os.MkdirAll(appDir, 0o700); err != nil {
 		http.Error(w, "failed to create app directory", http.StatusInternalServerError)
 		return
 	}
-	composePath := filepath.Join(appDir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, composeData, 0o600); err != nil {
+	// .env first: it was part of the validation above, so it must be in
+	// place before the compose file the watcher deploys.
+	// Only written for mode=new (do not clobber existing env on overwrite).
+	if mode == "new" && len(bundle.EnvExample) > 0 {
+		envPath := filepath.Join(appDir, ".env")
+		if err := fsutil.WriteFileAtomic(envPath, bundle.EnvExample, 0o600); err != nil {
+			log.Printf("[import] write .env %s: %v", slug, err)
+			http.Error(w, "failed to write .env file", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := fsutil.WriteFileAtomic(composePath, composeData, 0o600); err != nil {
 		http.Error(w, "failed to write compose file", http.StatusInternalServerError)
 		return
 	}
 
 	// Sidecar: always overwrite if present in bundle.
 	if len(bundle.Sidecar) > 0 {
-		if err := os.WriteFile(filepath.Join(appDir, "simpledeploy.yml"), bundle.Sidecar, 0o600); err != nil {
+		if err := fsutil.WriteFileAtomic(filepath.Join(appDir, "simpledeploy.yml"), bundle.Sidecar, 0o600); err != nil {
 			log.Printf("[import] write sidecar %s: %v", slug, err)
-		}
-	}
-	// .env: only write for mode=new (do not clobber existing env on overwrite).
-	if mode == "new" && len(bundle.EnvExample) > 0 {
-		envPath := filepath.Join(appDir, ".env")
-		if err := os.WriteFile(envPath, bundle.EnvExample, 0o600); err != nil {
-			log.Printf("[import] write .env %s: %v", slug, err)
 		}
 	}
 

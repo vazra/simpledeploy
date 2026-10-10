@@ -11,6 +11,8 @@ docker exec <container> tar -czf - <paths...>
 
 against the paths configured on the backup config. Tar strips leading `/` so the archive contents are relative (e.g. `var/lib/postgresql/data/...`). Restore extracts with `tar -xzf - -C /`, which recreates the absolute paths.
 
+Each path must be absolute and written in plain form: no `//`, `.` or `..` parts, and not `/` on its own. A trailing `/` is accepted (`/data` and `/data/` both work). Control characters and path parts starting with `-` are refused.
+
 Filename format: `{containerName}-{YYYYMMDD-HHMMSS}.tar.gz`
 
 ## Caveat for running databases

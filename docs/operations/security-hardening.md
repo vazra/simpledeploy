@@ -33,7 +33,7 @@ Before going to production:
 - Tokens carry `iss=simpledeploy`, `aud=simpledeploy-dashboard`, and a
   per-user `tv` (token version) claim. Bumping `tv` server-side
   invalidates all outstanding JWTs for that user.
-- `tv` is bumped on logout, password change, and role change — a stolen
+- `tv` is bumped on logout, password change, and role change, so a stolen
   cookie cannot outlive any of those events.
 - Cookies are `HttpOnly`, `Secure` (when TLS), `SameSite=Strict`, `MaxAge=86400`.
 
@@ -93,6 +93,8 @@ Three roles with increasing privilege:
 
 Non-admin users can be granted access to specific apps via `user_app_access`. The `super_admin` role bypasses all app-level access checks.
 
+Viewers see `.env` variable names but not their values (`masked: true` in the API). Manage and super_admin users see values.
+
 ### API Key Ownership
 
 Users can only delete their own API keys. `super_admin` can delete any key.
@@ -108,21 +110,18 @@ App names must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`. This prevents:
 
 ### Compose File Validation
 
-Every compose file is parsed and validated before deployment. The following directives are **rejected**:
+Every compose file is parsed the way `docker compose` sees it (variables
+filled in from the app's `.env`) and checked before any container starts:
+on deploy, import, rollback, version restore, pull, scale, and when the
+reconciler picks up a file from disk. Rejected directives include
+privileged mode, host or cross-container namespaces, dangerous
+capabilities, security options that disable AppArmor/seccomp/SELinux,
+devices, and bind mounts of system folders, SimpleDeploy's data folder or
+other apps' folders. Files the compose loader reads from the host
+(`env_file`, `secrets`, `configs`, build contexts) must stay inside the
+app folder, and symlinked `docker-compose.yml` / `.env` files are refused.
 
-| Directive | Reason |
-|-----------|--------|
-| `privileged: true` | Full host access, container escape |
-| `network_mode: host` | Bypasses network isolation |
-| `pid: host` | Access to host process namespace |
-| `ipc: host` | Shared memory with host |
-| `cap_add: ALL` | All Linux capabilities |
-| `cap_add: SYS_ADMIN` | Mount/unmount, container escape |
-| `cap_add: SYS_PTRACE` | Process debugging, secret extraction |
-| `cap_add: NET_ADMIN` | Network reconfiguration |
-| Bind mounts of `/etc`, `/proc`, `/sys`, `/dev`, `/root` | Sensitive host paths |
-| Bind mounts of `/var/run/docker.sock` | Docker socket = root access |
-| Volume paths containing `..` | Path traversal |
+The full list is in [Compose labels: security validation](/reference/compose-labels/#compose-security-validation).
 
 ## Config Sync Storage
 
@@ -170,8 +169,10 @@ X-Frame-Options: DENY
 X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: camera=(), microphone=(), geolocation=()
-Strict-Transport-Security: max-age=63072000; includeSubDomains  (when TLS active)
+Strict-Transport-Security: max-age=63072000  (when the request arrived over HTTPS)
 ```
+
+Behind a TLS-terminating proxy listed in `trusted_proxies`, `X-Forwarded-Proto: https` counts as HTTPS for HSTS and for the session cookie's `Secure` flag. The header is ignored from untrusted peers.
 
 ### Request Size Limits
 
@@ -179,7 +180,11 @@ All non-GET requests are limited to 1MB body size to prevent memory exhaustion f
 
 ### WebSocket Security
 
-WebSocket endpoints (`/api/apps/{slug}/logs`, `/api/apps/{slug}/deploy-logs`) validate the `Origin` header against the request `Host`. Cross-origin WebSocket connections are rejected to prevent Cross-Site WebSocket Hijacking. Idle connections are closed after 5 minutes.
+WebSocket endpoints (app logs, deploy logs, realtime events, process logs) require the browser's `Origin` host and port to match the dashboard host (or `Sec-Fetch-Site: same-origin`), so pages on other ports or subdomains cannot open them with your session. Every 60 seconds each socket re-checks that the user still exists, has the same role, still holds a valid session or API key, and still has access to the app; otherwise it closes (code 1008). Container log frames larger than 1 MiB end the stream instead of being buffered. Idle connections are closed after 5 minutes.
+
+### Cross-Site Request Protection
+
+The session cookie is `SameSite=Strict`, but browsers treat sibling subdomains (`app.example.com` and `manage.example.com`) as the same site. All state-changing API requests are therefore checked with Go's cross-origin protection: requests a browser marks as cross-origin (`Sec-Fetch-Site`, or `Origin` not matching `Host`) get `403`. The CLI, curl, and git webhooks send neither header and are unaffected. This also protects first-run setup (`POST /api/setup`) from being triggered by another site in your browser.
 
 ### Webhook Security
 
@@ -257,7 +262,7 @@ openssl rand -hex 32
 Copy the output into your config:
 
 ```yaml
-master_secret: "a1b2c3d4e5f6..."
+master_secret: "<output of openssl rand -hex 32>"
 ```
 
 ### Backup Security Enhancements
@@ -269,8 +274,21 @@ master_secret: "a1b2c3d4e5f6..."
 
 ## Breaking Changes on Upgrade
 
-If upgrading from an older version:
+### Upgrading to the next release after 1.4.2
+
+- **Placeholder `master_secret` values are flagged.** If your config still contains an example value from the docs (for example `change-me-to-a-random-string`), the server logs a warning at startup and signs sessions with a random key stored in `data_dir/session-signing.key` instead of the public value (everyone signs in again once). Stored credentials are still encrypted with the public value, so replace it with `openssl rand -hex 32` soon, then re-enter registry and S3 credentials and re-create API keys.
+- **Stricter compose validation.** Refused: bind mounts of system folders (including `/home`, `/usr`, `/var/lib`, writable `/var/log`), other apps' folders, a writable bind of the app folder itself, binds nested inside another writable bind, host files via `env_file`/`label_file`/`extends`/`secrets`/`configs`, `include`, `use_api_socket`, privileged `post_start`/`pre_stop` hooks, `provider` services, networks named `host`, and symlinked `docker-compose.yml`/`.env`. Apps already running keep their routes while their compose file is unchanged; redeploys, pulls, scaling and endpoint/IP-access edits show the reasons until the file is fixed. To allow a specific host folder (for example a media library under `/home`), list it in `allowed_bind_paths` in `config.yaml`.
+- **Private S3 endpoints need an opt-in.** MinIO or other S3 endpoints on loopback, private, link-local or CGNAT/Tailscale addresses require `SIMPLEDEPLOY_ALLOW_PRIVATE_S3=1`; existing backup configs pointing at them fail until it is set.
+- **Git sync pulls are narrower.** `_global.yml` is push-only, pulled access-grant edits are reverted, and symlinks in the repo block the apply.
+- **Endpoint domains belong to one app.** Each domain is served by one app, even on different paths. When several apps claim a domain, the app that already serves it keeps it while it still claims it; otherwise (including after a restart) the app created first (lowest app ID) wins. The other apps' routes on that domain are dropped and logged. Endpoint edits onto another app's domain, or (for non-super_admin users) onto the dashboard `domain`, are refused, and custom certs can only be uploaded for an app's own endpoints, with a key that matches the certificate and a certificate valid for the domain. Non-super_admin users cannot add wildcard (`*`) endpoint domains.
+- **Custom alert webhook templates receive JSON-escaped values.** Every string field (app name, metric, status and so on) is escaped for use inside a JSON string before your template runs, so a template that escaped values itself may now double-escape them. Remove your own escaping and place the fields directly inside quotes.
+- **`.env` edits are checked like a deploy.** Saving variables that would make the compose file fail the security checks, or point an endpoint at another app's domain, is refused with the reasons.
+- **Restore limits.** Uploaded restore archives are capped at 8 GiB decompressed (`SIMPLEDEPLOY_RESTORE_MAX_GB` changes it); at most 4 restores run at once.
+- **Viewers see `.env` keys only.** Values come back empty with `masked: true`; manage and super_admin users see values.
+- **`simpledeploy init` keeps an existing config.** Pass `--force` to overwrite it.
+
+### Older releases
 
 - **API keys must be re-created.** Key hashing changed from SHA-256 to HMAC-SHA256. Existing keys in the database will not match.
 - **Registry credentials are auto-migrated.** New encryption uses random per-encryption salt (PBKDF2). Existing credentials encrypted with the fixed salt are automatically decrypted and re-encrypted on first access.
-- **`master_secret` is now required.** The server will refuse to start without it. Previously it would fall back to a default.
+- **`master_secret` is required.** The server refuses to start without it.

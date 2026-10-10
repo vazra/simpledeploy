@@ -68,9 +68,15 @@ Same version as the lost host:
 # apt
 sudo apt install simpledeploy=1.2.0
 
-# Or download binary
-curl -L https://github.com/vazra/simpledeploy/releases/download/v1.2.0/simpledeploy-linux-amd64 \
-  -o /usr/local/bin/simpledeploy && chmod +x /usr/local/bin/simpledeploy
+# Or download and verify the release tarball
+VERSION=1.2.0   # same version as the lost host
+ARCH=amd64      # or arm64
+FILE="simpledeploy_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/${FILE}"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/checksums.txt"
+grep " ${FILE}$" checksums.txt | sha256sum -c - \
+  && tar xzf "$FILE" simpledeploy \
+  && sudo install -m 0755 simpledeploy /usr/local/bin/simpledeploy
 ```
 
 Do not start the service yet.
@@ -116,7 +122,7 @@ docker run --rm -v myapp_data:/restore -v $(pwd):/backup alpine \
 ```
 
 <Aside type="caution">
-SimpleDeploy's own volume and SQLite restore endpoints (`POST /api/apps/{slug}/backups/upload-restore`) reject tar archives that contain absolute paths, `..` segments, symlinks, hardlinks, or device entries. They also cap gzip decompression at 8 GiB and run no more than 4 concurrent restores at a time. Archives produced by the matching `Backup` step pass these checks; bring-your-own tarballs may need to be repacked without symlinks.
+SimpleDeploy's own volume and SQLite restore endpoints (`POST /api/apps/{slug}/backups/upload-restore`) reject tar archives that contain absolute paths, `..` segments, symlinks, hardlinks, or device entries. Uploaded archives are capped at 8 GiB decompressed by default (`SIMPLEDEPLOY_RESTORE_MAX_GB` changes it), and no more than 4 restores run at a time. Archives produced by the matching `Backup` step pass these checks; bring-your-own tarballs may need to be repacked without symlinks.
 </Aside>
 
 ### Step 8: Verify

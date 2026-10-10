@@ -10,7 +10,8 @@
   import Modal from './Modal.svelte'
   import { computeQuickTestDomain, isValidIPv4 } from '../lib/appTemplates.js'
 
-  let { slug, app, services = [], onAppUpdated } = $props()
+  // canMutate: the current user may change this app (see canMutateApp).
+  let { slug, app, services = [], canMutate = false, onAppUpdated } = $props()
 
   // Service names from running containers may exclude failed/stopped services.
   // Union with services declared in compose so the endpoint dropdown always
@@ -144,18 +145,39 @@
     } else {
       updated[editingEndpointIdx] = ep
     }
-    await api.updateEndpoints(slug, updated)
-    editingEndpointIdx = -1
+    const res = await api.updateEndpoints(slug, updated)
     savingEndpoints = false
+    // On failure the API call already toasted the reason; keep the form open
+    // with the user's input so they can fix it and retry.
+    if (res?.error) return
+    editingEndpointIdx = -1
     onAppUpdated()
     configTabRef?.reload()
+  }
+
+  // Custom certificate upload. The pasted PEMs are cleared only once the
+  // server accepts them; on a refusal the API call already toasted the reason
+  // and the inputs keep what the user pasted so they can fix it and retry.
+  let certPem = $state('')
+  let keyPem = $state('')
+  let uploadingCert = $state(false)
+
+  async function uploadCustomCert() {
+    if (uploadingCert || !certPem || !keyPem || !editEndpoint.domain) return
+    uploadingCert = true
+    const res = await api.uploadCert(slug, editEndpoint.domain, certPem, keyPem)
+    uploadingCert = false
+    if (res?.error) return
+    certPem = ''
+    keyPem = ''
   }
 
   async function deleteEndpoint(i) {
     savingEndpoints = true
     const updated = endpoints.filter((_, idx) => idx !== i).map(e => ({ ...e, port: String(e.port || '') }))
-    await api.updateEndpoints(slug, updated)
+    const res = await api.updateEndpoints(slug, updated)
     savingEndpoints = false
+    if (res?.error) return
     onAppUpdated()
     configTabRef?.reload()
   }
@@ -266,27 +288,20 @@
           <p class="text-[11px] text-text-muted">Custom certificate for <span class="font-mono text-text-primary">{editEndpoint.domain}</span></p>
           <div>
             <label class="block text-[11px] text-text-muted mb-0.5">Certificate (PEM)</label>
-            <textarea placeholder="-----BEGIN CERTIFICATE-----" rows="3" id="ep-cert-input"
+            <textarea placeholder="-----BEGIN CERTIFICATE-----" rows="3" id="ep-cert-input" bind:value={certPem}
               class="w-full bg-input-bg border border-border/50 rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"></textarea>
           </div>
           <div>
             <label class="block text-[11px] text-text-muted mb-0.5">Private Key (PEM)</label>
-            <textarea placeholder="-----BEGIN PRIVATE KEY-----" rows="3" id="ep-key-input"
+            <textarea placeholder="-----BEGIN PRIVATE KEY-----" rows="3" id="ep-key-input" bind:value={keyPem}
               class="w-full bg-input-bg border border-border/50 rounded px-2.5 py-1.5 text-xs font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 resize-y"></textarea>
           </div>
           <div class="flex justify-end">
             <button type="button"
-              onclick={async () => {
-                const cert = document.getElementById('ep-cert-input')?.value
-                const key = document.getElementById('ep-key-input')?.value
-                if (cert && key && editEndpoint.domain) {
-                  await api.uploadCert(slug, editEndpoint.domain, cert, key)
-                  document.getElementById('ep-cert-input').value = ''
-                  document.getElementById('ep-key-input').value = ''
-                }
-              }}
-              class="px-3 py-1.5 text-xs rounded-lg bg-btn-primary hover:bg-btn-primary-hover text-surface-0 transition-colors">
-              Upload Certificate
+              onclick={uploadCustomCert}
+              disabled={uploadingCert}
+              class="px-3 py-1.5 text-xs rounded-lg bg-btn-primary hover:bg-btn-primary-hover text-surface-0 transition-colors disabled:opacity-60">
+              {uploadingCert ? 'Uploading...' : 'Upload Certificate'}
             </button>
           </div>
         </div>
@@ -360,11 +375,11 @@
   {/if}
 
   <!-- Section 2: Compose Configuration -->
-  <ConfigTab bind:this={configTabRef} {slug} composePath={app?.ComposePath} onModeChange={(m) => composeMode = m} />
+  <ConfigTab bind:this={configTabRef} {slug} composePath={app?.ComposePath} canEdit={canMutate} onModeChange={(m) => composeMode = m} />
 
   <!-- Section 3: Environment Variables (hidden in YAML mode, shown inline there) -->
   {#if composeMode !== 'yaml'}
-    <EnvEditor {slug} />
+    <EnvEditor {slug} canEdit={canMutate} />
   {/if}
 
   <!-- Section 4b: Export config -->

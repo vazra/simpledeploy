@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,5 +148,29 @@ func TestHandleTestGitConnection_NonAdmin(t *testing.T) {
 	rr := postTestConn(t, srv, cookie, map[string]any{"remote": "x", "branch": "main"})
 	if rr.Code != http.StatusForbidden && rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401/403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandleTestGitConnection_InvalidConfigListsAllowedForms: the message for
+// a rejected remote names every accepted remote form.
+func TestHandleTestGitConnection_InvalidConfigListsAllowedForms(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cookie := superAdminCookie(t, srv.jwt)
+	rr := postTestConn(t, srv, cookie, map[string]any{
+		"remote": "ext::sh -c touch% /tmp/x",
+		"branch": "main",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rr.Code, rr.Body.String())
+	}
+	var resp testConnResponse
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.OK || resp.Code != "invalid_config" {
+		t.Fatalf("resp %+v, want invalid_config", resp)
+	}
+	for _, form := range []string{"https://", "http://", "ssh://", "git://", "file://", "absolute local path", "user@host:path"} {
+		if !strings.Contains(resp.Message, form) {
+			t.Errorf("message %q does not mention %s", resp.Message, form)
+		}
 	}
 }

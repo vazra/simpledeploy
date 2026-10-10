@@ -58,3 +58,23 @@ func isTrusted(ip string, trusted []string) bool {
 	}
 	return false
 }
+
+// RequestIsHTTPS reports whether the client reached us over HTTPS: either
+// TLS terminated here, or the direct peer is a trusted proxy that set
+// X-Forwarded-Proto: https. Untrusted peers cannot spoof the header.
+func RequestIsHTTPS(r *http.Request, trustedProxies []string) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if len(trustedProxies) == 0 {
+		return false
+	}
+	directIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		directIP = r.RemoteAddr
+	}
+	if !isTrusted(directIP, trustedProxies) {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}

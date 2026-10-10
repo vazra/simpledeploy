@@ -78,7 +78,7 @@ Per domain, routes are tried in this order: `grpc` endpoints, then endpoints wit
 - With `tls.mode: off` (TLS terminated in front of SimpleDeploy) the proxy listener also accepts h2c, so gRPC clients can connect in plaintext.
 - gRPC clients that default to a non-443 port (e.g. `:50051`) can reach the same routes when that port is listed in `extra_listen_addrs` in `config.yaml` (see [Configuration](/simpledeploy/reference/configuration/)).
 
-Endpoint services no longer need to publish host ports to be reachable. SimpleDeploy auto-attaches them to a shared `simpledeploy-public` Docker network and reverse-proxies over that. `ports:` still works and, when present, takes precedence over the shared-network path.
+Endpoint services do not need to publish host ports to be reachable. SimpleDeploy auto-attaches them to a shared `simpledeploy-public` Docker network and reverse-proxies over that. `ports:` still works and, when present, takes precedence over the shared-network path.
 
 ### Published port loopback rewrite
 
@@ -95,26 +95,86 @@ disable the rewrite globally, set `SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true`.
 
 ### Compose security validation
 
-Compose files are rejected at deploy time (and by the reconciler watcher
-on disk) if they declare any of the following container-escape vectors:
+SimpleDeploy checks every compose file before it starts containers: on
+deploy, import, rollback, version restore, pull, scale, and when the
+reconciler finds a file on disk (git sync, SSH). The check sees the file
+exactly as `docker compose` will, with `${VARS}` filled in from the app's
+`.env` and the server environment, so the values that are checked are
+the values that run. A refused deploy shows the reasons in the deploy log.
 
-- `privileged: true`
-- `network_mode: host`, `pid: host`, `pid: container:*`, `pid: service:*`
-- `ipc: host`, `userns_mode: host`, `cgroup: host`
-- Dangerous capabilities via `cap_add`: `ALL`, `SYS_ADMIN`, `SYS_PTRACE`,
-  `SYS_MODULE`, `SYS_RAWIO`, `SYS_BOOT`, `SYS_TIME`, `NET_ADMIN`,
-  `NET_RAW`, `DAC_READ_SEARCH`, `DAC_OVERRIDE`, `BPF`, `PERFMON`, `MKNOD`
-  (with or without the `CAP_` prefix).
-- `security_opt`: `apparmor=unconfined`, `seccomp=unconfined`,
-  `label=disable`, `systempaths=unconfined`, `no-new-privileges=false`.
-- `devices` (any non-empty list).
-- `volumes_from` (any non-empty list).
-- Bind mounts of `/etc`, `/proc`, `/sys`, `/dev`, `/var/run/docker.sock`,
-  `/root`, `/var/lib/docker`, `/boot`, `/lib/modules`, `/run`, `/`,
-  or any path containing `..`.
-- Top-level volumes with `driver_opts` of the form
-  `type: none, o: bind, device: /host/path` (the host-bind shim) when the
-  device path falls in the bind-source deny list.
+These are refused:
+
+- `privileged: true`, and `privileged: true` on `post_start`/`pre_stop`
+  hooks.
+- `use_api_socket` (it hands the container the Docker API).
+- `provider` services (they run a host-side plugin instead of a container).
+- Sharing host or other containers' namespaces: `network_mode: host`,
+  `network_mode: container:*`, `pid: host` or any other `pid` value,
+  `ipc: host`, `ipc: container:*`, `uts: host`, `userns_mode: host`,
+  `cgroup: host`, and top-level `networks` whose `name` is `host` or
+  `container:*` or that use the `host` driver.
+- Dangerous capabilities via `cap_add` (any letter case, with or without
+  `CAP_`): `ALL`, `SYS_ADMIN`, `SYS_PTRACE`, `SYS_MODULE`, `SYS_RAWIO`,
+  `SYS_BOOT`, `SYS_TIME`, `NET_ADMIN`, `NET_RAW`, `DAC_READ_SEARCH`,
+  `DAC_OVERRIDE`, `BPF`, `PERFMON`, `MKNOD`, and similar.
+- `security_opt` that turns protections off (`=` or `:` form):
+  `apparmor=unconfined`, `seccomp=unconfined` or a custom seccomp profile,
+  `label=disable`, `label=type:*`, `systempaths=unconfined`,
+  `no-new-privileges=false`.
+- `devices`, `device_cgroup_rules`, `volumes_from`.
+- Build settings that reach the host: `network: host`, privileged builds,
+  insecure entitlements.
+- `include` (not supported), and `extends` files outside the app folder.
+
+GPU access through `gpus:` or `deploy.resources.reservations.devices` is
+allowed: Docker grants it through device requests, not raw host device
+nodes.
+
+**Host folders (bind mounts).** Folders inside the app's own folder (for
+example `./data`) are fine, subject to the layout rules below. Paths are cleaned and symlinks are
+followed before checking. A bind is refused when its source is, contains,
+or sits inside any of:
+
+- System folders: `/`, `/bin`, `/boot`, `/dev`, `/etc`, `/home`, `/lib*`,
+  `/proc`, `/root`, `/run`, `/sbin`, `/snap`, `/sys`, `/usr`,
+  `/var/lib`, `/var/run`, `/var/spool`, `/var/backups`, `/var/mail`
+  (so `/var` itself is refused too). `/var/log` is allowed read-only
+  (`/var/log:/logs:ro`).
+- SimpleDeploy's data folder, the folder holding all apps, and any other
+  app's folder.
+
+Other host folders such as `/opt/myapp`, `/srv/data` or `/mnt/disk` are
+allowed. To allow a specific folder under a protected one (for example
+`/home/media`), add it to `allowed_bind_paths` in `config.yaml` (binds
+inside it are then allowed; SimpleDeploy's data folder and other apps'
+folders stay protected). Do not list parents of sensitive folders such as
+`/var` or `/etc`.
+
+**Bind layout.** Two layouts are refused even inside the app folder:
+
+- A writable bind of the app folder itself (for example `.:/app`). Mount a
+  subfolder such as `./data:/app/data` instead, or add `:ro`.
+- A bind whose host folder sits inside another writable bind's host folder
+  (for example `./data:/data` plus `./data/config:/etc/app`, in the same
+  or another service). Use separate folders.
+
+**Files read from the host.** `env_file`, `secrets`/`configs` with
+`file:`, `label_file`, `extends` files, and `build` context,
+`dockerfile`, `additional_contexts` and SSH keys must stay inside the app
+folder.
+
+**Volumes.** Top-level volumes using the `local` driver may only use
+`driver_opts` for a bind to an allowed folder, `tmpfs`, `nfs`/`nfs4`, or
+`cifs`/`smb3`. Other drivers have any host `device`/`mountpoint` checked
+like a bind. A volume `name:` that points at another app's volumes
+(`simpledeploy-<other-app>_*`) is refused.
+
+**Symlinks.** `docker-compose.yml` and `.env` must be regular files, not
+symlinks.
+
+**Upgrading.** An app deployed before these rules keeps running and keeps
+its domain routes while its compose file is unchanged. Redeploys, pulls
+and scaling are refused with the reasons listed until the file is fixed.
 
 ## Access Control Labels
 

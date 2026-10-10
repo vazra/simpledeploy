@@ -29,7 +29,7 @@ func scrubSecrets(s string, token string) string {
 // RemoteCheck is the structured result of a connectivity probe.
 type RemoteCheck struct {
 	OK          bool   `json:"ok"`
-	Code        string `json:"code"` // ok|auth_failed|not_found|branch_missing|network|unknown
+	Code        string `json:"code"` // ok|empty_repo|auth_failed|not_found|branch_missing|network|invalid_config|unknown
 	BranchFound bool   `json:"branch_found"`
 	RefCount    int    `json:"ref_count"`
 	RawError    string `json:"raw_error"`
@@ -44,6 +44,12 @@ func CheckRemote(cfg Config) RemoteCheck {
 	branch := cfg.Branch
 	if branch == "" {
 		branch = "main"
+	}
+	if err := ValidateRemoteURL(cfg.Remote); err != nil {
+		return RemoteCheck{Code: "invalid_config", RawError: scrubSecrets(err.Error(), cfg.HTTPSToken)}
+	}
+	if err := ValidateBranch(branch); err != nil {
+		return RemoteCheck{Code: "invalid_config", RawError: scrubSecrets(err.Error(), cfg.HTTPSToken)}
 	}
 	auth, err := buildAuth(cfg)
 	if err != nil {

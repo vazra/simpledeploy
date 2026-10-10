@@ -1,7 +1,37 @@
 {
   "packages": {
     ".": {
-      "release-type": "go"
+      "release-type": "go",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "README.md"
+        },
+        {
+          "type": "generic",
+          "path": "docs/install/linux.mdx"
+        },
+        {
+          "type": "generic",
+          "path": "docs/install/upgrading.mdx"
+        },
+        {
+          "type": "generic",
+          "path": "docs/start/quickstart.mdx"
+        },
+        {
+          "type": "generic",
+          "path": "docs/operations/upgrade-rollback.md"
+        },
+        {
+          "type": "generic",
+          "path": "docs/integrations/github-actions.md"
+        },
+        {
+          "type": "generic",
+          "path": "docs-site/src/content/docs/index.mdx"
+        }
+      ]
     }
   },
   "last-release-sha": "2fa1091b1f5fbd2088017df035e34d166fd0b0d7"

@@ -1,8 +1,10 @@
 package proxy
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -145,5 +147,147 @@ func TestRateLimitHandlerBlocks(t *testing.T) {
 	}
 	if w2.Header().Get("Retry-After") != "60" {
 		t.Errorf("Retry-After header: got %q, want %q", w2.Header().Get("Retry-After"), "60")
+	}
+}
+
+func TestRateLimiterRegistryHostVariants(t *testing.T) {
+	reg := newTestRegistry()
+	reg.Set("Limited.Example.com", &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"}) // mixed-case configured domain
+	reg.Set("*.wild.example.com", &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"})
+
+	cases := []struct{ first, second string }{
+		{"limited.example.com", "LIMITED.EXAMPLE.COM"},       // uppercase host
+		{"Limited.example.com:8443", "limited.example.com."}, // host:port, trailing dot
+		{"a.wild.example.com", "B.Wild.Example.com:443"},     // wildcard (shared limiter)
+	}
+	for i, tc := range cases {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "1.2.3." + string(rune('1'+i)) + ":1"
+		if !reg.Allow(tc.first, req) {
+			t.Fatalf("%s: first request should be allowed", tc.first)
+		}
+		if reg.Allow(tc.second, req) {
+			t.Errorf("%s: second request should be limited (rule skipped)", tc.second)
+		}
+	}
+}
+
+func TestRateLimiterAllowForIsExact(t *testing.T) {
+	reg := newTestRegistry()
+	reg.Set("foo.*.com", &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"})
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "1.2.3.4:1"
+	reg.AllowFor("FOO.*.com", req)
+	if reg.AllowFor("foo.*.com", req) {
+		t.Error("AllowFor must use the bound route's limiter")
+	}
+	if !reg.AllowFor("foo.example.com", req) {
+		t.Error("AllowFor must not resolve wildcards")
+	}
+}
+
+func TestRateLimiterReplace(t *testing.T) {
+	reg := newTestRegistry()
+	cfg := &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"}
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "1.2.3.4:1"
+
+	reg.Replace(map[string]*RateLimitConfig{"a.com": cfg, "b.com": cfg})
+	reg.Allow("a.com", req)
+	// Same config: bucket state survives a route refresh.
+	reg.Replace(map[string]*RateLimitConfig{"A.com": {Requests: 1, Window: time.Minute, By: "ip"}})
+	if reg.Allow("a.com", req) {
+		t.Error("unchanged config must keep counters across Replace")
+	}
+	if !reg.Allow("b.com", req) {
+		t.Error("domain dropped from Replace must lose its limiter")
+	}
+	// Changed config: fresh limiter.
+	reg.Replace(map[string]*RateLimitConfig{"a.com": {Requests: 2, Window: time.Minute, By: "ip"}})
+	if !reg.Allow("a.com", req) {
+		t.Error("changed config must start a fresh limiter")
+	}
+}
+
+func TestDomainLimiterBucketCapEvictsExpiredThenOldest(t *testing.T) {
+	now := time.Unix(1000, 0)
+	d := newDomainLimiter(&RateLimitConfig{Requests: 2, Window: time.Minute, By: "path"})
+	d.maxBuckets = 3
+	d.now = func() time.Time { return now }
+
+	d.allow("k1")
+	now = now.Add(50 * time.Second)
+	d.allow("k2")
+	d.allow("k3")
+	d.allow("k3") // k3 now has 0 tokens
+
+	// k1 idle for a full window: evicted first, k2/k3 kept.
+	now = now.Add(20 * time.Second)
+	d.allow("k4")
+	if _, ok := d.buckets["k1"]; ok {
+		t.Error("expired bucket k1 should be evicted first")
+	}
+	for _, k := range []string{"k2", "k3", "k4"} {
+		if _, ok := d.buckets[k]; !ok {
+			t.Errorf("bucket %s evicted, want kept", k)
+		}
+	}
+
+	// Nothing expired: least recently used (k2) goes.
+	now = now.Add(time.Second)
+	d.allow("k3") // touch k3 (still limited)
+	d.allow("k5")
+	if _, ok := d.buckets["k2"]; ok {
+		t.Error("least recently used bucket k2 should be evicted")
+	}
+	if len(d.buckets) != 3 || d.lru.Len() != 3 {
+		t.Errorf("buckets = %d (lru %d), want 3", len(d.buckets), d.lru.Len())
+	}
+	if d.allow("k3") {
+		t.Error("k3 kept its state and must still be limited")
+	}
+}
+
+func TestDomainLimiterBoundedUnderKeyFlood(t *testing.T) {
+	d := newDomainLimiter(&RateLimitConfig{Requests: 5, Window: time.Minute, By: "path"})
+	for i := 0; i < maxRateLimitBuckets*2; i++ {
+		d.allow(fmt.Sprintf("/p/%d", i))
+	}
+	if len(d.buckets) > maxRateLimitBuckets || d.lru.Len() != len(d.buckets) {
+		t.Fatalf("buckets = %d (lru %d), want <= %d", len(d.buckets), d.lru.Len(), maxRateLimitBuckets)
+	}
+}
+
+func TestDomainLimiterHashesLongKeys(t *testing.T) {
+	d := newDomainLimiter(&RateLimitConfig{Requests: 1, Window: time.Minute, By: "header:X-Key"})
+	long := strings.Repeat("a", 64<<10)
+	d.allow(long)
+	if d.allow(long) {
+		t.Error("same long key must share a bucket")
+	}
+	for k := range d.buckets {
+		if len(k) > maxRateLimitKeyLen {
+			t.Errorf("stored key length %d, want <= %d", len(k), maxRateLimitKeyLen)
+		}
+	}
+}
+
+func TestRateLimitHandlerHostWithPortAndCase(t *testing.T) {
+	orig := RateLimiters
+	defer func() { RateLimiters = orig }()
+	RateLimiters = newTestRegistry()
+	RateLimiters.Set("Limited.com", &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"})
+
+	for _, h := range []*RateLimitHandler{{}, {Domain: "limited.com"}} {
+		RateLimiters.Set("Limited.com", &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"})
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "1.2.3.4:1"
+		req.Host = "LIMITED.com:8443"
+		_ = h.ServeHTTP(httptest.NewRecorder(), req, nopHandler{})
+		w := httptest.NewRecorder()
+		_ = h.ServeHTTP(w, req, nopHandler{})
+		if w.Code != http.StatusTooManyRequests {
+			t.Errorf("handler %+v: second request status %d, want 429", h, w.Code)
+		}
 	}
 }

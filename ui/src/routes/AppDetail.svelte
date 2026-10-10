@@ -18,9 +18,12 @@
   import { realtime } from '../lib/stores/realtime.svelte.js'
   import { formatBytes } from '../lib/format.js'
   import { canMutateApp, isSuperAdmin } from '../lib/auth.js'
+  import { isValidSlug } from '../lib/slug.js'
 
   let { params } = $props()
   let slug = $derived(params.slug)
+  // Crafted URLs (e.g. #/apps/..%2Factivity) must never reach API paths.
+  let slugValid = $derived(isValidSlug(slug))
 
   let app = $state(null)
   let activeTab = $state('overview')
@@ -87,6 +90,7 @@
   const unsubReconnect = connection.onReconnect(() => loadApp())
   let unsubRealtime = null
   onMount(() => {
+    if (!slugValid) { loading = false; return }
     loadApp()
     const hash = window.location.hash
     const tabMatch = hash.match(/[?&]tab=(\w+)/)
@@ -98,6 +102,7 @@
   onDestroy(() => { unsubReconnect(); stopPolling(); if (unsubRealtime) unsubRealtime() })
 
   async function loadApp() {
+    if (!slugValid) { loading = false; return }
     const [appRes, meRes] = await Promise.all([
       api.getApp(slug),
       loadServices(),
@@ -110,6 +115,7 @@
   }
 
   async function loadServices() {
+    if (!slugValid) return
     const res = await api.getAppServices(slug)
     if (res.error) return
     services = res.data || []
@@ -218,6 +224,7 @@
   }
 
   async function loadMetrics() {
+    if (!slugValid) return
     const [metRes, reqRes] = await Promise.all([
       api.appMetrics(slug, metricsRange),
       api.appRequests(slug, metricsRange),
@@ -295,7 +302,13 @@
 </script>
 
 <Layout>
-  {#if loading}
+  {#if !slugValid}
+    <div class="max-w-md mx-auto mt-16 text-center" data-testid="app-not-found">
+      <h2 class="text-lg font-semibold text-text-primary tracking-tight mb-2">App not found</h2>
+      <p class="text-sm text-text-secondary mb-5">This link doesn't point to a valid app. It may have been mistyped or the app was removed.</p>
+      <a href="#/" class="text-sm text-accent hover:underline">Back to apps</a>
+    </div>
+  {:else if loading}
     <div class="space-y-4">
       <Skeleton type="card" />
       <Skeleton type="card" count={3} />
@@ -427,7 +440,7 @@
       <BackupsTab {slug} />
 
     {:else if activeTab === 'settings'}
-      <SettingsTab {slug} {app} {services} onAppUpdated={loadApp} />
+      <SettingsTab {slug} {app} {services} {canMutate} onAppUpdated={loadApp} />
     {/if}
 
     <!-- Action Modal -->

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -286,7 +287,7 @@ func TestHandleUpdateEndpoints_RejectsBadProtocolPathAndCollisions(t *testing.T)
 		{"tls conflict", []compose.EndpointConfig{
 			{Domain: "a.example.com", Port: "80", Service: "web", TLS: "letsencrypt"},
 			{Domain: "a.example.com", Port: "81", Service: "web", Path: "/ws*", TLS: "off"},
-		}, "endpoint 1: tls \"off\" conflicts with tls \"auto\" of endpoint 0"},
+		}, "endpoint a.example.com/ws*: tls \"off\" conflicts with tls \"auto\" of endpoint a.example.com"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -302,5 +303,272 @@ func TestHandleUpdateEndpoints_RejectsBadProtocolPathAndCollisions(t *testing.T)
 				t.Errorf("body = %q, want substring %q", w.Body.String(), tc.want)
 			}
 		})
+	}
+}
+
+// writeEndpointApp writes a compose file with the given endpoint domains on
+// service "web" and registers the app.
+func writeEndpointApp(t *testing.T, s *store.Store, slug string, domains ...string) string {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("services:\n  web:\n    image: nginx\n")
+	if len(domains) > 0 {
+		b.WriteString("    labels:\n")
+	}
+	for i, d := range domains {
+		fmt.Fprintf(&b, "      simpledeploy.endpoints.%d.domain: %q\n      simpledeploy.endpoints.%d.port: \"80\"\n", i, d, i)
+		if i > 0 {
+			fmt.Fprintf(&b, "      simpledeploy.endpoints.%d.path: \"/p%d*\"\n", i, i)
+		}
+	}
+	composePath := filepath.Join(t.TempDir(), "docker-compose.yml")
+	if err := os.WriteFile(composePath, []byte(b.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertApp(&store.App{Name: slug, Slug: slug, ComposePath: composePath, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	return composePath
+}
+
+func putEndpoints(t *testing.T, srv *Server, slug string, cookie *http.Cookie, eps []compose.EndpointConfig) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(eps)
+	req := httptest.NewRequest(http.MethodPut, "/api/apps/"+slug+"/endpoints", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	return w
+}
+
+func TestHandleUpdateEndpoints_RejectsDomainOfOtherApp(t *testing.T) {
+	srv, s := newTestServer(t)
+	writeEndpointApp(t, s, "other", "taken.example.com")
+	minePath := writeEndpointApp(t, s, "mine")
+	before, _ := os.ReadFile(minePath)
+
+	// Case and trailing dot do not matter.
+	w := putEndpoints(t, srv, "mine", superAdminCookie(t, srv.jwt), []compose.EndpointConfig{
+		{Domain: "free.example.com", Port: "80", Service: "web"},
+		{Domain: "TAKEN.example.com.", Port: "80", Service: "web"},
+	})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `domain TAKEN.example.com. is already used by app "other"`) {
+		t.Errorf("super_admin body = %q, want conflicting app slug", w.Body.String())
+	}
+	if after, _ := os.ReadFile(minePath); string(after) != string(before) {
+		t.Error("compose file changed despite conflict")
+	}
+
+	// Non-super_admin: no other app details.
+	app, _ := s.GetAppBySlug("mine")
+	cookie := makeUserCookie(t, srv, s, "mgr", app.ID)
+	w = putEndpoints(t, srv, "mine", cookie, []compose.EndpointConfig{{Domain: "taken.example.com", Port: "80", Service: "web"}})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("manage status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+	if body := w.Body.String(); !strings.Contains(body, "already used by another app") || strings.Contains(body, "other\"") {
+		t.Errorf("manage body = %q, want generic message without slug", body)
+	}
+}
+
+func TestHandleUpdateEndpoints_StoredDomainFallback(t *testing.T) {
+	srv, s := newTestServer(t)
+	// Compose file unreadable: the stored primary domain still counts.
+	if err := s.UpsertApp(&store.App{Name: "legacy", Slug: "legacy", ComposePath: filepath.Join(t.TempDir(), "missing.yml"), Status: "running", Domain: "legacy.example.com"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	writeEndpointApp(t, s, "mine")
+	w := putEndpoints(t, srv, "mine", superAdminCookie(t, srv.jwt), []compose.EndpointConfig{{Domain: "Legacy.example.com", Port: "80", Service: "web"}})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleUpdateEndpoints_SameAppSharedDomainStillWorks(t *testing.T) {
+	srv, s := newTestServer(t)
+	writeEndpointApp(t, s, "other", "other.example.com")
+	writeEndpointApp(t, s, "mine", "mine.example.com", "mine.example.com")
+	w := putEndpoints(t, srv, "mine", superAdminCookie(t, srv.jwt), []compose.EndpointConfig{
+		{Domain: "mine.example.com", Port: "80", Service: "web"},
+		{Domain: "Mine.example.com", Port: "81", Service: "web", Path: "/api*"},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleUpdateEndpoints_RejectsReservedDomain(t *testing.T) {
+	srv, s := newTestServer(t)
+	writeEndpointApp(t, s, "mine")
+	eps := []compose.EndpointConfig{{Domain: "manage.example.com.", Port: "80", Service: "web"}}
+	srv.SetReservedDomains("", "Manage.Example.com")
+
+	// manage users may not claim the dashboard domain.
+	manage := loginAs(t, srv, s, "mgr", "password1", "manage")
+	u, _ := s.GetUserByUsername("mgr")
+	app, _ := s.GetAppBySlug("mine")
+	if err := s.GrantAppAccess(u.ID, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	w := putEndpoints(t, srv, "mine", manage, eps)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "reserved for the SimpleDeploy dashboard") {
+		t.Fatalf("manage: status = %d body = %q, want 409 reserved", w.Code, w.Body.String())
+	}
+
+	// super_admin may route it through an app to expose the dashboard.
+	if w := putEndpoints(t, srv, "mine", superAdminCookie(t, srv.jwt), eps); w.Code != http.StatusOK {
+		t.Fatalf("super_admin: status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// Label edits on a compose file that cannot be parsed are refused instead
+// of rewriting a file nobody checked.
+func TestEndpointAndAccessEditsRefusedWhenComposeUnparsable(t *testing.T) {
+	cases := map[string]func(t *testing.T, dir string){
+		"invalid yaml": func(t *testing.T, dir string) {
+			os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("services: [\n"), 0o600)
+		},
+		"broken .env": func(t *testing.T, dir string) {
+			os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte("services:\n  web:\n    image: nginx\n"), 0o600)
+			os.WriteFile(filepath.Join(dir, ".env"), []byte("A=\"unclosed\n"), 0o600)
+		},
+		"symlinked compose": func(t *testing.T, dir string) {
+			outside := filepath.Join(t.TempDir(), "compose.yml")
+			os.WriteFile(outside, []byte("services:\n  web:\n    image: nginx\n"), 0o600)
+			if err := os.Symlink(outside, filepath.Join(dir, "docker-compose.yml")); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"missing compose": func(t *testing.T, dir string) {},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv, s := newTestServer(t)
+			dir := t.TempDir()
+			setup(t, dir)
+			composePath := filepath.Join(dir, "docker-compose.yml")
+			before, _ := os.ReadFile(composePath)
+			if err := s.UpsertApp(&store.App{Name: "broken", Slug: "broken", ComposePath: composePath, Status: "running"}, nil); err != nil {
+				t.Fatal(err)
+			}
+			w := putEndpoints(t, srv, "broken", superAdminCookie(t, srv.jwt),
+				[]compose.EndpointConfig{{Domain: "b.example.com", Port: "80", Service: "web"}})
+			if w.Code != http.StatusConflict {
+				t.Fatalf("endpoints: status = %d, want 409; body: %s", w.Code, w.Body.String())
+			}
+			w = doJSON(t, srv, http.MethodPut, "/api/apps/broken/access", map[string]string{"allow": "10.0.0.1"})
+			if w.Code != http.StatusConflict {
+				t.Fatalf("access: status = %d, want 409; body: %s", w.Code, w.Body.String())
+			}
+			if after, _ := os.ReadFile(composePath); string(after) != string(before) {
+				t.Fatalf("compose changed: %q", after)
+			}
+		})
+	}
+}
+
+func TestEndpointAndAccessEditsWriteAtomically(t *testing.T) {
+	srv, s := newTestServer(t)
+	composePath := writeEndpointApp(t, s, "atom", "old.example.com")
+	if err := os.Chmod(composePath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := putEndpoints(t, srv, "atom", superAdminCookie(t, srv.jwt),
+		[]compose.EndpointConfig{{Domain: "new.example.com", Port: "80", Service: "web"}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("endpoints: status = %d; body: %s", w.Code, w.Body.String())
+	}
+	if fi, _ := os.Lstat(composePath); fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode after endpoints = %v, want 0600", fi.Mode().Perm())
+	}
+	if err := os.Chmod(composePath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w = doJSON(t, srv, http.MethodPut, "/api/apps/atom/access", map[string]string{"allow": "10.0.0.1"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("access: status = %d; body: %s", w.Code, w.Body.String())
+	}
+	if fi, _ := os.Lstat(composePath); !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode after access = %v, want regular 0600", fi.Mode())
+	}
+	entries, _ := os.ReadDir(filepath.Dir(composePath))
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestEndpointErrorsNameTheDomain(t *testing.T) {
+	srv, s := newTestServer(t)
+	writeEndpointApp(t, s, "named")
+	cookie := superAdminCookie(t, srv.jwt)
+	cases := []struct {
+		eps  []compose.EndpointConfig
+		want string
+	}{
+		{[]compose.EndpointConfig{{Domain: "ok.example.com", Service: "web"}, {Domain: "", Service: "web"}}, "every endpoint needs a domain"},
+		{[]compose.EndpointConfig{{Domain: "bad_domain!", Service: "web"}}, `invalid domain "bad_domain!"`},
+		{[]compose.EndpointConfig{{Domain: "nosvc.example.com"}}, "endpoint nosvc.example.com: service is required"},
+	}
+	for _, tc := range cases {
+		w := putEndpoints(t, srv, "named", cookie, tc.eps)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
+			t.Errorf("status = %d body = %q, want 400 with %q", w.Code, w.Body.String(), tc.want)
+		}
+	}
+}
+
+func TestWildcardEndpointDomainsSuperAdminOnly(t *testing.T) {
+	srv, s := newTestServer(t)
+	writeEndpointApp(t, s, "wild", "wild.example.com")
+	app, _ := s.GetAppBySlug("wild")
+	manage := makeUserCookie(t, srv, s, "mgr", app.ID)
+	wildcard := []compose.EndpointConfig{
+		{Domain: "wild.example.com", Port: "80", Service: "web"},
+		{Domain: "w*.example.com", Port: "80", Service: "web"},
+	}
+
+	w := putEndpoints(t, srv, "wild", manage, wildcard)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "wildcard") {
+		t.Fatalf("manage: status = %d body = %q, want 409 wildcard", w.Code, w.Body.String())
+	}
+	if w := putEndpoints(t, srv, "wild", superAdminCookie(t, srv.jwt), wildcard); w.Code != http.StatusOK {
+		t.Fatalf("super_admin: status = %d; body: %s", w.Code, w.Body.String())
+	}
+	// A wildcard a super_admin set up does not lock manage users out.
+	wildcard[0].Port = "8080"
+	if w := putEndpoints(t, srv, "wild", manage, wildcard); w.Code != http.StatusOK {
+		t.Fatalf("manage keeping existing wildcard: status = %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// Domain ownership still sees an app whose .env is broken or whose compose
+// file is a link.
+func TestOtherAppDomainsParseFallbacks(t *testing.T) {
+	srv, s := newTestServer(t)
+	envPath := writeEndpointApp(t, s, "badenv", "badenv.example.com")
+	os.WriteFile(filepath.Join(filepath.Dir(envPath), ".env"), []byte("A=\"unclosed\n"), 0o600)
+
+	linkDir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "compose.yml")
+	os.WriteFile(target, []byte("services:\n  web:\n    image: nginx\n    labels:\n      simpledeploy.endpoints.0.domain: linked.example.com\n"), 0o600)
+	linkPath := filepath.Join(linkDir, "docker-compose.yml")
+	if err := os.Symlink(target, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertApp(&store.App{Name: "linked", Slug: "linked", ComposePath: linkPath, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	writeEndpointApp(t, s, "mine")
+	for _, domain := range []string{"badenv.example.com", "linked.example.com"} {
+		w := putEndpoints(t, srv, "mine", superAdminCookie(t, srv.jwt), []compose.EndpointConfig{{Domain: domain, Port: "80", Service: "web"}})
+		if w.Code != http.StatusConflict {
+			t.Errorf("%s: status = %d, want 409; body: %s", domain, w.Code, w.Body.String())
+		}
 	}
 }

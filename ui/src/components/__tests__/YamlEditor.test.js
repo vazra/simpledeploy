@@ -23,6 +23,11 @@ describe('YamlEditor', () => {
     expect(gutter.textContent.replace(/\s+/g, '')).toBe('123');
   });
 
+  it('readonly prop makes the textarea read-only', () => {
+    const { container } = render(YamlEditor, { value: 'A=1', readonly: true });
+    expect(container.querySelector('textarea').readOnly).toBe(true);
+  });
+
   it('renders an error banner when error prop provided', () => {
     const { getByText } = render(YamlEditor, { value: '', error: 'bad yaml' });
     expect(getByText('bad yaml')).toBeInTheDocument();

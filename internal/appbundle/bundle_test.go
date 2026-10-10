@@ -157,3 +157,28 @@ func TestParseZipSlip(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRefusesSymlinkedCompose(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "outside.yml")
+	if err := os.WriteFile(target, []byte("services: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "docker-compose.yml")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(dir, "x", "x", "dev"); err == nil {
+		t.Fatal("Build must refuse a symlinked docker-compose.yml")
+	}
+}
+
+func TestParseRejectsOversizedEntry(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("manifest.json")
+	w.Write(bytes.Repeat([]byte(" "), maxZipEntryBytes+10))
+	zw.Close()
+	if _, err := Parse(buf.Bytes()); err == nil {
+		t.Fatal("expected error for oversized entry")
+	}
+}

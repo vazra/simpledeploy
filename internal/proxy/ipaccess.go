@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"maps"
 	"net"
 	"net/http"
 	"sync"
@@ -17,7 +18,7 @@ type parsedAllowlist struct {
 	nets []*net.IPNet
 }
 
-// ipAccessRegistry maps domains to their parsed allowlists.
+// ipAccessRegistry maps normalized route domains to their parsed allowlists.
 type ipAccessRegistry struct {
 	mu    sync.RWMutex
 	rules map[string]*parsedAllowlist
@@ -27,9 +28,9 @@ func newIPAccessRegistry() *ipAccessRegistry {
 	return &ipAccessRegistry{rules: make(map[string]*parsedAllowlist)}
 }
 
-// Set registers or replaces the allowlist for a domain.
-// Entries are pre-parsed into net.IP and net.IPNet for fast lookup.
-func (reg *ipAccessRegistry) Set(domain string, entries []string) {
+// parseAllowlist pre-parses entries into net.IP and net.IPNet for fast
+// lookup. Invalid entries are dropped.
+func parseAllowlist(entries []string) *parsedAllowlist {
 	parsed := &parsedAllowlist{}
 	for _, entry := range entries {
 		if ip := net.ParseIP(entry); ip != nil {
@@ -40,28 +41,76 @@ func (reg *ipAccessRegistry) Set(domain string, entries []string) {
 			parsed.nets = append(parsed.nets, ipNet)
 		}
 	}
+	return parsed
+}
+
+// Set registers or replaces the allowlist for a domain (case-insensitive;
+// wildcard domains such as "*.example.com" are allowed).
+func (reg *ipAccessRegistry) Set(domain string, entries []string) {
+	parsed := parseAllowlist(entries)
 	reg.mu.Lock()
-	reg.rules[domain] = parsed
+	reg.rules[normalizeDomain(domain)] = parsed
 	reg.mu.Unlock()
 }
 
 // Remove deletes the allowlist for a domain.
 func (reg *ipAccessRegistry) Remove(domain string) {
 	reg.mu.Lock()
-	delete(reg.rules, domain)
+	delete(reg.rules, normalizeDomain(domain))
 	reg.mu.Unlock()
 }
 
-// Allowed returns true if the request should be allowed for the domain.
-// Returns true when no rules are configured or the allowlist is empty.
-func (reg *ipAccessRegistry) Allowed(domain string, r *http.Request) bool {
-	reg.mu.RLock()
-	al, ok := reg.rules[domain]
-	reg.mu.RUnlock()
-
-	if !ok {
-		return true
+// Replace atomically swaps the whole rule set for rules (domain -> entries).
+// Domains not in rules lose their allowlist.
+func (reg *ipAccessRegistry) Replace(rules map[string][]string) {
+	next := make(map[string]*parsedAllowlist, len(rules))
+	for domain, entries := range rules {
+		next[normalizeDomain(domain)] = parseAllowlist(entries)
 	}
+	reg.mu.Lock()
+	reg.rules = next
+	reg.mu.Unlock()
+}
+
+// snapshot returns a copy of the current rule set.
+func (reg *ipAccessRegistry) snapshot() map[string]*parsedAllowlist {
+	reg.mu.RLock()
+	defer reg.mu.RUnlock()
+	return maps.Clone(reg.rules)
+}
+
+// restore swaps in a rule set taken by snapshot.
+func (reg *ipAccessRegistry) restore(rules map[string]*parsedAllowlist) {
+	if rules == nil {
+		rules = make(map[string]*parsedAllowlist)
+	}
+	reg.mu.Lock()
+	reg.rules = rules
+	reg.mu.Unlock()
+}
+
+// Allowed returns true if the request should be allowed for host (a request
+// Host header; port and case are ignored). host is matched against the
+// registered domains the way Caddy's host matcher routes it: exact domain
+// first, then the most specific wildcard.
+// Returns true when no rules are configured or the allowlist is empty.
+func (reg *ipAccessRegistry) Allowed(host string, r *http.Request) bool {
+	reg.mu.RLock()
+	al, ok := lookupHost(reg.rules, host)
+	reg.mu.RUnlock()
+	return !ok || al.allows(r)
+}
+
+// AllowedFor is like Allowed but uses the rules registered for exactly the
+// route domain (no wildcard resolution). Used by handlers bound to a route.
+func (reg *ipAccessRegistry) AllowedFor(domain string, r *http.Request) bool {
+	reg.mu.RLock()
+	al, ok := reg.rules[normalizeDomain(domain)]
+	reg.mu.RUnlock()
+	return !ok || al.allows(r)
+}
+
+func (al *parsedAllowlist) allows(r *http.Request) bool {
 	// Empty allowlist = no restriction
 	if len(al.ips) == 0 && len(al.nets) == 0 {
 		return true
@@ -96,7 +145,13 @@ func init() {
 }
 
 // IPAccessHandler is a Caddy middleware that enforces per-domain IP allowlists.
-type IPAccessHandler struct{}
+type IPAccessHandler struct {
+	// Domain is the route domain whose allowlist applies. buildConfig sets
+	// it so the handler uses its own route's rules even when several route
+	// domains (e.g. two wildcards) match the request host. Empty falls back
+	// to resolving the request Host against the registry.
+	Domain string `json:"domain,omitempty"`
+}
 
 func (IPAccessHandler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
@@ -109,11 +164,13 @@ func (h *IPAccessHandler) Provision(_ caddy.Context) error { return nil }
 func (h *IPAccessHandler) Validate() error                 { return nil }
 
 func (h *IPAccessHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	host := r.Host
-	if h2, _, err := net.SplitHostPort(host); err == nil && h2 != "" {
-		host = h2
+	var allowed bool
+	if h.Domain != "" {
+		allowed = IPAccessRules.AllowedFor(h.Domain, r)
+	} else {
+		allowed = IPAccessRules.Allowed(r.Host, r)
 	}
-	if !IPAccessRules.Allowed(host, r) {
+	if !allowed {
 		http.NotFound(w, r)
 		return nil
 	}

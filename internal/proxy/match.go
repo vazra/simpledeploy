@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
@@ -28,27 +27,24 @@ func routeRank(r Route) int {
 // orderRoutes returns a new slice with routes grouped by domain and, inside
 // each domain, sorted by routeRank and then longest path first. Caddy
 // evaluates routes top to bottom and every route is terminal, so the most
-// specific matcher must come first. Domains are sorted (exact hosts before
-// wildcards, then lexically) and equal-length paths lexically; exact duplicates
-// keep input order, which callers make deterministic (apps sorted by slug,
-// endpoints by label index). A stable config lets SetRoutes skip no-op reloads.
+// specific matcher must come first. Domains are grouped case-insensitively
+// (Caddy's host matcher ignores case) and sorted by domainLess (exact hosts,
+// then wildcards with fewer "*" labels, then lexically); equal-length paths
+// sort lexically; exact duplicates keep input order, which callers make
+// deterministic (apps sorted by slug, endpoints by label index). A stable
+// config lets SetRoutes skip no-op reloads.
 func orderRoutes(in []Route) []Route {
 	groups := map[string][]Route{}
 	var domains []string
 	for _, r := range in {
-		if _, ok := groups[r.Domain]; !ok {
-			domains = append(domains, r.Domain)
+		key := normalizeDomain(r.Domain)
+		if _, ok := groups[key]; !ok {
+			domains = append(domains, key)
 		}
-		groups[r.Domain] = append(groups[r.Domain], r)
+		groups[key] = append(groups[key], r)
 	}
 	out := make([]Route, 0, len(in))
-	sort.Slice(domains, func(i, j int) bool {
-		wi, wj := strings.Contains(domains[i], "*"), strings.Contains(domains[j], "*")
-		if wi != wj {
-			return !wi
-		}
-		return domains[i] < domains[j]
-	})
+	sort.Slice(domains, func(i, j int) bool { return domainLess(domains[i], domains[j]) })
 	for _, d := range domains {
 		g := groups[d]
 		sort.SliceStable(g, func(i, j int) bool {

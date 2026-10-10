@@ -401,3 +401,63 @@ func TestParsePaths(t *testing.T) {
 		t.Fatalf("len = %d, want 2", len(paths))
 	}
 }
+
+func TestParsePaths_TrimsCommaList(t *testing.T) {
+	paths := parsePaths(" /data , /config ,")
+	if len(paths) != 2 || paths[0] != "/data" || paths[1] != "/config" {
+		t.Fatalf("parsePaths = %q, want [/data /config]", paths)
+	}
+}
+
+func TestSchedulerRefusesUnsafePaths(t *testing.T) {
+	st := newMockStore()
+	st.configs[1] = &store.BackupConfig{ID: 1, AppID: 10, Strategy: "volume", Target: "mock", Paths: `["/data","/-rf"]`}
+	st.runs[99] = &store.BackupRun{ID: 99, BackupConfigID: 1, Status: "success", FilePath: "x.tar.gz"}
+
+	sched := NewScheduler(st, nil)
+	sched.RegisterStrategy("volume", NewVolumeStrategy())
+	sched.RegisterTargetFactory("mock", func(string) (Target, error) { return newMockTarget(), nil })
+
+	if err := sched.RunBackup(context.Background(), 1); err == nil {
+		t.Fatal("RunBackup: expected error for unsafe path")
+	}
+	if st.failedCall == nil || !strings.Contains(st.failedCall.errMsg, "backup path") {
+		t.Fatalf("expected failed run with path error, got %+v", st.failedCall)
+	}
+	if err := sched.RunRestore(context.Background(), 99); err == nil || !strings.Contains(err.Error(), "backup path") {
+		t.Fatalf("RunRestore: expected path error, got %v", err)
+	}
+}
+
+func TestSchedulerRunRestoreSizePolicy(t *testing.T) {
+	spoolDir(t)
+	st := newMockStore()
+	st.configs[1] = &store.BackupConfig{ID: 1, AppID: 10, Strategy: "capture", Target: "mock"}
+	tgt := newMockTarget()
+	tgt.uploaded["b.tar.gz"] = []byte("payload")
+	st.runs[7] = &store.BackupRun{ID: 7, BackupConfigID: 1, Status: "success", FilePath: "b.tar.gz", Checksum: checksumOf(t, "payload")}
+
+	strategy := &readerCapture{}
+	sched := NewScheduler(st, nil)
+	sched.RegisterStrategy("capture", strategy)
+	sched.RegisterTargetFactory("mock", func(string) (Target, error) { return tgt, nil })
+
+	t.Setenv(RestoreMaxGBEnv, "")
+	if err := sched.RunRestore(context.Background(), 7); err != nil {
+		t.Fatalf("RunRestore: %v", err)
+	}
+	if strategy.maxBytes != NoDecompressedLimit {
+		t.Errorf("default MaxDecompressedBytes = %d, want no limit", strategy.maxBytes)
+	}
+	if string(strategy.data) != "payload" {
+		t.Errorf("restored %q, want payload", strategy.data)
+	}
+
+	t.Setenv(RestoreMaxGBEnv, "3")
+	if err := sched.RunRestore(context.Background(), 7); err != nil {
+		t.Fatalf("RunRestore: %v", err)
+	}
+	if strategy.maxBytes != 3<<30 {
+		t.Errorf("MaxDecompressedBytes with %s=3 = %d, want %d", RestoreMaxGBEnv, strategy.maxBytes, int64(3<<30))
+	}
+}

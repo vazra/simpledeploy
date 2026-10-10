@@ -112,3 +112,28 @@ func TestOrderRoutesWildcardAfterExact(t *testing.T) {
 		t.Fatalf("order = %v, want [b z w]", ups)
 	}
 }
+
+func TestOrderRoutesGroupsDomainsCaseInsensitively(t *testing.T) {
+	got := orderRoutes([]Route{
+		{Domain: "a.com", Upstream: "catchall"},
+		{Domain: "A.com", Upstream: "path", Path: "/api*"},
+	})
+	if got[0].Upstream != "path" {
+		t.Fatalf("order = %v, want path route before catch-all of the same host", got)
+	}
+}
+
+func TestOrderRoutesFewerWildcardsFirst(t *testing.T) {
+	got := orderRoutes([]Route{
+		{Domain: "*.*.a.com", Upstream: "two"},
+		{Domain: "*.b.a.com", Upstream: "one"},
+		{Domain: "x.b.a.com", Upstream: "exact"},
+	})
+	var ups []string
+	for _, r := range got {
+		ups = append(ups, r.Upstream)
+	}
+	if !reflect.DeepEqual(ups, []string{"exact", "one", "two"}) {
+		t.Fatalf("order = %v, want [exact one two]", ups)
+	}
+}

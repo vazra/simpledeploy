@@ -1,5 +1,5 @@
 <script>
-  let { value = '', onchange = () => {}, error = '', minHeight = '400px', bordered = true } = $props()
+  let { value = '', onchange = () => {}, error = '', minHeight = '400px', bordered = true, readonly = false } = $props()
 
   let textareaEl = $state(null)
   let gutterEl = $state(null)
@@ -12,6 +12,7 @@
   }
 
   function handleKeydown(e) {
+    if (readonly) return
     if (e.key === 'Tab') {
       e.preventDefault()
       const el = e.currentTarget
@@ -52,6 +53,7 @@
     <textarea
       bind:this={textareaEl}
       {value}
+      {readonly}
       oninput={handleInput}
       onkeydown={handleKeydown}
       onscroll={syncScroll}

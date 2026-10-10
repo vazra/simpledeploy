@@ -359,3 +359,25 @@ func TestValidateExtraListenAddrs(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveAtomicRemovesTempFileOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	// A directory at the target path makes the final rename fail.
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{DataDir: dir}
+	if err := cfg.SaveAtomic(path); err == nil {
+		t.Fatal("SaveAtomic onto a directory succeeded")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}

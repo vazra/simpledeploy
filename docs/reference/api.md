@@ -84,7 +84,12 @@ Deploy an app by uploading a compose file.
 
 // Response 201
 {"name": "myapp", "status": "deployed"}
+
+// Response 400 (compose file fails security checks)
+{"error": "compose file contains disallowed directives", "violations": ["service \"web\": privileged mode not allowed"]}
 ```
+
+Requires `super_admin`. Rollback and version restore check the stored version with the app's current `.env`: one that fails the checks or does not load gets the same `400` `{error, violations}` body, and one using a domain another app now has gets `409`.
 
 ### `DELETE /api/apps/{slug}`
 
@@ -93,6 +98,40 @@ Remove an app. Stops containers, removes network, deletes from store.
 ### `GET /api/apps/{slug}/compose`
 
 Get the raw compose file content. Returns `text/yaml`.
+
+## App Settings
+
+### `GET /api/apps/{slug}/env`
+
+List the app's `.env` variables. `manage` and `super_admin` users get values; viewers get each key with an empty value and `masked: true`.
+
+```json
+// manage / super_admin
+[{"key": "DB_PASSWORD", "value": "s3cret"}]
+
+// viewer
+[{"key": "DB_PASSWORD", "value": "", "masked": true}]
+```
+
+### `PUT /api/apps/{slug}/env`
+
+Replace the whole `.env` file. Body: `[{"key": "...", "value": "..."}]`. Not available to viewers. Never send masked entries back: their empty value would overwrite the secret.
+
+The compose file is checked with the new values, like a compose edit. `400` with `{error, violations}` when the values make it fail the security checks or stop it loading (for example an unclosed quote). `409` when the compose file already fails the checks with the current `.env` (fix and redeploy it first; same body as below) or when a value moves an endpoint onto a domain another app or the dashboard uses.
+
+### `PUT /api/apps/{slug}/endpoints`
+
+Replace the app's endpoints (written to the compose labels, routes reload automatically). Body: `[{"domain": "app.example.com", "service": "web", "port": "3000", "tls": "letsencrypt", "protocol": "http", "path": ""}]` (`protocol` and `path` optional).
+
+### `PUT /api/apps/{slug}/access`
+
+Set the IP allowlist. Body: `{"allow": "1.2.3.4, 10.0.0.0/8"}` (empty string allows all traffic).
+
+**Refused edits.** Endpoint, access and env edits return `409` when the change cannot be applied: a domain already belongs to another app or to the dashboard, or the app's current compose file fails security checks (fix and redeploy it first). The compose case returns JSON:
+
+```json
+{"error": "<reason>", "violations": ["service \"web\": privileged mode not allowed"]}
+```
 
 ## App Actions
 
@@ -156,6 +195,8 @@ Rollback to a previous compose version.
 {"status": "ok"}
 ```
 
+`400` with `{error, violations}` when the version fails today's checks or does not load; `409` when one of its domains now belongs to another app.
+
 ### `GET /api/apps/{slug}/events`
 
 List deploy events (deploys, rollbacks).
@@ -164,14 +205,17 @@ List deploy events (deploys, rollbacks).
 
 ### `POST /api/apps/validate-compose`
 
-Validate a compose file without deploying.
+Validate a compose file without deploying. Requires `super_admin`.
 
 ```json
 // Request
 {"compose": "<base64-encoded compose>"}
 
 // Response 200
-{"valid": true, "services": [...]}
+{"valid": true}
+
+// Response 200 (parse error)
+{"valid": false, "errors": ["..."]}
 ```
 
 ## Metrics Endpoints
@@ -272,7 +316,17 @@ Trigger immediate backup. Returns 202 Accepted (runs async).
 
 ### `POST /api/backups/restore/{id}`
 
-Restore from a backup run. Returns 202 Accepted (runs async).
+Restore from a backup run. Returns 202 Accepted (runs async), or `429` when too many restores are already in progress (try again later).
+
+### `POST /api/apps/{slug}/backups/upload-restore`
+
+Restore from an uploaded backup file (`multipart/form-data`). Returns 202 Accepted (runs async), or `429` when too many restores are already in progress (try again later).
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `file` | yes | Backup file |
+| `strategy` | yes | `postgres`, `mysql`, `redis`, `volume`, `sqlite`, ... |
+| `container` | for multi-container apps | Compose service name (for example `db`), container name, or container ID prefix (12+ characters). Only this app's containers match. Leave empty for single-container apps; with several containers the error lists the service names to choose from. |
 
 ## Alert Endpoints
 

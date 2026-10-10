@@ -135,13 +135,17 @@ func TestValidate_DriverOptsHostBindShim(t *testing.T) {
 }
 
 func TestValidate_AllowsInnocentService(t *testing.T) {
-	v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{
+	// A bind inside the app's own folder is allowed even though the folder
+	// lives under a protected system path (/var/lib).
+	cfg := cfgWith(types.ServiceConfig{
 		Name:  "web",
 		Image: "nginx:alpine",
 		Volumes: []types.ServiceVolumeConfig{
 			{Type: "bind", Source: "/var/lib/simpledeploy/apps/web/data", Target: "/data"},
 		},
-	}))
+	})
+	cfg.ComposePath = "/var/lib/simpledeploy/apps/web/docker-compose.yml"
+	v := ValidateComposeSecurity(cfg)
 	if len(v) != 0 {
 		t.Fatalf("expected zero violations for innocent service, got %v", v)
 	}

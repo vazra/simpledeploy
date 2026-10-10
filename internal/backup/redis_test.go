@@ -1,6 +1,12 @@
 package backup
 
 import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -90,4 +96,38 @@ func TestRedisStrategy_Detect(t *testing.T) {
 
 func TestRedisStrategy_Interface(t *testing.T) {
 	var _ Strategy = NewRedisStrategy()
+}
+
+// Redis restore must validate the archive before 'docker stop', so these
+// fail without touching docker.
+func TestRedisStrategy_RestoreRejectsUnsafeArchive(t *testing.T) {
+	cases := map[string][]*tar.Header{
+		"symlink":   {{Name: "dump.rdb", Linkname: "/etc/passwd", Typeflag: tar.TypeSymlink}},
+		"traversal": {{Name: "../../etc/cron.d/x", Size: 1, Typeflag: tar.TypeReg}},
+		"absolute":  {{Name: "/etc/passwd", Size: 1, Typeflag: tar.TypeReg}},
+	}
+	for name, entries := range cases {
+		t.Run(name, func(t *testing.T) {
+			data := makeTarGz(t, entries)
+			err := NewRedisStrategy().Restore(context.Background(), RestoreOpts{
+				ContainerName: noSuchContainer,
+				Reader:        io.NopCloser(bytes.NewReader(data)),
+			})
+			if err == nil || !strings.Contains(err.Error(), "reject restore archive") {
+				t.Fatalf("expected archive rejection, got %v", err)
+			}
+		})
+	}
+}
+
+func TestRedisStrategy_RestoreRejectsOversizeArchive(t *testing.T) {
+	data := makeTarGz(t, []*tar.Header{{Name: "dump.rdb", Size: 64 << 10, Typeflag: tar.TypeReg}})
+	err := NewRedisStrategy().Restore(context.Background(), RestoreOpts{
+		ContainerName:        noSuchContainer,
+		Reader:               io.NopCloser(bytes.NewReader(data)),
+		MaxDecompressedBytes: 16 << 10,
+	})
+	if !errors.Is(err, errArchiveTooLarge) {
+		t.Fatalf("expected errArchiveTooLarge, got %v", err)
+	}
 }

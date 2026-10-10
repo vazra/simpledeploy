@@ -37,6 +37,7 @@ type UpstreamResolver interface {
 // Route holds routing config for a deployed app.
 type Route struct {
 	AppSlug    string
+	AppID      int64 // store ID; lowest wins a domain several apps claim (see claimDomains)
 	Domain     string
 	Upstream   string // "localhost:{port}"
 	TLS        string // "auto", "custom", "off"

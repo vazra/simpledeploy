@@ -19,7 +19,7 @@ Starts: reverse proxy (Caddy), management API, reconciler watcher, metrics colle
 
 ### `simpledeploy init`
 
-Generate a default config file.
+Generate a default config file with a random `master_secret` (mode `0600`). Refuses to overwrite an existing file unless `--force` is given; replacing the secret makes stored credentials unreadable and invalidates API keys.
 
 ```bash
 simpledeploy init --config /etc/simpledeploy/config.yaml

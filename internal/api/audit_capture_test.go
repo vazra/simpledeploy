@@ -604,7 +604,7 @@ func TestAuditCertUploaded(t *testing.T) {
 
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+	if err := os.WriteFile(composePath, []byte(certAppCompose), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertApp(&store.App{Name: "certapp", Slug: "certapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
@@ -638,6 +638,10 @@ func TestAuditCertUploaded(t *testing.T) {
 	}
 }
 
+// certAppCompose is an app whose endpoint is foo.example.com, the domain the
+// cert tests upload for (certs are only accepted for the app's own endpoints).
+const certAppCompose = "services:\n  web:\n    image: nginx\n    labels:\n      simpledeploy.endpoints.0.domain: foo.example.com\n      simpledeploy.endpoints.0.port: \"80\"\n"
+
 func genTestCertPEM(t *testing.T) (certPEM, keyPEM string) {
 	t.Helper()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -647,6 +651,7 @@ func genTestCertPEM(t *testing.T) (certPEM, keyPEM string) {
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "foo.example.com"},
+		DNSNames:     []string{"foo.example.com", "mine.example.com"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 	}
@@ -708,7 +713,7 @@ func TestCertUploadDeleteForceProxyReload(t *testing.T) {
 
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+	if err := os.WriteFile(composePath, []byte(certAppCompose), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertApp(&store.App{Name: "certapp", Slug: "certapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
@@ -735,7 +740,7 @@ func TestCertReloadFailureMessage(t *testing.T) {
 	srv.SetProxyReloader(&countingReloader{err: errors.New("boom")})
 	dir := t.TempDir()
 	composePath := filepath.Join(dir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0644); err != nil {
+	if err := os.WriteFile(composePath, []byte(certAppCompose), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertApp(&store.App{Name: "certapp", Slug: "certapp", ComposePath: composePath, Status: "running"}, nil); err != nil {
@@ -746,7 +751,7 @@ func TestCertReloadFailureMessage(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodPut, "/api/apps/certapp/certs/foo.example.com",
 		map[string]string{"cert": certPEM, "key": keyPEM}, cookie))
-	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "cert saved but proxy reload failed") {
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "proxy reload failed, so the new cert was not applied") {
 		t.Fatalf("upload: %d %q", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()

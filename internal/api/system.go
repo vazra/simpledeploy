@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -295,14 +296,23 @@ func (s *Server) handleSystemLogsWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	conn.SetReadLimit(wsMaxFrameSize)
 
 	ch := s.logBuf.Subscribe()
 	defer s.logBuf.Unsubscribe(ch)
 
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// Process logs are super_admin-only: stop streaming once the user is
+	// gone, demoted, or their session/API key is revoked.
+	if a := s.newWSAuth(r); a != nil {
+		go watchWSAuth(ctx, conn, func() bool { return s.wsAuthStillValid(a) }, cancel)
+	}
+
 	// Read pump to detect disconnect
-	done := make(chan struct{})
 	go func() {
-		defer close(done)
+		defer cancel()
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -319,7 +329,7 @@ func (s *Server) handleSystemLogsWS(w http.ResponseWriter, r *http.Request) {
 			if err := conn.WriteJSON(entry); err != nil {
 				return
 			}
-		case <-done:
+		case <-ctx.Done():
 			return
 		}
 	}

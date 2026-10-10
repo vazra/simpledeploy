@@ -21,7 +21,8 @@ function createToastStore() {
   return {
     subscribe,
     success: (msg) => add('success', msg),
-    error: (msg) => add('error', msg),
+    // Multi-line errors carry refusal reasons; give people time to read them.
+    error: (msg) => add('error', msg, typeof msg === 'string' && msg.includes('\n') ? 12000 : 4000),
     warning: (msg) => add('warning', msg),
     info: (msg) => add('info', msg),
     remove,

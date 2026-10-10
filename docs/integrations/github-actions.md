@@ -37,17 +37,17 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
           push: true
@@ -56,8 +56,17 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
 
       - name: Install SimpleDeploy CLI
+        env:
+          SD_VERSION: "1.4.2" # x-release-please-version
         run: |
-          curl -fsSL https://get.simpledeploy.io | sh
+          base="https://github.com/vazra/simpledeploy/releases/download/v${SD_VERSION}"
+          file="simpledeploy_${SD_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLO "${base}/${file}"
+          curl -fsSLO "${base}/checksums.txt"
+          # Fails the step unless the tarball matches the release's checksums.txt.
+          grep " ${file}$" checksums.txt | sha256sum -c -
+          tar xzf "$file" simpledeploy
+          sudo install -m 0755 simpledeploy /usr/local/bin/simpledeploy
           simpledeploy version
 
       - name: Configure remote context
@@ -105,6 +114,7 @@ Wire this to a `workflow_dispatch` trigger so you can roll back manually from th
 
 ## Tips
 
-- Pin the CLI version in CI: `curl -fsSL https://get.simpledeploy.io | sh -s -- v1.2.0`.
+- The CLI is pinned to a release with `SD_VERSION`. The step downloads that [release](https://github.com/vazra/simpledeploy/releases)'s `checksums.txt` and checks the tarball against it, so a corrupted or truncated download fails the step (run scripts use `bash -e`). To upgrade, bump `SD_VERSION`; there is no checksum to copy by hand.
+- The example pins every action to a full commit SHA, with the release tag in a trailing comment. Keep that pattern when you add or bump actions; Dependabot and Renovate update the SHA and the comment together.
 - Use environments (Production, Staging) and store separate `SIMPLEDEPLOY_URL` / `SIMPLEDEPLOY_TOKEN` secrets per environment.
 - For matrix deploys to many servers, loop over an array of context names rather than duplicating steps.

@@ -1,6 +1,28 @@
 import { toasts } from './stores/toast.js'
+import { hasMaskedEnv, toEnvPayload } from './env.js'
+import { formatApiError, violationsOf } from './apiErrors.js'
 
 const BASE = '/api'
+
+// Encode a single path segment (slug, id, domain, ...) so user/route-derived
+// values can never inject extra segments, query strings or fragments.
+// "." and ".." are dot-segments even when percent-encoded, so reject them.
+export function seg(v) {
+  const s = String(v)
+  if (s === '.' || s === '..') throw new TypeError(`invalid path segment: ${s}`)
+  return encodeURIComponent(s)
+}
+
+// Parse a non-ok response body into { data, error, violations }.
+async function readErrorResponse(res, fallback) {
+  const text = await res.text()
+  let data = null
+  const ct = res.headers?.get?.('content-type')
+  if (ct && ct.includes('application/json') && text) {
+    try { data = JSON.parse(text) } catch { /* fall back to text */ }
+  }
+  return { data, error: formatApiError(data, text || fallback || `HTTP ${res.status}`), violations: violationsOf(data) }
+}
 
 async function baseRequest(method, path, body, responseMode) {
   const opts = {
@@ -25,19 +47,8 @@ async function baseRequest(method, path, body, responseMode) {
       return { data: null, error: 'Unauthorized' }
     }
     if (!res.ok) {
-      const text = await res.text()
-      let data = null
-      let error = text || `HTTP ${res.status}`
-      const ct = res.headers.get('content-type')
-      if (ct && ct.includes('application/json') && text) {
-        try {
-          data = JSON.parse(text)
-          if (data && typeof data === 'object' && typeof data.error === 'string') {
-            error = data.error
-          }
-        } catch { /* fall back to text */ }
-      }
-      return { data, error, status: res.status }
+      const { data, error, violations } = await readErrorResponse(res)
+      return { data, error, violations, status: res.status }
     }
     let data
     if (responseMode === 'text') {
@@ -95,12 +106,12 @@ export const api = {
 
   // Apps
   listApps: () => request('GET', '/apps'),
-  getApp: (slug) => request('GET', `/apps/${slug}`),
-  removeApp: (slug) => requestWithToast('DELETE', `/apps/${slug}`, null, 'App removed'),
+  getApp: (slug) => request('GET', `/apps/${seg(slug)}`),
+  removeApp: (slug) => requestWithToast('DELETE', `/apps/${seg(slug)}`, null, 'App removed'),
   listArchived: () => request('GET', '/apps/archived'),
-  purgeApp: (slug) => requestWithToast('POST', `/apps/${slug}/purge`, null, 'App purged'),
+  purgeApp: (slug) => requestWithToast('POST', `/apps/${seg(slug)}/purge`, null, 'App purged'),
   deploy: (name, compose, source = 'manual', force = false) => request('POST', '/apps/deploy', { name, compose, source, force }),
-  getCompose: (slug) => requestText('GET', `/apps/${slug}/compose`),
+  getCompose: (slug) => requestText('GET', `/apps/${seg(slug)}/compose`),
   validateCompose: (compose) => request('POST', '/apps/validate-compose', { compose }),
 
   // Community recipes
@@ -108,52 +119,60 @@ export const api = {
   fetchCommunityRecipeFile: (id, file = 'compose') =>
     requestText('GET', `/recipes/community/file?id=${encodeURIComponent(id)}&file=${encodeURIComponent(file)}`),
 
-  restartApp: (slug) => request('POST', `/apps/${slug}/restart`),
-  stopApp: (slug) => requestWithToast('POST', `/apps/${slug}/stop`, null, 'App stopped'),
-  startApp: (slug) => requestWithToast('POST', `/apps/${slug}/start`, null, 'App started'),
-  pullApp: (slug) => request('POST', `/apps/${slug}/pull`),
-  cancelDeploy: (slug) => requestWithToast('POST', `/apps/${slug}/cancel`, null, 'Deploy cancelled'),
-  scaleApp: (slug, scales) => requestWithToast('POST', `/apps/${slug}/scale`, { scales }, 'App scaled'),
-  getAppServices: (slug) => request('GET', `/apps/${slug}/services`),
-  getEnv: (slug) => request('GET', `/apps/${slug}/env`),
-  putEnv: (slug, vars) => requestWithToast('PUT', `/apps/${slug}/env`, vars, 'Environment saved'),
-  getComposeVersions: (slug) => request('GET', `/apps/${slug}/versions`),
-  rollbackApp: (slug, versionId) => requestWithToast('POST', `/apps/${slug}/rollback`, { version_id: versionId }, 'Rolled back'),
-  deleteVersion: (slug, id) => requestWithToast('DELETE', `/apps/${slug}/versions/${id}`, null, 'Version deleted'),
-  getDeployEvents: (slug) => request('GET', `/apps/${slug}/events`),
-  updateDomain: (slug, domain) => requestWithToast('PUT', `/apps/${slug}/domain`, { domain }, 'Domain updated'),
-  updateEndpoints: (slug, endpoints) => requestWithToast('PUT', `/apps/${slug}/endpoints`, endpoints, 'Endpoints updated'),
-  uploadCert: (slug, domain, cert, key) => requestWithToast('PUT', `/apps/${slug}/certs/${encodeURIComponent(domain)}`, { cert, key }, 'Certificate uploaded'),
-  deleteCert: (slug, domain) => requestWithToast('DELETE', `/apps/${slug}/certs/${encodeURIComponent(domain)}`, null, 'Certificate removed'),
-  updateAccess: (slug, allow) => requestWithToast('PUT', `/apps/${slug}/access`, { allow }, 'IP allowlist updated'),
+  restartApp: (slug) => request('POST', `/apps/${seg(slug)}/restart`),
+  stopApp: (slug) => requestWithToast('POST', `/apps/${seg(slug)}/stop`, null, 'App stopped'),
+  startApp: (slug) => requestWithToast('POST', `/apps/${seg(slug)}/start`, null, 'App started'),
+  pullApp: (slug) => request('POST', `/apps/${seg(slug)}/pull`),
+  cancelDeploy: (slug) => requestWithToast('POST', `/apps/${seg(slug)}/cancel`, null, 'Deploy cancelled'),
+  scaleApp: (slug, scales) => requestWithToast('POST', `/apps/${seg(slug)}/scale`, { scales }, 'App scaled'),
+  getAppServices: (slug) => request('GET', `/apps/${seg(slug)}/services`),
+  getEnv: (slug) => request('GET', `/apps/${seg(slug)}/env`),
+  putEnv: async (slug, vars) => {
+    // PUT replaces the whole .env; a masked (viewer) entry would wipe the secret.
+    if (hasMaskedEnv(vars)) {
+      const error = 'Hidden values cannot be saved'
+      toasts.error(error)
+      return { data: null, error }
+    }
+    return requestWithToast('PUT', `/apps/${seg(slug)}/env`, toEnvPayload(vars), 'Environment saved')
+  },
+  getComposeVersions: (slug) => request('GET', `/apps/${seg(slug)}/versions`),
+  rollbackApp: (slug, versionId) => requestWithToast('POST', `/apps/${seg(slug)}/rollback`, { version_id: versionId }, 'Rolled back'),
+  deleteVersion: (slug, id) => requestWithToast('DELETE', `/apps/${seg(slug)}/versions/${seg(id)}`, null, 'Version deleted'),
+  getDeployEvents: (slug) => request('GET', `/apps/${seg(slug)}/events`),
+  updateDomain: (slug, domain) => requestWithToast('PUT', `/apps/${seg(slug)}/domain`, { domain }, 'Domain updated'),
+  updateEndpoints: (slug, endpoints) => requestWithToast('PUT', `/apps/${seg(slug)}/endpoints`, endpoints, 'Endpoints updated'),
+  uploadCert: (slug, domain, cert, key) => requestWithToast('PUT', `/apps/${seg(slug)}/certs/${seg(domain)}`, { cert, key }, 'Certificate uploaded'),
+  deleteCert: (slug, domain) => requestWithToast('DELETE', `/apps/${seg(slug)}/certs/${seg(domain)}`, null, 'Certificate removed'),
+  updateAccess: (slug, allow) => requestWithToast('PUT', `/apps/${seg(slug)}/access`, { allow }, 'IP allowlist updated'),
 
   // Metrics
-  systemMetrics: (range) => request('GET', `/metrics/system?range=${range || '1h'}`),
-  appMetrics: (slug, range) => request('GET', `/apps/${slug}/metrics?range=${range || '1h'}`),
-  appRequests: (slug, range) => request('GET', `/apps/${slug}/requests?range=${range || '1h'}`),
+  systemMetrics: (range) => request('GET', `/metrics/system?range=${encodeURIComponent(range || '1h')}`),
+  appMetrics: (slug, range) => request('GET', `/apps/${seg(slug)}/metrics?range=${encodeURIComponent(range || '1h')}`),
+  appRequests: (slug, range) => request('GET', `/apps/${seg(slug)}/requests?range=${encodeURIComponent(range || '1h')}`),
 
   // Backup configs
-  listBackupConfigs: (slug) => request('GET', `/apps/${slug}/backups/configs`),
-  createBackupConfig: (slug, cfg) => requestWithToast('POST', `/apps/${slug}/backups/configs`, cfg, 'Backup config created'),
-  updateBackupConfig: (id, cfg) => requestWithToast('PUT', `/backups/configs/${id}`, cfg, 'Backup config updated'),
-  deleteBackupConfig: (id) => requestWithToast('DELETE', `/backups/configs/${id}`, null, 'Backup config deleted'),
+  listBackupConfigs: (slug) => request('GET', `/apps/${seg(slug)}/backups/configs`),
+  createBackupConfig: (slug, cfg) => requestWithToast('POST', `/apps/${seg(slug)}/backups/configs`, cfg, 'Backup config created'),
+  updateBackupConfig: (id, cfg) => requestWithToast('PUT', `/backups/configs/${seg(id)}`, cfg, 'Backup config updated'),
+  deleteBackupConfig: (id) => requestWithToast('DELETE', `/backups/configs/${seg(id)}`, null, 'Backup config deleted'),
 
   // Backup runs
-  listBackupRuns: (slug) => request('GET', `/apps/${slug}/backups/runs`),
-  triggerBackup: (slug) => requestWithToast('POST', `/apps/${slug}/backups/run`, null, 'Backup triggered'),
-  triggerBackupConfig: (id) => requestWithToast('POST', `/backups/configs/${id}/run`, null, 'Backup triggered'),
-  restore: (id) => requestWithToast('POST', `/backups/restore/${id}`, null, 'Restore started'),
-  downloadBackupUrl: (id) => `${BASE}/backups/runs/${id}/download`,
+  listBackupRuns: (slug) => request('GET', `/apps/${seg(slug)}/backups/runs`),
+  triggerBackup: (slug) => requestWithToast('POST', `/apps/${seg(slug)}/backups/run`, null, 'Backup triggered'),
+  triggerBackupConfig: (id) => requestWithToast('POST', `/backups/configs/${seg(id)}/run`, null, 'Backup triggered'),
+  restore: (id) => requestWithToast('POST', `/backups/restore/${seg(id)}`, null, 'Restore started'),
+  downloadBackupUrl: (id) => `${BASE}/backups/runs/${seg(id)}/download`,
   uploadRestore: async (slug, formData) => {
     try {
-      const res = await fetch(`${BASE}/apps/${slug}/backups/upload-restore`, {
+      const res = await fetch(`${BASE}/apps/${seg(slug)}/backups/upload-restore`, {
         method: 'POST',
         body: formData,
         credentials: 'include',
       });
       if (!res.ok) {
-        const text = await res.text();
-        return { data: null, error: text || 'Upload failed' };
+        const { error, violations } = await readErrorResponse(res, 'Upload failed');
+        return { data: null, error, violations, status: res.status };
       }
       return { data: true, error: null };
     } catch (err) {
@@ -163,40 +182,40 @@ export const api = {
 
   // Backup dashboard & detection
   backupSummary: () => request('GET', '/backups/summary'),
-  detectStrategies: (slug) => request('GET', `/apps/${slug}/backups/detect`),
+  detectStrategies: (slug) => request('GET', `/apps/${seg(slug)}/backups/detect`),
   testS3: (cfg) => request('POST', '/backups/test-s3', cfg),
 
   // Compose versions
-  updateComposeVersion: (slug, id, data) => requestWithToast('PUT', `/apps/${slug}/versions/${id}`, data, 'Version updated'),
-  downloadComposeVersionUrl: (slug, id) => `${BASE}/apps/${slug}/versions/${id}/download`,
-  restoreComposeVersion: (slug, id) => requestWithToast('POST', `/apps/${slug}/versions/${id}/restore`, null, 'Restoring version'),
+  updateComposeVersion: (slug, id, data) => requestWithToast('PUT', `/apps/${seg(slug)}/versions/${seg(id)}`, data, 'Version updated'),
+  downloadComposeVersionUrl: (slug, id) => `${BASE}/apps/${seg(slug)}/versions/${seg(id)}/download`,
+  restoreComposeVersion: (slug, id) => requestWithToast('POST', `/apps/${seg(slug)}/versions/${seg(id)}/restore`, null, 'Restoring version'),
 
   // Webhooks
   listWebhooks: () => request('GET', '/webhooks'),
   createWebhook: (w) => requestWithToast('POST', '/webhooks', w, 'Webhook created'),
-  updateWebhook: (id, w) => requestWithToast('PUT', `/webhooks/${id}`, w, 'Webhook updated'),
-  deleteWebhook: (id) => requestWithToast('DELETE', `/webhooks/${id}`, null, 'Webhook deleted'),
+  updateWebhook: (id, w) => requestWithToast('PUT', `/webhooks/${seg(id)}`, w, 'Webhook updated'),
+  deleteWebhook: (id) => requestWithToast('DELETE', `/webhooks/${seg(id)}`, null, 'Webhook deleted'),
   testWebhook: (data) => requestWithToast('POST', '/webhooks/test', data, 'Test sent successfully'),
 
   // Alerts
   listAlertRules: () => request('GET', '/alerts/rules'),
   createAlertRule: (r) => requestWithToast('POST', '/alerts/rules', r, 'Alert rule created'),
-  updateAlertRule: (id, r) => requestWithToast('PUT', `/alerts/rules/${id}`, r, 'Alert rule updated'),
-  deleteAlertRule: (id) => requestWithToast('DELETE', `/alerts/rules/${id}`, null, 'Alert rule deleted'),
+  updateAlertRule: (id, r) => requestWithToast('PUT', `/alerts/rules/${seg(id)}`, r, 'Alert rule updated'),
+  deleteAlertRule: (id) => requestWithToast('DELETE', `/alerts/rules/${seg(id)}`, null, 'Alert rule deleted'),
   alertHistory: () => request('GET', '/alerts/history'),
-  clearAlertHistory: (mode) => requestWithToast('DELETE', `/alerts/history?mode=${mode}`, null, 'Alert history cleared'),
+  clearAlertHistory: (mode) => requestWithToast('DELETE', `/alerts/history?mode=${encodeURIComponent(mode)}`, null, 'Alert history cleared'),
 
   // Users
   listUsers: () => request('GET', '/users'),
   createUser: (u) => requestWithToast('POST', '/users', u, 'User created'),
-  updateUser: (id, u) => requestWithToast('PUT', `/users/${id}`, u, 'User updated'),
-  deleteUser: (id) => requestWithToast('DELETE', `/users/${id}`, null, 'User deleted'),
-  listUserAccess: (id) => request('GET', `/users/${id}/access`),
-  grantUserAccess: (id, slug) => requestWithToast('POST', `/users/${id}/access`, { app_slug: slug }, 'Access granted'),
-  revokeUserAccess: (id, slug) => requestWithToast('DELETE', `/users/${id}/access/${encodeURIComponent(slug)}`, null, 'Access revoked'),
+  updateUser: (id, u) => requestWithToast('PUT', `/users/${seg(id)}`, u, 'User updated'),
+  deleteUser: (id) => requestWithToast('DELETE', `/users/${seg(id)}`, null, 'User deleted'),
+  listUserAccess: (id) => request('GET', `/users/${seg(id)}/access`),
+  grantUserAccess: (id, slug) => requestWithToast('POST', `/users/${seg(id)}/access`, { app_slug: slug }, 'Access granted'),
+  revokeUserAccess: (id, slug) => requestWithToast('DELETE', `/users/${seg(id)}/access/${seg(slug)}`, null, 'Access revoked'),
   listAPIKeys: () => request('GET', '/apikeys'),
   createAPIKey: (name) => requestWithToast('POST', '/apikeys', { name }, 'API key created'),
-  deleteAPIKey: (id) => requestWithToast('DELETE', `/apikeys/${id}`, null, 'API key revoked'),
+  deleteAPIKey: (id) => requestWithToast('DELETE', `/apikeys/${seg(id)}`, null, 'API key revoked'),
 
   // Profile
   getProfile: () => request('GET', '/me'),
@@ -206,18 +225,18 @@ export const api = {
   // Registries
   listRegistries: () => request('GET', '/registries'),
   createRegistry: (r) => requestWithToast('POST', '/registries', r, 'Registry added'),
-  updateRegistry: (id, r) => requestWithToast('PUT', `/registries/${id}`, r, 'Registry updated'),
-  deleteRegistry: (id) => requestWithToast('DELETE', `/registries/${id}`, null, 'Registry removed'),
+  updateRegistry: (id, r) => requestWithToast('PUT', `/registries/${seg(id)}`, r, 'Registry updated'),
+  deleteRegistry: (id) => requestWithToast('DELETE', `/registries/${seg(id)}`, null, 'Registry removed'),
 
   // Docker
   dockerInfo: () => request('GET', '/docker/info'),
   dockerDiskUsage: () => request('GET', '/docker/disk-usage'),
   dockerImages: () => request('GET', '/docker/images'),
-  dockerRemoveImage: (id) => requestWithToast('DELETE', `/docker/images/${encodeURIComponent(id)}`, null, 'Image removed'),
+  dockerRemoveImage: (id) => requestWithToast('DELETE', `/docker/images/${seg(id)}`, null, 'Image removed'),
   dockerNetworks: () => request('GET', '/docker/networks'),
   dockerVolumes: () => request('GET', '/docker/volumes'),
-  dockerRemoveNetwork: (id) => requestWithToast('DELETE', `/docker/networks/${encodeURIComponent(id)}`, null, 'Network removed'),
-  dockerRemoveVolume: (name) => requestWithToast('DELETE', `/docker/volumes/${encodeURIComponent(name)}`, null, 'Volume removed'),
+  dockerRemoveNetwork: (id) => requestWithToast('DELETE', `/docker/networks/${seg(id)}`, null, 'Network removed'),
+  dockerRemoveVolume: (name) => requestWithToast('DELETE', `/docker/volumes/${seg(name)}`, null, 'Volume removed'),
   dockerPruneContainers: () => request('POST', '/docker/prune/containers'),
   dockerPruneImages: () => request('POST', '/docker/prune/images'),
   dockerPruneVolumes: () => request('POST', '/docker/prune/volumes'),
@@ -227,7 +246,7 @@ export const api = {
   // WebSocket
   deployLogsWs: (slug) => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return new WebSocket(`${proto}//${window.location.host}/api/apps/${slug}/deploy-logs`)
+    return new WebSocket(`${proto}//${window.location.host}/api/apps/${seg(slug)}/deploy-logs`)
   },
   systemLogsWs: () => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -240,7 +259,7 @@ export const api = {
   systemPruneMetrics: (days, tier) => request('POST', '/system/prune/metrics', { days, tier }),
   systemPruneRequestStats: (days, tier) => request('POST', '/system/prune/request-stats', { days, tier }),
   systemVacuum: () => request('POST', '/system/vacuum'),
-  systemLogs: (limit = 500) => request('GET', `/system/process-logs?limit=${limit}`),
+  systemLogs: (limit = 500) => request('GET', `/system/process-logs?limit=${encodeURIComponent(limit)}`),
   systemBackupDownload: (compact = false) => {
     const url = `/api/system/backup/download?compact=${compact}`
     return fetch(url, { method: 'POST', credentials: 'include' }).then(res => {
@@ -273,10 +292,10 @@ export const api = {
     if (categories.length) params.set('categories', categories.join(','))
     if (before) params.set('before', before)
     params.set('limit', limit)
-    return request('GET', `/apps/${slug}/activity?${params}`)
+    return request('GET', `/apps/${seg(slug)}/activity?${params}`)
   },
-  listRecentActivity: (limit = 8) => request('GET', `/activity/recent?limit=${limit}`),
-  getActivity: (id) => request('GET', `/activity/${id}`),
+  listRecentActivity: (limit = 8) => request('GET', `/activity/recent?limit=${encodeURIComponent(limit)}`),
+  getActivity: (id) => request('GET', `/activity/${seg(id)}`),
   getAuditConfig: () => request('GET', '/system/audit-config'),
   putAuditConfig: (body) => request('PUT', '/system/audit-config', body),
   purgeActivity: () => request('DELETE', '/activity'),
@@ -292,7 +311,7 @@ export const api = {
   // App export/import
   exportApp: async (slug) => {
     try {
-      const res = await fetch(`${BASE}/apps/${slug}/export`, { credentials: 'include' })
+      const res = await fetch(`${BASE}/apps/${seg(slug)}/export`, { credentials: 'include' })
       if (res.status === 401) {
         if (!window.location.hash.includes('login')) window.location.hash = '#/login'
         return { data: null, error: 'Unauthorized' }
@@ -321,15 +340,15 @@ export const api = {
         if (!window.location.hash.includes('login')) window.location.hash = '#/login'
         return { data: null, error: 'Unauthorized' }
       }
+      if (!res.ok) {
+        const { data, error, violations } = await readErrorResponse(res)
+        return { data, error, violations, status: res.status }
+      }
       const text = await res.text()
       let data = null
       const ct = res.headers.get('content-type')
       if (ct && ct.includes('application/json') && text) {
         try { data = JSON.parse(text) } catch { /* ignore */ }
-      }
-      if (!res.ok) {
-        const errMsg = (data && typeof data.error === 'string') ? data.error : (text || `HTTP ${res.status}`)
-        return { data, error: errMsg, status: res.status }
       }
       return { data, error: null, status: res.status }
     } catch (err) {
@@ -351,15 +370,15 @@ export const api = {
         if (!window.location.hash.includes('login')) window.location.hash = '#/login'
         return { data: null, error: 'Unauthorized' }
       }
+      if (!res.ok) {
+        const { data, error, violations } = await readErrorResponse(res)
+        return { data, error, violations, status: res.status }
+      }
       const text = await res.text()
       let data = null
       const ct = res.headers.get('content-type')
       if (ct && ct.includes('application/json') && text) {
         try { data = JSON.parse(text) } catch { /* ignore */ }
-      }
-      if (!res.ok) {
-        const errMsg = (data && typeof data.error === 'string') ? data.error : (text || `HTTP ${res.status}`)
-        return { data, error: errMsg, status: res.status }
       }
       return { data, error: null, status: res.status }
     } catch (err) {

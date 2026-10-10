@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
-	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,6 +24,7 @@ import (
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/events"
+	"github.com/vazra/simpledeploy/internal/fsutil"
 	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/store"
@@ -59,15 +62,36 @@ type Reconciler struct {
 	bus          *events.Bus            // nil-safe
 }
 
+// scanResult is one pass over the apps directory.
+type scanResult struct {
+	desired map[string]*compose.AppConfig
+	// refused holds apps rejected on compose security rules or for a
+	// symlinked compose file; file-reference refusals hold a route-only
+	// parse (compose.ParseForRoutes). An app deployed before the rules
+	// tightened keeps its routes while its compose file is unchanged (see
+	// withRouteOnlyApps); it cannot be redeployed until the file is fixed.
+	refused map[string]*compose.AppConfig
+}
+
 // SetEventBus wires the realtime events bus for status flips. Nil-safe.
 func (r *Reconciler) SetEventBus(b *events.Bus) { r.bus = b }
 
 // New creates a Reconciler. syncer may be nil (disables configsync recovery).
+// It also registers data_dir and apps_dir with the compose validator so no
+// app can bind-mount SimpleDeploy's own data or another app's folder.
 func New(st *store.Store, d AppDeployer, p proxy.Proxy, appsDir string, cfg *config.Config, syncer *configsync.Syncer) *Reconciler {
 	secret := ""
+	dataDir := ""
 	if cfg != nil {
 		secret = cfg.MasterSecret
+		dataDir = cfg.DataDir
 	}
+	compose.SetProtectedPaths(dataDir, appsDir)
+	var allowed []string
+	if cfg != nil {
+		allowed = cfg.AllowedBindPaths
+	}
+	compose.SetAllowedHostPaths(allowed)
 	return &Reconciler{store: st, deployer: d, proxy: p, appsDir: appsDir, config: cfg, masterSecret: secret, syncer: syncer}
 }
 
@@ -96,10 +120,11 @@ func (r *Reconciler) SubscribeDeployLog(slug string) (<-chan deployer.OutputLine
 
 // Reconcile diffs the apps directory against the store and deploys/removes as needed.
 func (r *Reconciler) Reconcile(ctx context.Context) error {
-	desired, err := r.scanAppsDir()
+	scan, err := r.scanAppsDir()
 	if err != nil {
 		return fmt.Errorf("scan apps dir: %w", err)
 	}
+	desired := scan.desired
 
 	current, err := r.store.ListApps()
 	if err != nil {
@@ -168,12 +193,16 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			continue // already archived; do nothing
 		}
 		if _, exists := desired[a.Slug]; !exists {
+			if _, refused := scan.refused[a.Slug]; refused {
+				// Still on disk; the scan already logged why it is refused.
+				continue
+			}
 			// Re-stat the compose path before archiving to absorb transient
-			// FS hiccups (slow NFS, watcher firing mid-rename, etc.). If the
-			// file reappeared between scanAppsDir and now, skip archive.
+			// FS hiccups (slow NFS, watcher firing mid-rename, etc.) and
+			// files that failed to parse. If the file exists now, skip archive.
 			composePath := filepath.Join(r.appsDir, a.Slug, "docker-compose.yml")
 			if _, statErr := os.Stat(composePath); statErr == nil {
-				log.Printf("[reconciler] skipping archive of %s: dir reappeared between scan and decision", a.Slug)
+				log.Printf("[reconciler] skipping archive of %s: docker-compose.yml exists but was not loaded", a.Slug)
 				continue
 			}
 			if err := r.archiveApp(ctx, a.Slug); err != nil {
@@ -183,7 +212,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 
 	if r.proxy != nil {
-		r.updateProxyRoutes(desired)
+		r.updateProxyRoutes(desired, scan.refused)
 	}
 
 	return nil
@@ -194,11 +223,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 // changes where only routing needs to change. Also updates the stored
 // compose hash so a subsequent Reconcile doesn't falsely redeploy.
 func (r *Reconciler) RefreshRoutes(ctx context.Context) error {
-	desired, err := r.scanAppsDir()
+	scan, err := r.scanAppsDir()
 	if err != nil {
 		return fmt.Errorf("scan apps dir: %w", err)
 	}
-	for slug, cfg := range desired {
+	for slug, cfg := range scan.desired {
 		hash, hashErr := hashFile(cfg.ComposePath)
 		if hashErr != nil || hash == "" {
 			continue
@@ -214,12 +243,16 @@ func (r *Reconciler) RefreshRoutes(ctx context.Context) error {
 		}
 	}
 	if r.proxy != nil {
-		r.updateProxyRoutes(desired)
+		r.updateProxyRoutes(scan.desired, scan.refused)
 	}
 	return nil
 }
 
-func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
+// updateProxyRoutes routes desired plus the refused apps withRouteOnlyApps
+// keeps. desired and refused must come from the same scan.
+func (r *Reconciler) updateProxyRoutes(desired, refused map[string]*compose.AppConfig) {
+	apps := r.withRouteOnlyApps(desired, refused)
+	ids := r.appIDs()
 	// Iterate apps in slug order so route order (and the generated Caddy
 	// config) is deterministic across reloads.
 	slugs := make([]string, 0, len(apps))
@@ -234,6 +267,15 @@ func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
 		if err != nil {
 			continue
 		}
+		// The proxy gives a shared domain to the lowest AppID. Apps not in
+		// the store yet sort last so existing apps keep their domains.
+		id, ok := ids[slug]
+		if !ok {
+			id = math.MaxInt64
+		}
+		for i := range appRoutes {
+			appRoutes[i].AppID = id
+		}
 		routes = append(routes, appRoutes...)
 	}
 	if err := r.proxy.SetRoutes(routes); err != nil {
@@ -241,11 +283,28 @@ func (r *Reconciler) updateProxyRoutes(apps map[string]*compose.AppConfig) {
 	}
 }
 
+// appIDs maps app slugs to store IDs. Empty when the store is unavailable.
+func (r *Reconciler) appIDs() map[string]int64 {
+	ids := map[string]int64{}
+	if r.store == nil {
+		return ids
+	}
+	apps, err := r.store.ListApps()
+	if err != nil {
+		log.Printf("[reconciler] list apps for route ownership: %v", err)
+		return ids
+	}
+	for _, a := range apps {
+		ids[a.Slug] = a.ID
+	}
+	return ids
+}
+
 // ensureSharedNetwork rewrites the compose file at path atomically if the
 // shared-network declaration is missing. Idempotent and nil-safe on errors
 // (logs and continues). Returns true iff the file was rewritten.
 func ensureSharedNetwork(path string) bool {
-	content, err := os.ReadFile(path)
+	content, err := fsutil.ReadRegularFile(path)
 	if err != nil {
 		return false
 	}
@@ -257,14 +316,8 @@ func ensureSharedNetwork(path string) bool {
 	if !changed {
 		return false
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		log.Printf("[reconciler] write %s: %v", tmp, err)
-		return false
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		log.Printf("[reconciler] rename %s -> %s: %v", tmp, path, err)
-		_ = os.Remove(tmp)
+	if err := fsutil.WriteFileAtomic(path, out, 0o600); err != nil {
+		log.Printf("[reconciler] write %s: %v", path, err)
 		return false
 	}
 	log.Printf("[reconciler] injected shared network into %s", path)
@@ -517,10 +570,20 @@ func (r *Reconciler) IsDeploying(slug string) bool {
 	return false
 }
 
+// ErrVersionNotFound is returned by RollbackOne when the version does not
+// exist or belongs to a different app.
+var ErrVersionNotFound = errors.New("version not found for this app")
+
 func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int64) error {
-	ver, err := r.store.GetComposeVersion(versionID)
+	app, err := r.store.GetAppBySlug(slug)
 	if err != nil {
-		return fmt.Errorf("get version: %w", err)
+		return fmt.Errorf("get app: %w", err)
+	}
+	ver, err := r.store.GetComposeVersion(versionID)
+	if err != nil || ver.AppID != app.ID {
+		// A version ID from another app must never be written into this
+		// app's folder.
+		return ErrVersionNotFound
 	}
 
 	composePath := filepath.Join(r.appsDir, slug, "docker-compose.yml")
@@ -531,7 +594,22 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 	if os.Getenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK") != "true" {
 		composeData = mirror.RewritePortsLoopback(composeData)
 	}
-	if err := os.WriteFile(composePath, composeData, 0o600); err != nil {
+
+	// Check the old version against today's rules before it replaces the
+	// current file, so a refused rollback leaves the app as it was.
+	dotEnv, err := compose.ReadDotEnv(filepath.Dir(composePath))
+	if err != nil {
+		return err
+	}
+	pre, err := compose.ParseContent(composeData, composePath, slug, dotEnv)
+	if err != nil {
+		return fmt.Errorf("parse compose: %w", err)
+	}
+	if v := compose.ValidateComposeSecurity(pre); len(v) > 0 {
+		return &compose.ViolationError{Violations: v}
+	}
+
+	if err := fsutil.WriteFileAtomic(composePath, composeData, 0o600); err != nil {
 		return fmt.Errorf("write compose: %w", err)
 	}
 
@@ -570,11 +648,17 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 			}
 		}
 	}
-	hash, hashErr := hashFile(cfg.ComposePath)
-	if hashErr != nil {
-		log.Printf("[reconciler] hash %s rollback: %v", cfg.ComposePath, hashErr)
+	// A refused file never ran: keep the stored hash so it cannot qualify
+	// for route-only retention (see withRouteOnlyApps).
+	hash := app.ComposeHash
+	if !refusedByDeployer(result.Err) {
+		var hashErr error
+		hash, hashErr = hashFile(cfg.ComposePath)
+		if hashErr != nil {
+			log.Printf("[reconciler] hash %s rollback: %v", cfg.ComposePath, hashErr)
+		}
 	}
-	app := &store.App{
+	app = &store.App{
 		Name:        slug,
 		Slug:        slug,
 		ComposePath: cfg.ComposePath,
@@ -615,13 +699,14 @@ func (r *Reconciler) loadAppConfig(slug string) (*compose.AppConfig, error) {
 
 // scanAppsDir reads subdirectories and parses each docker-compose.yml.
 // Hidden directories (starting with ".") are skipped.
-func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
+func (r *Reconciler) scanAppsDir() (scanResult, error) {
 	entries, err := os.ReadDir(r.appsDir)
 	if err != nil {
-		return nil, fmt.Errorf("read dir: %w", err)
+		return scanResult{}, fmt.Errorf("read dir: %w", err)
 	}
 
 	result := make(map[string]*compose.AppConfig)
+	refused := make(map[string]*compose.AppConfig)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -641,6 +726,34 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 		ensureSharedNetwork(composePath)
 
 		cfg, err := compose.ParseFile(composePath, name)
+		// ErrDotEnv first: a symlinked .env also matches ErrNotRegular.
+		if errors.Is(err, compose.ErrDotEnv) {
+			// docker compose cannot use this .env either, and the deployer
+			// re-parses strictly before every `up`, so nothing new can start
+			// from it. Keep routing the running app from the compose file
+			// alone instead of dropping it.
+			log.Printf("[reconciler] WARNING: %s: %v (app kept; fix .env before the next deploy)", name, err)
+			cfg, err = parseNoDotEnv(composePath, name, false)
+		} else if errors.Is(err, fsutil.ErrNotRegular) {
+			// A symlinked compose file is never deployed, but an app that was
+			// running from one before keeps its routes while unchanged.
+			if linked, lerr := parseNoDotEnv(composePath, name, true); lerr == nil {
+				log.Printf("[reconciler] SECURITY: skipping %s: docker-compose.yml is a symlink; replace it with a regular file", name)
+				refused[name] = linked
+				continue
+			}
+		}
+		var ve *compose.ViolationError
+		if errors.As(err, &ve) {
+			// include, label_file or extends outside the app folder: never
+			// deployed, but a running app keeps its routes while the file
+			// is unchanged (see withRouteOnlyApps).
+			log.Printf("[reconciler] SECURITY: skipping %s: %v", name, ve.Violations)
+			if routes, rerr := compose.ParseForRoutes(composePath, name); rerr == nil {
+				refused[name] = routes
+				continue
+			}
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reconciler: parse %s: %v\n", name, err)
 			continue
@@ -652,6 +765,7 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 		if violations := compose.ValidateComposeSecurity(cfg); len(violations) > 0 {
 			fmt.Fprintf(os.Stderr, "reconciler: refuse %s: compose security: %v\n", name, violations)
 			log.Printf("[reconciler] SECURITY: skipping %s: %v", name, violations)
+			refused[name] = cfg
 			continue
 		}
 		// Endpoint label problems (collisions, conflicting tls) are rejected
@@ -663,7 +777,65 @@ func (r *Reconciler) scanAppsDir() (map[string]*compose.AppConfig, error) {
 		}
 		result[name] = cfg
 	}
-	return result, nil
+	return scanResult{desired: result, refused: refused}, nil
+}
+
+// withRouteOnlyApps returns apps plus refused apps that are still running
+// from an unchanged, previously deployed compose file (same hash as the
+// last successful deploy). Upgrading to stricter validation then keeps
+// existing apps reachable instead of silently dropping their routes; a
+// changed file never qualifies, so new content is never routed unchecked.
+func (r *Reconciler) withRouteOnlyApps(apps, refused map[string]*compose.AppConfig) map[string]*compose.AppConfig {
+	if len(refused) == 0 || r.store == nil {
+		return apps
+	}
+	merged := make(map[string]*compose.AppConfig, len(apps)+len(refused))
+	for slug, cfg := range apps {
+		merged[slug] = cfg
+	}
+	for slug, cfg := range refused {
+		if _, ok := merged[slug]; ok {
+			continue
+		}
+		existing, err := r.store.GetAppBySlug(slug)
+		if err != nil || existing == nil || existing.ArchivedAt.Valid || existing.ComposeHash == "" {
+			continue
+		}
+		hash, err := hashFile(cfg.ComposePath)
+		if errors.Is(err, fsutil.ErrNotRegular) {
+			// Older versions hashed symlinked compose files through the link.
+			hash, err = hashLinkedFile(cfg.ComposePath)
+		}
+		if err != nil || hash != existing.ComposeHash {
+			continue
+		}
+		log.Printf("[reconciler] WARNING: %s: keeping routes for the running app; fix its compose file before the next deploy", slug)
+		merged[slug] = cfg
+	}
+	return merged
+}
+
+// parseNoDotEnv parses the compose file ignoring the app's .env.
+// followLink reads a symlinked compose file through the link; that is only
+// used to keep routes for an app already running from one, such files are
+// never deployed.
+func parseNoDotEnv(composePath, name string, followLink bool) (*compose.AppConfig, error) {
+	read := fsutil.ReadRegularFile
+	if followLink {
+		read = os.ReadFile
+	}
+	content, err := read(composePath)
+	if err != nil {
+		return nil, err
+	}
+	return compose.ParseContent(content, composePath, name, nil)
+}
+
+// refusedByDeployer reports whether err means the deployer refused the
+// compose file (security rules or an unusable .env) before running it.
+func refusedByDeployer(err error) bool {
+	var ve *compose.ViolationError
+	return errors.As(err, &ve) || errors.Is(err, compose.ErrDotEnv)
 }
 
 // deployApp calls deployer.Deploy then upserts the app in the store with labels.
@@ -692,9 +864,21 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		}
 	}
 
-	hash, hashErr := hashFile(cfg.ComposePath)
-	if hashErr != nil {
-		log.Printf("[reconciler] hash %s: %v", cfg.ComposePath, hashErr)
+	// A refused file never ran: keep the stored hash and skip the compose
+	// version so it cannot qualify for route-only retention (see
+	// withRouteOnlyApps).
+	refused := refusedByDeployer(result.Err)
+	var hash string
+	if refused {
+		if existing, err := r.store.GetAppBySlug(slug); err == nil {
+			hash = existing.ComposeHash
+		}
+	} else {
+		var hashErr error
+		hash, hashErr = hashFile(cfg.ComposePath)
+		if hashErr != nil {
+			log.Printf("[reconciler] hash %s: %v", cfg.ComposePath, hashErr)
+		}
 	}
 	status := "running"
 	action := "deploy"
@@ -727,9 +911,11 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 		}
 	}
 
-	content, _ := os.ReadFile(cfg.ComposePath)
-	if len(content) > 0 {
-		r.store.CreateComposeVersion(app.ID, string(content), hash)
+	if !refused {
+		content, _ := fsutil.ReadRegularFile(cfg.ComposePath)
+		if len(content) > 0 {
+			r.store.CreateComposeVersion(app.ID, string(content), hash)
+		}
 	}
 	r.store.CreateDeployEvent(slug, action, nil, result.Output)
 
@@ -742,12 +928,12 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	// next Reconcile and prevent legitimate redeploys).
 	if result.Err == nil && r.proxy != nil {
 		go func() {
-			desired, err := r.scanAppsDir()
+			scan, err := r.scanAppsDir()
 			if err != nil {
 				log.Printf("[reconciler] post-deploy route refresh scan for %s: %v", slug, err)
 				return
 			}
-			r.updateProxyRoutes(desired)
+			r.updateProxyRoutes(scan.desired, scan.refused)
 		}()
 	}
 
@@ -757,8 +943,19 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	return nil
 }
 
-func hashFile(path string) (string, error) {
+// hashLinkedFile hashes path through a symlink, matching how older versions
+// recorded ComposeHash. Only used for the route-only check.
+func hashLinkedFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:]), nil
+}
+
+func hashFile(path string) (string, error) {
+	data, err := fsutil.ReadRegularFile(path)
 	if err != nil {
 		return "", err
 	}

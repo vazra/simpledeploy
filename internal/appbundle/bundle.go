@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/vazra/simpledeploy/internal/fsutil"
 )
 
 // SchemaVersion is the current bundle schema version.
@@ -53,20 +55,20 @@ type Bundle struct {
 // Build reads files from appDir and produces a ZIP byte slice.
 func Build(appDir, slug, displayName, version string) ([]byte, error) {
 	composePath := filepath.Join(appDir, fileCompose)
-	composeBytes, err := os.ReadFile(composePath)
+	composeBytes, err := fsutil.ReadRegularFile(composePath)
 	if err != nil {
 		return nil, fmt.Errorf("read docker-compose.yml: %w", err)
 	}
 
 	var sidecarBytes []byte
-	if b, err := os.ReadFile(filepath.Join(appDir, fileSidecar)); err == nil {
+	if b, err := fsutil.ReadRegularFile(filepath.Join(appDir, fileSidecar)); err == nil {
 		sidecarBytes = b
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read simpledeploy.yml: %w", err)
 	}
 
 	var envExample []byte
-	if b, err := os.ReadFile(filepath.Join(appDir, fileEnvSource)); err == nil {
+	if b, err := fsutil.ReadRegularFile(filepath.Join(appDir, fileEnvSource)); err == nil {
 		envExample = redactEnv(b)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read .env: %w", err)
@@ -187,13 +189,24 @@ func Parse(zipBytes []byte) (*Bundle, error) {
 	return b, nil
 }
 
+// maxZipEntryBytes caps the decompressed size of a single bundle entry so a
+// small, highly compressed upload cannot expand without bound in memory.
+const maxZipEntryBytes = 10 << 20
+
 func readZipFile(f *zip.File) ([]byte, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(rc)
+	data, err := io.ReadAll(io.LimitReader(rc, maxZipEntryBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxZipEntryBytes {
+		return nil, fmt.Errorf("%s exceeds %d bytes", f.Name, maxZipEntryBytes)
+	}
+	return data, nil
 }
 
 // redactEnv strips values from KEY=VALUE lines while preserving comments,

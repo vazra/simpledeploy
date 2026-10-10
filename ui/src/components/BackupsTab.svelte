@@ -432,14 +432,15 @@
           </select>
         </div>
         <div>
-          <label class="block text-xs font-medium text-text-secondary mb-1">Container (optional)</label>
+          <label for="upload-restore-service" class="block text-xs font-medium text-text-secondary mb-1">Service name (optional)</label>
           <input
+            id="upload-restore-service"
             type="text"
             class="w-full bg-input-bg border border-border/50 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
-            placeholder="e.g. postgres"
+            placeholder="e.g. db"
             bind:value={uploadContainer}
           />
-          <p class="text-xs text-text-muted mt-1">Name of the service to restore into</p>
+          <p class="text-xs text-text-muted mt-1" data-testid="upload-restore-service-hint">The service to restore into, as named in your compose file. Leave empty if this app runs a single container; apps with several containers need it.</p>
         </div>
         <div>
           <label class="block text-xs font-medium text-text-secondary mb-1">

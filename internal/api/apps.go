@@ -2,11 +2,58 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"path/filepath"
 
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/fsutil"
 	"github.com/vazra/simpledeploy/internal/store"
 )
+
+// parseComposeForDisplay parses an app's compose file for read-only uses
+// (showing endpoints, domain ownership). When the .env cannot be used it
+// parses without it, when docker-compose.yml is a link to a regular file it
+// reads the link's target, and when file references are refused it parses
+// without them (compose.ParseForRoutes), so the app's domains stay known.
+// The result must never be used to deploy or to write files.
+func parseComposeForDisplay(composePath, slug string) (*compose.AppConfig, error) {
+	cfg, err := compose.ParseFile(composePath, slug)
+	if _, ok := violationsOf(err); ok {
+		return compose.ParseForRoutes(composePath, slug)
+	}
+	switch {
+	case err == nil:
+		return cfg, nil
+	case errors.Is(err, compose.ErrDotEnv):
+		data, rerr := fsutil.ReadRegularFile(composePath)
+		if rerr != nil {
+			return nil, err
+		}
+		cfg, err = compose.ParseContent(data, composePath, slug, nil)
+		if _, ok := violationsOf(err); ok {
+			return compose.ParseForRoutes(composePath, slug)
+		}
+		return cfg, err
+	case errors.Is(err, fsutil.ErrNotRegular):
+		// Resolve the link, then read the target with the regular-file
+		// checks so a FIFO or device target cannot block or be read.
+		target, rerr := filepath.EvalSymlinks(composePath)
+		if rerr != nil {
+			return nil, err
+		}
+		data, rerr := fsutil.ReadRegularFile(target)
+		if rerr != nil {
+			return nil, err
+		}
+		dotEnv, derr := compose.ReadDotEnv(filepath.Dir(composePath))
+		if derr != nil {
+			dotEnv = nil
+		}
+		return compose.ParseContent(data, composePath, slug, dotEnv)
+	}
+	return nil, err
+}
 
 func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 	opts := store.ListAppsOptions{}
@@ -60,7 +107,7 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 	// Extract endpoints from compose file (includes service names)
 	var endpoints []compose.EndpointConfig
 	if app.ComposePath != "" {
-		if cfg, err := compose.ParseFile(app.ComposePath, slug); err == nil {
+		if cfg, err := parseComposeForDisplay(app.ComposePath, slug); err == nil {
 			endpoints = cfg.Endpoints
 		}
 	}

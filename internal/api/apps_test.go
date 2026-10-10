@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/vazra/simpledeploy/internal/auth"
+	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -139,5 +142,76 @@ func TestListAppsEmpty(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&apps)
 	if len(apps) != 0 {
 		t.Errorf("got %d apps, want 0", len(apps))
+	}
+}
+
+// GET /api/apps/{slug} still shows endpoints when the .env is broken or the
+// compose file is a link.
+func TestGetAppEndpointsParseFallbacks(t *testing.T) {
+	const withEndpoint = "services:\n  web:\n    image: nginx\n    labels:\n      simpledeploy.endpoints.0.domain: shown.example.com\n"
+	cases := map[string]func(t *testing.T, dir string){
+		"broken .env": func(t *testing.T, dir string) {
+			os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(withEndpoint), 0o600)
+			os.WriteFile(filepath.Join(dir, ".env"), []byte("A=\"unclosed\n"), 0o600)
+		},
+		"symlinked compose": func(t *testing.T, dir string) {
+			target := filepath.Join(t.TempDir(), "compose.yml")
+			os.WriteFile(target, []byte(withEndpoint), 0o600)
+			if err := os.Symlink(target, filepath.Join(dir, "docker-compose.yml")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv, s := newTestServer(t)
+			dir := t.TempDir()
+			setup(t, dir)
+			composePath := filepath.Join(dir, "docker-compose.yml")
+			if _, err := compose.ParseFile(composePath, "fb"); err == nil {
+				t.Fatal("ParseFile succeeded; the fallback is not exercised")
+			}
+			s.UpsertApp(&store.App{Name: "fb", Slug: "fb", ComposePath: composePath, Status: "running"}, nil)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/apps/fb", nil)
+			req.AddCookie(superAdminCookie(t, srv.jwt))
+			w := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
+			}
+			var resp struct {
+				Endpoints []compose.EndpointConfig `json:"endpoints"`
+			}
+			json.NewDecoder(w.Body).Decode(&resp)
+			if len(resp.Endpoints) != 1 || resp.Endpoints[0].Domain != "shown.example.com" {
+				t.Fatalf("endpoints = %+v, want shown.example.com", resp.Endpoints)
+			}
+		})
+	}
+}
+
+func TestParseComposeForDisplayRefusesFIFOTarget(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	composePath := filepath.Join(dir, "docker-compose.yml")
+	if err := os.Symlink(fifo, composePath); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := parseComposeForDisplay(composePath, "fifo")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("want an error for a FIFO target")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("parseComposeForDisplay blocked on a FIFO")
 	}
 }

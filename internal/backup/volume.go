@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path"
 	"strings"
 	"time"
 
@@ -53,7 +54,7 @@ func collectVolumePaths(svc compose.ServiceConfig) []string {
 			continue
 		}
 		if v.Target != "" {
-			paths = append(paths, v.Target)
+			paths = append(paths, path.Clean(v.Target))
 		}
 	}
 	return paths
@@ -63,17 +64,13 @@ func (s *VolumeStrategy) Backup(ctx context.Context, opts BackupOpts) (*BackupRe
 	if len(opts.Paths) == 0 {
 		return nil, fmt.Errorf("no volume paths specified")
 	}
+	if err := ValidatePaths("volume", opts.Paths); err != nil {
+		return nil, err
+	}
 
 	filename := fmt.Sprintf("%s-%s.tar.gz", opts.ContainerName, time.Now().Format("20060102-150405"))
 
-	// -C / + relative paths so archive entries are normalized to relative
-	// form (validateTarStream on restore rejects absolute paths).
-	args := []string{"exec", opts.ContainerName, "tar", "-czf", "-", "-C", "/"}
-	for _, p := range opts.Paths {
-		args = append(args, strings.TrimPrefix(p, "/"))
-	}
-
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", tarCreateArgs(opts.ContainerName, opts.Paths)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -94,10 +91,11 @@ func (s *VolumeStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 	// attacker-uploaded backup with absolute paths, '..' segments, or
 	// symlinks cannot escape the container's volume layout (and via bind
 	// mounts, the host).
-	safe, err := validateTarStream(opts.Reader)
+	safe, err := validateTarStream(opts.Reader, opts.MaxDecompressedBytes)
 	if err != nil {
 		return fmt.Errorf("reject restore archive: %w", err)
 	}
+	defer safe.Close()
 	// Keep extract flags portable: BusyBox tar (Alpine) lacks
 	// --no-same-owner/--no-overwrite-dir. validateTarStream already
 	// rejects the dangerous archive shapes those flags were guarding.
@@ -109,4 +107,16 @@ func (s *VolumeStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 		return fmt.Errorf("tar restore: %w: %s", err, out)
 	}
 	return nil
+}
+
+// tarCreateArgs builds the 'docker exec <container> tar -czf - ...' argv
+// for paths. -C / + relative paths so archive entries are normalized to
+// relative form (validateTarStream on restore rejects absolute paths), and
+// "--" ends option parsing so no operand can be read as a tar flag.
+func tarCreateArgs(container string, paths []string) []string {
+	args := []string{"exec", container, "tar", "-czf", "-", "-C", "/", "--"}
+	for _, p := range paths {
+		args = append(args, strings.TrimPrefix(p, "/"))
+	}
+	return args
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -55,6 +56,10 @@ type Config struct {
 	LoginRateLimit RateLimitConfig `yaml:"login_ratelimit"`
 	Registries     []string        `yaml:"registries"`
 	TrustedProxies []string        `yaml:"trusted_proxies"`
+	// AllowedBindPaths are host folders apps may bind-mount even though they
+	// sit under a protected system folder (e.g. /home/media). SimpleDeploy's
+	// data folder and other apps' folders stay protected.
+	AllowedBindPaths []string `yaml:"allowed_bind_paths"`
 	LogBufferSize  int             `yaml:"log_buffer_size"`
 	PublicHost      string          `yaml:"public_host"`
 	RecipesIndexURL string          `yaml:"recipes_index_url"`
@@ -148,6 +153,46 @@ func (c *Config) applyGitSyncDefaults() {
 	}
 }
 
+// minMasterSecretLen is the length below which Load warns about a weak
+// master_secret. `openssl rand -hex 32` produces 64 characters.
+const minMasterSecretLen = 32
+
+// placeholderSecrets are example master_secret values from the docs and
+// common defaults. Running with one of them means every install shares the
+// key that encrypts stored credentials and signs sessions.
+var placeholderSecrets = map[string]bool{
+	"change-me-to-a-random-string":  true,
+	"paste_random_string_here":      true,
+	"paste_long_random_string_here": true,
+	"generate-a-random-string-here": true,
+	"a1b2c3d4e5f6...":               true,
+	"...":                           true,
+	"changeme":                      true,
+	"change-me":                     true,
+	"change_me":                     true,
+	"secret":                        true,
+	"password":                      true,
+	"master_secret":                 true,
+	"your-secret-here":              true,
+}
+
+// isPlaceholderSecret reports whether s is a known example value
+// (case-insensitive, surrounding whitespace ignored).
+func isPlaceholderSecret(s string) bool {
+	v := strings.ToLower(strings.TrimSpace(s))
+	// Docs write placeholders as <...>; a real secret never looks like that.
+	if strings.HasPrefix(v, "<") && strings.HasSuffix(v, ">") {
+		return true
+	}
+	return placeholderSecrets[v]
+}
+
+// PlaceholderMasterSecret reports whether master_secret is a known example
+// value from the docs (public, so it must not sign sessions).
+func (c *Config) PlaceholderMasterSecret() bool {
+	return isPlaceholderSecret(c.MasterSecret)
+}
+
 func (c *Config) Validate() error {
 	switch c.TLS.Mode {
 	case "", "auto", "custom", "off", "local":
@@ -189,6 +234,15 @@ func Load(path string) (*Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	if cfg.PlaceholderMasterSecret() {
+		// Refusing to start would lock existing installs out (and changing
+		// the secret makes stored credentials unreadable). The server instead
+		// signs sessions with a random key from data_dir, so the public value
+		// never signs sessions.
+		log.Printf("WARNING: master_secret is still the example placeholder %q from the docs. Sessions are signed with a random key from data_dir instead, but stored credentials remain protected only by this public value. Generate a real one with `openssl rand -hex 32`, put it in the config, then re-enter registry/S3 credentials and re-create API keys.", cfg.MasterSecret)
+	} else if len(cfg.MasterSecret) < minMasterSecretLen {
+		log.Printf("WARNING: master_secret is shorter than %d characters; generate a stronger one with `openssl rand -hex 32` (changing it requires re-entering stored registry and backup credentials)", minMasterSecretLen)
+	}
 	return cfg, nil
 }
 
@@ -197,7 +251,8 @@ func (c *Config) Marshal() ([]byte, error) {
 }
 
 // SaveAtomic writes the config to path atomically (temp file + rename).
-func (c *Config) SaveAtomic(path string) error {
+// The temp file is removed when any step fails.
+func (c *Config) SaveAtomic(path string) (err error) {
 	data, err := c.Marshal()
 	if err != nil {
 		return err
@@ -208,19 +263,21 @@ func (c *Config) SaveAtomic(path string) error {
 		return err
 	}
 	tmpPath := tmp.Name()
+	defer func() {
+		if err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
+		}
+	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
 		return err
 	}
 	// 0600: config.yaml contains master_secret which gates all encrypted
 	// blobs and JWT/HMAC signing.
 	if err := os.Chmod(tmpPath, 0o600); err != nil {
-		os.Remove(tmpPath)
 		return err
 	}
 	return os.Rename(tmpPath, path)

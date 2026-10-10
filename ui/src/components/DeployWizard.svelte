@@ -8,6 +8,7 @@
   import ImportAppModal from './ImportAppModal.svelte'
   import { appTemplates, categories, applyVars, applyAccessMode, suggestName } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
+  import { errorLines } from '../lib/apiErrors.js'
 
   let { open = false, onclose = () => {}, onComplete = () => {}, onAppsChanged = () => {}, initialTemplateId = null } = $props()
 
@@ -238,7 +239,7 @@
         composeErrors = []
       } else {
         composeValid = false
-        composeErrors = res.data?.errors || ['Invalid compose file']
+        composeErrors = res.data?.errors || (res.error ? [res.error] : ['Invalid compose file'])
       }
     } catch {
       composeValid = false
@@ -360,7 +361,8 @@
 
     if (res.error) {
       deployStatus = 'failed'
-      deployLines = [{ line: res.error, stream: 'stderr' }]
+      // Refusals carry one reason per line (see formatApiError).
+      deployLines = errorLines(res.error).map((line) => ({ line, stream: 'stderr' }))
       return
     }
 

@@ -18,19 +18,31 @@ Prefer a containerized install? See [Install via Docker](/install/docker/); it w
 
 ## Download
 
+Each [release](https://github.com/vazra/simpledeploy/releases) ships versioned tarballs plus a `checksums.txt`. The commands below verify the tarball before installing; `sha256sum` must print `OK`.
+
 <Tabs>
 <TabItem label="amd64">
 ```bash
-curl -L https://github.com/vazra/simpledeploy/releases/latest/download/simpledeploy_linux_amd64.tar.gz | tar xz
-sudo mv simpledeploy /usr/local/bin/
-sudo chmod +x /usr/local/bin/simpledeploy
+VERSION=1.4.2   # latest: https://github.com/vazra/simpledeploy/releases # x-release-please-version
+ARCH=amd64
+FILE="simpledeploy_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/${FILE}"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/checksums.txt"
+grep " ${FILE}$" checksums.txt | sha256sum -c - \
+  && tar xzf "$FILE" simpledeploy \
+  && sudo install -m 0755 simpledeploy /usr/local/bin/simpledeploy
 ```
 </TabItem>
 <TabItem label="arm64">
 ```bash
-curl -L https://github.com/vazra/simpledeploy/releases/latest/download/simpledeploy_linux_arm64.tar.gz | tar xz
-sudo mv simpledeploy /usr/local/bin/
-sudo chmod +x /usr/local/bin/simpledeploy
+VERSION=1.4.2   # latest: https://github.com/vazra/simpledeploy/releases # x-release-please-version
+ARCH=arm64
+FILE="simpledeploy_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/${FILE}"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/checksums.txt"
+grep " ${FILE}$" checksums.txt | sha256sum -c - \
+  && tar xzf "$FILE" simpledeploy \
+  && sudo install -m 0755 simpledeploy /usr/local/bin/simpledeploy
 ```
 </TabItem>
 </Tabs>
@@ -102,12 +114,19 @@ WantedBy=multi-user.target
 
 ## Upgrading
 
-Download the new tarball, replace the binary, restart:
+Download and verify the new tarball, then swap the binary:
 
 ```bash
-sudo systemctl stop simpledeploy
-sudo mv simpledeploy /usr/local/bin/
-sudo systemctl start simpledeploy
+VERSION=1.4.2   # target release # x-release-please-version
+ARCH=amd64      # or arm64
+FILE="simpledeploy_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/${FILE}"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/checksums.txt"
+grep " ${FILE}$" checksums.txt | sha256sum -c - \
+  && tar xzf "$FILE" simpledeploy \
+  && sudo systemctl stop simpledeploy \
+  && sudo install -m 0755 simpledeploy /usr/local/bin/simpledeploy \
+  && sudo systemctl start simpledeploy
 ```
 
 Next: [First deploy](/first-deploy/prepare/).

@@ -13,10 +13,15 @@ package gitsync
 //     "theirs" = the local commits being reapplied.
 //
 // We want local (server) to win, so during a rebase we use `--theirs` for
-// conflicted files.
+// conflicted files. The exception is a local "restore access grants" commit
+// (unpushed in pull-only mode): it only reverts pulled access lists, so its
+// conflicts take the remote file and securePulledTree re-applies the access
+// restore afterwards. Otherwise the remote's other edits to that sidecar
+// (e.g. alert thresholds) would be dropped on every later pull.
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,6 +40,13 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 		// Clean rebase, no conflicts.
 		sha, shaErr := gitHead(appsDir)
 		return nil, sha, shaErr
+	}
+
+	// git refuses to start when the working tree has uncommitted changes;
+	// report it instead of treating it as a conflict-free no-op.
+	if bytes.Contains(out, []byte("cannot rebase")) || bytes.Contains(out, []byte("commit or stash")) ||
+		bytes.Contains(out, []byte("would be overwritten")) || bytes.Contains(out, []byte("could not detach HEAD")) {
+		return nil, "", fmt.Errorf("gitsync: rebase refused: apps_dir has uncommitted or untracked changes that the pull would overwrite; commit or remove them (or enable auto_push) and sync again: %s", bytes.TrimSpace(out))
 	}
 
 	// Check if it's a conflict situation.
@@ -59,13 +71,21 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 			break
 		}
 
+		takeRemote := replayingAccessRestore(appsDir)
 		for _, f := range conflictFiles {
+			if takeRemote {
+				if err := takeUpstreamSide(appsDir, f); err != nil {
+					_, _ = gitExec(appsDir, "rebase", "--abort")
+					return nil, "", err
+				}
+				continue
+			}
 			// Take local side (--theirs in rebase = our server commits).
 			if _, cherr := gitExec(appsDir, "checkout", "--theirs", "--", f); cherr != nil {
 				_, _ = gitExec(appsDir, "rebase", "--abort")
 				return nil, "", fmt.Errorf("gitsync: checkout --theirs %s: %w", f, cherr)
 			}
-			if _, addErr := gitExec(appsDir, "add", f); addErr != nil {
+			if _, addErr := gitExec(appsDir, "add", "--", f); addErr != nil {
 				_, _ = gitExec(appsDir, "rebase", "--abort")
 				return nil, "", fmt.Errorf("gitsync: add %s: %w", f, addErr)
 			}
@@ -77,8 +97,13 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 			})
 		}
 
-		// Continue the rebase.
-		contOut, contErr := gitExec(appsDir, "rebase", "--continue")
+		// Continue the rebase; skip the commit when the resolution left
+		// nothing to commit (git refuses to --continue with an empty one).
+		next := "--continue"
+		if !hasStagedChanges(appsDir) {
+			next = "--skip"
+		}
+		contOut, contErr := gitExec(appsDir, "rebase", next)
 		if contErr == nil {
 			break // done
 		}
@@ -92,16 +117,79 @@ func rebaseServerWins(appsDir, branch string) ([]Conflict, string, error) {
 		}
 	}
 
+	if rebaseInProgress(appsDir) {
+		_, _ = gitExec(appsDir, "rebase", "--abort")
+		return nil, "", errors.New("gitsync: rebase did not complete; aborted")
+	}
+
+	// Whatever path git took, the remote branch must now be part of HEAD;
+	// otherwise the pull was not applied and must not be reported as done.
+	if out, err := gitExec(appsDir, "merge-base", "--is-ancestor", "origin/"+branch, "HEAD"); err != nil {
+		return nil, "", fmt.Errorf("gitsync: rebase did not apply origin/%s: %w\n%s", branch, err, bytes.TrimSpace(out))
+	}
 	sha, shaErr := gitHead(appsDir)
 	return conflicts, sha, shaErr
 }
 
-// listConflictedFiles returns paths with unresolved merge conflicts.
+// replayingAccessRestore reports whether the commit a stopped rebase is
+// replaying is a simpledeploy "restore access grants" commit.
+func replayingAccessRestore(appsDir string) bool {
+	out, err := gitExec(appsDir, "log", "-1", "--format=%B", "REBASE_HEAD", "--")
+	if err != nil {
+		return false
+	}
+	msg := string(out)
+	subject, _, _ := strings.Cut(msg, "\n")
+	return strings.TrimSpace(subject) == restoreAccessSubject && isBotCommit(msg)
+}
+
+// takeUpstreamSide resolves a conflicted path with the version being rebased
+// onto ("ours" during a rebase), or removes it when upstream deleted it.
+func takeUpstreamSide(appsDir, f string) error {
+	if _, err := gitExec(appsDir, "checkout", "--ours", "--", f); err != nil {
+		if out, rmErr := gitExec(appsDir, "rm", "-q", "-f", "--", f); rmErr != nil {
+			return fmt.Errorf("gitsync: take remote %s: %w\n%s", f, rmErr, out)
+		}
+		return nil
+	}
+	if out, err := gitExec(appsDir, "add", "--", f); err != nil {
+		return fmt.Errorf("gitsync: add %s: %w\n%s", f, err, out)
+	}
+	return nil
+}
+
+// hasStagedChanges reports whether the index differs from HEAD. Errors count
+// as changes so the caller falls back to `rebase --continue`.
+func hasStagedChanges(appsDir string) bool {
+	_, err := gitExec(appsDir, "diff", "--cached", "--quiet")
+	return err != nil
+}
+
+// rebaseInProgress reports whether a rebase is still stopped in appsDir.
+func rebaseInProgress(appsDir string) bool {
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		out, err := gitExec(appsDir, "rev-parse", "--git-path", name)
+		if err != nil {
+			continue
+		}
+		p := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(appsDir, p)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// listConflictedFiles returns paths with unresolved merge conflicts. Uses -z
+// so remote-controlled file names (spaces, newlines, quotes) come back
+// verbatim instead of quoted or split.
 func listConflictedFiles(appsDir string) ([]string, error) {
-	out, _ := gitExec(appsDir, "diff", "--name-only", "--diff-filter=U")
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	out, _ := gitExec(appsDir, "diff", "--name-only", "-z", "--diff-filter=U")
 	var files []string
-	for _, l := range lines {
+	for _, l := range strings.Split(string(out), "\x00") {
 		if l != "" {
 			files = append(files, l)
 		}
@@ -127,9 +215,28 @@ func gitHead(appsDir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// gitSafetyConfig is passed as -c overrides on every system git invocation.
+// ext:: runs an arbitrary command and fd:: talks to inherited file
+// descriptors; neither is ever a legitimate sync remote. core.symlinks=false
+// makes git check out committed symlinks as plain files, so content pulled
+// from the remote cannot point managed paths outside apps_dir.
+var gitSafetyConfig = []string{
+	"-c", "protocol.ext.allow=never",
+	"-c", "protocol.fd.allow=never",
+	"-c", "core.symlinks=false",
+}
+
+// gitAllowedProtocols is exported as GIT_ALLOW_PROTOCOL, which makes git
+// refuse every transport not listed, regardless of user or system config.
+const gitAllowedProtocols = "file:git:http:https:ssh"
+
 // gitExec runs git with the given args in appsDir and returns combined output.
 func gitExec(appsDir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", appsDir}, args...)...)
+	full := make([]string, 0, len(gitSafetyConfig)+2+len(args))
+	full = append(full, gitSafetyConfig...)
+	full = append(full, "-C", appsDir)
+	full = append(full, args...)
+	cmd := exec.Command("git", full...)
 	// Inherit the real environment so SSH_AUTH_SOCK etc. are available, but
 	// strip variables that redirect git's view of "the repository". When this
 	// process runs as (or under) a git hook, GIT_DIR/GIT_WORK_TREE/etc. are
@@ -153,6 +260,8 @@ var gitEnvBlocklist = []string{
 	"GIT_NAMESPACE",
 	"GIT_OBJECT_DIRECTORY",
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+	// Replaced with gitAllowedProtocols below.
+	"GIT_ALLOW_PROTOCOL",
 }
 
 // scrubbedGitEnv returns the current process's env with redirector vars
@@ -178,6 +287,7 @@ func scrubbedGitEnv() []string {
 	out = append(out,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_EDITOR=true",
+		"GIT_ALLOW_PROTOCOL="+gitAllowedProtocols,
 	)
 	return out
 }

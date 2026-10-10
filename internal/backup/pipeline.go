@@ -1,10 +1,8 @@
 package backup
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 )
 
 // PipelineResult holds the outcome of a backup pipeline run.
@@ -69,17 +67,24 @@ func (p *Pipeline) RunRestore(ctx context.Context, opts RestoreOpts, filePath, e
 	defer reader.Close()
 
 	if expectedChecksum != "" {
-		cw := NewChecksumWriter()
-		verified := cw.TeeReader(reader)
-		data, err := io.ReadAll(verified)
+		// Stage the download on disk while hashing so a large backup is
+		// never held in memory, then restore from the verified file.
+		// Strategies that validate archives check this file in place.
+		spool, err := newSpoolFile()
 		if err != nil {
-			return fmt.Errorf("reading for checksum: %w", err)
+			return err
+		}
+		defer spool.Close()
+		limit, capped := restoreCap(opts.MaxDecompressedBytes)
+		cw := NewChecksumWriter()
+		if err := spool.fill(cw.TeeReader(reader), limit, capped); err != nil {
+			return fmt.Errorf("download: %w", err)
 		}
 		if actual := cw.Sum(); actual != expectedChecksum {
 			return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actual)
 		}
 		reader.Close()
-		opts.Reader = io.NopCloser(bytes.NewReader(data))
+		opts.Reader = spool
 	} else {
 		opts.Reader = reader
 	}

@@ -1,0 +1,59 @@
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      gomod-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      ui-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      e2e-minor-patch:
+        update-types: [minor, patch]
+
+  # pnpm lockfile (v9); dependabot's npm ecosystem handles pnpm.
+  - package-ecosystem: npm
+    directory: /docs-site
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      docs-minor-patch:
+        update-types: [minor, patch]
+
+  # Keeps the SHA-pinned actions (and their `# vX.Y.Z` comments) current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]

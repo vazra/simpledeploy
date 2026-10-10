@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,11 +15,16 @@ import (
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
+	"github.com/vazra/simpledeploy/internal/fsutil"
 	"github.com/vazra/simpledeploy/internal/mirror"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
 var validAppName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
+
+// dotEnvProblem is shown when the .env next to a compose file stops it from
+// being checked (compose.ErrDotEnv).
+const dotEnvProblem = "the app's .env file cannot be used: it is a link, or has a line docker compose cannot read (such as an unclosed quote). Fix it and try again."
 
 type reconciler interface {
 	DeployOne(ctx context.Context, composePath, appName string) error
@@ -143,35 +149,48 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appDir := filepath.Join(s.appsDir, body.Name)
-	if err := os.MkdirAll(appDir, 0o700); err != nil {
-		http.Error(w, "failed to create app directory", http.StatusInternalServerError)
-		return
-	}
-
 	composePath := filepath.Join(appDir, "docker-compose.yml")
-	// Capture old compose for audit Before snapshot before overwriting.
-	// Read unconditionally; missing file (truly new app) yields nil bytes.
-	oldComposeData, _ := os.ReadFile(composePath)
-	if err := os.WriteFile(composePath, composeData, 0o600); err != nil {
-		http.Error(w, "failed to write compose file", http.StatusInternalServerError)
+
+	// Validate before anything is written, as docker compose will see the
+	// file: relative paths from the app folder and ${VAR} values from the
+	// app's existing .env. A refused redeploy leaves the current file as is.
+	dotEnv, err := compose.ReadDotEnv(appDir)
+	if err != nil {
+		http.Error(w, dotEnvProblem, http.StatusBadRequest)
 		return
 	}
-
-	// Validate compose file for dangerous directives
-	parsed, err := compose.ParseFile(composePath, body.Name)
+	parsed, err := compose.ParseContent(composeData, composePath, body.Name, dotEnv)
+	if errors.Is(err, compose.ErrDotEnv) {
+		http.Error(w, dotEnvProblem, http.StatusBadRequest)
+		return
+	}
+	if v, ok := violationsOf(err); ok {
+		writeViolations(w, http.StatusBadRequest, "compose file contains disallowed directives", v)
+		return
+	}
 	if err != nil {
-		os.Remove(composePath)
 		http.Error(w, "invalid compose file", http.StatusBadRequest)
 		return
 	}
 	if violations := compose.ValidateComposeForDeploy(parsed); len(violations) > 0 {
-		os.Remove(composePath)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]any{
 			"error":      "compose file contains disallowed directives",
 			"violations": violations,
 		})
+		return
+	}
+	if err := os.MkdirAll(appDir, 0o700); err != nil {
+		http.Error(w, "failed to create app directory", http.StatusInternalServerError)
+		return
+	}
+
+	// Capture old compose for audit Before snapshot before overwriting.
+	// Read unconditionally; missing file (truly new app) yields nil bytes.
+	oldComposeData, _ := fsutil.ReadRegularFile(composePath)
+	if err := fsutil.WriteFileAtomic(composePath, composeData, 0o600); err != nil {
+		http.Error(w, "failed to write compose file", http.StatusInternalServerError)
 		return
 	}
 
@@ -335,31 +354,20 @@ func (s *Server) handleValidateCompose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpFile, err := os.CreateTemp("", "validate-compose-*.yml")
-	if err != nil {
-		http.Error(w, "failed to create temp file", http.StatusInternalServerError)
-		return
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.Write(composeData); err != nil {
-		tmpFile.Close()
-		http.Error(w, "failed to write temp file", http.StatusInternalServerError)
-		return
-	}
-	tmpFile.Close()
-
 	type validateResponse struct {
 		Valid  bool     `json:"valid"`
 		Errors []string `json:"errors,omitempty"`
 	}
 
-	_, parseErr := compose.ParseFile(tmpFile.Name(), "validate")
+	// Parse from memory as if in an empty folder: no temp file, and no
+	// stray .env in a shared temp dir can feed the interpolation.
+	virtualPath := filepath.Join(os.TempDir(), "simpledeploy-validate", "docker-compose.yml")
+	_, parseErr := compose.ParseContent(composeData, virtualPath, "validate", nil)
 	if parseErr != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(validateResponse{
 			Valid:  false,
-			Errors: []string{parseErr.Error()},
+			Errors: []string{"Invalid compose file: " + parseErr.Error()},
 		})
 		return
 	}
@@ -370,12 +378,21 @@ func (s *Server) handleValidateCompose(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetCompose(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
+	if !validAppName.MatchString(slug) {
+		http.Error(w, "invalid app name", http.StatusBadRequest)
+		return
+	}
 	composePath := filepath.Join(s.appsDir, slug, "docker-compose.yml")
 
-	data, err := os.ReadFile(composePath)
+	// Never follow a symlink: it could point at any file on the host.
+	data, err := fsutil.ReadRegularFile(composePath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			http.Error(w, "compose file not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, fsutil.ErrNotRegular) {
+			http.Error(w, "docker-compose.yml is a link or not a regular file; replace it with a regular file", http.StatusConflict)
 			return
 		}
 		http.Error(w, "failed to read compose file", http.StatusInternalServerError)

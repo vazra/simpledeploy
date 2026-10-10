@@ -23,6 +23,9 @@ on:
       - 'internal/compose/inject.go'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: templates-${{ github.ref }}
   cancel-in-progress: true
@@ -39,16 +42,21 @@ jobs:
         shard: [1, 2, 3, 4]
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read # docker login to GHCR for mirrored image pulls
     env:
       TOTAL_SHARDS: 4
       E2E_USE_MIRROR: '1'
       SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX: 'ghcr.io/vazra/simpledeploy-mirror/'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       # Authenticate the docker daemon to GHCR so deploy-time `docker
@@ -66,13 +74,13 @@ jobs:
       - name: Pre-pull template images for this shard
         env:
           SHARD: ${{ matrix.shard }}
-        run: node e2e/scripts/prepull-templates.mjs --shard=${SHARD}/${TOTAL_SHARDS}
+        run: node e2e/scripts/prepull-templates.mjs --shard="${SHARD}/${TOTAL_SHARDS}"
       - name: Run template deploy tests
         env:
           E2E_TEMPLATES: '1'
           SHARD: ${{ matrix.shard }}
-        run: cd e2e && npx playwright test --shard=${SHARD}/${TOTAL_SHARDS}
-      - uses: actions/upload-artifact@v4
+        run: cd e2e && npx playwright test --shard="${SHARD}/${TOTAL_SHARDS}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: templates-playwright-report-shard-${{ matrix.shard }}

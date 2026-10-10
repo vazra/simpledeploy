@@ -27,6 +27,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 concurrency:
   group: mirror-images
   cancel-in-progress: false
@@ -41,11 +44,12 @@ jobs:
       MIRROR_PREFIX: ghcr.io/${{ github.repository_owner }}/simpledeploy-mirror
       FORCE: ${{ inputs.force }}
       ACTOR: ${{ github.actor }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
 
@@ -61,6 +65,8 @@ jobs:
           sudo apt-get install -y skopeo
 
       - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           printf '%s' "$GH_TOKEN" | skopeo login ghcr.io --username "$ACTOR" --password-stdin
 

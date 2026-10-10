@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/vazra/simpledeploy/internal/audit"
@@ -333,7 +335,26 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "version_id is required", http.StatusBadRequest)
 		return
 	}
+	// The version must belong to this app: middleware only checked access
+	// to the slug, not to the version ID in the body.
+	_, ver, ok := s.appVersion(w, slug, body.VersionID)
+	if !ok {
+		return
+	}
+	// Same checks as a version restore, including domains other apps took
+	// since. RollbackOne re-checks the rules right before writing.
+	if _, ok := s.checkVersionForRestore(w, r, slug, filepath.Join(s.appsDir, slug, "docker-compose.yml"), ver); !ok {
+		return
+	}
 	if err := s.reconciler.RollbackOne(r.Context(), slug, body.VersionID); err != nil {
+		if v, ok := violationsOf(err); ok {
+			writeViolations(w, http.StatusBadRequest, versionRefused, v)
+			return
+		}
+		if errors.Is(err, compose.ErrDotEnv) {
+			http.Error(w, dotEnvProblem, http.StatusBadRequest)
+			return
+		}
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -373,18 +394,14 @@ func (s *Server) handleDeleteVersion(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid version id", http.StatusBadRequest)
 		return
 	}
-	// Capture version number + app for audit before deletion.
-	var beforeJSON []byte
-	var appID *int64
-	var appSlug string
-	if v, err := s.store.GetComposeVersion(id); err == nil && v != nil {
-		beforeJSON, _ = json.Marshal(map[string]any{"version": v.Version})
-		if a, err := s.store.GetAppByID(v.AppID); err == nil && a != nil {
-			aid := a.ID
-			appID = &aid
-			appSlug = a.Slug
-		}
+	app, ver, ok := s.appVersion(w, r.PathValue("slug"), id)
+	if !ok {
+		return
 	}
+	// Capture version number + app for audit before deletion.
+	beforeJSON, _ := json.Marshal(map[string]any{"version": ver.Version})
+	appID := &app.ID
+	appSlug := app.Slug
 	if err := s.store.DeleteComposeVersion(id); err != nil {
 		httpError(w, err, http.StatusNotFound)
 		return
@@ -398,6 +415,23 @@ func (s *Server) handleDeleteVersion(w http.ResponseWriter, r *http.Request) {
 	})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// appVersion checks that compose version id belongs to the app with this
+// slug and returns both. On failure it writes a 404 and returns false, so a
+// version ID from another app is indistinguishable from a missing one.
+func (s *Server) appVersion(w http.ResponseWriter, slug string, id int64) (*store.App, *store.ComposeVersion, bool) {
+	app, err := s.store.GetAppBySlug(slug)
+	if err != nil || app == nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return nil, nil, false
+	}
+	ver, err := s.store.GetComposeVersion(id)
+	if err != nil || ver == nil || ver.AppID != app.ID {
+		http.Error(w, "version not found", http.StatusNotFound)
+		return nil, nil, false
+	}
+	return app, ver, true
 }
 
 func (s *Server) handleListDeployEvents(w http.ResponseWriter, r *http.Request) {

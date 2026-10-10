@@ -29,7 +29,7 @@ The reconciler picks up the missing directory on its next scan, stops the stack,
 
 ### Via git sync
 
-If [git sync](./git-sync) is enabled and you delete the app's directory in your repo and push, the next pull will remove the directory locally. The reconciler then archives it the same way.
+If [git sync](/operations/git-sync/) is enabled and you delete the app's directory in your repo and push, the next pull will remove the directory locally. The reconciler then archives it the same way.
 
 ## Where archived apps appear
 

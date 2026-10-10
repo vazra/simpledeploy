@@ -1,7 +1,9 @@
 <script>
   import { diffLines } from 'diff'
 
-  let { oldText = '', newText = '', onConfirm = () => {}, onCancel = () => {} } = $props()
+  // error: why the last deploy attempt was refused (shown above the buttons).
+  // busy: a deploy is in flight; blocks a second confirm.
+  let { oldText = '', newText = '', onConfirm = () => {}, onCancel = () => {}, error = '', busy = false } = $props()
 
   let parts = $derived(diffLines(oldText, newText))
 
@@ -30,6 +32,13 @@
 {/if}{/each}{/if}{/each}</code></pre>
     </div>
 
+    {#if error}
+      <div role="alert" data-testid="diff-error" class="mb-4 flex-shrink-0 max-h-40 overflow-y-auto text-xs text-danger bg-danger/10 border border-danger/30 rounded-md px-3 py-2 whitespace-pre-line break-words">
+        <p class="font-medium mb-1">This change was not deployed. Fix the following and try again:</p>
+        {error}
+      </div>
+    {/if}
+
     <div class="flex justify-end gap-2 flex-shrink-0">
       <button
         type="button"
@@ -41,9 +50,10 @@
       <button
         type="button"
         onclick={onConfirm}
-        class="px-3.5 py-2 text-sm bg-btn-primary hover:bg-btn-primary-hover text-white rounded-md transition-colors"
+        disabled={busy}
+        class="px-3.5 py-2 text-sm bg-btn-primary hover:bg-btn-primary-hover text-white rounded-md transition-colors disabled:opacity-50 disabled:pointer-events-none"
       >
-        Confirm &amp; Deploy
+        {busy ? 'Deploying...' : 'Confirm & Deploy'}
       </button>
     </div>
   </div>

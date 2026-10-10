@@ -488,3 +488,118 @@ func TestRecentActivityLimit(t *testing.T) {
 		t.Errorf("clamped limit: expected 20 entries, got %d", len(entries2))
 	}
 }
+
+// TestAppActivityNonAdminScopedToCurrentApp: rows left by a purged app with
+// the same slug are hidden from non-admins; rows recorded before the apps
+// row existed (lifecycle/created) still show. super_admin sees everything.
+func TestAppActivityNonAdminScopedToCurrentApp(t *testing.T) {
+	srv, st := newTestServer(t)
+	db := st.DB()
+
+	oldID := seedApp(t, st, "reused")
+	oldDeploy := seedAudit(t, st, store.AuditEntry{AppID: &oldID, AppSlug: "reused", ActorSource: "ui", Category: "deploy", Action: "deploy_succeeded", Summary: "old deploy"})
+	if err := st.PurgeApp("reused"); err != nil {
+		t.Fatal(err)
+	}
+	oldPurged := seedAudit(t, st, store.AuditEntry{AppSlug: "reused", ActorSource: "ui", Category: "lifecycle", Action: "purged", Summary: "old purged"})
+	if _, err := db.Exec(`UPDATE audit_log SET created_at = datetime('now', '-1 hour') WHERE id IN (?, ?)`, oldDeploy, oldPurged); err != nil {
+		t.Fatal(err)
+	}
+
+	seedAudit(t, st, store.AuditEntry{AppSlug: "reused", ActorSource: "ui", Category: "lifecycle", Action: "created", Summary: "new created"})
+	newID := seedApp(t, st, "reused")
+	// The apps row lands after the deploy finished.
+	if _, err := db.Exec(`UPDATE apps SET created_at = datetime('now', '+2 minutes') WHERE id = ?`, newID); err != nil {
+		t.Fatal(err)
+	}
+	seedAudit(t, st, store.AuditEntry{AppID: &newID, AppSlug: "reused", ActorSource: "ui", Category: "deploy", Action: "deploy_succeeded", Summary: "new deploy"})
+
+	summaries := func(cookie *http.Cookie) []string {
+		t.Helper()
+		w := doRequest(t, srv, http.MethodGet, "/api/apps/reused/activity", cookie)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Entries []store.AuditEntry `json:"entries"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, e := range resp.Entries {
+			out = append(out, e.Summary)
+		}
+		return out
+	}
+
+	member := makeUserCookie(t, srv, st, "member", newID)
+	if got := strings.Join(summaries(member), ","); got != "new deploy,new created" {
+		t.Fatalf("non-admin summaries = %q, want new deploy,new created", got)
+	}
+	if got := summaries(makeAdminCookie(t, srv)); len(got) != 4 {
+		t.Fatalf("super_admin got %d entries (%v), want 4", len(got), got)
+	}
+}
+
+// TestGetActivityMatchesAppFeedScope: a non-admin can open every row the app
+// feed lists for them, including rows recorded with only the app slug, but
+// not slug-only rows of a purged earlier app with the same slug, nor rows of
+// apps they cannot access.
+func TestGetActivityMatchesAppFeedScope(t *testing.T) {
+	srv, st := newTestServer(t)
+	db := st.DB()
+
+	seedApp(t, st, "reused")
+	if err := st.PurgeApp("reused"); err != nil {
+		t.Fatal(err)
+	}
+	oldEnv := seedAudit(t, st, store.AuditEntry{AppSlug: "reused", ActorSource: "ui", Category: "env", Action: "changed", Summary: "old env"})
+	oldPurged := seedAudit(t, st, store.AuditEntry{AppSlug: "reused", ActorSource: "ui", Category: "lifecycle", Action: "purged", Summary: "old purged"})
+	if _, err := db.Exec(`UPDATE audit_log SET created_at = datetime('now', '-1 hour') WHERE id IN (?, ?)`, oldEnv, oldPurged); err != nil {
+		t.Fatal(err)
+	}
+
+	seedAudit(t, st, store.AuditEntry{AppSlug: "reused", ActorSource: "ui", Category: "lifecycle", Action: "created", Summary: "new created"})
+	newID := seedApp(t, st, "reused")
+	seedAudit(t, st, store.AuditEntry{AppSlug: "reused", ActorSource: "ui", Category: "env", Action: "changed", Summary: "new env (slug only)"})
+	seedAudit(t, st, store.AuditEntry{AppID: &newID, AppSlug: "reused", ActorSource: "ui", Category: "deploy", Action: "deploy_succeeded", Summary: "new deploy"})
+
+	seedApp(t, st, "other")
+	otherSlugOnly := seedAudit(t, st, store.AuditEntry{AppSlug: "other", ActorSource: "ui", Category: "env", Action: "changed", Summary: "other env"})
+
+	member := makeUserCookie(t, srv, st, "member", newID)
+	outsider := makeUserCookie(t, srv, st, "outsider")
+
+	w := doRequest(t, srv, http.MethodGet, "/api/apps/reused/activity", member)
+	if w.Code != http.StatusOK {
+		t.Fatalf("feed status = %d", w.Code)
+	}
+	var feed struct {
+		Entries []store.AuditEntry `json:"entries"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&feed); err != nil {
+		t.Fatal(err)
+	}
+	if len(feed.Entries) != 3 {
+		t.Fatalf("feed = %+v, want 3 rows of the current app", feed.Entries)
+	}
+	for _, e := range feed.Entries {
+		path := fmt.Sprintf("/api/activity/%d", e.ID)
+		if w := doRequest(t, srv, http.MethodGet, path, member); w.Code != http.StatusOK {
+			t.Errorf("member GET %q = %d, want 200", e.Summary, w.Code)
+		}
+		if w := doRequest(t, srv, http.MethodGet, path, outsider); w.Code != http.StatusNotFound {
+			t.Errorf("outsider GET %q = %d, want 404", e.Summary, w.Code)
+		}
+	}
+	for _, id := range []int64{oldEnv, oldPurged, otherSlugOnly} {
+		path := fmt.Sprintf("/api/activity/%d", id)
+		if w := doRequest(t, srv, http.MethodGet, path, member); w.Code != http.StatusNotFound {
+			t.Errorf("member GET row %d outside the feed = %d, want 404", id, w.Code)
+		}
+		if w := doRequest(t, srv, http.MethodGet, path, makeAdminCookie(t, srv)); w.Code != http.StatusOK {
+			t.Errorf("super_admin GET row %d = %d, want 200", id, w.Code)
+		}
+	}
+}

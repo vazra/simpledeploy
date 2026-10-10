@@ -2,13 +2,20 @@
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
   import Button from './Button.svelte'
+  import { MASKED_ENV_PLACEHOLDER, hasMaskedEnv, isMaskedEnv } from '../lib/env.js'
 
-  let { slug } = $props()
+  // canEdit: the current user may change this app (super_admin, or manage
+  // with access). Viewers get a read-only list.
+  let { slug, canEdit = false } = $props()
 
   let vars = $state([])
   let loading = $state(true)
   let saving = $state(false)
   let showValues = $state(false)
+  // Masked entries (key only) also force read-only: PUT replaces the file,
+  // so saving would wipe the hidden values.
+  let masked = $derived(hasMaskedEnv(vars))
+  let readOnly = $derived(!canEdit || masked)
 
   onMount(async () => {
     const res = await api.getEnv(slug)
@@ -33,6 +40,7 @@
   }
 
   async function save() {
+    if (readOnly) return
     saving = true
     await api.putEnv(slug, vars)
     saving = false
@@ -46,18 +54,29 @@
       <p class="text-xs text-text-secondary mt-0.5">Stored in <code class="font-mono">.env</code> alongside your compose file. Docker Compose loads these automatically.</p>
     </div>
     <div class="flex gap-2">
+      {#if !masked}
       <button
         onclick={() => showValues = !showValues}
         class="px-2 py-1 text-xs rounded-lg border border-border/50 text-text-secondary hover:text-text-primary transition-colors"
       >
         {showValues ? 'Hide values' : 'Show values'}
       </button>
+      {/if}
     </div>
   </div>
 
   {#if loading}
     <p class="text-xs text-text-muted">Loading...</p>
   {:else}
+    {#if readOnly}
+      <p class="text-xs text-text-secondary bg-surface-3/40 rounded-lg px-3 py-2 mb-3" data-testid="env-readonly-hint">
+        {#if masked}
+          You have view-only access, so values are hidden. You can see which variables exist; ask an admin to view or change them.
+        {:else}
+          You have view-only access. Ask an admin to add or change environment variables.
+        {/if}
+      </p>
+    {/if}
     {#if vars.length > 0}
       <div class="overflow-x-auto mb-3">
         <table class="w-full text-sm">
@@ -77,24 +96,32 @@
                     value={v.key}
                     oninput={(e) => updateKey(i, e.currentTarget.value)}
                     placeholder="KEY"
+                    readonly={readOnly}
                     class="w-full bg-transparent font-mono text-xs text-text-primary outline-none focus:bg-input-bg px-1 py-0.5 rounded"
                   />
                 </td>
                 <td class="py-1.5 px-2">
-                  <input
-                    type={showValues ? 'text' : 'password'}
-                    value={v.value}
-                    oninput={(e) => updateValue(i, e.currentTarget.value)}
-                    placeholder="value"
-                    class="w-full bg-transparent font-mono text-xs text-text-primary outline-none focus:bg-input-bg px-1 py-0.5 rounded"
-                  />
+                  {#if isMaskedEnv(v)}
+                    <span class="block font-mono text-xs text-text-muted px-1 py-0.5" title="Hidden for viewers">{MASKED_ENV_PLACEHOLDER}</span>
+                  {:else}
+                    <input
+                      type={showValues ? 'text' : 'password'}
+                      value={v.value}
+                      oninput={(e) => updateValue(i, e.currentTarget.value)}
+                      placeholder="value"
+                      readonly={readOnly}
+                      class="w-full bg-transparent font-mono text-xs text-text-primary outline-none focus:bg-input-bg px-1 py-0.5 rounded"
+                    />
+                  {/if}
                 </td>
                 <td class="py-1.5 px-2">
-                  <button
-                    onclick={() => removeVar(i)}
-                    class="text-danger hover:opacity-70 text-xs leading-none"
-                    aria-label="Remove"
-                  >&#x2715;</button>
+                  {#if !readOnly}
+                    <button
+                      onclick={() => removeVar(i)}
+                      class="text-danger hover:opacity-70 text-xs leading-none"
+                      aria-label="Remove"
+                    >&#x2715;</button>
+                  {/if}
                 </td>
               </tr>
             {/each}
@@ -102,12 +129,14 @@
         </table>
       </div>
     {:else}
-      <p class="text-xs text-text-muted mb-3">No environment variables. Add one below.</p>
+      <p class="text-xs text-text-muted mb-3">{readOnly ? 'No environment variables.' : 'No environment variables. Add one below.'}</p>
     {/if}
 
-    <div class="flex gap-2 mt-2">
-      <Button variant="secondary" size="sm" onclick={addVar}>Add Variable</Button>
-      <Button size="sm" onclick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
-    </div>
+    {#if !readOnly}
+      <div class="flex gap-2 mt-2">
+        <Button variant="secondary" size="sm" onclick={addVar}>Add Variable</Button>
+        <Button size="sm" onclick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
+      </div>
+    {/if}
   {/if}
 </div>

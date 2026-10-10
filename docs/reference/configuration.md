@@ -52,8 +52,10 @@ tls:
   mode: auto          # auto (Let's Encrypt) | custom | off
   email: admin@example.com  # ACME account email (required for auto)
 
-# Secret for encrypting stored credentials and signing JWTs
-master_secret: "change-me-to-a-random-string"
+# Secret for encrypting stored credentials and signing JWTs.
+# `simpledeploy init` generates one; otherwise use `openssl rand -hex 32`.
+# Known placeholder values log a warning and are not used to sign sessions.
+master_secret: "<64 random hex characters>"
 
 # Activity log retention in days (0 = keep forever, default 365)
 audit_retention_days: 365
@@ -112,7 +114,7 @@ git_sync:
 | `extra_listen_addrs` | list of string | `[]` | Additional `host:port` listeners for the HTTPS proxy server, e.g. `[":50051"]`. Every listener serves the same routes, TLS policies and certificates over HTTP/1.1 and HTTP/2 (no HTTP/3). Must not repeat `listen_addr`, `http_listen_addr` or each other. Open the ports (TCP) in your firewall. |
 | `management_port` | int | `8443` | Management API port |
 | `management_addr` | string | `127.0.0.1` | Management API bind address. Default keeps the dashboard local-only. Set to `""` (or `0.0.0.0`) to expose on every interface. |
-| `domain` | string | - | Management UI domain |
+| `domain` | string | - | Management UI domain. Reserved: non-super_admin users cannot set it as an app endpoint domain. |
 | `public_host` | string | `""` | Server hostname/IP used for sslip.io auto-domains in template Quick test mode. Editable at runtime. |
 | `tls.mode` | string | `auto` | TLS mode: `auto`, `custom`, `off`, `local` |
 | `tls.email` | string | - | ACME email (required for auto TLS) |
@@ -124,6 +126,7 @@ git_sync:
 | `ratelimit.burst` | int | `50` | Burst allowance |
 | `ratelimit.by` | string | `ip` | Rate limit key |
 | `registries` | list | `[]` | Default registry names for all apps |
+| `allowed_bind_paths` | list of string | `[]` | Absolute host folders apps may bind-mount even though they sit under a protected system folder (e.g. `["/home/media"]`). SimpleDeploy's data folder and other apps' folders stay protected. Do not list parents of sensitive folders such as `/var` or `/etc`. See [compose security validation](/reference/compose-labels/#compose-security-validation). |
 | `git_sync.enabled` | bool | `false` | Enable two-way git sync |
 | `git_sync.remote` | string | - | Git remote URL (required if enabled); SSH or HTTPS |
 | `git_sync.branch` | string | `main` | Branch to sync against |

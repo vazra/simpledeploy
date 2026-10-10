@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 
-	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -66,12 +65,11 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Capture old allowlist for audit before-snapshot.
-	var oldAllow string
-	if app.ComposePath != "" {
-		if parsed, err := compose.ParseFile(app.ComposePath, slug); err == nil {
-			oldAllow = parsed.AccessAllow
-		}
+	parsed, ok := loadComposeForEdit(w, app)
+	if !ok {
+		return
 	}
+	oldAllow := parsed.AccessAllow
 
 	if err := updateComposeAccessAllow(app.ComposePath, req.Allow); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
@@ -93,7 +91,7 @@ func (s *Server) handleUpdateAccess(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateComposeAccessAllow(composePath, allow string) error {
-	data, err := os.ReadFile(composePath)
+	data, err := fsutil.ReadRegularFile(composePath)
 	if err != nil {
 		return fmt.Errorf("read compose: %w", err)
 	}
@@ -140,7 +138,7 @@ func updateComposeAccessAllow(composePath, allow string) error {
 			}
 			lines[lineIdx] = replaceAllowValue(lines[lineIdx], node.Value, allow)
 		}
-		return os.WriteFile(composePath, joinLines(lines), 0o600)
+		return fsutil.WriteFileAtomic(composePath, joinLines(lines), 0o600)
 	}
 
 	// No existing label: no-op if allow is empty
@@ -164,7 +162,7 @@ func updateComposeAccessAllow(composePath, allow string) error {
 	if err != nil {
 		return fmt.Errorf("marshal compose: %w", err)
 	}
-	return os.WriteFile(composePath, out, 0o600)
+	return fsutil.WriteFileAtomic(composePath, out, 0o600)
 }
 
 // replaceAllowValue replaces the old allow value on a YAML line, preserving

@@ -12,9 +12,11 @@ This page sets the scope for security analysis: what SimpleDeploy considers a th
 | Host root | Fully trusted | Owns the SQLite DB, `master_secret`, Docker socket, kernel. Anything below this is bounded by host root. |
 | `simpledeploy` daemon | Fully trusted | Runs as root by design (docker.sock + privileged ports). Compromise of the daemon equals host root. |
 | `super_admin` user | Equivalent to host root | Can deploy arbitrary compose to a daemon SimpleDeploy talks to as root. Treat super_admin as a privileged operator. |
-| `manage` user (with grant) | Trusted within their app set | Can mutate their accessible apps, restore backups, change env, etc. Cannot reach platform-level config. |
-| `viewer` user (with grant) | Read-only within their app set | Can view, download logs, fetch activity, but not mutate. |
+| `manage` user (with grant) | Trusted within their app set | Can mutate their accessible apps, restore backups into their own app's containers, change env, etc. Cannot reach platform-level config, other apps' domains, containers or folders, or the host (compose security validation runs with env values filled in). |
+| `viewer` user (with grant) | Read-only within their app set | Can view, download logs, fetch activity, but not mutate. `.env` values are masked. |
 | Authenticated client (cookie or API key) | Bounded by the user's role | The role+grants of the user the credential belongs to. |
+| Git sync remote (anyone who can push) | Untrusted for platform state | Can change compose files and per-app alert/backup config, which pass the same validation as a dashboard deploy. Cannot change users, roles, registries, access grants, or plant symlinks. |
+| Deployed app (and pages it serves) | Untrusted | Runs in Docker isolation. Pages on sibling subdomains of the dashboard are blocked from making authenticated state-changing requests (cross-origin protection). |
 | Unauthenticated network traffic | Untrusted | Reaches Caddy on `:80`/`:443`, the dashboard if exposed, public health/setup endpoints. Treated as adversarial. |
 
 ## In-scope adversaries
@@ -26,7 +28,8 @@ The following are explicitly part of the threat model. SimpleDeploy is designed 
 - **Compromised compose file or recipe** trying to escape the container onto the host.
 - **Compromised gitsync remote or backup tarball** trying to deliver a privileged compose or write outside the container's volume.
 - **Hostile DNS or compromised CA** trying to redirect a webhook dispatch to an internal endpoint (DNS rebinding / SSRF).
-- **Authenticated `viewer` or `manage` user** trying to escalate to platform-level access, read another user's apps, exfiltrate audit history, or smuggle through ID parameters.
+- **Authenticated `viewer` or `manage` user** trying to escalate to platform-level access, read another user's apps, exfiltrate audit history, or smuggle through ID parameters, env variables, backup targets/paths, restore targets, or endpoint domains.
+- **Malicious page on a sibling subdomain** (for example a deployed app at `app.example.com` while the dashboard is at `manage.example.com`) trying to ride the admin's session cookie. `SameSite=Strict` does not cover same-site subdomains, so state-changing requests are checked with Go's cross-origin protection (`Sec-Fetch-Site` / `Origin`).
 - **Stolen JWT cookie or API key** trying to outlive logout / password change / role change.
 
 ## Out-of-scope adversaries

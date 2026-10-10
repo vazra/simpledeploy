@@ -22,8 +22,10 @@ SimpleDeploy itself uses ~60 MB RAM. Everything else is your apps and Docker.
 SimpleDeploy needs Docker Engine + the Compose plugin. Skip this if Docker is already running.
 
 ```bash
-# Official one-liner (verify on docs.docker.com first)
-curl -fsSL https://get.docker.com | sudo sh
+# Docker's official convenience script (see docs.docker.com/engine/install)
+curl -fsSL https://get.docker.com -o get-docker.sh
+less get-docker.sh   # optional: review before running as root
+sudo sh get-docker.sh
 sudo systemctl enable --now docker
 docker version
 docker compose version

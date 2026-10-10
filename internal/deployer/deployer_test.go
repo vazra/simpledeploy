@@ -3,12 +3,30 @@ package deployer
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 )
+
+// testApp writes a minimal compose file so the pre-up security check has a
+// real file to parse.
+func testApp(t *testing.T, name string) *compose.AppConfig {
+	t.Helper()
+	return testAppWith(t, name, "services:\n  web:\n    image: nginx\n")
+}
+
+func testAppWith(t *testing.T, name, content string) *compose.AppConfig {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "docker-compose.yml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &compose.AppConfig{Name: name, ComposePath: path}
+}
 
 type fakeAudit struct {
 	mu     sync.Mutex
@@ -34,10 +52,7 @@ func TestDeployCallsComposeUp(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
 
-	app := &compose.AppConfig{
-		Name:        "myapp",
-		ComposePath: "/apps/myapp/docker-compose.yml",
-	}
+	app := testApp(t, "myapp")
 
 	if result := d.Deploy(context.Background(), app); result.Err != nil {
 		t.Fatalf("Deploy: %v", result.Err)
@@ -71,10 +86,7 @@ func TestDeployPropagatesError(t *testing.T) {
 	mock := &MockRunner{Err: fmt.Errorf("compose failed")}
 	d := &Deployer{runner: mock}
 
-	app := &compose.AppConfig{
-		Name:        "myapp",
-		ComposePath: "/apps/myapp/docker-compose.yml",
-	}
+	app := testApp(t, "myapp")
 
 	result := d.Deploy(context.Background(), app)
 	if result.Err == nil {
@@ -111,7 +123,7 @@ func TestNewFailsWhenComposeUnavailable(t *testing.T) {
 func TestRestartCallsComposeRestart(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 	if result := d.Restart(context.Background(), app); result.Err != nil {
 		t.Fatalf("Restart: %v", result.Err)
 	}
@@ -145,7 +157,7 @@ func TestStartCallsComposeStart(t *testing.T) {
 func TestPullCallsPullThenUp(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 	if result := d.Pull(context.Background(), app, nil); result.Err != nil {
 		t.Fatalf("Pull: %v", result.Err)
 	}
@@ -160,7 +172,7 @@ func TestPullCallsPullThenUp(t *testing.T) {
 func TestPullWithAuth(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/tmp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 
 	auths := []RegistryAuth{
 		{URL: "ghcr.io", Username: "user", Password: "pass"},
@@ -186,7 +198,7 @@ func TestPullWithAuth(t *testing.T) {
 func TestPullWithoutAuth(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/tmp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 
 	result := d.Pull(context.Background(), app, nil)
 	if result.Err != nil {
@@ -205,7 +217,7 @@ func TestPullWithoutAuth(t *testing.T) {
 func TestScaleCallsComposeUpWithScale(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock}
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 	if err := d.Scale(context.Background(), app, map[string]int{"web": 3}); err != nil {
 		t.Fatalf("Scale: %v", err)
 	}
@@ -231,7 +243,7 @@ func TestDeployEmitsSucceededAudit(t *testing.T) {
 	fa := &fakeAudit{}
 	d := &Deployer{runner: mock, audit: fa}
 
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 	result := d.Deploy(context.Background(), app)
 	if result.Err != nil {
 		t.Fatalf("Deploy: %v", result.Err)
@@ -257,7 +269,7 @@ func TestDeployEmitsFailedAudit(t *testing.T) {
 	fa := &fakeAudit{}
 	d := &Deployer{runner: mock, audit: fa}
 
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 	result := d.Deploy(context.Background(), app)
 	if result.Err == nil {
 		t.Fatal("expected error from Deploy")
@@ -283,7 +295,7 @@ func TestRollbackDeployEmitsRollbackAudit(t *testing.T) {
 	fa := &fakeAudit{}
 	d := &Deployer{runner: mock, audit: fa}
 
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 	cvID := int64(42)
 	result := d.RollbackDeploy(context.Background(), app, 3, &cvID)
 	if result.Err != nil {
@@ -313,7 +325,7 @@ func TestDeployNoAuditPanicsWithNilEmitter(t *testing.T) {
 	mock := &MockRunner{}
 	d := &Deployer{runner: mock} // audit is nil
 
-	app := &compose.AppConfig{Name: "myapp", ComposePath: "/apps/myapp/docker-compose.yml"}
+	app := testApp(t, "myapp")
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("Deploy panicked with nil audit emitter: %v", r)

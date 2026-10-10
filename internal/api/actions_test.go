@@ -165,7 +165,8 @@ func TestScaleEndpoint(t *testing.T) {
 func TestRollbackEndpoint(t *testing.T) {
 	srv, mock := newActionTestServer(t)
 	cookie := superAdminCookie(t, srv.jwt)
-	body, _ := json.Marshal(map[string]any{"version_id": 5})
+	verID := seedVersion(t, srv, "myapp")
+	body, _ := json.Marshal(map[string]any{"version_id": verID})
 	req := httptest.NewRequest(http.MethodPost, "/api/apps/myapp/rollback", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
@@ -174,9 +175,31 @@ func TestRollbackEndpoint(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
-	if len(mock.calls) == 0 || mock.calls[0] != "RollbackOne:myapp:5" {
-		t.Errorf("expected RollbackOne:myapp:5, got: %v", mock.calls)
+	want := fmt.Sprintf("RollbackOne:myapp:%d", verID)
+	if len(mock.calls) == 0 || mock.calls[0] != want {
+		t.Errorf("expected %s, got: %v", want, mock.calls)
 	}
+}
+
+// seedVersion creates app slug in the store with one compose version and
+// returns the version ID.
+func seedVersion(t *testing.T, srv *Server, slug string) int64 {
+	t.Helper()
+	if err := srv.store.UpsertApp(&store.App{Name: slug, Slug: slug, Status: "running"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	app, err := srv.store.GetAppBySlug(slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.CreateComposeVersion(app.ID, "services:\n  web:\n    image: nginx\n", "h-"+slug); err != nil {
+		t.Fatal(err)
+	}
+	versions, err := srv.store.ListComposeVersions(app.ID)
+	if err != nil || len(versions) == 0 {
+		t.Fatalf("list versions: %v", err)
+	}
+	return versions[0].ID
 }
 
 func TestScaleEndpointMissingBody(t *testing.T) {

@@ -46,12 +46,16 @@ Both paths populate an `audit.Ctx` (actor user id, name, source, IP) carried thr
 
 Three roles: `super_admin`, `manage`, `viewer`. Per-app grants in `user_app_access` extend `manage`/`viewer` to specific apps. Middleware:
 
-- `authMiddleware` — required on every authenticated route.
-- `appAccessMiddleware` — read access to `/api/apps/{slug}/…`. super_admin bypass.
-- `mutatingAppMiddleware` — same as above but rejects viewers.
-- `superAdminMiddleware` — super_admin only.
+- `authMiddleware`: required on every authenticated route.
+- `appAccessMiddleware`: read access to `/api/apps/{slug}/…`. super_admin bypass.
+- `mutatingAppMiddleware`: same as above but rejects viewers.
+- `superAdminMiddleware`: super_admin only.
 
 For routes keyed by a body or referenced row id (e.g. `PUT /api/backups/configs/{id}`), the handler resolves the underlying app id and calls `canMutateForApp`. The router registration in `internal/api/server.go` is the source of truth for which middleware applies where.
+
+## Cross-origin protection
+
+`SameSite=Strict` does not cover sibling subdomains, which are same-site. The API handler chain wraps the mux in Go's `http.CrossOriginProtection`, rejecting non-GET/HEAD/OPTIONS requests that the browser marks cross-origin (`Sec-Fetch-Site`, falling back to `Origin` vs `Host`). Non-browser clients send neither header and pass. WebSocket upgrades check `Origin` host:port against `Host`, and long-lived sockets re-check authorization every 60s.
 
 ## Session invalidation
 
@@ -67,9 +71,9 @@ JWTs minted before any of those events fail the `tv` check on the next request a
 
 Default bindings:
 
-- `:80`, `:443` — Caddy. Public-facing reverse proxy + ACME.
-- `127.0.0.1:8443` — dashboard. Local-only by default; operators front it under a `manage.<domain>` route through Caddy if external access is needed.
-- App `ports:` mappings are rewritten at deploy time to bind `127.0.0.1:` so the published port cannot be used to bypass per-app Caddy controls. Operator-explicit interface bindings (`0.0.0.0:`, `127.0.0.1:`, `[::1]:`) are preserved verbatim. The rewrite can be disabled globally with `SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true`.
+- `:80`, `:443`: Caddy. Public-facing reverse proxy + ACME.
+- `127.0.0.1:8443`: dashboard. Local-only by default; operators front it under a `manage.<domain>` route through Caddy if external access is needed.
+- App `ports:` mappings are rewritten at deploy time to bind `127.0.0.1:`, so outside traffic reaches apps only through Caddy and its per-app controls. Operator-explicit interface bindings (`0.0.0.0:`, `127.0.0.1:`, `[::1]:`) are preserved verbatim. The rewrite can be disabled globally with `SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true`.
 
 The Caddy admin API (default `:2019`) is **disabled** programmatically. There is no pprof, no `/debug` endpoint.
 
@@ -78,7 +82,7 @@ The Caddy admin API (default `:2019`) is **disabled** programmatically. There is
 | Destination | When |
 |---|---|
 | Configured `recipes_index_url` | UI catalog browsing (HTTPS, same-host enforcement on sub-resources) |
-| Operator-configured webhook URLs | Alert dispatch — public IPs only, with DNS-rebind protection in the dialer |
+| Operator-configured webhook URLs | Alert dispatch: public IPs only, with DNS-rebind protection in the dialer |
 | Configured registries | Compose deploy (image pulls happen via the Docker daemon, not the binary) |
 | Configured S3 endpoint | Backup target (operator-supplied creds) |
 | Configured git remote | git sync (operator-supplied creds) |
@@ -99,7 +103,7 @@ The `volume` and `sqlite` restore strategies pre-walk the uploaded tar (`interna
 - block/char/fifo entries
 - NUL in names
 
-After validation the stream is replayed verbatim into `docker exec ... tar -xzf -` with `--no-same-owner --no-overwrite-dir`. Decompressed size is capped at 8 GiB by default. Concurrent restores are capped server-side.
+After validation the stream is replayed verbatim into `docker exec ... tar -xzf -` with `--no-same-owner --no-overwrite-dir`. Uploaded archives are capped at 8 GiB decompressed by default (`SIMPLEDEPLOY_RESTORE_MAX_GB`); restores of SimpleDeploy's own backup runs are uncapped unless that variable is set. Concurrent restores are capped server-side.
 
 ## Audit trail
 
@@ -112,7 +116,7 @@ A super_admin can still tamper at the SQLite level. The trail is operator-trust-
 
 ## Logging
 
-Process stdout/stderr is teed into an in-process ring buffer (`internal/logbuf`). Buffered messages are sanitized: ANSI/OSC escape sequences are stripped, ASCII control characters except tab are dropped, and any single line is truncated at 8 KiB. The buffer is exposed at `GET /api/system/process-logs` to super_admin only.
+Process stdout/stderr is teed into an in-process ring buffer (`internal/logbuf`). The tee never stops draining the pipe: raw bytes always reach the original stdout/stderr, and over-long lines are truncated for the buffer rather than stalling every writer. Buffered messages are sanitized: ANSI/OSC escape sequences are stripped, ASCII control characters except tab are dropped, and any single line is truncated at 8 KiB. The buffer is exposed at `GET /api/system/process-logs` to super_admin only.
 
 The api logger (`log.Printf("[api] …")`) writes structured-ish lines and is also captured by the buffer. Handler errors are routed through `httpError`, which logs server-side and returns generic `http.StatusText` to the client; `err.Error()` is not echoed.
 
@@ -120,12 +124,14 @@ The api logger (`log.Printf("[api] …")`) writes structured-ish lines and is al
 
 - `http.Server.ReadHeaderTimeout = 10s`, `IdleTimeout = 120s` (read/write deadlines are per-handler so streaming WS is not killed).
 - Per-path body limit: 32 MiB for `upload-restore`, 256 KiB for cert uploads, 1 MiB elsewhere.
-- WS endpoints set `SetReadLimit(16 KiB)` and a 30s ping ticker; auth is rechecked every 60s.
+- WS endpoints set `SetReadLimit(16 KiB)` and a 30s ping ticker; auth (user, role, session/API key, app access) is rechecked every 60s on every socket. Container log frames over 1 MiB end the stream; TTY containers are streamed raw.
 - Login: dedicated 10/min/IP rate limiter.
 - Account lockout: per-(username, IP) tuple, max 30 minute backoff. Locked-out attempts return `401 invalid credentials` (no enumeration tell).
 - Webhook dispatcher: 10s overall timeout, 5s TLS handshake, 10s response-header.
-- Restore concurrency: server-wide semaphore caps to 4.
-- Decompression: 8 GiB cap on gzip readers in restore paths.
+- Restore concurrency: server-wide semaphore caps to 4, acquired before the upload is written to disk.
+- Decompression: uploaded restore archives are capped at 8 GiB decompressed by default (`SIMPLEDEPLOY_RESTORE_MAX_GB`), including bytes after the tar end marker; archives are staged in `{data_dir}/tmp`, not memory.
+- Per-domain rate limiter: at most 10,000 buckets per domain.
+- App bundle import: 10 MiB cap per zip entry.
 
 ## Build and release integrity
 
@@ -141,14 +147,14 @@ Cryptographic signing of release artifacts (cosign), SBOM emission (syft), and S
 
 Recommended starting points for a code audit:
 
-- `internal/api/server.go` — full route table.
-- `internal/api/middleware.go` — auth + audit context plumbing.
-- `internal/auth/` — JWT, API keys, password, lockout, real-IP, AES-GCM.
-- `internal/compose/validate.go` — compose security validator.
-- `internal/backup/tarsafe.go` — restore archive validator.
-- `internal/proxy/proxy.go` — Caddy config builder + custom modules.
-- `internal/store/migrations/` — schema history.
-- `internal/audit/` — audit recorder + render.
+- `internal/api/server.go`: full route table.
+- `internal/api/middleware.go`: auth + audit context plumbing.
+- `internal/auth/`: JWT, API keys, password, lockout, real-IP, AES-GCM.
+- `internal/compose/validate.go`: compose security validator.
+- `internal/backup/tarsafe.go`: restore archive validator.
+- `internal/proxy/proxy.go`: Caddy config builder + custom modules.
+- `internal/store/migrations/`: schema history.
+- `internal/audit/`: audit recorder + render.
 
 Run `go test ./...` and `go test -race ./...` from a clean checkout. Run `cd ui && npm test` for the dashboard.
 

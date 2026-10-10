@@ -15,9 +15,10 @@ import (
 
 // ApplyAppSidecar reconciles per-app DB rows to match the FS-loaded sidecar
 // for the given slug. The app row must already exist. Performs full-replace
-// for alert_rules, backup_configs, and user_app_access. Updates apps.name
-// from sidecar display_name. Alert rules referencing unknown webhooks are
-// dropped with a log line (rather than failing the whole apply).
+// for alert_rules, backup_configs, and user_app_access (the latter skipped
+// while SetAccessFromDashboardOnly is on). Updates apps.name from sidecar
+// display_name. Alert rules referencing unknown webhooks are dropped with a
+// log line (rather than failing the whole apply).
 //
 // loaded.Sidecar must be non-nil. loaded.Secrets may be nil.
 func (s *Syncer) ApplyAppSidecar(slug string, loaded *LoadedApp) error {
@@ -176,6 +177,10 @@ func (s *Syncer) ApplyAppSidecar(slug string, loaded *LoadedApp) error {
 		if err := s.store.DeleteBackupConfig(prev.ID); err != nil {
 			return fmt.Errorf("ApplyAppSidecar %s: delete backup config: %w", slug, err)
 		}
+	}
+
+	if s.accessFromDashboard.Load() {
+		return nil
 	}
 
 	// Full-replace user_app_access. ReplaceAppAccess silently skips users

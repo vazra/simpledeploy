@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -106,6 +107,10 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...
 		d.audit.RecordDeploy(auditCtx, evt)
 	}()
 
+	if err := checkComposeFile(app); err != nil {
+		return d.refuse(dl, app.Name, "deploy", err)
+	}
+
 	project := "simpledeploy-" + app.Name
 	args := []string{
 		"compose",
@@ -160,6 +165,10 @@ func (d *Deployer) RollbackDeploy(ctx context.Context, app *compose.AppConfig, v
 		}
 		d.audit.RecordDeploy(auditCtx, evt)
 	}()
+
+	if err := checkComposeFile(app); err != nil {
+		return d.refuse(dl, app.Name, "deploy", err)
+	}
 
 	project := "simpledeploy-" + app.Name
 	args := []string{
@@ -258,6 +267,10 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 		return DeployResult{Skipped: true}
 	}
 
+	if err := checkComposeFile(app); err != nil {
+		return d.refuse(dl, app.Name, "pull", err)
+	}
+
 	project := "simpledeploy-" + app.Name
 
 	pullArgs := []string{"compose", "-f", app.ComposePath, "-p", project, "pull"}
@@ -296,6 +309,42 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 	return DeployResult{Output: output, Status: status, Services: services}
 }
 
+// checkComposeFile re-reads the compose file from disk and runs the
+// security validator on it. Every path that runs `docker compose up` calls
+// this first, so a file changed after the caller parsed it (git sync, a
+// restored version, a manual edit) is still checked right before it runs.
+func checkComposeFile(app *compose.AppConfig) error {
+	cfg, err := compose.ParseFile(app.ComposePath, app.Name)
+	if err != nil {
+		return fmt.Errorf("compose file could not be read: %w", err)
+	}
+	if v := compose.ValidateComposeSecurity(cfg); len(v) > 0 {
+		return &compose.ViolationError{Violations: v}
+	}
+	return nil
+}
+
+// refuse ends a tracked deploy that checkComposeFile stopped, explaining
+// why in the deploy log so the UI shows the reason.
+func (d *Deployer) refuse(dl *DeployLog, slug, action string, err error) DeployResult {
+	lines := []string{"Stopped before starting: " + err.Error()}
+	var ve *compose.ViolationError
+	if errors.As(err, &ve) {
+		lines = []string{"Stopped before starting: the compose file breaks these security rules:"}
+		for _, v := range ve.Violations {
+			lines = append(lines, "  - "+v)
+		}
+		lines = append(lines, "Fix the compose file and try again.")
+	}
+	if dl != nil {
+		for _, l := range lines {
+			dl.Send(OutputLine{Line: l, Stream: "stderr"})
+		}
+	}
+	d.Tracker.DoneWithLogStatus(slug, action+"_failed", "failed", nil)
+	return DeployResult{Output: strings.Join(lines, "\n"), Err: err, Status: "failed"}
+}
+
 func writeDockerConfig(auths []RegistryAuth) (string, error) {
 	type authEntry struct {
 		Auth string `json:"auth"`
@@ -325,6 +374,9 @@ func writeDockerConfig(auths []RegistryAuth) (string, error) {
 }
 
 func (d *Deployer) Scale(ctx context.Context, app *compose.AppConfig, scales map[string]int) error {
+	if err := checkComposeFile(app); err != nil {
+		return err
+	}
 	project := "simpledeploy-" + app.Name
 	args := []string{
 		"compose",
@@ -347,6 +399,9 @@ func (d *Deployer) Scale(ctx context.Context, app *compose.AppConfig, scales map
 func (d *Deployer) Cancel(ctx context.Context, app *compose.AppConfig) error {
 	if err := d.Tracker.Cancel(app.Name); err != nil {
 		return err
+	}
+	if err := checkComposeFile(app); err != nil {
+		return fmt.Errorf("reconcile after cancel: %w", err)
 	}
 	project := "simpledeploy-" + app.Name
 	args := []string{

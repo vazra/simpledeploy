@@ -40,9 +40,17 @@ Uses `network_mode: host` so Caddy binds 80/443 directly. Image: `ghcr.io/vazra/
 ### Linux (binary)
 
 ```bash
-curl -L https://github.com/vazra/simpledeploy/releases/latest/download/simpledeploy_linux_amd64.tar.gz | tar xz
-sudo mv simpledeploy /usr/local/bin/
+VERSION=1.4.2   # latest: https://github.com/vazra/simpledeploy/releases # x-release-please-version
+ARCH=amd64      # or arm64
+FILE="simpledeploy_${VERSION}_linux_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/${FILE}"
+curl -fsSLO "https://github.com/vazra/simpledeploy/releases/download/v${VERSION}/checksums.txt"
+grep " ${FILE}$" checksums.txt | sha256sum -c - \
+  && tar xzf "$FILE" simpledeploy \
+  && sudo install -m 0755 simpledeploy /usr/local/bin/simpledeploy
 ```
+
+Installs only if the tarball matches the release's `checksums.txt`.
 
 ### Build from source
 

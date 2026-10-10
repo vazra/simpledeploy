@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -841,5 +842,248 @@ func TestBuildConfigCustomTLSDomainsSkipAutomation(t *testing.T) {
 				t.Errorf("%s: automation mentions custom domain %s: %s", mode, d, raw)
 			}
 		}
+	}
+}
+
+// freshRegistries swaps in empty package-level registries for the test.
+func freshRegistries(t *testing.T) {
+	t.Helper()
+	origIP, origRL := IPAccessRules, RateLimiters
+	IPAccessRules = newIPAccessRegistry()
+	RateLimiters = &RateLimiterRegistry{limiters: make(map[string]*domainLimiter)}
+	t.Cleanup(func() { IPAccessRules, RateLimiters = origIP, origRL })
+}
+
+func routeApps(rs []Route) []string {
+	var out []string
+	for _, r := range rs {
+		out = append(out, r.AppSlug+"@"+r.Domain+r.Path)
+	}
+	return out
+}
+
+func TestClaimDomainsOneAppPerDomain(t *testing.T) {
+	routes := []Route{
+		{AppSlug: "zeta", Domain: "Shared.example.com"},
+		{AppSlug: "alpha", Domain: "shared.example.com."},
+		{AppSlug: "alpha", Domain: "shared.example.com", Path: "/api*"}, // same app, other path: kept
+		{AppSlug: "zeta", Domain: "zeta.example.com"},
+	}
+	kept, owners := claimDomains(routes, nil)
+	want := []string{"alpha@shared.example.com.", "alpha@shared.example.com/api*", "zeta@zeta.example.com"}
+	if got := routeApps(kept); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("kept = %v, want %v", got, want)
+	}
+	if owners["shared.example.com"] != "alpha" || owners["zeta.example.com"] != "zeta" {
+		t.Errorf("owners = %v", owners)
+	}
+
+	// The previous owner keeps the domain even when it sorts later.
+	kept, owners = claimDomains(routes, map[string]string{"shared.example.com": "zeta"})
+	if owners["shared.example.com"] != "zeta" {
+		t.Fatalf("owner = %q, want previous owner zeta", owners["shared.example.com"])
+	}
+	for _, r := range kept {
+		if r.AppSlug == "alpha" {
+			t.Errorf("alpha route kept on zeta's domain: %+v", r)
+		}
+	}
+
+	// A previous owner that no longer claims the domain does not block others.
+	_, owners = claimDomains(routes, map[string]string{"shared.example.com": "gone"})
+	if owners["shared.example.com"] != "alpha" {
+		t.Errorf("owner = %q, want alpha", owners["shared.example.com"])
+	}
+}
+
+func TestClaimDomainsLowestAppIDWins(t *testing.T) {
+	routes := []Route{
+		{AppSlug: "alpha", AppID: 7, Domain: "shared.example.com"},
+		{AppSlug: "zeta", AppID: 3, Domain: "shared.example.com"},
+		{AppSlug: "mid", AppID: 3, Domain: "shared.example.com"},
+	}
+	kept, owners := claimDomains(routes, nil)
+	// zeta and mid tie on AppID 3; the slug breaks the tie.
+	if owners["shared.example.com"] != "mid" {
+		t.Fatalf("owner = %q, want mid (lowest AppID, then slug)", owners["shared.example.com"])
+	}
+	if got := routeApps(kept); len(got) != 1 || got[0] != "mid@shared.example.com" {
+		t.Errorf("kept = %v", got)
+	}
+
+	// A previous owner that still claims the domain keeps it.
+	_, owners = claimDomains(routes, map[string]string{"shared.example.com": "alpha"})
+	if owners["shared.example.com"] != "alpha" {
+		t.Errorf("owner = %q, want previous owner alpha", owners["shared.example.com"])
+	}
+}
+
+func TestSetRoutesOwnerStableAcrossRestart(t *testing.T) {
+	freshRegistries(t)
+	older := Route{AppSlug: "zeta", AppID: 1, Domain: "shared.test", Upstream: "z:1"}
+	newer := Route{AppSlug: "alpha", AppID: 2, Domain: "shared.test", Upstream: "a:1"}
+
+	// Running proxy: zeta claimed the domain first.
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "off"})
+	countingLoad(p)
+	if err := p.SetRoutes([]Route{older}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetRoutes([]Route{newer, older}); err != nil {
+		t.Fatal(err)
+	}
+	// Restart: a fresh proxy gets the same routes in either order.
+	for _, rs := range [][]Route{{newer, older}, {older, newer}} {
+		fresh := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "off"})
+		countingLoad(fresh)
+		if err := fresh.SetRoutes(rs); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := routeApps(fresh.snapshotRoutes()), routeApps(p.snapshotRoutes()); strings.Join(got, ",") != strings.Join(want, ",") || len(got) != 1 || got[0] != "zeta@shared.test" {
+			t.Errorf("after restart routes = %v, before = %v, want zeta@shared.test", got, want)
+		}
+	}
+}
+
+func TestSetRoutesLoadFailureRestoresRules(t *testing.T) {
+	freshRegistries(t)
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "off"})
+	fail := false
+	p.load = func([]byte, bool) error {
+		if fail {
+			return errors.New("load failed")
+		}
+		return nil
+	}
+	a := Route{AppSlug: "a", AppID: 1, Domain: "a.test", Upstream: "a:1", AllowedIPs: []string{"10.0.0.1"},
+		RateLimit: &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"}}
+	if err := p.SetRoutes([]Route{a}); err != nil {
+		t.Fatal(err)
+	}
+	// Use up a's single token so a fresh limiter would be detectable.
+	ok := reqFrom("a.test", "10.0.0.1:1")
+	if !RateLimiters.Allow("a.test", ok) {
+		t.Fatal("first request limited")
+	}
+
+	// New set: a is gone, b serves a.test without rules and b.test with an
+	// allowlist.
+	fail = true
+	b := Route{AppSlug: "b", AppID: 2, Domain: "b.test", Upstream: "b:1", AllowedIPs: []string{"10.0.0.2"}}
+	if err := p.SetRoutes([]Route{b, {AppSlug: "b", AppID: 2, Domain: "a.test", Upstream: "b:2"}}); err == nil {
+		t.Fatal("SetRoutes succeeded with a failing load")
+	}
+
+	if got := routeApps(p.snapshotRoutes()); len(got) != 1 || got[0] != "a@a.test" {
+		t.Errorf("routes = %v, want previous set", got)
+	}
+	if p.owners["a.test"] != "a" || len(p.owners) != 1 {
+		t.Errorf("owners = %v, want previous owners", p.owners)
+	}
+	if IPAccessRules.Allowed("a.test", reqFrom("", "5.5.5.5:1")) {
+		t.Error("a.test allowlist not restored")
+	}
+	if !IPAccessRules.Allowed("b.test", reqFrom("", "5.5.5.5:1")) {
+		t.Error("b.test allowlist from the failed set still active")
+	}
+	if RateLimiters.Allow("a.test", ok) {
+		t.Error("a.test limiter not restored with its counters")
+	}
+
+	// The next successful load applies the new set.
+	fail = false
+	a2 := a
+	a2.AllowedIPs, a2.RateLimit = nil, nil
+	if err := p.SetRoutes([]Route{a2, b}); err != nil {
+		t.Fatal(err)
+	}
+	if !IPAccessRules.Allowed("a.test", reqFrom("", "5.5.5.5:1")) || IPAccessRules.Allowed("b.test", reqFrom("", "5.5.5.5:1")) {
+		t.Error("rules not applied after a successful load")
+	}
+}
+
+func TestSetRoutesLaterAppCannotClearOrOverrideRules(t *testing.T) {
+	freshRegistries(t)
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "off"})
+	countingLoad(p)
+
+	owner := Route{AppSlug: "a", Domain: "secure.test", Upstream: "a:1", AllowedIPs: []string{"10.0.0.1"},
+		RateLimit: &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"}}
+	// "z" sorts after "a" and claims the same domain (other case) without
+	// rules: it must not clear a's allowlist or replace its limiter.
+	intruder := Route{AppSlug: "z", Domain: "SECURE.test", Upstream: "z:1",
+		RateLimit: &RateLimitConfig{Requests: 1000, Window: time.Minute, By: "ip"}}
+	if err := p.SetRoutes([]Route{owner, intruder}); err != nil {
+		t.Fatal(err)
+	}
+	if got := routeApps(p.snapshotRoutes()); len(got) != 1 || got[0] != "a@secure.test" {
+		t.Fatalf("routes = %v, want only a's", got)
+	}
+	if IPAccessRules.Allowed("secure.test", reqFrom("", "5.5.5.5:1")) {
+		t.Error("intruder cleared the owner's IP allowlist")
+	}
+	req := reqFrom("secure.test", "10.0.0.1:1")
+	RateLimiters.Allow("secure.test", req)
+	if RateLimiters.Allow("secure.test", req) {
+		t.Error("intruder replaced the owner's rate limiter")
+	}
+
+	// Owner is sticky: "0first" sorts before "a" but arrives later.
+	early := Route{AppSlug: "0first", Domain: "secure.test", Upstream: "f:1"}
+	if err := p.SetRoutes([]Route{early, owner, intruder}); err != nil {
+		t.Fatal(err)
+	}
+	if got := routeApps(p.snapshotRoutes()); len(got) != 1 || got[0] != "a@secure.test" {
+		t.Fatalf("routes = %v, want previous owner a to keep the domain", got)
+	}
+}
+
+func TestSetRoutesDropsStaleRules(t *testing.T) {
+	freshRegistries(t)
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "off"})
+	countingLoad(p)
+	r := Route{AppSlug: "a", Domain: "a.test", Upstream: "a:1", AllowedIPs: []string{"10.0.0.1"},
+		RateLimit: &RateLimitConfig{Requests: 1, Window: time.Minute, By: "ip"}}
+	if err := p.SetRoutes([]Route{r}); err != nil {
+		t.Fatal(err)
+	}
+	r.AllowedIPs, r.RateLimit = nil, nil
+	if err := p.SetRoutes([]Route{r}); err != nil {
+		t.Fatal(err)
+	}
+	req := reqFrom("a.test", "5.5.5.5:1")
+	if !IPAccessRules.Allowed("a.test", req) || !RateLimiters.Allow("a.test", req) || !RateLimiters.Allow("a.test", req) {
+		t.Error("removed allowlist/rate limit must no longer apply")
+	}
+}
+
+func TestBuildConfigBindsRuleHandlersToRouteDomain(t *testing.T) {
+	p := newTestProxy("off", "")
+	p.routes = []Route{{Domain: "App.Example.com", Upstream: "a:1"}}
+	routes := getServer(t, parseConfig(t, p))["routes"].([]interface{})
+	hs := routes[0].(map[string]interface{})["handle"].([]interface{})
+	for _, i := range []int{0, 1} {
+		if d := hs[i].(map[string]interface{})["domain"]; d != "app.example.com" {
+			t.Errorf("handler[%d] domain = %v, want app.example.com", i, d)
+		}
+	}
+}
+
+func TestSetRoutesSkipsInvalidDomainKeepsOthers(t *testing.T) {
+	freshRegistries(t)
+	p := NewCaddyProxy(CaddyConfig{ListenAddr: ":443", TLSMode: "off"})
+	countingLoad(p)
+	err := p.SetRoutes([]Route{
+		{AppSlug: "bad", Domain: "bad_domain!", Upstream: "b:1"},
+		{AppSlug: "a", Domain: "a.test", Upstream: "a:1", AllowedIPs: []string{"10.0.0.1"}},
+	})
+	if err != nil {
+		t.Fatalf("SetRoutes: %v (one bad route must not block others)", err)
+	}
+	if got := routeApps(p.snapshotRoutes()); len(got) != 1 || got[0] != "a@a.test" {
+		t.Fatalf("routes = %v, want only a's", got)
+	}
+	if IPAccessRules.Allowed("a.test", reqFrom("", "5.5.5.5:1")) {
+		t.Error("valid app's allowlist not applied")
 	}
 }

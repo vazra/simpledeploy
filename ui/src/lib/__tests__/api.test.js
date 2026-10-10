@@ -281,6 +281,53 @@ describe('api', () => {
     expect(opts.method).toBe('DELETE');
   });
 
+  it('encodes a traversal-style slug into a single path segment', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}));
+    await api.getApp('../activity?');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/apps/..%2Factivity%3F');
+
+    fetchMock.mockClear();
+    await api.getEnv('a/b#c');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/apps/a%2Fb%23c/env');
+
+    fetchMock.mockClear();
+    await api.deleteVersion('../x', '1/../2');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/apps/..%2Fx/versions/1%2F..%2F2');
+  });
+
+  it('encodes slug in raw fetch and URL builders', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => '', blob: async () => new Blob() });
+    await api.uploadRestore('../x', new FormData());
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/apps/..%2Fx/backups/upload-restore');
+
+    fetchMock.mockClear();
+    await api.exportApp('a?b');
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/apps/a%3Fb/export');
+
+    expect(api.downloadComposeVersionUrl('a/b', 3)).toBe('/api/apps/a%2Fb/versions/3/download');
+  });
+
+  it('rejects dot-segment slugs instead of building a traversal path', () => {
+    expect(() => api.getApp('..')).toThrow(/invalid path segment/);
+    expect(() => api.getApp('.')).toThrow(/invalid path segment/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('putEnv refuses to send masked (viewer) entries', async () => {
+    const res = await api.putEnv('foo', [{ key: 'A', value: '1' }, { key: 'B', value: '', masked: true }]);
+    expect(res.error).toMatch(/hidden/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(get(toasts)[0].type).toBe('error');
+  });
+
+  it('putEnv sends only key/value pairs', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
+    await api.putEnv('foo', [{ key: 'A', value: '1', masked: false }]);
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/apps/foo/env');
+    expect(JSON.parse(opts.body)).toEqual([{ key: 'A', value: '1' }]);
+  });
+
   it('encodes URL components for cert and docker endpoints', async () => {
     fetchMock.mockResolvedValue(jsonResponse({}));
     await api.deleteCert('foo', 'sub.example.com');
@@ -289,5 +336,72 @@ describe('api', () => {
     fetchMock.mockClear();
     await api.dockerRemoveImage('sha256:abc/def');
     expect(fetchMock.mock.calls[0][0]).toBe('/api/docker/images/sha256%3Aabc%2Fdef');
+  });
+
+  describe('refusal reasons (violations)', () => {
+    const refused = {
+      error: 'compose file contains disallowed directives',
+      violations: ['service "web": privileged not allowed', 'service "web": pid "host" not allowed'],
+    };
+    const expected = 'compose file contains disallowed directives:\n- service "web": privileged not allowed\n- service "web": pid "host" not allowed';
+
+    it('deploy returns the violations in error and alongside', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(refused, 400));
+      const res = await api.deploy('foo', 'Zm9v', 'update', true);
+      expect(res.error).toBe(expected);
+      expect(res.violations).toEqual(refused.violations);
+      expect(res.status).toBe(400);
+    });
+
+    it('endpoint save toasts the reasons on 409', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'compose fails checks', violations: ['volume "x": bind not allowed'] }, 409));
+      const res = await api.updateEndpoints('foo', []);
+      expect(res.status).toBe(409);
+      const t = get(toasts);
+      expect(t).toHaveLength(1);
+      expect(t[0].type).toBe('error');
+      expect(t[0].message).toBe('compose fails checks:\n- volume "x": bind not allowed');
+    });
+
+    it('rollback and version restore toast the reasons', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(refused, 400));
+      await api.rollbackApp('foo', 3);
+      fetchMock.mockResolvedValueOnce(jsonResponse(refused, 400));
+      await api.restoreComposeVersion('foo', 3);
+      const msgs = get(toasts).map((t) => t.message);
+      expect(msgs).toEqual([expected, expected]);
+    });
+
+    it('env save toasts the reasons', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'refused', violations: ['a'] }, 409));
+      const res = await api.putEnv('foo', [{ key: 'A', value: '1' }]);
+      expect(res.error).toBe('refused:\n- a');
+      expect(get(toasts)[0].message).toBe('refused:\n- a');
+    });
+
+    it('importApp and importAppPreview include violations', async () => {
+      const file = new Blob(['zip']);
+      fetchMock.mockResolvedValueOnce(jsonResponse(refused, 400));
+      let res = await api.importAppPreview(file, { mode: 'new', slug: 'foo' });
+      expect(res.error).toBe(expected);
+      expect(res.violations).toEqual(refused.violations);
+      fetchMock.mockResolvedValueOnce(jsonResponse(refused, 400));
+      res = await api.importApp(file, { mode: 'new', slug: 'foo' });
+      expect(res.error).toBe(expected);
+      expect(res.data).toEqual(refused);
+    });
+
+    it('uploadRestore includes violations from a JSON error', async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'refused', violations: ['a'] }, 400));
+      const res = await api.uploadRestore('foo', new FormData());
+      expect(res.error).toBe('refused:\n- a');
+      expect(res.violations).toEqual(['a']);
+    });
+
+    it('uploadRestore keeps its fallback message for an empty body', async () => {
+      fetchMock.mockResolvedValueOnce(textResponse('', 500));
+      const res = await api.uploadRestore('foo', new FormData());
+      expect(res.error).toBe('Upload failed');
+    });
   });
 });

@@ -1,6 +1,12 @@
 package backup
 
 import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -108,4 +114,35 @@ func TestSQLiteStrategy_Detect(t *testing.T) {
 
 func TestSQLiteStrategy_Interface(t *testing.T) {
 	var _ Strategy = NewSQLiteStrategy()
+}
+
+func TestSQLiteStrategy_RejectsUnsafePaths(t *testing.T) {
+	s := NewSQLiteStrategy()
+	for _, p := range []string{"/data/x'.db", "/data/x\".db", "/data/x\n.db", "relative.db", "/data/-x.db"} {
+		if _, err := s.Backup(context.Background(), BackupOpts{ContainerName: noSuchContainer, Paths: []string{p}}); err == nil {
+			t.Errorf("Backup(%q) succeeded, want path error", p)
+		}
+		data := makeTarGz(t, []*tar.Header{{Name: "tmp/sd-backup-x.db", Size: 1, Typeflag: tar.TypeReg}})
+		err := s.Restore(context.Background(), RestoreOpts{
+			ContainerName: noSuchContainer,
+			Paths:         []string{p},
+			Reader:        io.NopCloser(bytes.NewReader(data)),
+		})
+		if err == nil || !strings.Contains(err.Error(), "path") {
+			t.Errorf("Restore(%q) err = %v, want path error", p, err)
+		}
+	}
+}
+
+func TestSQLiteStrategy_RestoreRejectsOversizeArchive(t *testing.T) {
+	data := makeTarGz(t, []*tar.Header{{Name: "tmp/sd-backup-app.db", Size: 64 << 10, Typeflag: tar.TypeReg}})
+	err := NewSQLiteStrategy().Restore(context.Background(), RestoreOpts{
+		ContainerName:        noSuchContainer,
+		Paths:                []string{"/data/app.db"},
+		Reader:               io.NopCloser(bytes.NewReader(data)),
+		MaxDecompressedBytes: 16 << 10,
+	})
+	if !errors.Is(err, errArchiveTooLarge) {
+		t.Fatalf("expected errArchiveTooLarge, got %v", err)
+	}
 }

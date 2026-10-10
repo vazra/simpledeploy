@@ -201,13 +201,22 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	pipe := NewPipeline(strategy, target, hookRunner)
 
 	containerName := app.Name
-	if cfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Name); err == nil {
+	if cfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Slug); err == nil {
 		if detected := strategy.Detect(cfg); len(detected) > 0 {
 			containerName = detected[0].ContainerName
 			if len(paths) == 0 && len(detected[0].Paths) > 0 {
 				paths = detected[0].Paths
 			}
 		}
+	}
+
+	// Refuse unsafe paths (stored config or compose-detected) before any
+	// hook runs. Strategies re-check, this just fails the run early.
+	if err := validateRunPaths(strategy.Type(), paths); err != nil {
+		errMsg := err.Error()
+		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		s.sendAlert(app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	opts := BackupOpts{
@@ -278,7 +287,7 @@ func (s *Scheduler) RunRestore(ctx context.Context, runID int64) error {
 
 	containerName := app.Name
 	paths := parsePaths(cfg.Paths)
-	if composeCfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Name); err == nil {
+	if composeCfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Slug); err == nil {
 		if detected := strategy.Detect(composeCfg); len(detected) > 0 {
 			containerName = detected[0].ContainerName
 			if len(paths) == 0 && len(detected[0].Paths) > 0 {
@@ -287,9 +296,16 @@ func (s *Scheduler) RunRestore(ctx context.Context, runID int64) error {
 		}
 	}
 
+	if err := validateRunPaths(strategy.Type(), paths); err != nil {
+		return err
+	}
+
+	// Backups made by SimpleDeploy itself are not size-capped unless the
+	// operator sets RestoreMaxGBEnv.
 	opts := RestoreOpts{
-		ContainerName: containerName,
-		Paths:         paths,
+		ContainerName:        containerName,
+		Paths:                paths,
+		MaxDecompressedBytes: runRestoreMaxBytes(),
 	}
 
 	return pipe.RunRestore(ctx, opts, run.FilePath, run.Checksum, preHooks, postHooks)
@@ -410,8 +426,14 @@ func parsePaths(jsonStr string) []string {
 	}
 	var paths []string
 	if err := json.Unmarshal([]byte(jsonStr), &paths); err != nil {
-		// Try as comma-separated fallback
-		return strings.Split(jsonStr, ",")
+		// Try as comma-separated fallback. Trim and drop empty entries so
+		// "a, b," does not yield operands like " b" or "".
+		paths = nil
+		for _, p := range strings.Split(jsonStr, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				paths = append(paths, p)
+			}
+		}
 	}
 	return paths
 }

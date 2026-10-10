@@ -17,7 +17,10 @@ type LoadedApp struct {
 // secrets sidecar. Missing files are reported as nil fields, not errors.
 func (s *Syncer) LoadAppFromFS(slug string) (*LoadedApp, error) {
 	out := &LoadedApp{Slug: slug}
-	sidecarPath := filepath.Join(s.appsDir, slug, appSidecarName)
+	sidecarPath, err := s.appFilePath(slug, appSidecarName)
+	if err != nil {
+		return nil, err
+	}
 	sc, err := readYAML[AppSidecar](sidecarPath)
 	if err != nil {
 		return nil, fmt.Errorf("read sidecar %s: %w", sidecarPath, err)

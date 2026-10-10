@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/vazra/simpledeploy/internal/fsutil"
 )
 
 const archiveDirName = "archive"
@@ -61,7 +63,7 @@ func (s *Syncer) writeTombstoneFile(slug string, t *Tombstone) error {
 // os error (use os.IsNotExist to detect a missing file).
 func (s *Syncer) ReadTombstone(slug string) (*Tombstone, error) {
 	path := filepath.Join(s.ArchiveDir(), slug+".yml")
-	data, err := os.ReadFile(path)
+	data, err := fsutil.ReadRegularFile(path)
 	if err != nil {
 		return nil, err
 	}

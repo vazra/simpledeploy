@@ -2,8 +2,10 @@ package backup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -141,4 +143,108 @@ func (s *restoreCapture) Restore(ctx context.Context, opts RestoreOpts) error {
 	data, _ := io.ReadAll(opts.Reader)
 	*s.captured = data
 	return nil
+}
+
+// readerCapture records what Restore receives.
+type readerCapture struct {
+	data     []byte
+	spool    *spoolFile
+	maxBytes int64
+}
+
+func (s *readerCapture) Type() string                                    { return "capture" }
+func (s *readerCapture) Detect(cfg *compose.AppConfig) []DetectedService { return nil }
+func (s *readerCapture) Backup(ctx context.Context, opts BackupOpts) (*BackupResult, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (s *readerCapture) Restore(ctx context.Context, opts RestoreOpts) error {
+	s.spool, _ = opts.Reader.(*spoolFile)
+	s.maxBytes = opts.MaxDecompressedBytes
+	s.data, _ = io.ReadAll(opts.Reader)
+	return nil
+}
+
+func checksumOf(t *testing.T, data string) string {
+	t.Helper()
+	cw := NewChecksumWriter()
+	io.Copy(io.Discard, cw.TeeReader(strings.NewReader(data)))
+	return cw.Sum()
+}
+
+func TestPipelineRestore_StreamsVerifiedSpool(t *testing.T) {
+	dir := spoolDir(t)
+	target := newMockTarget()
+	target.uploaded["f.tar.gz"] = []byte("archive-bytes")
+	strategy := &readerCapture{}
+	pipe := NewPipeline(strategy, target, nil)
+
+	opts := RestoreOpts{ContainerName: "db", MaxDecompressedBytes: NoDecompressedLimit}
+	if err := pipe.RunRestore(context.Background(), opts, "f.tar.gz", checksumOf(t, "archive-bytes"), nil, nil); err != nil {
+		t.Fatalf("RunRestore: %v", err)
+	}
+	if strategy.spool == nil {
+		t.Fatal("strategy did not get the staged spool file")
+	}
+	if _, err := strategy.spool.f.Stat(); !errors.Is(err, os.ErrClosed) {
+		t.Errorf("spool still open after restore (stat err = %v)", err)
+	}
+	if string(strategy.data) != "archive-bytes" {
+		t.Errorf("strategy read %q, want archive-bytes", strategy.data)
+	}
+	if strategy.maxBytes != NoDecompressedLimit {
+		t.Errorf("MaxDecompressedBytes = %d, want %d", strategy.maxBytes, NoDecompressedLimit)
+	}
+	assertDirEmpty(t, dir)
+}
+
+func TestPipelineRestore_ChecksumMismatchSpoolRemoved(t *testing.T) {
+	dir := spoolDir(t)
+	target := newMockTarget()
+	target.uploaded["f.tar.gz"] = []byte("tampered")
+	strategy := &readerCapture{}
+	pipe := NewPipeline(strategy, target, nil)
+
+	err := pipe.RunRestore(context.Background(), RestoreOpts{}, "f.tar.gz", checksumOf(t, "original"), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("want checksum mismatch, got %v", err)
+	}
+	if strategy.data != nil {
+		t.Error("strategy ran despite checksum mismatch")
+	}
+	assertDirEmpty(t, dir)
+}
+
+func TestPipelineRestore_RawSizeCap(t *testing.T) {
+	dir := spoolDir(t)
+	target := newMockTarget()
+	data := strings.Repeat("x", 4<<10)
+	target.uploaded["f.tar.gz"] = []byte(data)
+	strategy := &readerCapture{}
+	pipe := NewPipeline(strategy, target, nil)
+
+	err := pipe.RunRestore(context.Background(), RestoreOpts{MaxDecompressedBytes: 1 << 10}, "f.tar.gz", checksumOf(t, data), nil, nil)
+	if !errors.Is(err, errArchiveTooLarge) {
+		t.Fatalf("want errArchiveTooLarge, got %v", err)
+	}
+	if strategy.data != nil {
+		t.Error("strategy ran for an oversize archive")
+	}
+	assertDirEmpty(t, dir)
+
+	if err := pipe.RunRestore(context.Background(), RestoreOpts{MaxDecompressedBytes: NoDecompressedLimit}, "f.tar.gz", checksumOf(t, data), nil, nil); err != nil {
+		t.Fatalf("uncapped restore: %v", err)
+	}
+}
+
+func TestPipelineRestore_SpoolDir(t *testing.T) {
+	dir := t.TempDir()
+	setSpoolDir(t, dir)
+	target := newMockTarget()
+	target.uploaded["f"] = []byte("abc")
+	strategy := &readerCapture{}
+	pipe := NewPipeline(strategy, target, nil)
+	if err := pipe.RunRestore(context.Background(), RestoreOpts{}, "f", checksumOf(t, "abc"), nil, nil); err != nil {
+		t.Fatalf("RunRestore: %v", err)
+	}
+	assertDirEmpty(t, dir)
 }

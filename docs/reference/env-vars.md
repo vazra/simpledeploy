@@ -11,9 +11,13 @@ SimpleDeploy reads a small number of environment variables. The CLI prefers expl
 |------|---------|-------|--------|
 | `SD_PASSWORD` | (none) | client | Password used by `users create`, `apikey create`, and `registry add` when the `--password` flag is omitted. Avoids interactive stdin prompt. |
 | `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS` | `0` | server | When set to `1`, the alert webhook dispatcher allows posting to private/loopback IP ranges (RFC 1918, 127.0.0.0/8, CGNAT, multicast, etc.). Off by default. The dispatcher also re-validates the resolved IP at connect time to close DNS-rebinding bypass. |
+| `SIMPLEDEPLOY_ALLOW_PRIVATE_S3` | `0` | server, CLI | When set to `1`, S3 backup targets may use a custom endpoint on a private, loopback or link-local address (for example MinIO on the same host or LAN). Off by default: such endpoints are refused when saving the backup config and again when connecting, with the IP re-checked at connect time. `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` are honoured; when a proxy is used it resolves the endpoint, so instead the endpoint host is checked each time the S3 target is set up (every backup, restore, test and download). |
+| `SIMPLEDEPLOY_RESTORE_MAX_GB` | unset | server, CLI | Size limit for restores, in whole GiB (an integer above 0). A restore whose backup file or decompressed contents go over it fails instead of filling the disk. When unset, backups uploaded through the dashboard or API may expand to at most 8 GiB, and restores of SimpleDeploy's own backups have no limit. When set, the value applies to both. An invalid value falls back to 8 GiB. For mongo only the backup file is measured, since `mongorestore` decompresses it inside the container. See [Restore](/guides/backups/restore/#size-limits). |
 | `SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK` | `false` | server | When `true`, compose `ports:` mappings are NOT rewritten to `127.0.0.1:`. Default behavior pins published ports to loopback so Caddy's `simpledeploy.access.allow` and `simpledeploy.ratelimit.*` controls cannot be bypassed by direct connection. |
 | `SIMPLEDEPLOY_UPSTREAM_HOST` | `localhost` | server | Overrides the host used for `localhost:<port>` upstreams. Set to `host.docker.internal` when running SimpleDeploy inside a Docker container (non-host network) so Caddy can reach app host-published ports. The Docker install docs enable this automatically. |
 | `SIMPLEDEPLOY_HEALTH_PORT` | `8443` | container (healthcheck only) | Port used by the official Docker image's `HEALTHCHECK` to probe `http://localhost:$SIMPLEDEPLOY_HEALTH_PORT/api/health`. Override when your `management_port` differs from the default (e.g. `make dev-docker` sets `8500`). Not read by the simpledeploy binary itself. |
+
+`SIMPLEDEPLOY_ALLOW_PRIVATE_S3` and `SIMPLEDEPLOY_RESTORE_MAX_GB` are read by the process that runs the backup or restore. The CLI commands `simpledeploy backup run` and `simpledeploy restore` do the work themselves rather than asking the server, so set these variables in the shell you run them from too, not only in the `simpledeploy serve` environment or systemd unit.
 
 There is no `SD_CONFIG`, `SD_DATA_DIR`, etc. Pass `--config /path/to/config.yaml` instead. All server settings live in the YAML config (see [Configuration](/reference/configuration/)).
 
@@ -58,6 +62,13 @@ Allowing webhook posts to a Slack-compatible internal collector during local tes
 
 ```bash
 SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS=1 simpledeploy serve --config ./dev.yaml
+```
+
+Restoring a large backup from the CLI against a local MinIO, with a 50 GiB limit:
+
+```bash
+SIMPLEDEPLOY_ALLOW_PRIVATE_S3=1 SIMPLEDEPLOY_RESTORE_MAX_GB=50 \
+simpledeploy restore --config /etc/simpledeploy/config.yaml --app myapp --id 42
 ```
 
 Pointing the deployer at a remote Docker daemon:

@@ -6,8 +6,12 @@
   import { serviceTemplates } from '../lib/serviceTemplates.js'
   import { getImageDefaults, getHealthcheckSuggestion } from '../lib/imageDefaults.js'
   import { parseEndpointLabels, writeEndpointLabels } from '../lib/endpointLabels.js'
+  import { MASKED_ENV_PLACEHOLDER, envDisplayValue, hasMaskedEnv } from '../lib/env.js'
 
-  let { compose = {}, slug = '', onchange = () => {}, onerrors = () => {} } = $props()
+  // canEdit: the current user may change this app's .env file (super_admin,
+  // or manage with access). Gates every action that writes .env or moves
+  // values between compose and .env.
+  let { compose = {}, slug = '', canEdit = false, onchange = () => {}, onerrors = () => {} } = $props()
 
   // ---- Errors ----
   let errors = $state({})
@@ -17,6 +21,8 @@
   let envFileLoading = $state(false)
   let envFileSaving = $state(false)
   let envFileExpanded = $state(false)
+  // Masked values (viewer) are unknown here; never write them back.
+  let envFileReadOnly = $derived(!canEdit || hasMaskedEnv(envFileVars))
 
   // ---- Pending env rows (local-only empty rows for Add button) ----
   let pendingEnvRows = $state({})
@@ -31,13 +37,31 @@
     envFileLoading = false
   })
 
+  // Writes envFileVars to the app's .env. Returns true only when the server
+  // accepted the write; on a refusal the API call already toasted the reason.
   async function saveEnvFile() {
-    if (!slug) return
+    if (!slug || envFileReadOnly) return false
     envFileSaving = true
     try {
-      await api.putEnv(slug, envFileVars)
-    } catch { /* toast handled by api */ }
-    envFileSaving = false
+      const res = await api.putEnv(slug, envFileVars)
+      return !res?.error
+    } catch {
+      return false
+    } finally {
+      envFileSaving = false
+    }
+  }
+
+  // Appends a variable to the .env list and saves it. When the save is
+  // refused the variable is removed again so the list matches the server.
+  async function addEnvVarAndSave(key, value) {
+    const idx = envFileVars.length
+    envFileVars = [...envFileVars, { key, value }]
+    if (await saveEnvFile()) return true
+    if (envFileVars[idx]?.key === key) {
+      envFileVars = envFileVars.filter((_, i) => i !== idx)
+    }
+    return false
   }
 
   // ---- Helpers ----
@@ -394,7 +418,7 @@
     const key = extractEnvRefKey(value)
     if (!key) return null
     const found = envFileVars.find((v) => v.key === key)
-    return found ? found.value : null
+    return found ? envDisplayValue(found) : null
   }
 
   // Confirmation state for move-to-env
@@ -404,21 +428,21 @@
   let autoFilledServices = $state(new Set())
 
   function requestMoveToEnvFile(svcName, envName, envValue) {
+    if (envFileReadOnly) return
     envConfirm = { svcName, envName, envValue }
   }
 
-  function confirmMoveToEnvFile() {
-    if (!envConfirm) return
+  async function confirmMoveToEnvFile() {
+    if (!envConfirm || envFileReadOnly || envFileSaving) return
     const { svcName, envName, envValue } = envConfirm
     const existing = envFileVars.find((v) => v.key === envName)
-    if (!existing) {
-      envFileVars = [...envFileVars, { key: envName, value: envValue }]
-    }
+    // Only reference ${KEY} in compose once .env really holds the value;
+    // on a refused save keep the dialog open and compose unchanged.
+    if (!existing && !(await addEnvVarAndSave(envName, envValue))) return
     updateServiceDirect(svcName, (s) => {
       if (!s.environment) s.environment = {}
       s.environment[envName] = `\${${envName}}`
     })
-    saveEnvFile()
     envConfirm = null
   }
 
@@ -433,14 +457,15 @@
   let revealedEnvRef = $state(null) // "svcName:rowIdx" key for toggling
 
   function openEnvPicker(svcName, rowIdx, isPending) {
+    if (!canEdit) return
     envPickerFor = { svcName, rowIdx, isPending }
     envPickerNewKey = ''
     envPickerNewValue = ''
   }
 
-  function pickEnvVar(key) {
-    if (!envPickerFor) return
-    const { svcName, rowIdx, isPending } = envPickerFor
+  function pickEnvVar(key, target = envPickerFor) {
+    if (!target) return
+    const { svcName, rowIdx, isPending } = target
     const ref = `\${${key}}`
     if (isPending) {
       const p = pendingEnvRows[svcName] || []
@@ -460,11 +485,14 @@
     envPickerFor = null
   }
 
-  function addAndPickEnvVar() {
-    if (!envPickerNewKey || !envPickerFor) return
-    envFileVars = [...envFileVars, { key: envPickerNewKey, value: envPickerNewValue }]
-    saveEnvFile()
-    pickEnvVar(envPickerNewKey)
+  async function addAndPickEnvVar() {
+    if (!envPickerNewKey || !envPickerFor || envFileReadOnly || envFileSaving) return
+    const key = envPickerNewKey
+    const target = envPickerFor
+    // Only reference ${KEY} in compose once .env really holds the variable;
+    // on a refused save the picker stays open with what the user typed.
+    if (!(await addEnvVarAndSave(key, envPickerNewValue))) return
+    pickEnvVar(key, target)
   }
 
   // Autocomplete state for $ references
@@ -499,8 +527,11 @@
   }
 
   function moveFromEnvFile(svcName, envName) {
+    if (!canEdit) return
     // Find current value in .env
     const found = envFileVars.find((v) => v.key === envName)
+    // Masked (viewer) value is unknown; don't inline an empty placeholder.
+    if (found?.masked) return
     const val = found ? found.value : ''
     // Update compose env value to the actual value
     updateServiceDirect(svcName, (s) => {
@@ -929,7 +960,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
                     </button>
-                  {:else if slug && row.name && !isPending && !row.value}
+                  {:else if canEdit && slug && row.name && !isPending && !row.value}
                     <button
                       type="button"
                       onclick={() => openEnvPicker(svcName, i, false)}
@@ -1780,7 +1811,7 @@
 {/if}
 
 <!-- Confirmation dialog for moving env var to .env file -->
-{#if envConfirm}
+{#if envConfirm && !envFileReadOnly}
   <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
     <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={cancelMoveToEnvFile} aria-label="Close"></button>
     <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md shadow-2xl animate-scale-in">
@@ -1791,14 +1822,14 @@
       <p class="text-xs text-text-muted mb-5">The .env file is shared across all services and loaded automatically by Docker Compose.</p>
       <div class="flex justify-end gap-2">
         <button onclick={cancelMoveToEnvFile} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>
-        <button onclick={confirmMoveToEnvFile} class="px-4 py-2 text-sm bg-btn-primary text-surface-0 rounded-lg hover:bg-btn-primary-hover transition-colors shadow-sm">Move to .env</button>
+        <button onclick={confirmMoveToEnvFile} disabled={envFileSaving} class="px-4 py-2 text-sm bg-btn-primary text-surface-0 rounded-lg hover:bg-btn-primary-hover transition-colors shadow-sm disabled:opacity-40 disabled:pointer-events-none">Move to .env</button>
       </div>
     </div>
   </div>
 {/if}
 
 <!-- .env picker dialog -->
-{#if envPickerFor}
+{#if envPickerFor && canEdit}
   <div class="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
     <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={() => envPickerFor = null} aria-label="Close"></button>
     <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md w-full shadow-2xl animate-scale-in">
@@ -1814,7 +1845,7 @@
               class="w-full flex items-center justify-between px-3 py-2 text-left rounded-lg hover:bg-surface-hover transition-colors group"
             >
               <span class="font-mono text-sm text-text-primary">{v.key}</span>
-              <span class="text-xs text-text-muted truncate ml-3 max-w-40 group-hover:text-text-secondary">{v.value || '(empty)'}</span>
+              <span class="text-xs text-text-muted truncate ml-3 max-w-40 group-hover:text-text-secondary">{v.masked ? MASKED_ENV_PLACEHOLDER : (v.value || '(empty)')}</span>
             </button>
           {/each}
         </div>
@@ -1822,6 +1853,7 @@
         <p class="text-xs text-text-muted mb-4">No variables in .env yet.</p>
       {/if}
 
+      {#if !envFileReadOnly}
       <div class="border-t border-border/30 pt-3">
         <p class="text-[11px] text-text-muted mb-2">Add new variable</p>
         <div class="flex gap-2">
@@ -1839,7 +1871,7 @@
           />
           <button
             type="button"
-            disabled={!envPickerNewKey}
+            disabled={!envPickerNewKey || envFileSaving}
             onclick={addAndPickEnvVar}
             class="px-3 py-1.5 text-xs bg-btn-primary text-surface-0 rounded-lg hover:bg-btn-primary-hover transition-colors shadow-sm disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap"
           >
@@ -1847,6 +1879,7 @@
           </button>
         </div>
       </div>
+      {/if}
 
       <div class="flex justify-end mt-4">
         <button onclick={() => envPickerFor = null} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>

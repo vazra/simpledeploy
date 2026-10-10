@@ -63,7 +63,7 @@ The `.deb` installs a systemd unit at `/etc/systemd/system/simpledeploy.service`
    sudo vim /etc/simpledeploy/config.yaml
    ```
 
-   Set `domain`, `tls.email`, and `master_secret` (generate via `openssl rand -hex 32`). See [Configure SimpleDeploy](/first-deploy/config/) for the full walkthrough.
+   Set `domain` and `tls.email`. `init` already wrote a random `master_secret`: keep it, and back it up (it encrypts stored credentials). If you ever need to replace it, generate the new value with `openssl rand -hex 32`, then re-enter registry and S3 credentials and re-create API keys. See [Configure SimpleDeploy](/first-deploy/config/) for the full walkthrough.
 
 2. Enable and start:
 

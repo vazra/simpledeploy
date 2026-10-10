@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -34,20 +35,30 @@ func (s *Server) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	pingDone := make(chan struct{})
-	defer close(pingDone)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
 	go func() {
 		ticker := time.NewTicker(deployLogPingInterval)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-pingDone:
+			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				_ = conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(deployLogWriteTimeout))
 			}
 		}
 	}()
+
+	// Periodic auth recheck (same as the logs WS): a slow deploy can keep
+	// this socket open for minutes, so stop streaming once the user is
+	// gone, their session/role changed or they lost access to the app.
+	if a := s.newWSAuth(r); a != nil {
+		go watchWSAuth(ctx, conn, func() bool {
+			return s.wsAuthStillValid(a) && s.wsCanAccessApp(a, slug)
+		}, cancel)
+	}
 
 	// Wait up to 3s for deploy to start (race between async POST and WS connect)
 	var ch <-chan deployer.OutputLine
@@ -70,17 +81,26 @@ func (s *Server) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
+				cancel()
 				return
 			}
 		}
 	}()
 
-	for line := range ch {
-		if err := conn.WriteJSON(line); err != nil {
+	for {
+		select {
+		case <-ctx.Done():
 			return
-		}
-		if line.Done {
-			return
+		case line, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteJSON(line); err != nil {
+				return
+			}
+			if line.Done {
+				return
+			}
 		}
 	}
 }

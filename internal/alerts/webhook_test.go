@@ -204,6 +204,20 @@ func TestIsReservedIP(t *testing.T) {
 		{"224.0.0.1", true},   // multicast
 		{"::1", true},
 		{"fc00::1", true},
+		{"64:ff9b::a9fe:a9fe", true}, // NAT64 of 169.254.169.254
+		{"64:ff9b::7f00:1", true},    // NAT64 of 127.0.0.1
+		{"64:ff9b::a00:1", true},     // NAT64 of 10.0.0.1
+		{"64:ff9b::c0a8:101", true},  // NAT64 of 192.168.1.1
+		{"64:ff9b::6440:1", true},    // NAT64 of 100.64.0.1 (CGNAT)
+		{"64:ff9b::", true},          // NAT64 of 0.0.0.0
+		{"64:ff9b::ffff:ffff", true}, // NAT64 of 255.255.255.255
+		{"64:ff9b::808:808", false},  // NAT64 of 8.8.8.8 (DNS64 on IPv6-only hosts)
+		{"64:ff9b::8.8.8.8", false},
+		{"64:ff9b::101:101", false}, // NAT64 of 1.1.1.1
+		{"64:ff9b:1::1", true},      // NAT64 local-use
+		{"64:ff9b:1::808:808", true},
+		{"64:ff9b:1:ffff::1", true},
+		{"64:ff9c::1", false},
 		{"8.8.8.8", false},
 		{"1.1.1.1", false},
 		{"2606:4700:4700::1111", false},

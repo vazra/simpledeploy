@@ -9,8 +9,11 @@
   import Button from './Button.svelte'
   import Skeleton from './Skeleton.svelte'
   import Modal from './Modal.svelte'
+  import { envDisplayValue, hasMaskedEnv } from '../lib/env.js'
 
-  let { slug, composePath = '', onModeChange = () => {} } = $props()
+  // canEdit: the current user may change this app (super_admin, or manage
+  // with access). Decides whether .env is editable; viewers only read it.
+  let { slug, composePath = '', canEdit = false, onModeChange = () => {} } = $props()
 
   let envPath = $derived(composePath ? composePath.replace(/[^/]+$/, '.env') : '.env')
 
@@ -22,15 +25,19 @@
   let loading = $state(true)
   let saving = $state(false)
   let showDiff = $state(false)
+  let deployError = $state('')
   let hasValidationErrors = $state(false)
 
   // .env plain text (shown in YAML mode)
   let envText = $state('')
   let envOriginal = $state('')
   let savingEnv = $state(false)
+  // Masked values (viewer) must never be written back: PUT replaces the file.
+  let envMasked = $state(false)
+  let envReadOnly = $derived(!canEdit || envMasked)
 
   function envToText(vars) {
-    return vars.map(v => `${v.key}=${v.value}`).join('\n')
+    return vars.map(v => `${v.key}=${envDisplayValue(v)}`).join('\n')
   }
 
   function textToEnv(text) {
@@ -45,17 +52,22 @@
     if (!slug) return
     try {
       const res = await api.getEnv(slug)
+      envMasked = hasMaskedEnv(res.data)
       const t = envToText(res.data || [])
       envText = t
       envOriginal = t
     } catch { /* no env file */ }
   }
 
+  // Returns true when .env was saved.
   async function saveEnv() {
+    if (envReadOnly) return false
     savingEnv = true
-    await api.putEnv(slug, textToEnv(envText))
-    envOriginal = envText
+    const res = await api.putEnv(slug, textToEnv(envText))
     savingEnv = false
+    if (res?.error) return false
+    envOriginal = envText
+    return true
   }
 
   let versions = $state([])
@@ -226,22 +238,39 @@
     }
 
     currentYaml = yamlStr
+    deployError = ''
     showDiff = true
   }
 
+  function closeDiff() {
+    showDiff = false
+    deployError = ''
+  }
+
   async function confirmDeploy() {
+    if (saving) return
     saving = true
-    if (mode === 'yaml' && envText !== envOriginal) {
-      await saveEnv()
+    deployError = ''
+    if (mode === 'yaml' && !envReadOnly && envText !== envOriginal) {
+      // putEnv already toasted the reason; keep the review open.
+      if (!(await saveEnv())) {
+        saving = false
+        deployError = 'The .env file could not be saved, so nothing was deployed.'
+        return
+      }
     }
     const encoded = encodeBase64(currentYaml)
     const res = await api.deploy(slug, encoded, 'update', true)
     saving = false
-    showDiff = false
-    if (!res.error) {
-      originalYaml = normalizeYaml(currentYaml)
-      loadHistory()
+    if (res.error) {
+      // Keep the diff open so the user can see what was refused and fix it.
+      deployError = res.error
+      toasts.error(res.error)
+      return
     }
+    showDiff = false
+    originalYaml = normalizeYaml(currentYaml)
+    loadHistory()
   }
 
   async function loadHistory() {
@@ -273,7 +302,7 @@
   </div>
 {:else}
   {#if mode === 'visual'}
-    <VisualEditor {compose} {slug} onchange={(updated) => { compose = updated }} onerrors={(errs) => { hasValidationErrors = Object.keys(errs).length > 0 }} />
+    <VisualEditor {compose} {slug} {canEdit} onchange={(updated) => { compose = updated }} onerrors={(errs) => { hasValidationErrors = Object.keys(errs).length > 0 }} />
   {:else}
     <div class="bg-surface-2 rounded-xl shadow-sm border border-border/50 overflow-hidden">
       <div class="px-4 py-2 border-b border-border/30 bg-surface-3/30">
@@ -290,7 +319,12 @@
       <div class="px-4 py-2 border-b border-border/30 bg-surface-3/30">
         <span class="text-xs font-mono text-text-secondary">{envPath}</span>
       </div>
-      <YamlEditor bordered={false} value={envText} onchange={(val) => { envText = val }} minHeight="120px" />
+      {#if envReadOnly}
+        <p class="px-4 py-2 text-xs text-text-secondary border-b border-border/30" data-testid="env-readonly-hint">
+          {envMasked ? 'Values are hidden because you have view-only access.' : 'You have view-only access, so this file cannot be changed here.'}
+        </p>
+      {/if}
+      <YamlEditor bordered={false} value={envText} readonly={envReadOnly} onchange={(val) => { if (!envReadOnly) envText = val }} minHeight="120px" />
     </div>
   {/if}
 
@@ -428,8 +462,10 @@
   <DiffModal
     oldText={originalYaml}
     newText={currentYaml}
+    error={deployError}
+    busy={saving}
     onConfirm={confirmDeploy}
-    onCancel={() => showDiff = false}
+    onCancel={closeDiff}
   />
 {/if}
 
