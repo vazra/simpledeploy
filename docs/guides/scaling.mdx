@@ -58,7 +58,7 @@ A service is treated as non-scalable when any of the following hold:
 - A host port is published (`ports: ["8080:8080"]`).
 - A named volume is mounted (typically stateful state).
 - `deploy.mode: global` is set.
-- The image matches a known stateful database / broker (postgres, mysql, mariadb, mongo, redis, valkey, dragonfly, elasticsearch, opensearch, clickhouse, cassandra, rabbitmq, kafka, etcd, neo4j, influxdb, prometheus, qdrant, weaviate, minio, cockroach, ...).
+- The image matches a known stateful database / broker (postgres, mysql, mariadb, mongo, redis, valkey, dragonfly, elasticsearch, opensearch, clickhouse, cassandra, rabbitmq, kafka, etcd, neo4j, influxdb, prometheus, qdrant, weaviate, minio, silo, cockroach, ...).
 
 Override detection with a label:
 

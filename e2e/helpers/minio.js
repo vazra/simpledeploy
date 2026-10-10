@@ -1,12 +1,16 @@
 import { execFileSync, spawnSync } from 'child_process';
 import net from 'net';
 
-// MinIO fixture helper. Starts a MinIO server in a docker container on a random
-// host port, waits for health, creates a bucket, and exposes helpers to list /
-// remove objects via the `minio/mc` client image (keeps deps light: no S3 SDK).
-
-const MINIO_IMAGE = 'minio/minio:latest';
-const MC_IMAGE = 'minio/mc:latest';
+// MinIO fixture helper. Starts a MinIO-compatible server in a docker container
+// on a random host port, waits for health, creates a bucket, and exposes
+// helpers to list / remove objects via the bundled `mc` client (keeps deps
+// light: no S3 SDK).
+//
+// Uses pgsty/silo, a maintained drop-in MinIO fork: MinIO deleted minio/minio
+// and minio/mc from Docker Hub and quay.io/minio/* now requires login. Silo
+// keeps the MINIO_* env vars, ports, /minio/health/* routes and ships `mc`.
+// Same pinned tag as the MinIO app/service templates.
+const MINIO_IMAGE = 'pgsty/silo:RELEASE.2026-09-16T00-00-00Z';
 
 export const MINIO_ROOT_USER = 'minioadmin';
 export const MINIO_ROOT_PASSWORD = 'minioadmin123';
@@ -88,7 +92,7 @@ export async function startMinIO({ bucket = 'e2e-backups' } = {}) {
   const accessKey = MINIO_ROOT_USER;
   const secretKey = MINIO_ROOT_PASSWORD;
 
-  // mc runs the minio client in a short-lived container, configured via env
+  // mc runs the bundled client in a short-lived container, configured via env
   // MC_HOST_local. Use host networking via host.docker.internal on mac/windows,
   // or --add-host for linux. We pass the endpoint as http://host.docker.internal:PORT
   // because mc runs inside docker.
@@ -101,7 +105,8 @@ export async function startMinIO({ bucket = 'e2e-backups' } = {}) {
           'run', '--rm',
           '--add-host', 'host.docker.internal:host-gateway',
           '-e', `MC_HOST_local=${mcHost}`,
-          MC_IMAGE,
+          '--entrypoint', 'mc',
+          MINIO_IMAGE,
           ...args,
         ],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], ...opts },

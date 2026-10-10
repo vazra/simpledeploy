@@ -53,6 +53,12 @@ func TestScaleEligibility(t *testing.T) {
 			reasonSub: "stateful",
 		},
 		{
+			name:      "silo (MinIO fork) image",
+			svc:       ServiceConfig{Name: "s3", Image: "pgsty/silo:RELEASE.2026-09-16T00-00-00Z"},
+			scalable:  false,
+			reasonSub: "stateful",
+		},
+		{
 			name:      "deploy mode global",
 			svc:       ServiceConfig{Name: "agent", Image: "myagent", DeployMode: "global"},
 			scalable:  false,
