@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import yaml from 'js-yaml'
+  import * as yaml from 'js-yaml'
   import { api } from '../lib/api.js'
   import { toasts } from '../lib/stores/toast.js'
   import VisualEditor from './VisualEditor.svelte'
