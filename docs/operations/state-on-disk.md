@@ -86,6 +86,10 @@ Trade-off: a process crash between DB commit and FS write means the next boot's 
 
 Mitigation: the debounce is short; production crashes mid-debounce are rare; most edits are made via API anyway. If atomicity is required, future work can promote the writer to synchronous.
 
+Server-side CLI commands (`users`, `apikey`, `registry`) run in their own process without the mutation hook, so they write `config.yml` + `secrets.yml` synchronously after the DB commit and fail loudly if that write fails.
+
+Pruning is logged: whenever `ApplyGlobalSidecar` (boot or watcher) deletes a user, API key, registry, or webhook because it is absent from `config.yml`, it logs `[fs-auth] WARN: deleting ...` with the name (never the hash).
+
 ## Recovery from a corrupted DB
 
 1. Stop the server.
