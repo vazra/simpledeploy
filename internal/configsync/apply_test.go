@@ -1,6 +1,10 @@
 package configsync
 
 import (
+	"bytes"
+	"log"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/vazra/simpledeploy/internal/store"
@@ -223,5 +227,53 @@ func TestApplyGlobalSidecar_FullReplaceDeletesMissing(t *testing.T) {
 	}
 	if len(whs) != 0 {
 		t.Errorf("stale webhook not deleted: %+v", whs)
+	}
+}
+
+func TestApplyGlobalSidecar_LogsWarnOnPrune(t *testing.T) {
+	st := openTestStore(t)
+	syncer := New(st, t.TempDir(), t.TempDir())
+
+	keep, err := st.CreateUser("keep", "keep-hash", "super_admin", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghost, err := st.CreateUser("ghost", "ghost-hash", "viewer", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateAPIKey(keep.ID, "secret-key-hash-1", "orphan-key", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateAPIKey(ghost.ID, "secret-key-hash-2", "ghost-key", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	loaded := &LoadedGlobal{
+		Sidecar: &GlobalSidecar{Version: Version, Users: []UserEntry{{Username: "keep", Role: "super_admin"}}},
+		Secrets: &GlobalSecrets{Version: Version, Users: []UserSecretsEntry{{Username: "keep", PasswordHash: "keep-hash"}}},
+	}
+	if err := syncer.ApplyGlobalSidecar(loaded); err != nil {
+		t.Fatalf("ApplyGlobalSidecar: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		`WARN: deleting user "ghost"`,
+		`WARN: deleting api key "orphan-key" (user "keep")`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log missing %q; got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "secret-key-hash") || strings.Contains(out, "ghost-hash") {
+		t.Errorf("log leaked a hash:\n%s", out)
+	}
+	if strings.Contains(out, `deleting user "keep"`) {
+		t.Errorf("kept user logged as deleted:\n%s", out)
 	}
 }

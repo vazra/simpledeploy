@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -130,8 +131,16 @@ func (s *Store) UserCount() (int, error) {
 	return count, nil
 }
 
+// ErrAPIKeyNameTaken is returned by CreateAPIKey when the user already has a
+// key with the same name. Global sidecars identify keys by (username, name),
+// so duplicates would collapse into one on FS -> DB reconcile.
+var ErrAPIKeyNameTaken = errors.New("api key name already exists for this user")
+
 // CreateAPIKey inserts a new API key record and returns it. expiresAt may
-// be nil for keys that never expire.
+// be nil for keys that never expire. Returns ErrAPIKeyNameTaken if the user
+// already has a key with this name. No DB unique constraint is added because
+// existing installs may already hold duplicates; the check-and-insert is a
+// single statement so concurrent creates cannot race past it.
 func (s *Store) CreateAPIKey(userID int64, keyHash, name string, expiresAt *time.Time) (*APIKeyRecord, error) {
 	var k APIKeyRecord
 	var expiresAtNT sql.NullTime
@@ -141,17 +150,21 @@ func (s *Store) CreateAPIKey(userID int64, keyHash, name string, expiresAt *time
 	}
 	err := s.db.QueryRow(`
 		INSERT INTO api_keys (user_id, key_hash, name, expires_at)
-		VALUES (?, ?, ?, ?)
+		SELECT ?, ?, ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM api_keys WHERE user_id = ? AND name = ?)
 		RETURNING id, user_id, key_hash, name, created_at, expires_at
-	`, userID, keyHash, name, exp).Scan(
+	`, userID, keyHash, name, exp, userID, name).Scan(
 		&k.ID, &k.UserID, &k.KeyHash, &k.Name, &k.CreatedAt, &expiresAtNT,
 	)
-	if expiresAtNT.Valid {
-		t := expiresAtNT.Time
-		k.ExpiresAt = &t
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: %q", ErrAPIKeyNameTaken, name)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create api key: %w", err)
+	}
+	if expiresAtNT.Valid {
+		t := expiresAtNT.Time
+		k.ExpiresAt = &t
 	}
 	s.fireHook(ScopeGlobal, "")
 	return &k, nil

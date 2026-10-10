@@ -86,6 +86,12 @@ Trade-off: a process crash between DB commit and FS write means the next boot's 
 
 Mitigation: the debounce is short; production crashes mid-debounce are rare; most edits are made via API anyway. If atomicity is required, future work can promote the writer to synchronous.
 
+Local (non-remote) CLI commands (`users`, `apikey`, `registry`) run in their own process without the mutation hook, so they write `config.yml` + `secrets.yml` synchronously after the DB commit and exit non-zero if that write fails (run `simpledeploy config export` once fixed). Run them as the same OS user as the server: the rewritten `secrets.yml` (mode 0600) is owned by whoever ran the command. Avoid running them while someone is editing users, keys, registries or webhooks in the UI: the two processes write the same files, and a stale write from one can briefly overwrite the other.
+
+API keys are identified in the sidecars by (username, name), so key names must be unique per user; `apikey create` and `POST /api/apikeys` reject duplicates.
+
+Pruning is logged: whenever `ApplyGlobalSidecar` (boot or watcher) deletes a user, API key, registry, or webhook because it is absent from `config.yml`, it logs `[fs-auth] WARN: deleting ...` with the name (never the hash).
+
 ## Recovery from a corrupted DB
 
 1. Stop the server.

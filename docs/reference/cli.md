@@ -153,6 +153,8 @@ simpledeploy apikey revoke --id 3
 
 API keys authenticate CLI and API requests via `Authorization: Bearer sd_...` header.
 
+Local (non-remote) `users`, `apikey` and `registry` commands write the change to the DB and then to `<data_dir>/config.yml` + `secrets.yml`, the source of truth on boot. If that write fails the command exits non-zero and the change will be reverted on the next server restart until you fix the cause and run `simpledeploy config export`. Key names must be unique per user. Run these commands as the same OS user as the server. See [State on disk](/operations/state-on-disk/).
+
 ## Registry Management
 
 ### `simpledeploy registry`

@@ -48,13 +48,24 @@ func RunFirstBootSeedIfNeeded(ctx context.Context, db *store.Store, s *Syncer, c
 	if err := s.WriteRedactedGlobal(); err != nil {
 		log.Printf("[fs-auth] write redacted global: %v", err)
 	}
-	_ = ensureGitignore(s.AppsDir(), []string{"*.secrets.yml"})
-	_ = ensureGitignore(s.DataDir(), []string{"secrets.yml"})
+	s.EnsureSecretsGitignore()
 	if err := db.SetMeta(fsSeededKey, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		return err
 	}
 	log.Printf("[fs-auth] first-boot seed complete; FS is now the source of truth")
 	return nil
+}
+
+// EnsureSecretsGitignore best-effort adds .gitignore entries so secrets
+// sidecars are never committed: "*.secrets.yml" in apps_dir and
+// "secrets.yml" in data_dir. Idempotent.
+func (s *Syncer) EnsureSecretsGitignore() {
+	if err := ensureGitignore(s.AppsDir(), []string{"*.secrets.yml"}); err != nil {
+		log.Printf("[fs-auth] ensure gitignore %s: %v", s.AppsDir(), err)
+	}
+	if err := ensureGitignore(s.DataDir(), []string{"secrets.yml"}); err != nil {
+		log.Printf("[fs-auth] ensure gitignore %s: %v", s.DataDir(), err)
+	}
 }
 
 func ensureGitignore(dir string, lines []string) error {

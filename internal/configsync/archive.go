@@ -54,11 +54,7 @@ func (s *Syncer) writeTombstoneFile(slug string, t *Tombstone) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicWriteFile(path, out, 0644)
 }
 
 // ReadTombstone reads the tombstone for a slug. Returns the parsed struct or an
