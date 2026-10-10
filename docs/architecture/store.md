@@ -57,6 +57,14 @@ SQL files live in `internal/store/migrations/` and are embedded with `go:embed`.
 | 018 | gitsync_config (DB-authoritative git sync configuration) |
 | 019 | apps_status_unstable (transient status tracking) |
 | 020 | audit_log (unified activity feed) + audit_config (retention) |
+| 021 | recipe_pulls (community recipe popularity) |
+| 022 | apps.archived_at (archive instead of delete) |
+| 023 | system_meta (key/value markers) |
+| 024 | backup_configs uuid |
+| 025 | role `admin` renamed to `manage` |
+| 026 | users.token_version (session invalidation) |
+| 027 | api_keys.last_used_at |
+| 028 | alert_history.rule_id `ON DELETE SET NULL` (history kept when a rule is deleted) |
 
 Migrations are forward-only. Adding a column with a default is safe; renames and drops are forbidden in published migrations to keep rollback to a previous binary version possible.
 

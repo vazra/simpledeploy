@@ -276,6 +276,7 @@ master_secret: "<output of openssl rand -hex 32>"
 
 ### Upgrading to the next release after 1.4.3
 
+- **Database foreign keys are enforced on every connection.** Deleting a webhook also deletes the alert rules that use it. Alert history is kept when its rule is deleted (the entry keeps its snapshot of the rule).
 - **Header names with a dot are no longer passed to apps.** The built-in proxy (Caddy 2.11.7) drops request headers whose names contain `.`, as it already did for `_`. An app that reads such a header must switch to a name made of letters, digits and `-`. The same applies to `simpledeploy.ratelimit.by: header:NAME`: with `.` or `_` in the name, every request shares one bucket.
 - **Stalled uploads are cut after a minute.** A request body to an `http` endpoint that sends no data for one minute is closed (slow-client protection). Normal slow uploads that keep sending are not affected, and `grpc`/`h2c` endpoints have no such limit.
 

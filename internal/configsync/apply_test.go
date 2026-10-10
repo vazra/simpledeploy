@@ -277,3 +277,46 @@ func TestApplyGlobalSidecar_LogsWarnOnPrune(t *testing.T) {
 		t.Errorf("kept user logged as deleted:\n%s", out)
 	}
 }
+
+// A sidecar rule without a webhook cannot be stored (webhook_id is a foreign
+// key); it is skipped and the rest of the sidecar still applies.
+func TestApplyAppSidecar_RuleWithoutWebhookSkipped(t *testing.T) {
+	st := openTestStore(t)
+	syncer := New(st, t.TempDir(), t.TempDir())
+	app := &store.App{Name: "a", Slug: "a", ComposePath: "/x/y.yml", Status: "running"}
+	if err := st.UpsertApp(app, nil); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	wh := &store.Webhook{Name: "hook", Type: "custom", URL: "https://example.com/h"}
+	if err := st.CreateWebhook(wh); err != nil {
+		t.Fatalf("CreateWebhook: %v", err)
+	}
+	loaded := &LoadedApp{
+		Slug: "a",
+		Sidecar: &AppSidecar{
+			Version: Version,
+			App:     AppMeta{Slug: "a", DisplayName: "a"},
+			AlertRules: []AlertRuleEntry{
+				{Metric: "cpu_pct", Operator: ">", Threshold: 80, DurationSec: 60, Enabled: true},
+				{Metric: "mem_pct", Operator: ">", Threshold: 90, DurationSec: 60, Webhook: "hook", Enabled: true},
+			},
+		},
+	}
+	if err := syncer.ApplyAppSidecar("a", loaded); err != nil {
+		t.Fatalf("ApplyAppSidecar: %v", err)
+	}
+	rules, err := st.ListAlertRules(&app.ID)
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(rules) != 1 || rules[0].Metric != "mem_pct" {
+		t.Fatalf("rules = %+v, want only the mem_pct rule", rules)
+	}
+	if err := syncer.ImportAppSidecar(loaded.Sidecar); err != nil {
+		t.Fatalf("ImportAppSidecar: %v", err)
+	}
+	rules, _ = st.ListAlertRules(&app.ID)
+	if len(rules) != 1 || rules[0].Metric != "mem_pct" {
+		t.Fatalf("after import rules = %+v, want only the mem_pct rule", rules)
+	}
+}

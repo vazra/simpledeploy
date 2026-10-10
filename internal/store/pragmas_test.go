@@ -468,3 +468,30 @@ func TestRecordAuditMissingParents(t *testing.T) {
 		t.Errorf("app_id = %v, want %d", got.AppID, appID)
 	}
 }
+
+// Deleting an alert rule keeps its history (rule_id becomes NULL); rows carry
+// a snapshot of the rule.
+func TestDeleteAlertRuleKeepsHistory(t *testing.T) {
+	s := newTestStore(t)
+	wh := &Webhook{Name: "h", Type: "custom", URL: "https://example.com/h"}
+	if err := s.CreateWebhook(wh); err != nil {
+		t.Fatalf("CreateWebhook: %v", err)
+	}
+	rule := &AlertRule{Metric: "cpu_pct", Operator: ">", Threshold: 80, DurationSec: 60, WebhookID: wh.ID, Enabled: true}
+	if err := s.CreateAlertRule(rule); err != nil {
+		t.Fatalf("CreateAlertRule: %v", err)
+	}
+	if _, err := s.CreateAlertHistory(rule.ID, 95, rule); err != nil {
+		t.Fatalf("CreateAlertHistory: %v", err)
+	}
+	if err := s.DeleteAlertRule(rule.ID); err != nil {
+		t.Fatalf("DeleteAlertRule: %v", err)
+	}
+	hist, err := s.ListAlertHistory(nil, 10)
+	if err != nil {
+		t.Fatalf("ListAlertHistory: %v", err)
+	}
+	if len(hist) != 1 || hist[0].RuleID != nil || hist[0].Metric != "cpu_pct" {
+		t.Fatalf("history = %+v, want one row with NULL rule_id and the snapshot", hist)
+	}
+}

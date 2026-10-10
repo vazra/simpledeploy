@@ -7,11 +7,12 @@ Migrations live in `internal/store/migrations/` and are embedded into the binary
 
 ## Adding a migration
 
-1. Pick the next sequence number (look at the existing files; current high water mark is 17).
+1. Pick the next sequence number (look at the existing files in `internal/store/migrations/`).
 2. Create `NNN_short_topic.sql`. Example: `017_add_user_avatar_url.sql`.
 3. Write idempotent SQL. Always include `IF NOT EXISTS` on tables and indexes when feasible.
 4. Run the suite: `make test`. The store tests apply all migrations on a fresh DB.
 5. If you add a column, add a default so existing rows are valid.
+   Migrations run with foreign keys off (see [Store](/architecture/store/)), so a table rebuild (create new table, copy, drop old, rename) does not cascade. The flip side: a migration that deletes parent rows must delete their children itself.
 6. Update `CLAUDE.md` and `docs/architecture/store.md` with the new entry.
 
 ## Forward-compatibility rules

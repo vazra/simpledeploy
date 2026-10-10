@@ -36,6 +36,8 @@ func TestMigration025_RenamesAdminToManage(t *testing.T) {
 		);
 		CREATE TABLE apps (id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT);
 		CREATE TABLE user_app_access (user_id INTEGER, app_id INTEGER, PRIMARY KEY (user_id, app_id));
+		CREATE TABLE alert_rules (id INTEGER PRIMARY KEY AUTOINCREMENT);
+		CREATE TABLE alert_history (id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id INTEGER, fired_at DATETIME NOT NULL DEFAULT (datetime('now')), resolved_at DATETIME, value REAL NOT NULL, metric TEXT NOT NULL DEFAULT '', app_slug TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', threshold REAL NOT NULL DEFAULT 0);
 		CREATE TABLE api_keys (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INTEGER NOT NULL,
