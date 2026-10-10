@@ -51,7 +51,7 @@ All three are registered in `init()` of their respective files in [/internal/pro
 
 ### `simpledeploy_metrics`
 
-[/internal/proxy/reqmetrics.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/reqmetrics.go). Wraps the response writer to capture status code, measures latency from before to after `next.ServeHTTP`, then non-blocking send into `RequestStatsCh` (a package-level `chan<-` set during startup). Dropped if full. Path is normalized via `NormalizePath` (numeric IDs and UUIDs become `{id}`) so the metrics table does not explode in cardinality.
+[/internal/proxy/reqmetrics.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/reqmetrics.go). Wraps the response writer to capture the final status code (1xx informational responses are skipped, `101` counts), measures latency from before to after `next.ServeHTTP`, then non-blocking send into `RequestStatsCh` (a package-level `chan<-` set during startup). Dropped if full. When the chain returns an error before anything was written, Caddy's error handling writes the response outside this wrapper, so the status comes from the error instead: the `caddyhttp.HandlerError` status (`502` for an unreachable upstream, `504` for a timeout), `499` when the client went away, else `500`. Once a status or body was written, that status is kept even if an error follows. A client disconnect that `reverse_proxy` turns into `WriteHeader(499)` is recorded as `499`. Path is normalized via `NormalizePath` (numeric IDs and UUIDs become `{id}`) so the metrics table does not explode in cardinality.
 
 ### `simpledeploy_ratelimit`
 
