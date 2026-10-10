@@ -541,3 +541,74 @@ func TestValidateRejectsHostReachingServiceOptions(t *testing.T) {
 	}
 	wantNone(t, validateApp(t, appsDir, "hook-ok", "services:\n  web:\n    image: nginx\n    post_start:\n      - command: [\"true\"]\n", ""))
 }
+
+func TestValidatePreStartHooks(t *testing.T) {
+	_, appsDir := testApps(t)
+	svc := "services:\n  web:\n    image: nginx\n    pre_start:\n      - command: [\"true\"]\n"
+	cases := map[string]struct{ hook, want string }{
+		"privileged":   {"        privileged: true\n", "privileged mode"},
+		"host bind":    {"        volumes:\n          - /etc:/host\n", `mounting "/etc"`},
+		"app folder":   {"        volumes:\n          - .:/app\n", "writable bind of the app folder itself"},
+		"api socket":   {"        use_api_socket: true\n", "use_api_socket"},
+		"host network": {"        network_mode: host\n", "network_mode 'host'"},
+		"host pid":     {"        pid: host\n", "pid mode 'host'"},
+		"host ipc":     {"        ipc: host\n", "ipc mode 'host'"},
+		"capability":   {"        cap_add: [SYS_ADMIN]\n", "dangerous capability"},
+		"security_opt": {"        security_opt: [\"seccomp:unconfined\"]\n", "security_opt"},
+		"devices":      {"        devices:\n          - /dev/sda:/dev/sda\n", "'devices'"},
+		"volumes_from": {"        volumes_from: [\"container:other\"]\n", "'volumes_from'"},
+		"env_file":     {"        env_file: /etc/environment\n", "env_file"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			wantViolation(t, validateApp(t, appsDir, "hook", svc+tc.hook, ""), `service "web" pre_start hook 1: `+tc.want)
+		})
+	}
+
+	// Hooks behind an inactive profile are checked too.
+	wantViolation(t, validateApp(t, appsDir, "hook-profile",
+		"services:\n  web:\n    image: nginx\n    profiles: [later]\n    pre_start:\n      - privileged: true\n", ""),
+		`service "web" pre_start hook 1: privileged`)
+
+	// Settings the loader copies from the service into the hook are
+	// reported once, for the service.
+	v := validateApp(t, appsDir, "hook-inherit",
+		"services:\n  web:\n    image: nginx\n    cap_add: [SYS_ADMIN]\n    pre_start:\n      - command: [\"true\"]\n", "")
+	if len(v) != 1 || !strings.Contains(v[0], `service "web": dangerous capability`) {
+		t.Fatalf("want one service-level violation, got %v", v)
+	}
+
+	wantNone(t, validateApp(t, appsDir, "hook-ok", svc+"        user: \"1000\"\n        volumes:\n          - ./data:/data\n", ""))
+}
+
+func TestValidateJobs(t *testing.T) {
+	_, appsDir := testApps(t)
+	job := "services:\n  web:\n    image: nginx\njobs:\n  task:\n    image: busybox\n    triggers:\n      manual: true\n"
+	cases := map[string]struct{ extra, want string }{
+		"privileged":       {"    privileged: true\n", "privileged mode"},
+		"root bind":        {"    volumes:\n      - /:/host\n", `mounting "/"`},
+		"app folder":       {"    volumes:\n      - .:/app\n", "writable bind of the app folder itself"},
+		"host network":     {"    network_mode: host\n", "network_mode 'host'"},
+		"capability":       {"    cap_add: [ALL]\n", "dangerous capability"},
+		"api socket":       {"    use_api_socket: true\n", "use_api_socket"},
+		"devices":          {"    devices:\n      - /dev/mem:/dev/mem\n", "'devices'"},
+		"env_file":         {"    env_file: /etc/environment\n", "env_file"},
+		"build context":    {"    build:\n      context: /etc\n", "build context"},
+		"privileged build": {"    build:\n      context: .\n      privileged: true\n", "privileged build"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			wantViolation(t, validateApp(t, appsDir, "job", job+tc.extra, ""), `job "task": `+tc.want)
+		})
+	}
+
+	// Jobs behind an inactive profile are checked too.
+	wantViolation(t, validateApp(t, appsDir, "job-profile", job+"    profiles: [later]\n    privileged: true\n", ""), `job "task": privileged`)
+
+	// Nested writable binds count across services and jobs.
+	wantViolation(t, validateApp(t, appsDir, "job-nested",
+		"services:\n  web:\n    image: nginx\n    volumes:\n      - ./data:/data\njobs:\n  task:\n    image: busybox\n    triggers:\n      manual: true\n    volumes:\n      - ./data/sub:/sub\n", ""),
+		`job "task": bind`)
+
+	wantNone(t, validateApp(t, appsDir, "job-ok", job+"    command: [\"date\"]\n    volumes:\n      - ./backup:/backup\n", ""))
+}

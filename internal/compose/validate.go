@@ -156,6 +156,12 @@ func ValidateComposeSecurity(cfg *AppConfig) []string {
 	for _, name := range sortedKeys(services) {
 		violations = append(violations, validateService(name, services[name], h)...)
 	}
+	// Jobs (containers run by hand or on a schedule) follow the same rules,
+	// including ones behind an inactive profile.
+	jobs := cfg.Project.AllJobs()
+	for _, name := range sortedKeys(jobs) {
+		violations = append(violations, validateJob(name, jobs[name], h)...)
+	}
 
 	for _, name := range sortedKeys(cfg.Project.Volumes) {
 		violations = append(violations, validateVolume(name, cfg.Project.Volumes[name], cfg, h)...)
@@ -169,7 +175,7 @@ func ValidateComposeSecurity(cfg *AppConfig) []string {
 		}
 	}
 
-	violations = append(violations, bindLayoutViolations(services, cfg.Project.Volumes, h)...)
+	violations = append(violations, bindLayoutViolations(containerMounts(services, jobs), cfg.Project.Volumes, h)...)
 
 	// secrets/configs with file: are bind-mounted from the host.
 	for _, name := range sortedKeys(cfg.Project.Secrets) {
@@ -188,25 +194,48 @@ func ValidateComposeSecurity(cfg *AppConfig) []string {
 	return violations
 }
 
+// mounts are the volumes of one container, named for messages.
+type mounts struct {
+	who     string // e.g. `service "web"`
+	volumes []types.ServiceVolumeConfig
+}
+
+// containerMounts lists the volumes of every service, pre_start hook and
+// job, in a stable order.
+func containerMounts(services map[string]types.ServiceConfig, jobs types.Jobs) []mounts {
+	var out []mounts
+	for _, name := range sortedKeys(services) {
+		svc := services[name]
+		out = append(out, mounts{who: fmt.Sprintf("service %q", name), volumes: svc.Volumes})
+		for i, hook := range svc.PreStart {
+			out = append(out, mounts{who: fmt.Sprintf("service %q pre_start hook %d", name, i+1), volumes: hook.Volumes})
+		}
+	}
+	for _, name := range sortedKeys(jobs) {
+		out = append(out, mounts{who: fmt.Sprintf("job %q", name), volumes: jobs[name].Volumes})
+	}
+	return out
+}
+
 // bindLayoutViolations refuses a writable bind of the app folder itself and
 // any bind whose host path lies inside another writable bind's host path.
 // Mounts of local volumes whose driver_opts bind a host folder count as
 // binds of that folder.
-func bindLayoutViolations(services map[string]types.ServiceConfig, volumes types.Volumes, h hostPaths) []string {
+func bindLayoutViolations(containers []mounts, volumes types.Volumes, h hostPaths) []string {
 	type bind struct {
-		svc, src string
+		who, src string
 		rw       bool
 	}
 	var binds []bind
-	for _, name := range sortedKeys(services) {
-		for _, vol := range services[name].Volumes {
+	for _, c := range containers {
+		for _, vol := range c.volumes {
 			if vol.Type == types.VolumeTypeVolume {
 				if device, ro, ok := volumeHostBind(volumes[vol.Source]); ok {
 					src := filepath.Clean(device)
 					if real, ok := resolvePath(src); ok {
 						src = real
 					}
-					binds = append(binds, bind{svc: name, src: src, rw: !vol.ReadOnly && !ro})
+					binds = append(binds, bind{who: c.who, src: src, rw: !vol.ReadOnly && !ro})
 				}
 				continue
 			}
@@ -224,7 +253,7 @@ func bindLayoutViolations(services map[string]types.ServiceConfig, volumes types
 			if real, ok := resolvePath(src); ok {
 				src = real
 			}
-			binds = append(binds, bind{svc: name, src: src, rw: !vol.ReadOnly})
+			binds = append(binds, bind{who: c.who, src: src, rw: !vol.ReadOnly})
 		}
 	}
 	var out []string
@@ -237,7 +266,7 @@ func bindLayoutViolations(services map[string]types.ServiceConfig, volumes types
 	}
 	for _, b := range binds {
 		if b.rw && h.appReal != "" && b.src == h.appReal {
-			addOnce(fmt.Sprintf("service %q: writable bind of the app folder itself not allowed (mount a subfolder such as ./data, or add :ro)", b.svc))
+			addOnce(fmt.Sprintf("%s: writable bind of the app folder itself not allowed (mount a subfolder such as ./data, or add :ro)", b.who))
 		}
 	}
 	for _, a := range binds {
@@ -246,7 +275,7 @@ func bindLayoutViolations(services map[string]types.ServiceConfig, volumes types
 		}
 		for _, b := range binds {
 			if b.src != a.src && within(b.src, a.src) {
-				addOnce(fmt.Sprintf("service %q: bind %q is inside the writable bind %q; use separate folders", b.svc, b.src, a.src))
+				addOnce(fmt.Sprintf("%s: bind %q is inside the writable bind %q; use separate folders", b.who, b.src, a.src))
 			}
 		}
 	}
@@ -269,94 +298,137 @@ func volumeHostBind(v types.VolumeConfig) (device string, ro, ok bool) {
 	return device, hasMountOpt(opts["o"], "ro"), true
 }
 
+// validateService checks a service, its build and its pre_start hooks.
 func validateService(name string, svc types.ServiceConfig, h hostPaths) []string {
-	var violations []string
-	add := func(format string, args ...any) {
-		violations = append(violations, fmt.Sprintf("service %q: ", name)+fmt.Sprintf(format, args...))
-	}
-
-	if svc.Privileged {
-		add("privileged mode not allowed")
-	}
-	if svc.UseAPISocket {
-		add("use_api_socket not allowed")
-	}
+	reasons := containerViolations(svc.ContainerSpec, h)
 	for _, hk := range append(append([]types.ServiceHook{}, svc.PostStart...), svc.PreStop...) {
 		if hk.Privileged {
-			add("privileged post_start/pre_stop hooks not allowed")
+			reasons = append(reasons, "privileged post_start/pre_stop hooks not allowed")
 			break
 		}
 	}
 	if svc.Provider != nil {
-		add("provider services not allowed")
+		reasons = append(reasons, "provider services not allowed")
+	}
+	reasons = append(reasons, buildViolations(svc.Build, h)...)
+	violations := prefixed(fmt.Sprintf("service %q: ", name), reasons)
+
+	// pre_start hooks run as separate containers before the service. The
+	// loader copies the service's settings into each hook, so only report
+	// problems the service itself does not already have.
+	own := make(map[string]bool, len(reasons))
+	for _, r := range reasons {
+		own[r] = true
+	}
+	for i, hook := range svc.PreStart {
+		var extra []string
+		for _, r := range containerViolations(hook.ContainerSpec, h) {
+			if !own[r] {
+				extra = append(extra, r)
+			}
+		}
+		violations = append(violations, prefixed(fmt.Sprintf("service %q pre_start hook %d: ", name, i+1), extra)...)
+	}
+	return violations
+}
+
+// validateJob checks a job: a container that runs to completion, by hand
+// or on a schedule. Jobs get the same rules as services.
+func validateJob(name string, job types.JobConfig, h hostPaths) []string {
+	reasons := containerViolations(job.ContainerSpec, h)
+	reasons = append(reasons, buildViolations(job.Build, h)...)
+	return prefixed(fmt.Sprintf("job %q: ", name), reasons)
+}
+
+func prefixed(prefix string, reasons []string) []string {
+	out := make([]string, 0, len(reasons))
+	for _, r := range reasons {
+		out = append(out, prefix+r)
+	}
+	return out
+}
+
+// containerViolations checks the settings shared by everything that runs a
+// container: services, their pre_start hooks, and jobs.
+func containerViolations(c types.ContainerSpec, h hostPaths) []string {
+	var violations []string
+	add := func(format string, args ...any) {
+		violations = append(violations, fmt.Sprintf(format, args...))
 	}
 
-	networkMode := strings.ToLower(strings.TrimSpace(svc.NetworkMode))
+	if c.Privileged {
+		add("privileged mode not allowed")
+	}
+	if c.UseAPISocket {
+		add("use_api_socket not allowed")
+	}
+
+	networkMode := strings.ToLower(strings.TrimSpace(c.NetworkMode))
 	if networkMode == "host" {
 		add("network_mode 'host' not allowed")
 	} else if strings.HasPrefix(networkMode, "container:") {
-		add("network_mode %q not allowed (it joins another container's network)", svc.NetworkMode)
+		add("network_mode %q not allowed (it joins another container's network)", c.NetworkMode)
 	}
 
-	if svc.Pid == "host" {
+	if c.Pid == "host" {
 		add("pid mode 'host' not allowed")
-	} else if svc.Pid != "" {
+	} else if c.Pid != "" {
 		// "container:" and "service:" forms let the service inspect and
 		// signal arbitrary neighbors.
-		add("pid %q not allowed", svc.Pid)
+		add("pid %q not allowed", c.Pid)
 	}
 
-	ipc := strings.ToLower(strings.TrimSpace(svc.Ipc))
+	ipc := strings.ToLower(strings.TrimSpace(c.Ipc))
 	if ipc == "host" {
 		add("ipc mode 'host' not allowed")
 	} else if strings.HasPrefix(ipc, "container:") {
-		add("ipc %q not allowed (it shares another container's memory)", svc.Ipc)
+		add("ipc %q not allowed (it shares another container's memory)", c.Ipc)
 	}
 
-	if strings.EqualFold(strings.TrimSpace(svc.Uts), "host") {
+	if strings.EqualFold(strings.TrimSpace(c.Uts), "host") {
 		add("uts 'host' not allowed")
 	}
 
 	// userns_mode/cgroup: only "host" punches through namespace isolation.
 	// Empty is the default (isolated) and stays allowed.
-	if strings.EqualFold(svc.UserNSMode, "host") {
+	if strings.EqualFold(c.UserNSMode, "host") {
 		add("userns_mode 'host' not allowed")
 	}
-	if strings.EqualFold(svc.Cgroup, "host") {
+	if strings.EqualFold(c.Cgroup, "host") {
 		add("cgroup 'host' not allowed")
 	}
 
-	for _, c := range svc.CapAdd {
-		if _, bad := dangerousCaps[normalizeCap(c)]; bad {
-			add("dangerous capability %q not allowed", c)
+	for _, cp := range c.CapAdd {
+		if _, bad := dangerousCaps[normalizeCap(cp)]; bad {
+			add("dangerous capability %q not allowed", cp)
 		}
 	}
 
 	// security_opt: disabling apparmor/seccomp/etc. negates host isolation
 	// regardless of other compose hardening.
-	for _, opt := range svc.SecurityOpt {
+	for _, opt := range c.SecurityOpt {
 		if unsafeSecurityOpt(opt) {
 			add("security_opt %q not allowed", opt)
 		}
 	}
 
 	// devices and device_cgroup_rules expose host device nodes.
-	if len(svc.Devices) > 0 {
+	if len(c.Devices) > 0 {
 		add("'devices' not allowed")
 	}
-	if len(svc.DeviceCgroupRules) > 0 {
+	if len(c.DeviceCgroupRules) > 0 {
 		add("'device_cgroup_rules' not allowed")
 	}
 
 	// volumes_from imports another (possibly privileged) container's
 	// volumes wholesale.
-	if len(svc.VolumesFrom) > 0 {
+	if len(c.VolumesFrom) > 0 {
 		add("'volumes_from' not allowed")
 	}
 
 	// Bind mounts. Short syntax arrives as type "bind" with the source made
 	// absolute by the loader; treat any absolute source as a host path.
-	for _, vol := range svc.Volumes {
+	for _, vol := range c.Volumes {
 		src := vol.Source
 		if src == "" || (vol.Type != types.VolumeTypeBind && !strings.HasPrefix(src, "/")) {
 			continue
@@ -367,56 +439,65 @@ func validateService(name string, svc types.ServiceConfig, h hostPaths) []string
 	}
 
 	// Files docker compose reads from the host on the app's behalf.
-	for _, f := range svc.EnvFiles {
+	for _, f := range c.EnvFiles {
 		if f.Path != "" && !h.confined(f.Path) {
 			add("env_file %q must be inside the app folder", f.Path)
 		}
 	}
-	for _, f := range svc.LabelFiles {
+	for _, f := range c.LabelFiles {
 		if f != "" && !h.confined(f) {
 			add("label_file %q must be inside the app folder", f)
 		}
 	}
+	return violations
+}
 
-	if b := svc.Build; b != nil {
-		localContext := b.Context != "" && isLocalContext(b.Context)
-		if localContext && !h.confined(b.Context) {
-			add("build context %q must be inside the app folder", b.Context)
+// buildViolations checks build settings that reach host files or turn off
+// build isolation.
+func buildViolations(b *types.BuildConfig, h hostPaths) []string {
+	if b == nil {
+		return nil
+	}
+	var violations []string
+	add := func(format string, args ...any) {
+		violations = append(violations, fmt.Sprintf(format, args...))
+	}
+	localContext := b.Context != "" && isLocalContext(b.Context)
+	if localContext && !h.confined(b.Context) {
+		add("build context %q must be inside the app folder", b.Context)
+	}
+	if localContext && b.DockerfileInline == "" && b.Dockerfile != "" {
+		df := b.Dockerfile
+		if !filepath.IsAbs(df) {
+			df = filepath.Join(b.Context, df)
 		}
-		if localContext && b.DockerfileInline == "" && b.Dockerfile != "" {
-			df := b.Dockerfile
-			if !filepath.IsAbs(df) {
-				df = filepath.Join(b.Context, df)
-			}
-			if !h.confined(df) {
-				add("dockerfile %q must be inside the app folder", b.Dockerfile)
-			}
-		}
-		for _, ctxName := range sortedKeys(b.AdditionalContexts) {
-			v := b.AdditionalContexts[ctxName]
-			if v != "" && isLocalContext(v) && !h.confined(v) {
-				add("build context %q must be inside the app folder", v)
-			}
-		}
-		for _, key := range b.SSH {
-			if key.Path != "" && !h.confined(key.Path) {
-				add("build ssh key %q must be inside the app folder", key.Path)
-			}
-		}
-		if strings.EqualFold(b.Network, "host") {
-			add("build network 'host' not allowed")
-		}
-		if b.Privileged {
-			add("privileged build not allowed")
-		}
-		for _, e := range b.Entitlements {
-			switch strings.ToLower(strings.TrimSpace(e)) {
-			case "security.insecure", "network.host":
-				add("build entitlement %q not allowed", e)
-			}
+		if !h.confined(df) {
+			add("dockerfile %q must be inside the app folder", b.Dockerfile)
 		}
 	}
-
+	for _, ctxName := range sortedKeys(b.AdditionalContexts) {
+		v := b.AdditionalContexts[ctxName]
+		if v != "" && isLocalContext(v) && !h.confined(v) {
+			add("build context %q must be inside the app folder", v)
+		}
+	}
+	for _, key := range b.SSH {
+		if key.Path != "" && !h.confined(key.Path) {
+			add("build ssh key %q must be inside the app folder", key.Path)
+		}
+	}
+	if strings.EqualFold(b.Network, "host") {
+		add("build network 'host' not allowed")
+	}
+	if b.Privileged {
+		add("privileged build not allowed")
+	}
+	for _, e := range b.Entitlements {
+		switch strings.ToLower(strings.TrimSpace(e)) {
+		case "security.insecure", "network.host":
+			add("build entitlement %q not allowed", e)
+		}
+	}
 	return violations
 }
 

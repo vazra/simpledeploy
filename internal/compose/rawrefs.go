@@ -22,8 +22,9 @@ const includeViolation = `"include" is not supported: put all services in docker
 
 // checkRawFileRefs refuses compose content that would make the loader read
 // files on its own before the validator runs: a top-level include, and
-// services' label_file and extends.file values that are not regular files
-// inside appDir. Extends files are checked the same way, recursively.
+// label_file and extends.file values of services and jobs (and label_file
+// of services' pre_start hooks) that are not regular files inside appDir.
+// Extends files are checked the same way, recursively.
 func checkRawFileRefs(content []byte, appDir string) error {
 	c := &rawRefChecker{appDir: appDir, seen: map[string]bool{}}
 	if real, err := filepath.EvalSymlinks(appDir); err == nil {
@@ -74,39 +75,62 @@ func (c *rawRefChecker) checkDoc(doc any, dir string, top bool, depth int) {
 	if _, ok := root["include"]; ok && top {
 		c.add(includeViolation)
 	}
-	services := rawMap(root["services"])
-	for _, name := range sortedKeys(services) {
-		svc := rawMap(services[name])
-		if svc == nil {
-			continue
-		}
-		switch lf := svc["label_file"].(type) {
-		case nil:
-		case []any:
-			for _, item := range lf {
-				c.checkFile(name, "label_file", item, dir, false, depth)
+	for _, section := range rawContainerSections {
+		entries := rawMap(root[section.key])
+		for _, name := range sortedKeys(entries) {
+			entry := rawMap(entries[name])
+			if entry == nil {
+				continue
 			}
-		default:
-			c.checkFile(name, "label_file", lf, dir, false, depth)
-		}
-		// extends: <service> and extends without file stay in this file.
-		if ext := rawMap(svc["extends"]); ext != nil {
-			if f, ok := ext["file"]; ok && f != nil {
-				c.checkFile(name, "extends file", f, dir, true, depth)
+			who := fmt.Sprintf("%s %q", section.kind, name)
+			c.checkLabelFiles(who, entry["label_file"], dir, depth)
+			// extends: <service> and extends without file stay in this file.
+			if ext := rawMap(entry["extends"]); ext != nil {
+				if f, ok := ext["file"]; ok && f != nil {
+					c.checkFile(who, "extends file", f, dir, true, depth)
+				}
+			}
+			if hooks, ok := entry["pre_start"].([]any); ok {
+				for i, hook := range hooks {
+					if hm := rawMap(hook); hm != nil {
+						c.checkLabelFiles(fmt.Sprintf("%s pre_start hook %d", who, i+1), hm["label_file"], dir, depth)
+					}
+				}
 			}
 		}
 	}
 }
 
+// rawContainerSections are the top-level sections whose entries run
+// containers and may name label_file and extends files.
+var rawContainerSections = []struct{ key, kind string }{
+	{"services", "service"},
+	{"jobs", "job"},
+}
+
+// checkLabelFiles checks a label_file value: one path or a list of paths.
+func (c *rawRefChecker) checkLabelFiles(who string, v any, dir string, depth int) {
+	switch lf := v.(type) {
+	case nil:
+	case []any:
+		for _, item := range lf {
+			c.checkFile(who, "label_file", item, dir, false, depth)
+		}
+	default:
+		c.checkFile(who, "label_file", lf, dir, false, depth)
+	}
+}
+
 // checkFile refuses a file reference unless it is a plain relative path to
-// a regular file inside the app folder (after resolving symlinks).
-func (c *rawRefChecker) checkFile(svc, kind string, v any, dir string, extends bool, depth int) {
+// a regular file inside the app folder (after resolving symlinks). who
+// names the owner for messages, e.g. `service "web"`.
+func (c *rawRefChecker) checkFile(who, kind string, v any, dir string, extends bool, depth int) {
 	p, ok := rawScalar(v)
 	if !ok {
-		c.add("service %q: %s must be a path", svc, kind)
+		c.add("%s: %s must be a path", who, kind)
 		return
 	}
-	bad := func() { c.add("service %q: %s %q must be a file inside the app folder", svc, kind, p) }
+	bad := func() { c.add("%s: %s %q must be a file inside the app folder", who, kind, p) }
 	if p == "" || filepath.IsAbs(p) || strings.Contains(p, "..") || strings.ContainsAny(p, "~$") || c.appReal == "" {
 		bad()
 		return
@@ -126,7 +150,7 @@ func (c *rawRefChecker) checkFile(svc, kind string, v any, dir string, extends b
 	}
 	c.seen[real] = true
 	if depth >= maxExtendsDepth {
-		c.add("service %q: extends files nest too deeply", svc)
+		c.add("%s: extends files nest too deeply", who)
 		return
 	}
 	data, err := fsutil.ReadRegularFile(real)
@@ -135,13 +159,14 @@ func (c *rawRefChecker) checkFile(svc, kind string, v any, dir string, extends b
 		return
 	}
 	if err := c.checkContent(data, filepath.Dir(full), false, depth+1); err != nil {
-		c.add("service %q: extends file %q is not valid YAML", svc, p)
+		c.add("%s: extends file %q is not valid YAML", who, p)
 	}
 }
 
-// stripFileRefs returns content without the keys that make the loader read
-// other files: a top-level include, and services' label_file and extends
-// with a file (extends within the same file is kept).
+// stripFileRefs returns content without the keys checkRawFileRefs checks:
+// a top-level include, label_file and extends with a file in services and
+// jobs (extends within the same file is kept), and pre_start hooks'
+// label_file.
 func stripFileRefs(content []byte) ([]byte, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(content))
 	var buf bytes.Buffer
@@ -159,13 +184,20 @@ func stripFileRefs(content []byte) ([]byte, error) {
 			continue
 		}
 		rawDelete(doc, "include")
-		services := rawMap(rawMap(doc)["services"])
-		for _, name := range sortedKeys(services) {
-			svc := services[name]
-			rawDelete(svc, "label_file")
-			if ext := rawMap(rawMap(svc)["extends"]); ext != nil {
-				if f, ok := ext["file"]; ok && f != nil {
-					rawDelete(svc, "extends")
+		for _, section := range rawContainerSections {
+			entries := rawMap(rawMap(doc)[section.key])
+			for _, name := range sortedKeys(entries) {
+				entry := entries[name]
+				rawDelete(entry, "label_file")
+				if ext := rawMap(rawMap(entry)["extends"]); ext != nil {
+					if f, ok := ext["file"]; ok && f != nil {
+						rawDelete(entry, "extends")
+					}
+				}
+				if hooks, ok := rawMap(entry)["pre_start"].([]any); ok {
+					for _, hook := range hooks {
+						rawDelete(hook, "label_file")
+					}
 				}
 			}
 		}

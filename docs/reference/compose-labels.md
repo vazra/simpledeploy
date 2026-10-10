@@ -126,6 +126,11 @@ These are refused:
   insecure entitlements.
 - `include` (not supported), and `extends` files outside the app folder.
 
+`pre_start` hooks and top-level `jobs` start their own containers, so each
+one gets the same checks as a service, including the host folder rules
+below. Their `env_file`, `label_file` and `extends` files must be inside
+the app folder too.
+
 GPU access through `gpus:` or `deploy.resources.reservations.devices` is
 allowed: Docker grants it through device requests, not raw host device
 nodes.
