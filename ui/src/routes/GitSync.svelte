@@ -350,7 +350,7 @@
                 <input type="checkbox" bind:checked={fAutoPushEnabled} class="mt-0.5 w-4 h-4 accent-accent shrink-0" />
                 <span class="text-sm text-text-primary">
                   Auto-push local changes
-                  <span class="block text-xs text-text-muted font-normal">Commit and push sidecars whenever they change.</span>
+                  <span class="block text-xs text-text-muted font-normal">Commit and push sidecars whenever they change. When off, changes are committed locally only and never pushed.</span>
                 </span>
               </label>
 
