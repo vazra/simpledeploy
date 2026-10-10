@@ -11,19 +11,19 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.2.2",
+    "@tailwindcss/vite": "^4.3.3",
     "chart.js": "^4.5.1",
     "chartjs-adapter-date-fns": "^3.0.0",
-    "date-fns": "^4.1.0",
+    "date-fns": "^4.4.0",
     "diff": "^8.0.4",
     "js-yaml": "^4.3.2",
-    "svelte-spa-router": "^5.0.1",
+    "svelte-spa-router": "^5.1.1",
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/svelte": "^5.3.1",
+    "@testing-library/svelte": "^5.4.2",
     "jsdom": "^25.0.1",
     "svelte": "^5.57.2",
     "vite": "^8.0.7",
