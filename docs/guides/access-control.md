@@ -14,6 +14,8 @@ Restrict which client IPs reach an app with the `simpledeploy.access.allow` labe
 
 The proxy returns `404` rather than `403` so you don't leak the existence of the app to scanners.
 
+The allowlist applies to every endpoint domain of the app, including wildcard domains such as `*.example.com`. Domains are matched the way the proxy routes requests: letter case and port are ignored.
+
 ## Examples
 
 ### Office + admin laptop
