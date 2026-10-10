@@ -110,6 +110,10 @@ Ask: "would someone who has never heard of Docker Compose understand this?" If n
 3. Check whether user-facing (`docs/`) or contributor-facing ( `CONTRIBUTING.md`, `docs/contributing/`, `docs/architecture/`, `e2e/README.md`) docs need updating; update them in the same PR.
 4. Add or update test coverage when it makes sense: Go tests, vitests (per UI Test Coverage Rule), or E2E specs for full-stack flows.
 
+## Security Fixes
+
+Vulnerability fixes follow `docs/contributing/security-process.md`: draft advisory, temporary private fork (push only there), neutral wording in code/docs/commits, squash, merge from the advisory page, `fix:` follow-up PR to trigger release-please, then CVE and publish. Never open public issues/PRs for unfixed vulnerabilities.
+
 ## Commit Messages
 
 Conventional Commits: `type(scope): description`. Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`. Scopes: `api`, `cli`, `ui`, or omit.

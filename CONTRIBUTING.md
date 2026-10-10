@@ -67,3 +67,7 @@ Scopes: `api`, `cli`, `ui`, or omit if broad.
 3. Run `make test` (and `make e2e` if touching API/UI)
 4. Commit with a conventional commit message
 5. Open a PR against `main`
+
+## Security
+
+Do not open public issues or pull requests for vulnerabilities. Report them privately as described in [SECURITY.md](SECURITY.md). Maintainers handle fixes, releases, advisories and CVEs as described in [docs/contributing/security-process.md](docs/contributing/security-process.md).
