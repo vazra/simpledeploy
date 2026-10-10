@@ -189,8 +189,10 @@ func TestValidateBindNormalizesPaths(t *testing.T) {
 	for _, src := range []string{"//etc", "/./etc", "/srv/../etc/", "/var//run/docker.sock"} {
 		t.Run(src, func(t *testing.T) {
 			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{
-				Name:    "x",
-				Volumes: []types.ServiceVolumeConfig{{Type: "bind", Source: src, Target: "/x"}},
+				Name: "x",
+				ContainerSpec: types.ContainerSpec{
+					Volumes: []types.ServiceVolumeConfig{{Type: "bind", Source: src, Target: "/x"}},
+				},
 			}))
 			wantViolation(t, v, "protected system folder")
 		})
@@ -421,7 +423,7 @@ func TestValidateVolumeDeviceBindLayout(t *testing.T) {
 func TestValidateCapabilityNormalization(t *testing.T) {
 	for _, c := range []string{"Cap_Sys_Admin", "cap_sys_admin", "sys_admin", " SYS_ADMIN ", "cap_all"} {
 		t.Run(c, func(t *testing.T) {
-			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", CapAdd: []string{c}}))
+			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{CapAdd: []string{c}}}))
 			wantViolation(t, v, "dangerous capability")
 		})
 	}
@@ -439,24 +441,24 @@ func TestValidateSecurityOptForms(t *testing.T) {
 	}
 	for _, opt := range bad {
 		t.Run(opt, func(t *testing.T) {
-			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", SecurityOpt: []string{opt}}))
+			v := ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{SecurityOpt: []string{opt}}}))
 			wantViolation(t, v, "security_opt")
 		})
 	}
 	ok := []string{"no-new-privileges:true", "no-new-privileges", "label=level:s0:c100,c200", "apparmor=docker-default", "seccomp=builtin"}
 	for _, opt := range ok {
 		t.Run(opt, func(t *testing.T) {
-			wantNone(t, ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", SecurityOpt: []string{opt}})))
+			wantNone(t, ValidateComposeSecurity(cfgWith(types.ServiceConfig{Name: "x", ContainerSpec: types.ContainerSpec{SecurityOpt: []string{opt}}})))
 		})
 	}
 }
 
 func TestValidateNamespaceSharing(t *testing.T) {
 	bad := []types.ServiceConfig{
-		{Name: "x", NetworkMode: "container:other"},
-		{Name: "x", Ipc: "container:other"},
-		{Name: "x", Uts: "host"},
-		{Name: "x", DeviceCgroupRules: []string{"c 1:3 mr"}},
+		{Name: "x", ContainerSpec: types.ContainerSpec{NetworkMode: "container:other"}},
+		{Name: "x", ContainerSpec: types.ContainerSpec{Ipc: "container:other"}},
+		{Name: "x", ContainerSpec: types.ContainerSpec{Uts: "host"}},
+		{Name: "x", ContainerSpec: types.ContainerSpec{DeviceCgroupRules: []string{"c 1:3 mr"}}},
 	}
 	for _, svc := range bad {
 		if v := ValidateComposeSecurity(cfgWith(svc)); len(v) == 0 {
@@ -464,10 +466,10 @@ func TestValidateNamespaceSharing(t *testing.T) {
 		}
 	}
 	ok := []types.ServiceConfig{
-		{Name: "x", NetworkMode: "service:db"},
-		{Name: "x", NetworkMode: "bridge"},
-		{Name: "x", Ipc: "shareable"},
-		{Name: "x", Ipc: "private"},
+		{Name: "x", ContainerSpec: types.ContainerSpec{NetworkMode: "service:db"}},
+		{Name: "x", ContainerSpec: types.ContainerSpec{NetworkMode: "bridge"}},
+		{Name: "x", ContainerSpec: types.ContainerSpec{Ipc: "shareable"}},
+		{Name: "x", ContainerSpec: types.ContainerSpec{Ipc: "private"}},
 	}
 	for _, svc := range ok {
 		wantNone(t, ValidateComposeSecurity(cfgWith(svc)))
