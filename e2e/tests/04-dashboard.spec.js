@@ -29,8 +29,9 @@ test.describe('Dashboard', () => {
     const running = apps.filter((a) => a.Status === 'running').length;
     await expect(main.getByRole('button', { name: /^Running/ }).locator('span').last()).toHaveText(String(running));
 
-    // Memory card sub-text reads "<used> / <total>"; both stay "0" without data.
-    await expect(main.getByText(/^\d+\.\d [KMGT]?B \/ \d+\.\d [KMGT]?B$/)).toBeVisible();
+    // Memory stat card sub-text reads "<used> / <total>"; both stay "0" without data.
+    const memCard = main.getByText('Memory', { exact: true }).locator('xpath=../..');
+    await expect(memCard.getByText(/^\d+\.\d [KMGT]?B \/ \d+\.\d [KMGT]?B$/)).toBeVisible();
 
     await main.getByPlaceholder(/search/i).fill('nginx');
     await expect(main.getByRole('heading', { name: 'e2e-nginx', exact: true })).toBeVisible();

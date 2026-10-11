@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
 import { apiLogin, waitForDeployDone } from '../helpers/api.js';
-import { findServiceContainer, containerImage } from '../helpers/docker.js';
+import { dockerCLI } from '../helpers/docker.js';
 import { waitForProxyStatus } from '../helpers/proxy.js';
 
 test.describe('App Configuration', () => {
@@ -32,10 +32,12 @@ test.describe('App Configuration', () => {
     expect((await deployRes).status()).toBe(202);
     await expect(review).toBeHidden();
 
-    await expect.poll(() => {
-      const name = findServiceContainer('e2e-nginx', 'web');
-      return name ? containerImage(name) : '';
-    }, { timeout: 90_000 }).toMatch(/(^|\/)nginx:1\.27-alpine$/);
+    // One docker ps call: the container is replaced mid-poll.
+    await expect.poll(() => dockerCLI([
+      'ps', '--format', '{{.Image}}',
+      '--filter', 'label=com.docker.compose.project=simpledeploy-e2e-nginx',
+      '--filter', 'label=com.docker.compose.service=web',
+    ]).trim(), { timeout: 90_000 }).toMatch(/^(\S+\/)?nginx:1\.27-alpine$/);
     expect((await waitForDeployDone('e2e-nginx')).Status).toBe('running');
     await waitForProxyStatus('nginx-test.local', 200, { timeoutMs: 30_000, bodyContains: 'Welcome to nginx' });
   });

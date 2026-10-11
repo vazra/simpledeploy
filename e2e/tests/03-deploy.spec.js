@@ -28,7 +28,7 @@ async function deployApp(page, appName, composeContent) {
   await dialog.getByPlaceholder('my-app').fill(appName);
   await dialog.getByRole('button', { name: 'YAML' }).click();
   await dialog.locator('textarea').last().fill(composeContent);
-  await expect(dialog.getByText('Valid compose file')).toBeVisible({ timeout: 10_000 });
+  await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
   await dialog.getByRole('button', { name: 'Next' }).click();
   await dialog.getByRole('button', { name: 'Deploy' }).click();
   await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
@@ -75,7 +75,7 @@ test.describe('Deploy Apps', () => {
     expect(res.status()).toBe(200);
     expect((await res.json()).valid).toBe(false);
     await expect(dialog.getByText(/^Invalid compose file:/)).toBeVisible();
-    await expect(dialog.getByText('Valid compose file')).toHaveCount(0);
+    await expect(dialog.getByText('Valid compose file', { exact: true })).toHaveCount(0);
     await expect(dialog.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
@@ -95,7 +95,7 @@ test.describe('Deploy Apps', () => {
       await dialog.locator('#tpl-var-domain').fill('tpl-e2e.localhost');
       await dialog.getByRole('button', { name: /^apply/i }).click();
       await dialog.getByPlaceholder('my-app').fill('e2e-nginx');
-      await expect(dialog.getByText('Valid compose file')).toBeVisible({ timeout: 10_000 });
+      await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
       await dialog.getByRole('button', { name: 'Next' }).click();
       await dialog.getByRole('button', { name: 'Deploy' }).click();
 
@@ -133,7 +133,7 @@ test.describe('Deploy Apps', () => {
     await dialog.locator('textarea').last().fill(
       "services:\n  web:\n    image: nginx:1.25-alpine\n    ports:\n      - '8080:80'\n"
     );
-    await expect(dialog.getByText('Valid compose file')).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
 

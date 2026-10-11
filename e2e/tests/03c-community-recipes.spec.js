@@ -55,7 +55,7 @@ test.describe('community recipes', () => {
 
     await expect(wizard.locator('textarea').last()).toHaveValue(FIXTURE_RECIPE.compose);
     await expect(wizard.getByPlaceholder('my-app')).toHaveValue(FIXTURE_RECIPE.id);
-    await expect(wizard.getByText('Valid compose file')).toBeVisible({ timeout: 10_000 });
+    await expect(wizard.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
 
     // Using a recipe records a compose pull for the popularity report.
     const pop = await page.request.get(`${server.baseURL}/api/recipes/community/popularity`);
