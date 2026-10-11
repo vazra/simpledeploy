@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -79,6 +80,7 @@ type Server struct {
 	cfgPath           string
 	deploymentMode    deployment.Mode
 	gs                *gitsync.Syncer
+	gsPushing         atomic.Bool // gs is set and pushes; see GitSyncPushing
 	cs                *configsync.Syncer
 	recipesCache      *recipes.Cache
 	bus               *events.Bus
@@ -164,7 +166,10 @@ func (s *Server) SetConfig(cfg *config.Config, path string) {
 func (s *Server) SetDocker(dc docker.Client) { s.docker = dc }
 
 // SetGitSync sets the gitsync.Syncer (nil disables git endpoints).
-func (s *Server) SetGitSync(gs *gitsync.Syncer) { s.gs = gs }
+func (s *Server) SetGitSync(gs *gitsync.Syncer) {
+	s.gs = gs
+	s.gsPushing.Store(gitSyncPushes(gs))
+}
 
 // SetConfigSync sets the configsync.Syncer (nil disables sidecar cleanup on delete).
 func (s *Server) SetConfigSync(cs *configsync.Syncer) { s.cs = cs }

@@ -19,7 +19,7 @@ Each entry stores: actor, source (UI / API / CLI / git sync / system), category,
 
 ## Sync eligibility
 
-Entries for config-change categories are marked with a sync status when [git sync](/operations/git-sync/) is enabled. The git sync worker stamps each relevant entry with `synced`, `pending`, or `failed` after the push completes. Runtime events (deploys, auth, start/stop) are not git-tracked and carry no badge.
+Entries for config-change categories are marked with a sync status when [git sync](/operations/git-sync/) is enabled and pushes changes (auto-push on); entries recorded while it is off carry no badge. The git sync worker stamps each relevant entry with `synced`, `pending`, or `failed` after the push completes. Runtime events (deploys, auth, start/stop) are not git-tracked and carry no badge.
 
 ## Retention
 

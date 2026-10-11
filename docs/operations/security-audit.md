@@ -41,7 +41,7 @@ Entries for config-change categories (`compose`, `endpoint`, `backup`, `alert`, 
 | Pending | Waiting for the next sync cycle |
 | Sync failed | Commit or push failed; see git sync error details |
 
-Runtime-only events (`deploy`, `auth`, `system`, `lifecycle` start/stop/scale) are never committed to git and show no badge.
+Runtime-only events (`deploy`, `auth`, `system`, `lifecycle` start/stop/scale) are never committed to git and show no badge. Entries recorded while git sync is off, or while auto-push is off (pull-only), also show no badge.
 
 ## Retention
 

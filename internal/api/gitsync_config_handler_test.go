@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/config"
+	"github.com/vazra/simpledeploy/internal/gitsync"
 )
 
 func gitPlainInit(path string, bare bool) (*git.Repository, error) {
@@ -310,5 +312,61 @@ func TestDisableGitSync(t *testing.T) {
 	kv, _ := srv.store.GetGitSyncConfig()
 	if len(kv) != 0 {
 		t.Errorf("expected empty DB after disable, got %v", kv)
+	}
+}
+
+func TestGitSyncPushingFollowsSyncer(t *testing.T) {
+	srv, _ := newTestServer(t)
+	newSyncer := func(push bool) *gitsync.Syncer {
+		t.Helper()
+		gs, err := gitsync.New(gitsync.Config{
+			Enabled:         true,
+			Remote:          "file://" + t.TempDir(),
+			Branch:          "main",
+			AppsDir:         t.TempDir(),
+			AutoPushEnabled: push,
+		}, srv.store, nil, nil)
+		if err != nil {
+			t.Fatalf("gitsync.New: %v", err)
+		}
+		return gs
+	}
+
+	if srv.GitSyncPushing() {
+		t.Error("no syncer: want false")
+	}
+	srv.SetGitSync(newSyncer(false))
+	if srv.GitSyncPushing() {
+		t.Error("pull-only syncer: want false")
+	}
+	srv.SetGitSync(newSyncer(true))
+	if !srv.GitSyncPushing() {
+		t.Error("pushing syncer: want true")
+	}
+
+	// Reloading with git sync turned off clears it.
+	srv.cfg = &config.Config{AppsDir: t.TempDir(), MasterSecret: "secret"}
+	srv.masterSecret = "secret"
+	if _, err := srv.ReloadGitSync(context.Background()); err != nil {
+		t.Fatalf("ReloadGitSync: %v", err)
+	}
+	if srv.GitSyncPushing() {
+		t.Error("after reload with git sync off: want false")
+	}
+
+	// Reloading with git sync on sets it again.
+	bare := t.TempDir()
+	if _, err := gitPlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetGitSyncConfig(map[string]string{"enabled": "true", "remote": "file://" + bare, "branch": "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.ReloadGitSync(context.Background()); err != nil {
+		t.Fatalf("ReloadGitSync: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.gs.Stop() })
+	if !srv.GitSyncPushing() {
+		t.Error("after reload with git sync on: want true")
 	}
 }
