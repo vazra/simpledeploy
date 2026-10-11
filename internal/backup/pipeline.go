@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"fmt"
+	"log"
 )
 
 // PipelineResult holds the outcome of a backup pipeline run.
@@ -10,6 +11,7 @@ type PipelineResult struct {
 	FilePath  string
 	SizeBytes int64
 	Checksum  string
+	Warnings  []string // post-hook failures; the backup itself succeeded
 }
 
 // Pipeline orchestrates backup and restore flows through strategy, target, and hooks.
@@ -29,6 +31,8 @@ func (p *Pipeline) RunBackup(ctx context.Context, opts BackupOpts, preHooks, pos
 	// 1. Run pre-hooks (abort on failure)
 	if p.hooks != nil && len(preHooks) > 0 {
 		if err := p.hooks.RunPre(ctx, preHooks); err != nil {
+			// Post-hooks undo pre-hooks (e.g. restart a stopped service).
+			p.runPostHooks(ctx, postHooks)
 			return nil, fmt.Errorf("pre-hook: %w", err)
 		}
 	}
@@ -53,9 +57,9 @@ func (p *Pipeline) RunBackup(ctx context.Context, opts BackupOpts, preHooks, pos
 	}
 
 	// 5. Post-hooks (best effort)
-	p.runPostHooks(ctx, postHooks)
+	warnings := p.runPostHooks(ctx, postHooks)
 
-	return &PipelineResult{FilePath: filePath, SizeBytes: size, Checksum: cw.Sum()}, nil
+	return &PipelineResult{FilePath: filePath, SizeBytes: size, Checksum: cw.Sum(), Warnings: warnings}, nil
 }
 
 // RunRestore: download -> verify checksum -> pre-hooks -> strategy.Restore -> post-hooks
@@ -91,6 +95,7 @@ func (p *Pipeline) RunRestore(ctx context.Context, opts RestoreOpts, filePath, e
 
 	if p.hooks != nil && len(preHooks) > 0 {
 		if err := p.hooks.RunPre(ctx, preHooks); err != nil {
+			p.runPostHooks(ctx, postHooks)
 			return fmt.Errorf("pre-hook: %w", err)
 		}
 	}
@@ -104,8 +109,16 @@ func (p *Pipeline) RunRestore(ctx context.Context, opts RestoreOpts, filePath, e
 	return nil
 }
 
-func (p *Pipeline) runPostHooks(ctx context.Context, hooks []Hook) {
-	if p.hooks != nil && len(hooks) > 0 {
-		p.hooks.RunPost(ctx, hooks)
+// runPostHooks runs hooks even when ctx is already canceled, so a service
+// stopped by a pre-hook is started again. Failures are logged and returned
+// as warnings.
+func (p *Pipeline) runPostHooks(ctx context.Context, hooks []Hook) []string {
+	if p.hooks == nil || len(hooks) == 0 {
+		return nil
 	}
+	warnings := p.hooks.RunPost(context.WithoutCancel(ctx), hooks)
+	for _, w := range warnings {
+		log.Printf("[backup] warning: %s", w)
+	}
+	return warnings
 }

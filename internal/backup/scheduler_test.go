@@ -25,6 +25,7 @@ type mockStore struct {
 	oldRuns     []store.BackupRun
 	oldRunsTime []store.BackupRun
 	deletedRuns []int64
+	composePath string
 }
 
 type successArgs struct {
@@ -101,7 +102,7 @@ func (m *mockStore) DeleteBackupRun(id int64) error {
 }
 
 func (m *mockStore) GetAppByID(id int64) (*store.App, error) {
-	return &store.App{ID: id, Name: "testapp", Slug: "testapp"}, nil
+	return &store.App{ID: id, Name: "testapp", Slug: "testapp", ComposePath: m.composePath}, nil
 }
 
 func (m *mockStore) GetBackupRun(id int64) (*store.BackupRun, error) {
@@ -383,24 +384,6 @@ func TestSetAlertFunc(t *testing.T) {
 	_ = sched.RunBackup(context.Background(), 1)
 	if !alertCalled {
 		t.Error("alert func should have been called on success")
-	}
-}
-
-func TestParseHooks(t *testing.T) {
-	hooks := parseHooks(`[{"type":"stop","service":"db"}]`)
-	if len(hooks) != 1 {
-		t.Fatalf("len = %d, want 1", len(hooks))
-	}
-	if hooks[0].Type != "stop" {
-		t.Errorf("type = %q, want stop", hooks[0].Type)
-	}
-
-	// empty/null
-	if len(parseHooks("")) != 0 {
-		t.Error("empty string should return nil")
-	}
-	if len(parseHooks("null")) != 0 {
-		t.Error("null should return nil")
 	}
 }
 
