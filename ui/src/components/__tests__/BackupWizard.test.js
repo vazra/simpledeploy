@@ -225,7 +225,7 @@ describe('BackupWizard', () => {
 
     it('saves a custom command as an exec hook with the service name', async () => {
       api.detectStrategies.mockResolvedValue(detected);
-      const utils = render(BackupWizard, { open: true, slug: 'foo' });
+      const utils = render(BackupWizard, { open: true, slug: 'foo', allowCommandHooks: true });
       await toHooksStep(utils);
       await fireEvent.click(utils.getByText('Custom pre-backup command'));
       await fireEvent.input(utils.getByPlaceholderText('Service name'), { target: { value: 'web' } });
@@ -236,6 +236,22 @@ describe('BackupWizard', () => {
       const [, cfg] = api.createBackupConfig.mock.calls[0];
       expect(JSON.parse(cfg.pre_hooks)).toEqual([{ type: 'exec', service: 'web', command: 'sync' }]);
       expect(JSON.parse(cfg.post_hooks)).toEqual([]);
+    });
+
+    // Command hooks are super admin only (the server returns 403 otherwise).
+    it('hides custom commands unless allowed, but lists existing ones', async () => {
+      api.detectStrategies.mockResolvedValue(detected);
+      const editConfig = {
+        id: 9, strategy: 'volume', target: 'local', schedule_cron: '0 2 * * *',
+        retention_mode: 'count', retention_count: 3,
+        pre_hooks: JSON.stringify([{ type: 'exec', service: 'web', command: 'sync' }]), post_hooks: '[]',
+      };
+      const utils = render(BackupWizard, { open: true, slug: 'foo', editConfig });
+      await toHooksStep(utils);
+      expect(utils.queryByText('Custom pre-backup command')).toBeNull();
+      expect(utils.queryByText('Custom post-backup command')).toBeNull();
+      expect(utils.getByText(/Only a super admin can add commands/)).toBeTruthy();
+      expect(utils.getByText('web: sync')).toBeTruthy();
     });
 
     it('drops hooks saved by the old wizard format when editing', async () => {

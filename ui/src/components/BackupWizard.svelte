@@ -5,7 +5,7 @@
   import Badge from './Badge.svelte'
   import { api } from '../lib/api.js'
 
-  let { open = false, slug = '', editConfig = null, onclose = () => {}, oncreated = () => {} } = $props()
+  let { open = false, slug = '', editConfig = null, allowCommandHooks = false, onclose = () => {}, oncreated = () => {} } = $props()
 
   const TOTAL_STEPS = 6
   let step = $state(1)
@@ -565,9 +565,13 @@
         <h4 class="text-sm font-semibold text-text-primary">Pre/post backup hooks</h4>
         <p class="text-xs text-text-muted mt-0.5">Optional commands to run before or after the backup, inside one of this app's services. Most backups do not need any.</p>
       </div>
+      {#if !allowCommandHooks}
+        <p class="text-xs text-text-muted">Only a super admin can add commands here. You can remove existing ones.</p>
+      {/if}
 
       <!-- Custom pre-hooks -->
       <div class="space-y-2">
+        {#if allowCommandHooks}
         <button
           type="button"
           onclick={() => showCustomPre = !showCustomPre}
@@ -588,6 +592,7 @@
             <Button size="sm" variant="secondary" onclick={addCustomPreHook} disabled={!customPreHook.service || !customPreHook.command}>Add</Button>
           </div>
         {/if}
+        {/if}
 
         {#each preHooks as hook, i}
           <div class="flex items-center gap-2 px-3 py-2 bg-surface-3/20 rounded-lg text-xs">
@@ -603,6 +608,7 @@
 
       <!-- Custom post-hooks -->
       <div class="space-y-2">
+        {#if allowCommandHooks}
         <button
           type="button"
           onclick={() => showCustomPost = !showCustomPost}
@@ -622,6 +628,7 @@
             </div>
             <Button size="sm" variant="secondary" onclick={addCustomPostHook} disabled={!customPostHook.service || !customPostHook.command}>Add</Button>
           </div>
+        {/if}
         {/if}
 
         {#each postHooks as hook, i}

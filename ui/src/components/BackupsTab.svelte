@@ -8,7 +8,7 @@
   import BackupWizard from './BackupWizard.svelte'
   import { toasts } from '../lib/stores/toast.js'
 
-  let { slug } = $props()
+  let { slug, allowCommandHooks = false } = $props()
 
   let configs = $state([])
   let runs = $state([])
@@ -394,7 +394,7 @@
   </div>
 {/if}
 
-<BackupWizard open={showWizard} {slug} {editConfig} onclose={closeWizard} oncreated={loadData} />
+<BackupWizard open={showWizard} {slug} {editConfig} {allowCommandHooks} onclose={closeWizard} oncreated={loadData} />
 
 {#if showRestoreModal}
   <Modal

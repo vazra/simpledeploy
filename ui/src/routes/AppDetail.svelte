@@ -437,7 +437,7 @@
       </div>
 
     {:else if activeTab === 'backups'}
-      <BackupsTab {slug} />
+      <BackupsTab {slug} allowCommandHooks={isSuperAdmin(me)} />
 
     {:else if activeTab === 'settings'}
       <SettingsTab {slug} {app} {services} {canMutate} onAppUpdated={loadApp} />

@@ -210,3 +210,60 @@ func TestCreateBackupConfigRetentionMode(t *testing.T) {
 		})
 	}
 }
+
+// Command-running hooks (exec, flush) are super admin only; a manage user
+// may use stop/start and may edit a config whose command hooks they leave
+// unchanged.
+func TestBackupCommandHooksSuperAdminOnly(t *testing.T) {
+	srv, st, admin := newHooksTestServer(t)
+	app, err := st.GetAppBySlug("myapp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := makeUserCookie(t, srv, st, "mgr", app.ID)
+	execHook := `[{"type":"exec","service":"db","command":"sync"}]`
+
+	if w := postBackupCfg(t, srv, mgr, backupCfgBody(execHook, "")); w.Code != http.StatusForbidden {
+		t.Fatalf("manage create with exec hook: status = %d, want 403; body: %s", w.Code, w.Body.String())
+	}
+	if w := postBackupCfg(t, srv, mgr, backupCfgBody(`[{"type":"stop","service":"web"}]`, `[{"type":"start","service":"web"}]`)); w.Code != http.StatusCreated {
+		t.Fatalf("manage create with stop/start: status = %d, body: %s", w.Code, w.Body.String())
+	}
+
+	w := postBackupCfg(t, srv, admin, backupCfgBody(execHook, ""))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("admin create with exec hook: status = %d, body: %s", w.Code, w.Body.String())
+	}
+	var created store.BackupConfig
+	json.NewDecoder(w.Body).Decode(&created)
+
+	put := func(body map[string]any) int {
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/backups/configs/%d", created.ID), bytes.NewReader(b))
+		req.AddCookie(mgr)
+		rw := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rw, req)
+		return rw.Code
+	}
+	keep := backupCfgBody(execHook, "")
+	keep["retention_count"] = 9
+	if code := put(keep); code != http.StatusOK {
+		t.Fatalf("manage edit keeping admin's exec hook: status = %d, want 200", code)
+	}
+	if code := put(backupCfgBody(`[{"type":"exec","service":"db","command":"id"}]`, "")); code != http.StatusForbidden {
+		t.Fatalf("manage changing exec command: status = %d, want 403", code)
+	}
+	if code := put(backupCfgBody(execHook, `[{"type":"flush_redis","service":"db"}]`)); code != http.StatusForbidden {
+		t.Fatalf("manage adding a flush hook: status = %d, want 403", code)
+	}
+	stored, err := st.GetBackupConfig(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.PreHooks != execHook || stored.RetentionCount != 9 {
+		t.Fatalf("stored = pre %s retention %d, want admin's hook kept and retention 9", stored.PreHooks, stored.RetentionCount)
+	}
+	if code := put(backupCfgBody("", "")); code != http.StatusOK {
+		t.Fatalf("manage removing the exec hook: status = %d, want 200", code)
+	}
+}

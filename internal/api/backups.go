@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -107,6 +108,52 @@ func (s *Server) validateBackupHooks(cfg *store.BackupConfig, app *store.App) er
 	return nil
 }
 
+// commandHooks returns the hooks in raw that run commands inside a
+// container (exec, flush_*), each in canonical JSON.
+func commandHooks(raw string) []string {
+	hooks, _, err := backup.ParseHooks(raw)
+	if err != nil {
+		return nil
+	}
+	var cmds []string
+	for _, h := range hooks {
+		switch h.Type {
+		case backup.HookTypeExec, backup.HookTypeFlushRedis, backup.HookTypeFlushMySQL:
+			cmds = append(cmds, backup.HooksJSON([]backup.Hook{h}))
+		}
+	}
+	return cmds
+}
+
+// subset reports whether every entry of a is in b.
+func subset(a, b []string) bool {
+	for _, x := range a {
+		if !slices.Contains(b, x) {
+			return false
+		}
+	}
+	return true
+}
+
+// checkCommandHookPermission refuses new or changed command-running hooks
+// unless the caller is a super admin: manage users cannot edit the compose
+// file, so such hooks would give them new shell access inside the app's
+// containers. Keeping or removing the stored config's (prev) command hooks
+// is allowed, so a manage user can still edit the rest of the config.
+func checkCommandHookPermission(r *http.Request, cfg, prev *store.BackupConfig) error {
+	if u := GetAuthUser(r); u != nil && u.Role == "super_admin" {
+		return nil
+	}
+	var prevPre, prevPost []string
+	if prev != nil {
+		prevPre, prevPost = commandHooks(prev.PreHooks), commandHooks(prev.PostHooks)
+	}
+	if !subset(commandHooks(cfg.PreHooks), prevPre) || !subset(commandHooks(cfg.PostHooks), prevPost) {
+		return fmt.Errorf("only a super admin can add or change backup hooks that run commands (exec, flush). Stop and start hooks are allowed")
+	}
+	return nil
+}
+
 // noHooks reports whether a stored hooks value holds no entries.
 func noHooks(raw string) bool {
 	switch strings.TrimSpace(raw) {
@@ -156,6 +203,10 @@ func (s *Server) handleCreateBackupConfig(w http.ResponseWriter, r *http.Request
 	}
 	if err := s.validateBackupHooks(&cfg, app); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := checkCommandHookPermission(r, &cfg, nil); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
@@ -231,6 +282,10 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 	}
 	if err := s.validateBackupHooks(&cfg, app); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := checkCommandHookPermission(r, &cfg, existing); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 

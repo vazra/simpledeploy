@@ -40,9 +40,14 @@ Each hook is `{"type", "service", "command", "timeout"}`. `pre_hooks` and `post_
 - Pre-hooks run in order. The first failure cancels the backup and marks the run failed. Post-hooks still run, so a service a pre-hook stopped is started again.
 - A failed post-hook is logged as a warning and does not fail the backup.
 
+## Who can add hooks
+
+- `stop` and `start` hooks: anyone who can manage the app.
+- `exec`, `flush_redis` and `flush_mysql` run commands, so only a super admin can add or change them. Users with manage access can keep or remove existing ones while editing the rest of the backup config.
+
 ## Security
 
-`exec` commands run inside the app's own container with `sh -c`, with the access that container already has. Users who can change an app's backup settings can already change what runs in that app (its `.env`, compose versions, and restores into its containers), and compose validation keeps app containers away from the host. Hooks never run commands on the host or in another app's containers.
+Commands run inside the app's own container with `sh -c`, with the access that container already has. Compose validation keeps app containers away from the host. Hooks never run commands on the host or in another app's containers.
 
 ## Hooks from older versions
 
