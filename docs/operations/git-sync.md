@@ -9,7 +9,7 @@ When enabled, SimpleDeploy treats your `apps_dir` as a git working tree and comm
 
 Git sync complements [config sidecars](./config-sidecars), which write app config to local YAML files. Think of sidecars as the local source of truth and git sync as the transport layer that makes that truth portable. Sidecars are what get committed; git sync is what moves them to a remote.
 
-Git sync is **not** a replacement for database backup. It does not capture metrics, deploy history, audit logs, or any file outside `apps_dir`. Secrets stay local: `config.yml` (which holds password hashes and encrypted registry credentials) and the SQLite database are never committed.
+Git sync is **not** a replacement for database backup. It does not capture metrics, deploy history, audit logs, or any file outside `apps_dir`. Secrets stay local: `{data_dir}/config.yml`, `{data_dir}/secrets.yml` (password hashes, API key hashes, encrypted registry credentials, webhook URLs), `*.secrets.yml` in app folders, and the SQLite database are never committed.
 
 ## What gets committed
 

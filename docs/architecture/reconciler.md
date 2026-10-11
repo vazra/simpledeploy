@@ -17,7 +17,7 @@ There is no internal periodic tick. If you want a heartbeat sweep, restart the p
 
 1. `scanAppsDir()` walks `apps_dir`, parses and validates every `docker-compose.yml`, and returns a `scanResult`: `desired` (apps that pass) and `refused` (apps on disk that fail compose security rules, have a symlinked compose file, or reference files outside the app folder). Hidden directories (leading `.`) and directories without a compose file are skipped silently.
 2. `store.ListApps()` returns currently-known apps from SQLite.
-3. For each desired app: if not in the store, deploy. If in the store but the file's SHA-256 differs from `apps.compose_hash`, redeploy.
+3. For each desired app: if not in the store, deploy, then import its `simpledeploy.yml` when the app has no alert rules, backup configs or access grants yet (`ImportAppSidecarIfMissing`; this is how per-app config comes back after a DB loss). If in the store but the file's SHA-256 differs from `apps.compose_hash`, redeploy.
 4. For each store app neither desired nor refused, whose compose file is gone: archive it (teardown, tombstone, row marked archived; see [Archived apps](/operations/archived-apps/)).
 5. Recompute the route table from desired apps plus route-only refused apps (below), tag every route with its app's store ID (`Route.AppID`, `math.MaxInt64` for apps not in the store yet), and call `proxy.SetRoutes()`. The proxy uses `AppID` to give a domain claimed by several apps to the one created first (see [Proxy](/architecture/proxy/)).
 

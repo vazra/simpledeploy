@@ -96,7 +96,7 @@ Pruning is logged: whenever `ApplyGlobalSidecar` (boot or watcher) deletes a use
 
 1. Stop the server.
 2. Move `{data_dir}/simpledeploy.db` aside (rename, don't delete until you've verified recovery).
-3. Restart. The first-boot seed marker (`system_meta`) is in the DB, so the server runs the FS-to-DB reconcile via `ReconcileDBFromFS`. All FS-authoritative state rebuilds.
+3. Restart. The server imports `config.yml` + `secrets.yml` into the empty DB and records the first-boot seed as done, so the seed never rewrites those files from the empty DB. The reconciler then re-adds every app folder that has a `docker-compose.yml` and imports its `simpledeploy.yml` + `simpledeploy.secrets.yml`. App sidecars are never pruned in this state: orphan cleanup only touches folders without a compose file, DB row or tombstone, and skips an empty DB. See [Config sidecars](/operations/config-sidecars/#how-recovery-works).
 
 Caveat: runtime state (metrics, audit log, deploy history, archived-app rows that have no tombstone) is lost.
 
