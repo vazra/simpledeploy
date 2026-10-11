@@ -7,6 +7,7 @@
   import Skeleton from './Skeleton.svelte'
   import BackupWizard from './BackupWizard.svelte'
   import { toasts } from '../lib/stores/toast.js'
+  import { realtime } from '../lib/stores/realtime.svelte.js'
 
   let { slug, allowCommandHooks = false } = $props()
 
@@ -29,10 +30,15 @@
 
   let lastRun = $derived(runs[0])
 
-  onMount(loadData)
+  // Backup and restore runs publish on the app topic when they start and
+  // finish, so the run list stays current without a reload.
+  onMount(() => {
+    loadData()
+    return realtime.register(`app:${slug}`, () => loadData({ quiet: true }))
+  })
 
-  async function loadData() {
-    loading = true
+  async function loadData({ quiet = false } = {}) {
+    if (!quiet) loading = true
     const [cfgRes, runRes] = await Promise.all([
       api.listBackupConfigs(slug),
       api.listBackupRuns(slug),

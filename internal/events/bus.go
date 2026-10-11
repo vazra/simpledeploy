@@ -14,10 +14,14 @@ import (
 // Type is a coarse classification (e.g. "app.changed", "app.status").
 // Topic identifies the resource scope (e.g. "app:foo", "global:settings").
 // No payload data ships in events; clients refetch the relevant REST resource.
+// App, when set, is the slug of the app the event is about. It is never sent
+// to clients; the WS handler delivers the event (on any topic, global ones
+// included) only to users who can view that app.
 type Event struct {
 	Type    string    `json:"type"`
 	Topic   string    `json:"topic"`
 	ActorID *int64    `json:"actor_id,omitempty"`
+	App     string    `json:"-"`
 	Ts      time.Time `json:"ts"`
 }
 

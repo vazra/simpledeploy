@@ -142,10 +142,13 @@ func (s *Server) handleEventsWS(w http.ResponseWriter, r *http.Request) {
 	uid := user.ID
 
 	// Filter: deliver only events whose topic this conn is subscribed to.
+	// Events about one app (App set) go only to users who can view it, on
+	// any topic, global ones included.
 	filter := func(e events.Event) bool {
 		mu.Lock()
-		defer mu.Unlock()
-		return subs[e.Topic]
+		subscribed := subs[e.Topic]
+		mu.Unlock()
+		return subscribed && (e.App == "" || s.canSubscribeApp(user, e.App))
 	}
 	ch, cancel, sub := s.bus.Subscribe(filter)
 	defer cancel()

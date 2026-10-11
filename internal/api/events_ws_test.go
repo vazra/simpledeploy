@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/vazra/simpledeploy/internal/events"
+	"github.com/vazra/simpledeploy/internal/store"
 )
 
 func newEventsTestServer(t *testing.T) (*httptest.Server, *Server, *http.Cookie) {
@@ -132,5 +133,47 @@ func TestEventsWSUnsub(t *testing.T) {
 	conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	if _, _, err := conn.ReadMessage(); err == nil {
 		t.Fatal("expected no frame after unsub")
+	}
+}
+
+// Events tagged with an app reach only users who can view that app, even on
+// a global topic every user may subscribe to.
+func TestEventsWSAppTaggedEventsFiltered(t *testing.T) {
+	srv, st, _ := newAuditTestServer(t)
+	srv.SetBus(events.New())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	for _, slug := range []string{"mine", "theirs"} {
+		if err := st.UpsertApp(&store.App{Name: slug, Slug: slug, ComposePath: "/x/" + slug + ".yml", Status: "running"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mine, err := st.GetAppBySlug("mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := dialEvents(t, ts, makeUserCookie(t, srv, st, "mgr", mine.ID))
+	if err := conn.WriteJSON(map[string]string{"op": "sub", "topic": events.TopicGlobalBackups}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	for _, e := range events.BackupRunEvents("theirs") {
+		srv.bus.Publish(t.Context(), e)
+	}
+	for _, e := range events.BackupRunEvents("mine") {
+		srv.bus.Publish(t.Context(), e)
+	}
+	f := readFrame(t, conn, 2*time.Second)
+	if f["topic"] != events.TopicGlobalBackups || f["type"] != events.TypeBackupRun {
+		t.Fatalf("first frame = %v, want the event for the user's own app", f)
+	}
+	if _, leaked := f["app"]; leaked {
+		t.Fatalf("frame exposes the app slug: %v", f)
+	}
+	// Nothing else: the other app's event was dropped.
+	conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	if _, data, err := conn.ReadMessage(); err == nil {
+		t.Fatalf("unexpected extra frame: %s", data)
 	}
 }

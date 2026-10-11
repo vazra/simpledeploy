@@ -35,7 +35,7 @@ SimpleDeploy keeps the dashboard fresh without polling by broadcasting tiny noti
 | `global:users`     | users, role changes, access grants/revokes, API keys              |
 | `global:registries`| registry CRUD                                                     |
 | `global:alerts`    | webhooks, alert rules                                             |
-| `global:backups`   | any backup config or run                                          |
+| `global:backups`   | any backup config change; backup and restore runs starting and finishing |
 | `global:docker`    | docker prune actions                                              |
 | `global:audit`     | every audit-recorded mutation                                     |
 
@@ -62,7 +62,7 @@ No payload data ever ships in events. The UI runs its existing REST refetch when
 
 ## Authorization
 
-Topic ACL is computed when the WS opens. `super_admin` sees every global topic; everyone else sees `global:apps`, `global:backups`, `global:alerts` plus `app:<slug>` for any slug they have `user_app_access` on. A `sub` for a forbidden topic returns `{op:"err", reason:"forbidden"}`. When an `access` or `user` audit event affects the connected user, the server closes the socket so the client reconnects with fresh authz.
+Topic ACL is computed when the WS opens. `super_admin` sees every global topic; everyone else sees `global:apps`, `global:backups`, `global:alerts` plus `app:<slug>` for any slug they have `user_app_access` on. A `sub` for a forbidden topic returns `{op:"err", reason:"forbidden"}`. An event about one app (`Event.App` set, never sent to clients) is delivered only to users who can view that app, on any topic: the backup scheduler publishes `backup.run` on both `app:<slug>` and `global:backups` when a run starts and finishes, and a user with access to other apps does not learn that this app's backups ran. When an `access` or `user` audit event affects the connected user, the server closes the socket so the client reconnects with fresh authz.
 
 The upgrade requires a matching `Origin` (host and port) or `Sec-Fetch-Site: same-origin`, like the log sockets (`checkWebSocketOrigin`, see [Auth](/architecture/auth/#cross-origin-protection)). Every 60s the socket re-runs `wsAuthStillValid`: if the user is gone, their role changed, or the session token or API key used to connect is no longer valid, it closes with code 1008. `app:` topics the user lost access to are dropped with an `err` frame. The app log, deploy log and process log sockets run the same 60s check and close on failure.
 

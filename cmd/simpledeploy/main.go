@@ -668,6 +668,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		json.Unmarshal([]byte(decrypted), &s3cfg)
 		return backup.NewS3Target(s3cfg)
 	})
+	backupSched.SetEventBus(eventBus)
 	backupSched.SetAlertFunc(func(appID int64, appName, strategy, message, eventType string) {
 		evaluator.DispatchBackupAlert(alerts.BackupAlertEvent{
 			AppID:     appID,

@@ -20,6 +20,21 @@ const (
 // AppTopic returns the per-app topic string for a slug.
 func AppTopic(slug string) string { return fmt.Sprintf("app:%s", slug) }
 
+// TypeBackupRun is the event type sent when a backup or restore run of an
+// app starts or finishes.
+const TypeBackupRun = "backup.run"
+
+// BackupRunEvents returns the events to publish when a backup or restore run
+// of app slug starts or finishes: one on the app topic (the app's Backups
+// tab) and one on global:backups (the Backups page). Both carry App so only
+// users who can view the app receive them.
+func BackupRunEvents(slug string) []Event {
+	return []Event{
+		{Type: TypeBackupRun, Topic: AppTopic(slug), App: slug},
+		{Type: TypeBackupRun, Topic: TopicGlobalBackups, App: slug},
+	}
+}
+
 // TopicsForAudit returns the list of topics that should fire for a given
 // audit category, action, and (optional) app slug. Used by the audit recorder
 // to translate mutation events into bus publishes.
