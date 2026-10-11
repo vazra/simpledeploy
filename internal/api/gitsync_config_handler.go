@@ -80,7 +80,8 @@ func (s *Server) ReloadGitSync(ctx context.Context) (*gitsync.Status, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gitsync.New: %w", err)
 	}
-	if err := gs.Start(ctx); err != nil {
+	// ctx is usually the request's; the syncer must outlive it (Stop ends it).
+	if err := gs.Start(context.WithoutCancel(ctx)); err != nil {
 		return nil, fmt.Errorf("gitsync.Start: %w", err)
 	}
 

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -368,5 +370,45 @@ func TestGitSyncPushingFollowsSyncer(t *testing.T) {
 	t.Cleanup(func() { _ = srv.gs.Stop() })
 	if !srv.GitSyncPushing() {
 		t.Error("after reload with git sync on: want true")
+	}
+}
+
+// The handlers reload with r.Context(), which ends with the response. The
+// syncer started by the reload must keep running after that.
+func TestReloadGitSyncOutlivesRequest(t *testing.T) {
+	srv, _ := newTestServer(t)
+	appsDir := t.TempDir()
+	srv.cfg = &config.Config{AppsDir: appsDir, MasterSecret: "secret"}
+	srv.masterSecret = "secret"
+	bare := t.TempDir()
+	if _, err := gitPlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetGitSyncConfig(map[string]string{"enabled": "true", "remote": "file://" + bare, "branch": "main"}); err != nil {
+		t.Fatal(err)
+	}
+
+	reqCtx, endRequest := context.WithCancel(context.Background())
+	if _, err := srv.ReloadGitSync(reqCtx); err != nil {
+		t.Fatalf("ReloadGitSync: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.gs.Stop() })
+	endRequest()
+	time.Sleep(100 * time.Millisecond) // let a request-bound worker exit
+
+	before := srv.gs.Status().HeadSHA
+	if err := os.MkdirAll(filepath.Join(appsDir, "foo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appsDir, "foo", "docker-compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv.gs.EnqueueCommit(nil, "test edit")
+	deadline := time.Now().Add(10 * time.Second)
+	for srv.gs.Status().HeadSHA == before {
+		if time.Now().After(deadline) {
+			t.Fatal("syncer stopped committing once the reload request ended")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
