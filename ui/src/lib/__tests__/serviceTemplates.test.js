@@ -72,11 +72,11 @@ describe('addServiceToCompose', () => {
   });
 
   it('does not declare bind mounts', () => {
-    const gitea = serviceTemplates.find((t) => t.id === 'gitea');
+    const vols = ['data:/data', './conf:/conf:ro', '/srv/media:/media', '/cache'];
     const compose = { services: {} };
-    addServiceToCompose(compose, gitea);
-    expect(compose.volumes).toEqual({ giteadata: {} });
-    expect(compose.services.gitea.volumes).toEqual(gitea.config.volumes);
+    addServiceToCompose(compose, { id: 'svc', config: { image: 'x:1', volumes: vols } });
+    expect(compose.volumes).toEqual({ data: {} });
+    expect(compose.services.svc.volumes).toEqual(vols);
   });
 
   it('rewrites long syntax sources when renaming', () => {
@@ -164,6 +164,17 @@ describe('serviceTemplates integrity', () => {
       for (const vol of t.config.volumes || []) {
         expect(typeof vol).toBe('string');
         expect(vol.includes(':/'), `${t.id}: volume "${vol}" missing ":/"`).toBe(true);
+      }
+    }
+  });
+
+  // Host binds like /etc/localtime are refused by the server's compose
+  // security checks (protected system folder), so templates must only use
+  // named volumes.
+  it('volume entries are named volumes, never host bind mounts', () => {
+    for (const t of serviceTemplates) {
+      for (const vol of t.config.volumes || []) {
+        expect(namedVolumeSource(vol), `${t.id}: "${vol}" is not a named volume`).toBeTruthy();
       }
     }
   });

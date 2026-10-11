@@ -547,11 +547,9 @@ export const serviceTemplates = [
     config: {
       image: 'gitea/gitea:1',
       restart: 'unless-stopped',
-      volumes: [
-        'giteadata:/data',
-        '/etc/timezone:/etc/timezone:ro',
-        '/etc/localtime:/etc/localtime:ro',
-      ],
+      // No /etc/localtime bind: host system folders are refused by the
+      // compose security checks. Gitea logs in UTC.
+      volumes: ['giteadata:/data'],
       environment: {
         USER_UID: '1000',
         USER_GID: '1000',
