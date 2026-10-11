@@ -121,7 +121,7 @@ The compose file is checked with the new values, like a compose edit. `400` with
 
 ### `PUT /api/apps/{slug}/endpoints`
 
-Replace the app's endpoints (written to the compose labels, routes reload automatically). Body: `[{"domain": "app.example.com", "service": "web", "port": "3000", "tls": "letsencrypt", "protocol": "http", "path": ""}]` (`protocol` and `path` optional).
+Replace the app's endpoints (written to the compose labels, routes reload automatically). Body: `[{"domain": "app.example.com", "service": "web", "port": "3000", "tls": "letsencrypt", "protocol": "http", "path": ""}]` (`protocol` and `path` optional). `service` must name a service in the app's compose file; otherwise `400` and nothing is changed.
 
 ### `PUT /api/apps/{slug}/access`
 
