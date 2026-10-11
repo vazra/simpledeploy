@@ -10,9 +10,9 @@ async function openAppActivity(page, slug) {
 
 const rows = (page) => page.locator('main [data-testid="activity-row"]');
 
+// Not serial: the version check is expected to fail until the deploy audit
+// carries the version, and must not skip the rest. Purge stays last.
 test.describe('Activity changelog', () => {
-  test.describe.configure({ mode: 'serial' });
-
   test.beforeAll(async () => {
     expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
   });
@@ -63,6 +63,9 @@ test.describe('Activity changelog', () => {
       await expect(row).toHaveCount(1);
       await expect(row).toContainText(`Deploy failed: ${failed.error}`);
       await expect(row.locator('.text-red-400, details summary').filter({ hasText: failed.error.slice(0, 100) })).toBeVisible();
+      // The inline error is how users learn why a deploy failed, so it must
+      // carry docker's reason, not only "compose up: exit status 1".
+      expect(failed.error).toContain('127.0.0.1:1/e2e/missing');
     } finally {
       expect((await apiRequest('DELETE', `/api/apps/${slug}`)).status).toBe(200);
     }

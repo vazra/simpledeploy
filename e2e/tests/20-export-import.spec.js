@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
 import { apiLogin, apiRequest, waitForAppStatus } from '../helpers/api.js';
 import { dockerCLI } from '../helpers/docker.js';
@@ -23,7 +25,9 @@ async function openImportModal(page, bundlePath) {
 }
 
 test.describe('App Export/Import', () => {
-  let bundlePath;
+  // Downloads vanish with their browser context; keep the bundle for both tests.
+  const tmpDir = mkdtempSync(join(tmpdir(), 'sd-bundle-'));
+  const bundlePath = join(tmpDir, `${SOURCE}.simpledeploy.zip`);
 
   test.beforeAll(async () => {
     expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
@@ -34,6 +38,7 @@ test.describe('App Export/Import', () => {
     const res = await apiRequest('DELETE', `/api/apps/${CLONE}`);
     expect([200, 404]).toContain(res.status);
     dockerCLI(['volume', 'rm', '-f', `simpledeploy-${CLONE}_pgdata`]);
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
   test.beforeEach(async ({ page }) => {
@@ -53,7 +58,7 @@ test.describe('App Export/Import', () => {
       exportSection.getByRole('button', { name: /^export$/i }).click(),
     ]);
     expect(download.suggestedFilename()).toBe(`${SOURCE}.simpledeploy.zip`);
-    bundlePath = await download.path();
+    await download.saveAs(bundlePath);
     const buf = readFileSync(bundlePath);
     expect(buf.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
 
