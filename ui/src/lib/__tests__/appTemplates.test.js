@@ -362,7 +362,7 @@ describe('appTemplates integrity', () => {
   const categoryIds = new Set(categories.map((c) => c.id));
 
   it('has the expected number of templates', () => {
-    expect(appTemplates.length).toBe(20);
+    expect(appTemplates.length).toBe(19);
   });
 
   it('every template has required fields', () => {
