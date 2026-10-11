@@ -58,17 +58,20 @@ export async function startRegistry(opts = {}) {
     : docker(['run', '--rm', '--entrypoint', 'htpasswd', 'httpd:2', '-Bbn', user, pass]).trim();
   writeFileSync(join(authDir, 'htpasswd'), htpasswdLine + '\n');
 
-  // Run registry:2 with htpasswd auth.
+  // Run registry:2 with htpasswd auth. The file goes in with docker cp, not
+  // a bind mount: the temp dir is not shared with the Docker VM on colima,
+  // and registry:2 then generates its own htpasswd (every login 401s).
   docker([
-    'run', '-d',
+    'create',
     '--name', container,
     '-p', `127.0.0.1:${port}:5000`,
-    '-v', `${authDir}:/auth`,
     '-e', 'REGISTRY_AUTH=htpasswd',
     '-e', 'REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm',
     '-e', 'REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd',
     mirrored('registry:2'),
   ]);
+  docker(['cp', authDir, `${container}:/auth`]);
+  docker(['start', container]);
 
   const host = `localhost:${port}`;
 

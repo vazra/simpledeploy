@@ -47,7 +47,7 @@ test.describe('Archive lifecycle', () => {
     const dialog = page.getByRole('dialog');
     const purged = page.waitForResponse((r) => r.url().endsWith(`/api/apps/${slug}/purge`));
     await dialog.getByRole('button', { name: 'Confirm' }).click();
-    expect((await purged).status()).toBe(200);
+    expect((await purged).status()).toBe(204);
 
     await expect(main.locator('tr', { hasText: slug })).toHaveCount(0);
     expect(await archivedSlugs()).not.toContain(slug);
