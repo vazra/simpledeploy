@@ -22,6 +22,10 @@ curl -X POST https://manage.yourdomain.com/api/webhooks \
 | `template_override` | Optional Go template for custom payload (super_admin only) |
 | `headers_json` | Optional JSON object of additional headers |
 
+## Delivery
+
+Each alert is sent once. If the target is down or answers with an error, SimpleDeploy logs the failure and does not retry, so point webhooks at a reliable endpoint.
+
 ## Security
 
 Outbound webhooks are SSRF-protected: only `http://` and `https://` schemes, blocked private/loopback/metadata IPs, and allow-listed headers. See [Security hardening](/operations/security-hardening/) for details.

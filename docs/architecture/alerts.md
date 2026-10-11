@@ -9,7 +9,7 @@ The alerts package (`internal/alerts/`) evaluates user-defined rules against cur
 
 A rule is `(metric, op, threshold, duration_seconds, scope)`:
 
-- **metric**: `cpu_pct` (CPU percent, 100 = one core), `mem_pct` (memory as a percent of the container limit), `mem_bytes` (memory in bytes). Backup event rules use `backup_failed`, `backup_success`, `backup_missed` or `backup_all` (any backup event); they fire when the backup scheduler reports that event for the rule's app. The API rejects other metrics and operators.
+- **metric**: `cpu_pct` (CPU percent, 100 = one core), `mem_pct` (memory as a percent of the container limit), `mem_bytes` (memory in bytes). Backup event rules use `backup_failed`, `backup_success`, `backup_missed` or `backup_all` (any backup event); they fire when the backup scheduler reports that event for the rule's app, or for any app if the rule is global (see [Backup alerts](#backup-alerts)). The API rejects other metrics and operators.
 - **op**: `>`, `<`, `>=`, `<=`
 - **threshold**: numeric value (percent, count, etc.)
 - **duration**: condition must hold continuously for this many seconds
@@ -38,6 +38,10 @@ Network safety: by default the dispatcher refuses URLs that resolve to reserved 
 
 Delivery is single-shot: each notification is one POST with a 10 second timeout. A failed send (network error or HTTP status >= 400) is logged and not retried. A metric alert still records its `alert_history` row, so it will not fire again until it resolves.
 
-## Backup failure alerts
+## Backup alerts
 
-Backup runs that fail surface through the same alert pipeline using the `backup_failure` metric, so a single webhook can receive both metric and operational alerts.
+The backup scheduler reports events through a callback wired in `cmd/simpledeploy/main.go` to `Evaluator.DispatchBackupAlert`, so a single webhook can receive both metric and backup alerts. Event types are `backup_failed`, `backup_success` and `backup_missed` (from the periodic missed-schedule check). A rule matches when its metric equals the event type or is `backup_all`.
+
+Scope: a global rule (no app) fires for every app's events. An app-scoped rule fires only for its own app. The scheduler identifies the app by display name, so the dispatcher loads the rule's app and compares names; a rule whose app cannot be loaded does not fire. Two apps sharing one display name would match each other's scoped rules.
+
+Backup events have no threshold or duration and no `alert_history` row: every matching event sends one notification. The payload uses `Status` `firing` (the rule fired) for every event type, `MetricDisplay` `Backup Failed`, `Backup Succeeded` or `Backup Missed`, and the scheduler's message as `ValueDisplay`.
