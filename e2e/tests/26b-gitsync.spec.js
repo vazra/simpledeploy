@@ -14,7 +14,7 @@
 
 import { test, expect } from '@playwright/test';
 import { execFileSync, execSync, spawn } from 'child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, createWriteStream, renameSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, createWriteStream, renameSync, mkdirSync, copyFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHmac } from 'crypto';
@@ -237,6 +237,14 @@ test.describe('Git sync: roundtrip + conflict', () => {
     if (api) expect((await api('DELETE', `/api/apps/${APP_SLUG}`, null)).status).toBe(200);
     stopProc(srv);
     await new Promise((r) => setTimeout(r, 500));
+    // Keep the server log for CI artifacts (test-results/ is uploaded).
+    if (srv?.logPath) {
+      try {
+        const dir = join(import.meta.dirname, '..', 'test-results');
+        mkdirSync(dir, { recursive: true });
+        copyFileSync(srv.logPath, join(dir, '26b-gitsync-server.log'));
+      } catch {}
+    }
     for (const dir of [srv?.dataDir, srv?.appsDir, cloneDir, bareRepoPath]) {
       if (dir) try { rmSync(dir, { recursive: true, force: true }); } catch {}
     }
@@ -464,7 +472,12 @@ test.describe('Git sync: roundtrip + conflict', () => {
     expect(whListRes.ok).toBe(true);
     const serverWh = whListRes.data.find((w) => w.id === webhookId);
     expect(serverWh?.name, 'dashboard webhook name should stay from-server').toBe('from-server');
-    await poll(() => remoteFile(bareRepoPath, '_global.yml')?.includes('from-server'), 20_000);
+    try {
+      await poll(() => remoteFile(bareRepoPath, '_global.yml')?.includes('from-server'), 20_000);
+    } catch (e) {
+      const st = await api('GET', '/api/git/status', null);
+      throw new Error(`${e.message}\nserver log:\n${git(srv.appsDir, 'log', '--oneline', '-6')}\nremote log:\n${git(bareRepoPath, 'log', '--oneline', '-6', 'main')}\nremote _global.yml:\n${remoteFile(bareRepoPath, '_global.yml')}\nstatus: ${JSON.stringify({ err: st.data?.LastSyncError, head: st.data?.HeadSHA, behind: st.data?.CommitsBehind, pending: st.data?.PendingCommits })}`);
+    }
     expect(remoteFile(bareRepoPath, '_global.yml')).not.toContain('from-remote');
   });
 });
