@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -279,8 +281,10 @@ func ParseContent(content []byte, path, appName string, dotEnv []byte) (*AppConf
 		return a.Service < b.Service
 	})
 
-	for name, svc := range project.Services {
-		cfg.Services = append(cfg.Services, convertService(name, svc))
+	// Sorted, so callers that take the first match (backup strategy
+	// detection) pick the same service every time.
+	for _, name := range slices.Sorted(maps.Keys(project.Services)) {
+		cfg.Services = append(cfg.Services, convertService(name, project.Services[name]))
 	}
 
 	return cfg, nil

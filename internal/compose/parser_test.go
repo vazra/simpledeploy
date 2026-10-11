@@ -3,6 +3,7 @@ package compose
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -322,5 +323,29 @@ func TestEndpointConfigJSONOmitsIndex(t *testing.T) {
 	b, _ := json.Marshal(EndpointConfig{Domain: "a.example.com", Index: 5})
 	if strings.Contains(string(b), "ndex") {
 		t.Errorf("json = %s, want no index key", b)
+	}
+}
+
+// Services come back sorted by name so first-match callers (backup strategy
+// detection) are deterministic.
+func TestParseFileServicesSorted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docker-compose.yml")
+	content := "services:\n  zeta:\n    image: a\n  alpha:\n    image: b\n  mid:\n    image: c\n  beta:\n    image: d\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		cfg, err := ParseFile(path, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, s := range cfg.Services {
+			names = append(names, s.Name)
+		}
+		if got := strings.Join(names, ","); got != "alpha,beta,mid,zeta" {
+			t.Fatalf("services = %s, want alpha,beta,mid,zeta", got)
+		}
 	}
 }
