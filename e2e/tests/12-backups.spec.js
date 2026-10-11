@@ -91,10 +91,6 @@ test.describe('Backups', () => {
     const run = await waitForNewRunForConfig(POSTGRES_SLUG, configId, known);
     const done = await pollRunStatus(POSTGRES_SLUG, run.id, ['success', 'failed'], 120_000);
     expect(done.status, `run error: ${done.error_msg}`).toBe('success');
-
-    // The tab should pick up the finished run without a reload.
-    const history = page.locator('main').getByRole('table').nth(1);
-    await expect(history.getByRole('row').nth(1)).toContainText('success', { timeout: 15_000 });
   });
 
   test('global backups page shows summary', async ({ page }) => {
@@ -117,6 +113,24 @@ test.describe('Backups', () => {
     await expect(page.getByRole('heading', { name: 'No backups configured' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Backup Now' })).toHaveCount(0);
     expect(await listConfigs(POSTGRES_SLUG)).toEqual([]);
+  });
+
+  test('backups tab shows the finished run without a reload', async ({ page }) => {
+    const cfgId = await createBackupConfig(POSTGRES_SLUG, { strategy: 'postgres' });
+    try {
+      await openBackupsTab(page);
+      const known = new Set((await listRuns(POSTGRES_SLUG)).map((r) => r.id));
+      await page.getByRole('button', { name: 'Backup Now' }).click();
+
+      const run = await waitForNewRunForConfig(POSTGRES_SLUG, cfgId, known);
+      const done = await pollRunStatus(POSTGRES_SLUG, run.id, ['success', 'failed'], 120_000);
+      expect(done.status, `run error: ${done.error_msg}`).toBe('success');
+
+      const history = page.locator('main').getByRole('table').nth(1);
+      await expect(history.getByRole('row').nth(1)).toContainText('success');
+    } finally {
+      await apiRequest('DELETE', `/api/backups/configs/${cfgId}`);
+    }
   });
 });
 
@@ -189,7 +203,35 @@ test.describe('Backups - Functional Roundtrip', () => {
     }
   });
 
-  test('3. pre/post hooks run in the app container around the backup', async () => {
+  test('3. download, checksum, upload-restore cycle via multipart', async () => {
+    const runs = await listRuns(POSTGRES_SLUG);
+    const run = runs.find((r) => r.status === 'success' && r.file_path.endsWith('.sql.gz') && localBackupExists(r));
+    expect(run, 'a postgres run from test 1 with its file on disk').toBeTruthy();
+
+    psql(pgContainer, 'postgres', 'testdb', MARKER_SQL);
+
+    const dl = await apiDownload(`/api/backups/runs/${run.id}/download`);
+    expect(dl.status, `download failed: ${dl.body}`).toBe(200);
+    const actual = createHash('sha256').update(dl.buffer).digest('hex');
+    expect(actual).toBe(run.checksum.replace(/^sha256:/i, '').toLowerCase());
+
+    psql(pgContainer, 'postgres', 'testdb', 'DROP TABLE e2e_data;');
+
+    const up = await apiUploadMultipart(
+      `/api/apps/${POSTGRES_SLUG}/backups/upload-restore`,
+      { strategy: 'postgres', container: pgContainer },
+      'file',
+      run.file_path.split('/').pop(),
+      dl.buffer,
+    );
+    expect(up.status, `upload-restore: ${JSON.stringify(up.data)}`).toBe(202);
+
+    await expect
+      .poll(() => readOr(() => psql(pgContainer, 'postgres', 'testdb', SELECT_SQL)), { timeout: 90_000 })
+      .toBe('1|roundtrip-marker-abc123');
+  });
+
+  test('4. pre/post hooks run in the app container around the backup', async () => {
     // Hooks name compose services. The pre-hook leaves a marker; the post
     // hooks restart the db service (so its StartedAt changes) and then leave
     // a second marker, which needs the restarted container to be running.
@@ -220,33 +262,5 @@ test.describe('Backups - Functional Roundtrip', () => {
       await apiRequest('DELETE', `/api/backups/configs/${cfgId}`);
       await waitForHealthy(pgContainer, 'pg_isready -U postgres', 60_000);
     }
-  });
-
-  test('4. download, checksum, upload-restore cycle via multipart', async () => {
-    const runs = await listRuns(POSTGRES_SLUG);
-    const run = runs.find((r) => r.status === 'success' && r.file_path.endsWith('.sql.gz') && localBackupExists(r));
-    expect(run, 'a postgres run from test 1 with its file on disk').toBeTruthy();
-
-    psql(pgContainer, 'postgres', 'testdb', MARKER_SQL);
-
-    const dl = await apiDownload(`/api/backups/runs/${run.id}/download`);
-    expect(dl.status, `download failed: ${dl.body}`).toBe(200);
-    const actual = createHash('sha256').update(dl.buffer).digest('hex');
-    expect(actual).toBe(run.checksum.replace(/^sha256:/i, '').toLowerCase());
-
-    psql(pgContainer, 'postgres', 'testdb', 'DROP TABLE e2e_data;');
-
-    const up = await apiUploadMultipart(
-      `/api/apps/${POSTGRES_SLUG}/backups/upload-restore`,
-      { strategy: 'postgres', container: pgContainer },
-      'file',
-      run.file_path.split('/').pop(),
-      dl.buffer,
-    );
-    expect(up.status, `upload-restore: ${JSON.stringify(up.data)}`).toBe(202);
-
-    await expect
-      .poll(() => readOr(() => psql(pgContainer, 'postgres', 'testdb', SELECT_SQL)), { timeout: 90_000 })
-      .toBe('1|roundtrip-marker-abc123');
   });
 });

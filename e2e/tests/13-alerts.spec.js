@@ -3,7 +3,7 @@ import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
 import { apiLogin, apiRequest, waitForAppStatus } from '../helpers/api.js';
 import { startWebhookReceiver } from '../helpers/webhook.js';
 import { sqliteQuery, sqliteExec, getAppId } from '../helpers/db.js';
-import { deleteAppMetrics, startMetricRefresher } from '../helpers/metrics.js';
+import { deleteAppMetrics, startMetricRefresher, waitForCollectorCycle } from '../helpers/metrics.js';
 import { createBackupConfig } from '../helpers/backups.js';
 
 const UI_HOOK = 'E2E Test Hook';
@@ -30,6 +30,12 @@ async function createRule(body) {
   const res = await apiRequest('POST', '/api/alerts/rules', { operator: '>', enabled: true, ...body });
   expect(res.status, `rule create: ${JSON.stringify(res.data)}`).toBe(201);
   return res.data.id;
+}
+
+// ruleSelect finds a <select> in the rule form by one of its options (the
+// form labels are not tied to their inputs).
+function ruleSelect(dialog, optionText) {
+  return dialog.locator('select', { has: dialog.page().locator('option', { hasText: optionText }) });
 }
 
 // deleteRule drops the rule's alert history first: deleting a rule keeps its
@@ -95,19 +101,16 @@ test.describe('Alerts & Webhooks', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    const select = (optionText) => dialog.locator('select', { has: page.locator('option', { hasText: optionText }) });
-    await select('All Apps').selectOption('e2e-nginx');
-    await select('CPU Usage').selectOption('cpu_pct');
-    await select('above').selectOption('>');
+    await ruleSelect(dialog, 'CPU Usage').selectOption('cpu_pct');
+    await ruleSelect(dialog, 'above').selectOption('>');
     await dialog.locator('input[type="number"]').first().fill('90');
-    await select('Select webhook').selectOption(String(hook.id));
+    await ruleSelect(dialog, 'Select webhook').selectOption(String(hook.id));
     await dialog.getByRole('button', { name: 'Create' }).click();
     await expect(dialog).toBeHidden();
 
     const rule = (await listRules()).find((r) => r.webhook_id === hook.id);
-    // The rule must keep the app picked in the form, not become an all-apps rule.
-    expect(rule).toMatchObject({ metric: 'cpu_pct', operator: '>', threshold: 90, enabled: true, app_slug: 'e2e-nginx' });
-    await expect(page.locator('main table').nth(1).getByRole('row', { name: /CPU Usage > 90\.0%/ })).toBeVisible();
+    expect(rule).toMatchObject({ app_id: null, metric: 'cpu_pct', operator: '>', threshold: 90, duration_sec: 60, enabled: true });
+    await expect(page.locator('main table').nth(1).getByRole('row', { name: /CPU Usage > 90\.0% - All Apps/ })).toBeVisible();
   });
 
   test('delete alert rule', async ({ page }) => {
@@ -129,6 +132,32 @@ test.describe('Alerts & Webhooks', () => {
 
     await expect(row).toHaveCount(0);
     expect((await listWebhooks()).some((w) => w.name === UI_HOOK)).toBe(false);
+  });
+
+  test('rule form keeps the chosen app on create and edit', async ({ page }) => {
+    const hookId = await createWebhook({ name: UI_HOOK, type: 'custom', url: `${receiver.url}/ui` });
+    try {
+      await page.reload();
+      await page.getByRole('button', { name: 'Add Rule' }).click();
+      const dialog = page.getByRole('dialog');
+      await ruleSelect(dialog, 'All Apps').selectOption('e2e-nginx');
+      await ruleSelect(dialog, 'Select webhook').selectOption(String(hookId));
+      await dialog.getByRole('button', { name: 'Create' }).click();
+      await expect(dialog).toBeHidden();
+
+      const created = (await listRules()).find((r) => r.webhook_id === hookId);
+      expect(created, 'rule created for the chosen app, not all apps').toMatchObject({ app_slug: 'e2e-nginx', threshold: 80 });
+
+      await page.locator('main table').nth(1).getByRole('row', { name: /CPU Usage > 80\.0%/ }).click();
+      await dialog.locator('input[type="number"]').first().fill('85');
+      await dialog.getByRole('button', { name: 'Save' }).click();
+      await expect(dialog).toBeHidden();
+
+      const edited = (await listRules()).find((r) => r.id === created.id);
+      expect(edited, 'editing must not drop the app').toMatchObject({ app_slug: 'e2e-nginx', threshold: 85 });
+    } finally {
+      await apiRequest('DELETE', `/api/webhooks/${hookId}`);
+    }
   });
 });
 
@@ -155,6 +184,7 @@ test.describe('Alerts - Functional Dispatch', () => {
 
   const cpuEvents = (path, status) =>
     receiver.onPath(path).filter((r) => r.body.metric === 'cpu_pct' && r.body.status === status);
+  const sequence = () => receiver.received.map((r) => `${r.path} ${r.body.status} @${r.at}`).join(', ');
 
   // fireProbe adds a rule identical to the main one on its own webhook path
   // and waits for it to fire.
@@ -173,9 +203,13 @@ test.describe('Alerts - Functional Dispatch', () => {
     receiver = await startWebhookReceiver();
     appId = getAppId(APP_SLUG);
 
-    // Stop the app so the real collector does not write points for it.
+    // Stop the app so the real collector does not write points for it. A
+    // collector cycle already running can still store one last idle point,
+    // which would resolve the alert mid-test; wait for a cycle that started
+    // after the stop before clearing.
     const stop = await apiRequest('POST', `/api/apps/${APP_SLUG}/stop`);
     expect(stop.status).toBe(200);
+    await waitForCollectorCycle(Math.floor(Date.now() / 1000) + 1);
     deleteAppMetrics(APP_SLUG);
 
     webhookId = await createWebhook({ name: 'E2E Dispatch Hook', type: 'custom', url: receiver.url });
@@ -220,7 +254,7 @@ test.describe('Alerts - Functional Dispatch', () => {
       // Two later ticks (one per probe) must not fire the main rule again.
       await fireProbe('/probe1', refresher);
       await fireProbe('/probe2', refresher);
-      expect(cpuEvents('/', 'firing'), 'main rule fired again while still firing').toHaveLength(1);
+      expect(cpuEvents('/', 'firing'), `main rule fired again while still firing: ${sequence()}`).toHaveLength(1);
     } finally {
       refresher.stop();
     }
@@ -267,7 +301,7 @@ test.describe('Alerts - Functional Dispatch', () => {
       // The control rule (higher id) firing means the disabled rule's turn
       // in that tick has passed.
       await fireProbe('/control', refresher);
-      expect(cpuEvents('/', 'firing'), 'disabled rule fired').toEqual([]);
+      expect(cpuEvents('/', 'firing'), `disabled rule fired: ${sequence()}`).toEqual([]);
     } finally {
       refresher.stop();
     }

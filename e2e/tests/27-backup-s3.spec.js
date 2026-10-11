@@ -129,7 +129,26 @@ test.describe('Backups - S3 target (MinIO fixture)', () => {
     expect(createHash('sha256').update(buf).digest('hex')).toBe(roundtripRun.checksum.replace(/^sha256:/i, ''));
   });
 
-  test('3. retention_count=2 prunes the oldest S3 object and its run', async () => {
+  test('3. bogus S3 credentials produce a failed run with informative error', async () => {
+    await deleteAppConfigsFor(POSTGRES_SLUG);
+    const cfgId = await createBackupConfig(POSTGRES_SLUG, {
+      strategy: 'postgres',
+      target: 's3',
+      target_config_json: s3TargetJSON({
+        endpoint: minio.endpoint,
+        bucket: 'definitely-does-not-exist-e2e',
+        accessKey: 'bogus-access-key',
+        secretKey: 'bogus-secret-key-12345',
+        prefix: 'bogus',
+      }),
+    });
+
+    const run = await triggerAndWait(POSTGRES_SLUG, cfgId, 120_000);
+    expect(run.status).toBe('failed');
+    expect(run.error_msg).toMatch(/InvalidAccessKeyId|SignatureDoesNotMatch|AccessDenied|NoSuchBucket/i);
+  });
+
+  test('4. retention_count=2 prunes the oldest S3 object and its run', async () => {
     await deleteAppConfigsFor(POSTGRES_SLUG);
     const prefix = 'retention';
     const cfgId = await createBackupConfig(POSTGRES_SLUG, {
@@ -158,24 +177,5 @@ test.describe('Backups - S3 target (MinIO fixture)', () => {
     await expect
       .poll(async () => (await runsForConfig(POSTGRES_SLUG, cfgId)).map((r) => r.id).sort())
       .toEqual(kept.map((r) => r.id).sort());
-  });
-
-  test('4. bogus S3 credentials produce a failed run with informative error', async () => {
-    await deleteAppConfigsFor(POSTGRES_SLUG);
-    const cfgId = await createBackupConfig(POSTGRES_SLUG, {
-      strategy: 'postgres',
-      target: 's3',
-      target_config_json: s3TargetJSON({
-        endpoint: minio.endpoint,
-        bucket: 'definitely-does-not-exist-e2e',
-        accessKey: 'bogus-access-key',
-        secretKey: 'bogus-secret-key-12345',
-        prefix: 'bogus',
-      }),
-    });
-
-    const run = await triggerAndWait(POSTGRES_SLUG, cfgId, 120_000);
-    expect(run.status).toBe('failed');
-    expect(run.error_msg).toMatch(/InvalidAccessKeyId|SignatureDoesNotMatch|AccessDenied|NoSuchBucket/i);
   });
 });
