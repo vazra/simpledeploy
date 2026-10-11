@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
@@ -26,6 +27,18 @@ type serviceInfo struct {
 	Replicas    int    `json:"replicas"`
 	Scalable    bool   `json:"scalable"`
 	ScaleReason string `json:"scale_reason,omitempty"`
+}
+
+// composeOpTimeout bounds a docker compose operation that runs detached
+// from its request, so a hung daemon cannot hold it forever.
+const composeOpTimeout = 30 * time.Minute
+
+// detachedCtx returns a context for a docker compose operation that must
+// finish even if the client goes away. Closing the tab cancels r.Context(),
+// which would kill the compose process mid-way (e.g. leave 1 of 2 replicas).
+// Request values (actor for audit) are kept.
+func detachedCtx(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(r.Context()), composeOpTimeout)
 }
 
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
@@ -58,12 +71,14 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reconciler not configured", http.StatusInternalServerError)
 		return
 	}
-	if err := s.reconciler.StopOne(r.Context(), slug); err != nil {
+	ctx, cancel := detachedCtx(r)
+	defer cancel()
+	if err := s.reconciler.StopOne(ctx, slug); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "status": "stopped"})
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+	_, _ = s.audit.Record(ctx, audit.RecordReq{
 		Category: "lifecycle",
 		Action:   "stopped",
 		AppSlug:  slug,
@@ -79,12 +94,14 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reconciler not configured", http.StatusInternalServerError)
 		return
 	}
-	if err := s.reconciler.StartOne(r.Context(), slug); err != nil {
+	ctx, cancel := detachedCtx(r)
+	defer cancel()
+	if err := s.reconciler.StartOne(ctx, slug); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "status": "running"})
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+	_, _ = s.audit.Record(ctx, audit.RecordReq{
 		Category: "lifecycle",
 		Action:   "started",
 		AppSlug:  slug,
@@ -174,7 +191,9 @@ func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.reconciler.ScaleOne(r.Context(), slug, body.Scales); err != nil {
+	ctx, cancel := detachedCtx(r)
+	defer cancel()
+	if err := s.reconciler.ScaleOne(ctx, slug, body.Scales); err != nil {
 		// Forward the actual error (which wraps docker compose stderr) so the
 		// UI can show something more useful than "Internal Server Error".
 		log.Printf("[api] scale %s: %v", slug, err)
@@ -184,7 +203,7 @@ func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
 
 	beforeJSON, _ := json.Marshal(map[string]any{"name": slug, "replicas": beforeReplicas})
 	afterJSON, _ := json.Marshal(map[string]any{"name": slug, "replicas": afterReplicas})
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+	_, _ = s.audit.Record(ctx, audit.RecordReq{
 		Category: "lifecycle",
 		Action:   "scaled",
 		AppSlug:  slug,
@@ -346,7 +365,9 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.checkVersionForRestore(w, r, slug, filepath.Join(s.appsDir, slug, "docker-compose.yml"), ver); !ok {
 		return
 	}
-	if err := s.reconciler.RollbackOne(r.Context(), slug, body.VersionID); err != nil {
+	ctx, cancel := detachedCtx(r)
+	defer cancel()
+	if err := s.reconciler.RollbackOne(ctx, slug, body.VersionID); err != nil {
 		if v, ok := violationsOf(err); ok {
 			writeViolations(w, http.StatusBadRequest, versionRefused, v)
 			return
@@ -359,7 +380,7 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	afterJSON, _ := json.Marshal(map[string]any{"version_id": body.VersionID})
-	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
+	_, _ = s.audit.Record(ctx, audit.RecordReq{
 		Category: "lifecycle",
 		Action:   "rolled_back",
 		AppSlug:  slug,
