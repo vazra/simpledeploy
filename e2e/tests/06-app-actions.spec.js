@@ -29,12 +29,16 @@ async function expectActionComplete(page, action, timeout) {
   await expect(dialog).toBeHidden();
 }
 
-// Each test leaves the state the next one starts from (stopped -> started).
+// stop leaves e2e-nginx stopped for start; the rest expect it running.
 test.describe('App Actions', () => {
-  test.describe.configure({ mode: 'serial' });
-
   test.beforeAll(async () => {
     await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+  });
+
+  // Later specs need e2e-nginx running even if start failed here.
+  test.afterAll(async () => {
+    const app = await apiRequest('GET', '/api/apps/e2e-nginx');
+    if (app.data?.Status === 'stopped') await apiRequest('POST', '/api/apps/e2e-nginx/start');
   });
 
   test.beforeEach(async ({ page }) => {
