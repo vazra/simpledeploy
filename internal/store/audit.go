@@ -12,21 +12,21 @@ import (
 
 // AuditEntry represents a single row in the audit_log table.
 type AuditEntry struct {
-	ID               int64      `json:"id"`
-	AppID            *int64     `json:"app_id"`
-	AppSlug          string     `json:"app_slug"`
-	ActorUserID      *int64     `json:"actor_user_id"`
-	ActorName        string     `json:"actor_name"`
-	ActorSource      string     `json:"actor_source"`
-	IP               string     `json:"ip"`
-	Category         string     `json:"category"`
-	Action           string     `json:"action"`
-	Target           string     `json:"target"`
-	Summary          string     `json:"summary"`
+	ID               int64           `json:"id"`
+	AppID            *int64          `json:"app_id"`
+	AppSlug          string          `json:"app_slug"`
+	ActorUserID      *int64          `json:"actor_user_id"`
+	ActorName        string          `json:"actor_name"`
+	ActorSource      string          `json:"actor_source"`
+	IP               string          `json:"ip"`
+	Category         string          `json:"category"`
+	Action           string          `json:"action"`
+	Target           string          `json:"target"`
+	Summary          string          `json:"summary"`
 	BeforeJSON       json.RawMessage `json:"before_json,omitempty"`
 	AfterJSON        json.RawMessage `json:"after_json,omitempty"`
-	Error            string     `json:"error,omitempty"`
-	ComposeVersionID *int64     `json:"compose_version_id"`
+	Error            string          `json:"error,omitempty"`
+	ComposeVersionID *int64          `json:"compose_version_id"`
 	// SyncEligible is input-only: set it before calling RecordAudit to request
 	// sync tracking (stored as sync_status='pending'). It is NOT a stored column
 	// and is never populated on read; inspect SyncStatus directly instead.
@@ -457,6 +457,27 @@ func (s *Store) PendingSyncAuditIDs(ctx context.Context) ([]int64, error) {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan pending sync id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// UnsyncedAuditIDs returns ids of audit_log rows whose change is not yet
+// confirmed pushed (sync_status 'pending' or 'failed'), ordered by id.
+func (s *Store) UnsyncedAuditIDs(ctx context.Context) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id FROM audit_log WHERE sync_status IN ('pending', 'failed') ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("query unsynced audit ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan unsynced audit id: %w", err)
 		}
 		ids = append(ids, id)
 	}

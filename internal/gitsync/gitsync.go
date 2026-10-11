@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -809,16 +810,52 @@ func (g *Syncer) doPull(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !fetched {
-		return nil
+	if fetched {
+		if !g.cfg.AutoApplyEnabled {
+			// fetch-only mode: status is updated; don't rebase (a push
+			// would rebase too, so it waits as well).
+			return nil
+		}
+		if err := g.applyFetched(ctx); err != nil {
+			return err
+		}
 	}
+	g.pushUnpushed(ctx)
+	return nil
+}
 
-	if !g.cfg.AutoApplyEnabled {
-		// fetch-only mode: status is updated; don't rebase.
-		return nil
+// pushUnpushed pushes local commits that an earlier push could not deliver
+// (e.g. the remote was unreachable). Without it they would wait for the next
+// dashboard edit. No-op in pull-only mode.
+func (g *Syncer) pushUnpushed(ctx context.Context) {
+	if !g.cfg.AutoPushEnabled || g.commitsAhead() == 0 {
+		return
 	}
+	if err := g.doPushWithRetry(); err != nil {
+		log.Printf("[gitsync] push unpushed commits: %v", err)
+		g.setError(err.Error())
+		return
+	}
+	g.clearError()
+	if g.st != nil {
+		// Rows from the failed push (and any still pending) are in this push.
+		if ids, err := g.st.UnsyncedAuditIDs(ctx); err == nil && len(ids) > 0 {
+			g.mu.Lock()
+			sha := g.headSHA
+			g.mu.Unlock()
+			_ = g.st.MarkSyncSynced(ctx, ids, sha)
+		}
+	}
+}
 
-	return g.applyFetched(ctx)
+// commitsAhead counts local commits not on origin/<branch>.
+func (g *Syncer) commitsAhead() int {
+	out, err := gitExec(g.cfg.AppsDir, "rev-list", "--count", "origin/"+g.cfg.branch()+"..HEAD")
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	return n
 }
 
 // ApplyPending runs fetchAndInspect + applyFetched regardless of AutoApplyEnabled.
@@ -833,7 +870,11 @@ func (g *Syncer) ApplyPending(ctx context.Context) error {
 	if _, err := g.fetchAndInspect(); err != nil {
 		return err
 	}
-	return g.applyFetched(ctx)
+	if err := g.applyFetched(ctx); err != nil {
+		return err
+	}
+	g.pushUnpushed(ctx)
+	return nil
 }
 
 // fetchAndInspect fetches from origin and updates CommitsBehind in Status.

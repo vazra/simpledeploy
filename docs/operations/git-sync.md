@@ -5,7 +5,7 @@ description: How to keep your SimpleDeploy app configs in a git repository, sync
 
 Git sync is optional and disabled by default.
 
-When enabled, SimpleDeploy treats your `apps_dir` as a git working tree and commits every config change to a remote repository. Each deploy, env-var edit, or sidecar update triggers a commit and push within seconds. You can also pull remote changes back in, making it possible to manage deployments through git rather than (or alongside) the UI.
+When enabled, SimpleDeploy treats your `apps_dir` as a git working tree and commits every config change to a remote repository. Each deploy, env-var edit, or sidecar update triggers a commit and push within seconds. You can also pull remote changes back in, making it possible to manage deployments through git rather than (or alongside) the UI. If a push fails, for example because the remote is unreachable, the commit stays in `apps_dir` and is pushed on the next successful sync (poll, webhook, or **Sync now**).
 
 Git sync complements [config sidecars](./config-sidecars), which write app config to local YAML files. Think of sidecars as the local source of truth and git sync as the transport layer that makes that truth portable. Sidecars are what get committed; git sync is what moves them to a remote.
 
