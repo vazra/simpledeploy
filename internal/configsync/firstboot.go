@@ -99,7 +99,9 @@ func ensureGitignore(dir string, lines []string) error {
 
 // ReconcileDBFromFS scans the apps directory and applies each per-app sidecar
 // to the DB, then applies the global sidecar. Missing files are skipped (not
-// treated as deletions) so this is safe to run on every boot.
+// treated as deletions) so this is safe to run on every boot. Apps with no DB
+// row (e.g. after a DB loss) are left alone: the reconciler re-creates the
+// row from the app folder and then imports the sidecar.
 func (s *Syncer) ReconcileDBFromFS(ctx context.Context) error {
 	entries, err := os.ReadDir(s.appsDir)
 	if err != nil {
@@ -121,6 +123,10 @@ func (s *Syncer) ReconcileDBFromFS(ctx context.Context) error {
 				continue
 			}
 			if loaded == nil || loaded.Sidecar == nil {
+				continue
+			}
+			if _, err := s.store.GetAppBySlug(name); err != nil {
+				log.Printf("[fs-auth] %s: no app row yet; its sidecar is imported once the reconciler adds the app", name)
 				continue
 			}
 			if err := s.ApplyAppSidecar(name, loaded); err != nil {

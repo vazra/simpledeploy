@@ -26,6 +26,7 @@ import (
 
 const (
 	appSidecarName        = "simpledeploy.yml"
+	composeFileName       = "docker-compose.yml"
 	globalSidecar         = "config.yml"
 	redactedGlobalSidecar = "_global.yml"
 	debounceDelay         = 500 * time.Millisecond
@@ -260,7 +261,12 @@ func (s *Syncer) DeleteAppSidecar(slug string) error {
 	return nil
 }
 
-// PruneOrphanSidecars removes per-app sidecar files for slugs not present in the DB.
+// PruneOrphanSidecars removes per-app sidecar files from folders that are no
+// longer apps: no docker-compose.yml, no app row (active or archived) and no
+// archive tombstone. A folder with a compose file is never an orphan, DB row
+// or not: after a DB loss the reconciler re-creates the row from it and
+// imports the sidecar. Nothing is pruned while the DB has no apps (fresh or
+// wiped DB), or when a check fails; a stale file is safer than lost config.
 // Safe to call on every startup. Returns the list of slugs whose sidecars were removed.
 // Skips hidden dirs and names starting with '_' or '.'.
 func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
@@ -270,6 +276,18 @@ func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("PruneOrphanSidecars: readdir %s: %w", s.appsDir, err)
+	}
+
+	apps, err := s.store.ListAppsWithOptions(store.ListAppsOptions{IncludeArchived: true})
+	if err != nil {
+		return nil, fmt.Errorf("PruneOrphanSidecars: list apps: %w", err)
+	}
+	if len(apps) == 0 {
+		return nil, nil
+	}
+	known := make(map[string]bool, len(apps))
+	for _, a := range apps {
+		known[a.Slug] = true
 	}
 
 	var removed []string
@@ -285,12 +303,13 @@ func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
 		if _, err := os.Stat(sidecar); os.IsNotExist(err) {
 			continue
 		}
-		_, err := s.store.GetAppBySlug(name)
-		if err == nil {
-			// App exists in DB; keep sidecar.
+		// Keep it when the DB knows the app, the folder still has a compose
+		// file, or a tombstone will restore the archived row later in boot.
+		if known[name] ||
+			!pathAbsent(filepath.Join(s.appsDir, name, composeFileName)) ||
+			!pathAbsent(filepath.Join(s.ArchiveDir(), name+".yml")) {
 			continue
 		}
-		// Not in DB; remove sidecar.
 		if err := os.Remove(sidecar); err != nil && !os.IsNotExist(err) {
 			return removed, fmt.Errorf("PruneOrphanSidecars: remove %s: %w", sidecar, err)
 		}
@@ -301,6 +320,13 @@ func (s *Syncer) PruneOrphanSidecars() ([]string, error) {
 		s.callHook("", fmt.Sprintf("orphan sidecars pruned: %v", removed))
 	}
 	return removed, nil
+}
+
+// pathAbsent reports whether nothing (not even a dangling symlink) exists at
+// path. Any error other than not-exist counts as present.
+func pathAbsent(path string) bool {
+	_, err := os.Lstat(path)
+	return os.IsNotExist(err)
 }
 
 // WriteAppSidecar reads the app and its config from the store and writes the
@@ -873,6 +899,8 @@ func (s *Syncer) ImportGlobal(data *GlobalSidecar) error {
 // ImportGlobalIfEmpty imports the global sidecar only when the DB has zero users.
 // Returns (imported bool, err error). If no sidecar exists -> (false, nil).
 // If users table is non-empty -> (false, nil) without modifying DB.
+// When it imports, it also records the first-boot seed as done (see
+// RunFirstBootSeedIfNeeded), even if the import then fails.
 func (s *Syncer) ImportGlobalIfEmpty() (bool, error) {
 	users, err := s.store.ListUsers()
 	if err != nil {
@@ -880,6 +908,17 @@ func (s *Syncer) ImportGlobalIfEmpty() (bool, error) {
 	}
 	if len(users) > 0 {
 		return false, nil
+	}
+
+	if pathAbsent(filepath.Join(s.dataDir, globalSidecar)) {
+		return false, nil
+	}
+	// The DB is rebuilt from the files on disk, so they already are the
+	// source of truth. Mark the first-boot seed done before importing: a
+	// failed or partial import must never let RunFirstBootSeedIfNeeded
+	// overwrite config.yml and secrets.yml with the incomplete DB.
+	if err := s.store.SetMeta(fsSeededKey, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return false, fmt.Errorf("ImportGlobalIfEmpty: mark seeded: %w", err)
 	}
 
 	data, err := s.ReadGlobal()
