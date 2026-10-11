@@ -135,9 +135,11 @@ Set the IP allowlist. Body: `{"allow": "1.2.3.4, 10.0.0.0/8"}` (empty string all
 
 ## App Actions
 
+Stop, start, scale and rollback wait for `docker compose` to finish before responding. The operation keeps running if the client disconnects mid-request.
+
 ### `POST /api/apps/{slug}/restart`
 
-Restart all containers for the app. Returns `{"status": "ok"}`.
+Restart the app's existing containers in place (`docker compose restart`). Containers are not recreated, so compose changes and newer images are not picked up (use pull or a deploy for that). Runs in the background and returns `202` with `{"status": "started"}`.
 
 ### `POST /api/apps/{slug}/stop`
 
@@ -149,7 +151,7 @@ Start stopped containers. Returns `{"status": "ok"}`.
 
 ### `POST /api/apps/{slug}/pull`
 
-Pull latest images and redeploy. Uses configured registry auth if available. Returns `{"status": "ok"}`.
+Pull latest images and redeploy. Uses configured registry auth if available. Runs in the background and returns `202` with `{"status": "started"}`.
 
 ### `POST /api/apps/{slug}/scale`
 

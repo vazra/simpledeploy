@@ -452,7 +452,7 @@
         <button class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick={() => showRestartModal = false} aria-label="Close"></button>
         <div class="relative bg-surface-2 border border-border/50 rounded-2xl p-6 min-w-80 max-w-md shadow-2xl animate-scale-in">
           <h3 class="text-lg font-semibold text-text-primary tracking-tight mb-2">Restart App</h3>
-          <p class="text-sm text-text-secondary mb-5">This will force-recreate all containers for {app.Name}. Continue?</p>
+          <p class="text-sm text-text-secondary mb-5">Each service in {app.Name} will be stopped and started again, keeping its current settings and data. The app may be unavailable for a few seconds. To download newer images, use Pull & Update instead.</p>
           <div class="flex justify-end gap-2">
             <button onclick={() => showRestartModal = false} class="px-4 py-2 text-sm border border-border/50 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-3 transition-colors">Cancel</button>
             <Button onclick={handleRestart} loading={actionLoading === 'restart'}>Restart</Button>
