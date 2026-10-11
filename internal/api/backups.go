@@ -62,6 +62,50 @@ func validateBackupConfig(ctx context.Context, cfg *store.BackupConfig) error {
 	return nil
 }
 
+// validateBackupHooks checks cfg's pre/post hooks (types, limits, and that
+// each names a service in app's compose file) and stores them back in
+// canonical form, dropping entries in the old wizard format, which never
+// ran. Errors are human-readable and meant to be returned as 400. The run
+// re-checks hooks, and the executor only reaches app's own containers.
+func (s *Server) validateBackupHooks(cfg *store.BackupConfig, app *store.App) error {
+	if noHooks(cfg.PreHooks) && noHooks(cfg.PostHooks) {
+		return nil
+	}
+	composeCfg, composeErr := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Slug)
+	if composeErr != nil {
+		composeCfg = nil
+	}
+	var strategy backup.Strategy
+	if s.backupScheduler != nil {
+		if st, ok := s.backupScheduler.GetStrategy(cfg.Strategy); ok {
+			strategy = st
+		}
+	}
+	pre, post, _, err := backup.CheckHooks(cfg.PreHooks, cfg.PostHooks, composeCfg, strategy)
+	if err != nil {
+		return err
+	}
+	if len(pre)+len(post) > 0 && composeErr != nil {
+		return fmt.Errorf("backup hooks need this app's compose file to check the service names, but it could not be read. Fix the compose file, then save again")
+	}
+	if strings.TrimSpace(cfg.PreHooks) != "" {
+		cfg.PreHooks = backup.HooksJSON(pre)
+	}
+	if strings.TrimSpace(cfg.PostHooks) != "" {
+		cfg.PostHooks = backup.HooksJSON(post)
+	}
+	return nil
+}
+
+// noHooks reports whether a stored hooks value holds no entries.
+func noHooks(raw string) bool {
+	switch strings.TrimSpace(raw) {
+	case "", "null", "[]":
+		return true
+	}
+	return false
+}
+
 func (s *Server) handleListBackupConfigs(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	app, err := s.store.GetAppBySlug(slug)
@@ -97,6 +141,10 @@ func (s *Server) handleCreateBackupConfig(w http.ResponseWriter, r *http.Request
 	}
 	cfg.AppID = app.ID
 	if err := validateBackupConfig(r.Context(), &cfg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.validateBackupHooks(&cfg, app); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -166,6 +214,15 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	app, err := s.store.GetAppByID(existing.AppID)
+	if err != nil {
+		httpError(w, fmt.Errorf("get app: %w", err), http.StatusInternalServerError)
+		return
+	}
+	if err := s.validateBackupHooks(&cfg, app); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	// Encrypt S3 target config if present
 	if cfg.Target == "s3" && cfg.TargetConfigJSON != "" && s.masterSecret != "" {
@@ -194,10 +251,7 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	appID := existing.AppID
-	var appSlug string
-	if app, err := s.store.GetAppByID(existing.AppID); err == nil {
-		appSlug = app.Slug
-	}
+	appSlug := app.Slug
 	afterJSON := backupCfgAuditJSON(&cfg)
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category: "backup",
