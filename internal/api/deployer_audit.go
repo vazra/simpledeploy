@@ -20,10 +20,13 @@ func (a *DeployerAuditAdapter) RecordDeploy(ctx context.Context, e deployer.Depl
 	if a == nil || a.Rec == nil {
 		return
 	}
-	after, _ := json.Marshal(map[string]any{
-		"version": e.Version,
-		"error":   e.Error,
-	})
+	view := map[string]any{"error": e.Error}
+	// Version is 0 for normal deploys (the compose version is stored after
+	// the deployer returns); leave it out rather than record "version 0".
+	if e.Version > 0 {
+		view["version"] = e.Version
+	}
+	after, _ := json.Marshal(view)
 	var appID *int64
 	if e.AppID != 0 {
 		id := e.AppID

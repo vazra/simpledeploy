@@ -365,6 +365,16 @@ func TestDeploySucceeded(t *testing.T) {
 	}
 }
 
+// A normal deploy does not know its compose version (the reconciler stores
+// it afterwards); the summary must not claim "version 0".
+func TestDeploySucceededWithoutVersion(t *testing.T) {
+	for _, after := range []string{`{"version":0}`, `{"error":""}`, ``} {
+		if s, _ := Render("deploy", "deploy_succeeded", nil, []byte(after)); s != "Deploy succeeded" {
+			t.Errorf("after %q: summary = %q, want %q", after, s, "Deploy succeeded")
+		}
+	}
+}
+
 func TestDeployFailed(t *testing.T) {
 	s, _ := Render("deploy", "deploy_failed", nil, []byte(`{"version":42,"error":"image pull denied"}`))
 	if !strings.Contains(s, "failed") || !strings.Contains(s, "image pull denied") {
