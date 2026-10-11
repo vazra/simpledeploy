@@ -233,6 +233,8 @@ test.describe('Git sync: roundtrip + conflict', () => {
   });
 
   test.afterAll(async () => {
+    // Remove the app's containers before stopping the server.
+    if (api) expect((await api('DELETE', `/api/apps/${APP_SLUG}`, null)).status).toBe(200);
     stopProc(srv);
     await new Promise((r) => setTimeout(r, 500));
     for (const dir of [srv?.dataDir, srv?.appsDir, cloneDir, bareRepoPath]) {
