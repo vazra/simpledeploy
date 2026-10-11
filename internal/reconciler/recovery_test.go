@@ -193,3 +193,138 @@ func TestReconcilerArchivesOnComposeDelete(t *testing.T) {
 		t.Fatalf("expected tombstone at %s: %v", tombPath, err)
 	}
 }
+
+// TestReconcileDRAfterBootPrune runs a live install, wipes its DB, then the
+// serve boot order (global import, orphan prune, seed, FS reload, initial
+// Reconcile). The app's alert rules, backup configs and access grants must
+// come back from simpledeploy.yml, no sidecar may be deleted, and archived
+// apps must stay archived.
+func TestReconcileDRAfterBootPrune(t *testing.T) {
+	ctx := context.Background()
+	appsDir := t.TempDir()
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "simpledeploy.db")
+	for _, slug := range []string{"web", "gone", "nocompose"} {
+		writeComposeFile(t, appsDir, slug)
+	}
+
+	// Live install.
+	st1, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs1 := configsync.New(st1, appsDir, dataDir)
+	r1 := New(st1, &mockDeployer{}, nil, appsDir, nil, cs1)
+	if err := r1.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	web, err := st1.GetAppBySlug("web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wh := &store.Webhook{Name: "ops", Type: "slack", URL: "https://hooks.example.com/ops"}
+	if err := st1.CreateWebhook(wh); err != nil {
+		t.Fatal(err)
+	}
+	editor, err := st1.CreateUser("editor", "$2a$10$editor", "manage", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st1.GrantAppAccess(editor.ID, web.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st1.CreateAlertRule(&store.AlertRule{AppID: &web.ID, Metric: "cpu_pct", Operator: ">", Threshold: 90, DurationSec: 300, WebhookID: wh.ID, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st1.CreateBackupConfig(&store.BackupConfig{AppID: web.ID, Strategy: "volume", Target: "s3", ScheduleCron: "0 3 * * *", TargetConfigJSON: "enc:target", RetentionMode: "count", RetentionCount: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if err := configsync.RunFirstBootSeedIfNeeded(ctx, st1, cs1, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Archive two apps: one folder removed, one with only its compose removed.
+	if err := os.RemoveAll(filepath.Join(appsDir, "gone")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(appsDir, "nocompose", "docker-compose.yml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r1.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_ = cs1.Close()
+	st1.Close()
+
+	// Disaster: the DB is lost; data_dir and apps_dir survive.
+	for _, f := range []string{"simpledeploy.db", "simpledeploy.db-wal", "simpledeploy.db-shm"} {
+		if err := os.Remove(filepath.Join(dataDir, f)); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	cs := configsync.New(st, appsDir, dataDir)
+	if imported, err := cs.ImportGlobalIfEmpty(); err != nil || !imported {
+		t.Fatalf("ImportGlobalIfEmpty = %v, %v", imported, err)
+	}
+	if pruned, err := cs.PruneOrphanSidecars(); err != nil || len(pruned) != 0 {
+		t.Fatalf("PruneOrphanSidecars = %v, %v; want nothing pruned", pruned, err)
+	}
+	st.SetMutationHook(func(scope store.MutationScope, slug string) {
+		if scope == store.ScopeApp && slug != "" {
+			cs.ScheduleAppWrite(slug)
+		}
+	})
+	if err := configsync.RunFirstBootSeedIfNeeded(ctx, st, cs, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.ReconcileDBFromFS(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mock := &mockDeployer{}
+	if err := New(st, mock, nil, appsDir, nil, cs).Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.Close(); err != nil { // flush debounced sidecar writes
+		t.Fatal(err)
+	}
+
+	web, err = st.GetAppBySlug("web")
+	if err != nil {
+		t.Fatalf("web not re-created: %v", err)
+	}
+	if web.ArchivedAt.Valid {
+		t.Error("web archived after recovery")
+	}
+	rules, _ := st.ListAlertRules(&web.ID)
+	if len(rules) != 1 || rules[0].Metric != "cpu_pct" || rules[0].Threshold != 90 {
+		t.Errorf("alert rules not restored: %+v", rules)
+	}
+	backups, _ := st.ListBackupConfigs(&web.ID)
+	if len(backups) != 1 || backups[0].Target != "s3" || backups[0].TargetConfigJSON != "enc:target" {
+		t.Errorf("backup configs not restored: %+v", backups)
+	}
+	if access, _ := st.ListAccessForApp(web.ID); len(access) != 1 || access[0] != "editor" {
+		t.Errorf("access grants not restored: %v", access)
+	}
+	sc, err := cs.ReadAppSidecar("web")
+	if err != nil || sc == nil || len(sc.AlertRules) != 1 || len(sc.BackupConfigs) != 1 || len(sc.Access) != 1 {
+		t.Errorf("web sidecar after recovery = %+v, %v", sc, err)
+	}
+	if _, err := os.Stat(filepath.Join(appsDir, "nocompose", "simpledeploy.yml")); err != nil {
+		t.Errorf("archived app's sidecar removed: %v", err)
+	}
+	for _, slug := range []string{"gone", "nocompose"} {
+		a, err := st.GetAppBySlug(slug)
+		if err != nil || !a.ArchivedAt.Valid {
+			t.Errorf("%s not restored as archived: %+v, %v", slug, a, err)
+		}
+		if mock.hasCall("Deploy:" + slug) {
+			t.Errorf("archived app %s redeployed", slug)
+		}
+	}
+}
