@@ -67,8 +67,10 @@ test.describe('Activity changelog', () => {
       await expect(row).toContainText(`Deploy failed: ${failed.error}`);
       await expect(row.locator('.text-red-400, details summary').filter({ hasText: failed.error.slice(0, 100) })).toBeVisible();
       // The inline error is how users learn why a deploy failed, so it must
-      // carry docker's reason, not only "compose up: exit status 1".
-      expect(failed.error).toContain('127.0.0.1:1/e2e/missing');
+      // carry docker's reason, not only "compose up: exit status 1". Docker
+      // versions word it differently; all name the unreachable registry.
+      expect(failed.error).not.toMatch(/^compose up: exit status \d+$/);
+      expect(failed.error).toContain('127.0.0.1:1');
     } finally {
       expect((await apiRequest('DELETE', `/api/apps/${slug}`)).status).toBe(200);
     }
