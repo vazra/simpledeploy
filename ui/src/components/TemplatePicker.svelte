@@ -1,5 +1,5 @@
 <script>
-  import { generateSecret, validateVars, countEndpoints, computeQuickTestDomain, isValidIPv4, DEFAULT_ACCESS_MODE } from '../lib/appTemplates.js'
+  import { generateSecret, validateVars, countEndpoints, computeQuickTestDomain, computeQuickTestDomains, isValidIPv4, DEFAULT_ACCESS_MODE } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
   import CommunityRecipeBrowser from './CommunityRecipeBrowser.svelte'
 
@@ -40,6 +40,14 @@
   let quickDomain = $derived(
     selected ? computeQuickTestDomain(selected.nameSuggestion, quickHost || 'localhost') : ''
   )
+  // One auto domain per domain variable, so multi-endpoint templates get distinct hostnames.
+  let quickDomainRows = $derived.by(() => {
+    if (!selected) return []
+    const domains = computeQuickTestDomains(selected.variables, selected.nameSuggestion, quickHost || 'localhost')
+    return (selected.variables || [])
+      .filter((v) => domains[v.key])
+      .map((v) => ({ key: v.key, label: v.label || v.key, domain: domains[v.key] }))
+  })
   let hostValid = $derived(isValidIPv4(quickHost))
   let hostChanged = $derived(quickHost !== loadedHost)
 
@@ -206,8 +214,7 @@
     // Inject domain values based on access mode.
     const domainVars = (selected.variables || []).filter((v) => v.type === 'domain')
     if (accessMode === 'quick-test') {
-      const d = computeQuickTestDomain(selected.nameSuggestion, quickHost)
-      for (const v of domainVars) merged[v.key] = d
+      Object.assign(merged, computeQuickTestDomains(domainVars, selected.nameSuggestion, quickHost))
     } else if (accessMode === 'port-only') {
       for (const v of domainVars) merged[v.key] = 'localhost' // placeholder; labels stripped anyway
     }
@@ -401,15 +408,20 @@
 
       {#if accessMode === 'quick-test'}
         <div class="bg-surface-3/40 border border-border/30 rounded-lg px-3 py-3 flex flex-col gap-2">
-          <div>
-            <label class="block text-xs text-text-muted mb-1">Domain (auto)</label>
-            <input
-              type="text"
-              readonly
-              value={quickDomain}
-              class="w-full px-3 py-2 bg-input-bg/50 border border-border/30 rounded-lg text-sm text-text-primary font-mono"
-            />
-          </div>
+          {#each quickDomainRows as row (row.key)}
+            <div>
+              <label class="block text-xs text-text-muted mb-1" for="tpl-quick-{row.key}">
+                {quickDomainRows.length > 1 ? `${row.label} (auto)` : 'Domain (auto)'}
+              </label>
+              <input
+                id="tpl-quick-{row.key}"
+                type="text"
+                readonly
+                value={row.domain}
+                class="w-full px-3 py-2 bg-input-bg/50 border border-border/30 rounded-lg text-sm text-text-primary font-mono"
+              />
+            </div>
+          {/each}
           <div>
             <label class="block text-xs text-text-muted mb-1">Server IP (IPv4 required by sslip.io)</label>
             <div class="flex items-center gap-1.5">

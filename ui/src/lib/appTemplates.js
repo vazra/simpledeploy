@@ -115,6 +115,31 @@ export function computeQuickTestDomain(slug, host) {
   return `${slug}.${host}.sslip.io`;
 }
 
+// Quick-test domains for every domain variable of a template, as {key: domain}.
+// The main var ("domain", else the first) gets <slug>.<host>.sslip.io; others
+// get <slug>-<name>, where name is the key minus "_domain" (e.g. console_domain
+// -> minio-console), so endpoints never share a hostname (the server rejects
+// duplicate domain+path endpoints).
+export function computeQuickTestDomains(variables, slug, host) {
+  const domainVars = (variables || []).filter((v) => v.type === 'domain');
+  const main = domainVars.find((v) => v.key === 'domain') || domainVars[0];
+  const out = {};
+  const used = new Set();
+  if (main) {
+    out[main.key] = computeQuickTestDomain(slug, host);
+    used.add(slug);
+  }
+  for (const v of domainVars) {
+    if (v === main) continue;
+    const name = v.key.toLowerCase().replace(/_?domain$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'alt';
+    let label = `${slug}-${name}`;
+    for (let i = 2; used.has(label); i++) label = `${slug}-${name}-${i}`;
+    used.add(label);
+    out[v.key] = computeQuickTestDomain(label, host);
+  }
+  return out;
+}
+
 // Transform compose according to access mode.
 // opts = { host, slug } (only used by quick-test indirectly; port-only uses labels).
 export function applyAccessMode(compose, mode, _opts) {
