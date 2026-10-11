@@ -917,9 +917,10 @@ func TestPruneOrphanSidecarsCommitsToRemote(t *testing.T) {
 	appsDir := makeAppsDir(t)
 	bareDir := makeBareRemote(t)
 
-	// Three app dirs on disk.
+	// Three dirs on disk; only "alive" is still an app folder (an orphan has
+	// no compose file, a folder with one is never pruned).
+	writeFile(t, filepath.Join(appsDir, "alive", "docker-compose.yml"), "services:\n  web:\n    image: nginx\n")
 	for _, slug := range []string{"orphan1", "orphan2", "alive"} {
-		writeFile(t, filepath.Join(appsDir, slug, "docker-compose.yml"), "services:\n  web:\n    image: nginx\n")
 		writeFile(t, filepath.Join(appsDir, slug, "simpledeploy.yml"), "version: 1\napp:\n  slug: "+slug+"\n")
 	}
 
