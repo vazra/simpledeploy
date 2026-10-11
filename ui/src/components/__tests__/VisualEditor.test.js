@@ -137,3 +137,32 @@ describe('VisualEditor (smoke)', () => {
     });
   });
 });
+
+describe('VisualEditor add service from template', () => {
+  // Regression: the service was copied but its named volume was never
+  // declared, so `docker compose up` failed with "undefined volume pgdata".
+  it('declares the named volumes the new service references', async () => {
+    const onchange = vi.fn();
+    const { getByText } = render(VisualEditor, { compose: { services: {} }, slug: '', onchange });
+    await fireEvent.click(getByText('Add Service'));
+    await fireEvent.click(getByText('PostgreSQL'));
+    expect(onchange).toHaveBeenCalledTimes(1);
+    const next = onchange.mock.calls[0][0];
+    expect(next.services.postgresql.volumes).toEqual(['pgdata:/var/lib/postgresql/data']);
+    expect(next.volumes).toEqual({ pgdata: {} });
+  });
+
+  it('gives a second copy its own volume and keeps existing volume config', async () => {
+    const onchange = vi.fn();
+    const compose = {
+      services: { postgresql: { image: 'postgres:16-alpine', volumes: ['pgdata:/var/lib/postgresql/data'] } },
+      volumes: { pgdata: { driver: 'local' } },
+    };
+    const { getByText } = render(VisualEditor, { compose, slug: '', onchange });
+    await fireEvent.click(getByText('Add Service'));
+    await fireEvent.click(getByText('PostgreSQL'));
+    const next = onchange.mock.calls[0][0];
+    expect(next.services.postgresql2.volumes).toEqual(['pgdata2:/var/lib/postgresql/data']);
+    expect(next.volumes).toEqual({ pgdata: { driver: 'local' }, pgdata2: {} });
+  });
+});

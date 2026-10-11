@@ -3,7 +3,7 @@
   import { api } from '../lib/api.js'
   import AccordionSection from './AccordionSection.svelte'
   import RepeatableField from './RepeatableField.svelte'
-  import { serviceTemplates } from '../lib/serviceTemplates.js'
+  import { serviceTemplates, addServiceToCompose } from '../lib/serviceTemplates.js'
   import { getImageDefaults, getHealthcheckSuggestion } from '../lib/imageDefaults.js'
   import { parseEndpointLabels, writeEndpointLabels } from '../lib/endpointLabels.js'
   import { MASKED_ENV_PLACEHOLDER, envDisplayValue, hasMaskedEnv } from '../lib/env.js'
@@ -325,12 +325,8 @@
   // ---- Add service ----
   function addService(template = null) {
     const updated = deepClone(compose)
-    if (!updated.services) updated.services = {}
-    const baseName = template?.id === 'blank' || !template ? 'service' : template.id.replace(/-/g, '_')
-    let name = baseName
-    let n = 1
-    while (updated.services[name]) { n++; name = `${baseName}${n}` }
-    updated.services[name] = template?.config ? deepClone(template.config) : { image: '', restart: 'unless-stopped' }
+    // Also declares the template's named volumes at the top level.
+    const name = addServiceToCompose(updated, template)
     emitChange(updated)
     showTemplatesPicker = false
     editingServices = new Set([...editingServices, name])

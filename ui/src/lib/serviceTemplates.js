@@ -650,3 +650,60 @@ export const serviceTemplates = [
     },
   },
 ];
+
+// Named volume a service volume entry refers to, or null for bind mounts
+// (/x, ./x, ~/x), interpolated sources and anonymous volumes.
+export function namedVolumeSource(entry) {
+  let src = null;
+  if (typeof entry === 'string') {
+    const i = entry.indexOf(':');
+    if (i > 0) src = entry.slice(0, i);
+  } else if (entry && typeof entry === 'object' && entry.type === 'volume') {
+    src = entry.source;
+  }
+  return typeof src === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(src) ? src : null;
+}
+
+// Adds a service to `compose` (mutated) from a service template, or a blank
+// service when template is null or "blank". Returns the new service name.
+// Names get a numeric suffix on collision (postgresql, postgresql2, ...).
+// Named volumes the service uses are declared at the top level; one already
+// declared or used gets the same suffixing (pgdata -> pgdata2) so the new
+// service never shares data with an existing one.
+export function addServiceToCompose(compose, template = null) {
+  if (!compose.services) compose.services = {};
+  const blank = !template || template.id === 'blank';
+  const baseName = blank ? 'service' : template.id.replace(/-/g, '_');
+  let name = baseName;
+  for (let n = 2; compose.services[name]; n++) name = `${baseName}${n}`;
+  const svc = !blank && template.config
+    ? JSON.parse(JSON.stringify(template.config))
+    : { image: '', restart: 'unless-stopped' };
+
+  const taken = new Set(Object.keys(compose.volumes || {}));
+  for (const other of Object.values(compose.services)) {
+    for (const v of other?.volumes || []) {
+      const n = namedVolumeSource(v);
+      if (n) taken.add(n);
+    }
+  }
+  const renamed = {};
+  if (Array.isArray(svc.volumes)) {
+    svc.volumes = svc.volumes.map((v) => {
+      const src = namedVolumeSource(v);
+      if (!src) return v;
+      if (!renamed[src]) {
+        let vol = src;
+        for (let n = 2; taken.has(vol); n++) vol = `${src}${n}`;
+        taken.add(vol);
+        renamed[src] = vol;
+        if (!compose.volumes) compose.volumes = {};
+        compose.volumes[vol] = {};
+      }
+      const vol = renamed[src];
+      return typeof v === 'string' ? vol + v.slice(src.length) : { ...v, source: vol };
+    });
+  }
+  compose.services[name] = svc;
+  return name;
+}

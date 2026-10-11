@@ -16,7 +16,7 @@ The fastest way to deploy if you already have the dashboard open.
 3. The deploy wizard opens on a **Start** chooser with two primary options:
 
    - **Upload docker-compose file**: pick a `docker-compose.yml` from disk.
-   - **Build it yourself**: open the visual builder and add services, ports, env vars, and volumes step by step. You can switch to a raw YAML editor at any time.
+   - **Build it yourself**: open the visual builder and add services, ports, env vars, and volumes step by step. You can switch to a raw YAML editor at any time. Adding a service from a quick-start template (e.g. PostgreSQL) also creates the storage volume it needs; if that name is already used, a number is appended (e.g. `pgdata2`) so two services never share data.
 
    If you just want a quick start or an example to learn from, click **Browse templates** below the two options to pick a preconfigured app or service template.
 
