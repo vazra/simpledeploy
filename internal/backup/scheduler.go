@@ -3,7 +3,9 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ type BackupStore interface {
 	ListOldBackupRunsByTime(configID int64, maxAgeDays int) ([]store.BackupRun, error)
 	GetAppByID(id int64) (*store.App, error)
 	GetBackupRun(id int64) (*store.BackupRun, error)
+	DeleteBackupRun(id int64) error
 }
 
 // Scheduler runs scheduled backups and handles restore requests.
@@ -186,33 +189,8 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	// Parse hooks from config JSON
-	preHooks := parseHooks(cfg.PreHooks)
-	postHooks := parseHooks(cfg.PostHooks)
-	paths := parsePaths(cfg.Paths)
-
-	// Build hook runner
-	var hookRunner *HookRunner
-	if s.hookExec != nil && (len(preHooks) > 0 || len(postHooks) > 0) {
-		hookRunner = NewHookRunner(s.hookExec, 30*time.Second)
-	}
-
-	// Build pipeline
-	pipe := NewPipeline(strategy, target, hookRunner)
-
-	containerName := app.Name
-	if cfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Slug); err == nil {
-		if detected := strategy.Detect(cfg); len(detected) > 0 {
-			containerName = detected[0].ContainerName
-			if len(paths) == 0 && len(detected[0].Paths) > 0 {
-				paths = detected[0].Paths
-			}
-		}
-	}
-
-	// Refuse unsafe paths (stored config or compose-detected) before any
-	// hook runs. Strategies re-check, this just fails the run early.
-	if err := validateRunPaths(strategy.Type(), paths); err != nil {
+	plan, err := s.planRun(cfg, app, strategy, target)
+	if err != nil {
 		errMsg := err.Error()
 		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
 		s.sendAlert(app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
@@ -220,11 +198,11 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	}
 
 	opts := BackupOpts{
-		ContainerName: containerName,
-		Paths:         paths,
+		ContainerName: plan.containerName,
+		Paths:         plan.paths,
 	}
 
-	result, err := pipe.RunBackup(ctx, opts, preHooks, postHooks)
+	result, err := plan.pipe.RunBackup(ctx, opts, plan.preHooks, plan.postHooks)
 	if err != nil {
 		errMsg := err.Error()
 		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
@@ -275,40 +253,74 @@ func (s *Scheduler) RunRestore(ctx context.Context, runID int64) error {
 		return fmt.Errorf("get app: %w", err)
 	}
 
-	preHooks := parseHooks(cfg.PreHooks)
-	postHooks := parseHooks(cfg.PostHooks)
-
-	var hookRunner *HookRunner
-	if s.hookExec != nil && (len(preHooks) > 0 || len(postHooks) > 0) {
-		hookRunner = NewHookRunner(s.hookExec, 30*time.Second)
-	}
-
-	pipe := NewPipeline(strategy, target, hookRunner)
-
-	containerName := app.Name
-	paths := parsePaths(cfg.Paths)
-	if composeCfg, err := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Slug); err == nil {
-		if detected := strategy.Detect(composeCfg); len(detected) > 0 {
-			containerName = detected[0].ContainerName
-			if len(paths) == 0 && len(detected[0].Paths) > 0 {
-				paths = detected[0].Paths
-			}
-		}
-	}
-
-	if err := validateRunPaths(strategy.Type(), paths); err != nil {
+	plan, err := s.planRun(cfg, app, strategy, target)
+	if err != nil {
 		return err
 	}
 
 	// Backups made by SimpleDeploy itself are not size-capped unless the
 	// operator sets RestoreMaxGBEnv.
 	opts := RestoreOpts{
-		ContainerName:        containerName,
-		Paths:                paths,
+		ContainerName:        plan.containerName,
+		Paths:                plan.paths,
 		MaxDecompressedBytes: runRestoreMaxBytes(),
 	}
 
-	return pipe.RunRestore(ctx, opts, run.FilePath, run.Checksum, preHooks, postHooks)
+	return plan.pipe.RunRestore(ctx, opts, run.FilePath, run.Checksum, plan.preHooks, plan.postHooks)
+}
+
+// runPlan is what a backup or restore run needs, resolved from the config
+// and the app's compose file.
+type runPlan struct {
+	pipe          *Pipeline
+	containerName string
+	paths         []string
+	preHooks      []Hook
+	postHooks     []Hook
+}
+
+// planRun resolves the strategy's container and paths from the app's
+// compose file, then checks paths and hooks so that nothing (no hook
+// included) runs when either is invalid.
+func (s *Scheduler) planRun(cfg *store.BackupConfig, app *store.App, strategy Strategy, target Target) (*runPlan, error) {
+	project := "simpledeploy-" + app.Slug
+	plan := &runPlan{containerName: app.Name, paths: parsePaths(cfg.Paths)}
+	composeCfg, err := compose.ParseFile(app.ComposePath, project)
+	if err != nil {
+		composeCfg = nil
+	} else if detected := strategy.Detect(composeCfg); len(detected) > 0 {
+		plan.containerName = detected[0].ContainerName
+		if len(plan.paths) == 0 && len(detected[0].Paths) > 0 {
+			plan.paths = detected[0].Paths
+		}
+	}
+
+	// Refuse unsafe paths (stored config or compose-detected) before any
+	// hook runs. Strategies re-check, this just fails the run early.
+	if err := validateRunPaths(strategy.Type(), plan.paths); err != nil {
+		return nil, err
+	}
+
+	// Hooks can arrive from a sidecar or git sync rather than the API, so
+	// check them again. The executor's project scoping is the hard
+	// boundary either way.
+	pre, post, legacy, err := CheckHooks(cfg.PreHooks, cfg.PostHooks, composeCfg, strategy)
+	if err != nil {
+		return nil, err
+	}
+	if legacy > 0 {
+		log.Printf("[backup] config=%d: skipping %d hook(s) saved by an older backup wizard (they never ran); edit the backup config to set hooks again", cfg.ID, legacy)
+	}
+	var hookRunner *HookRunner
+	if len(pre) > 0 || len(post) > 0 {
+		if s.hookExec == nil {
+			return nil, fmt.Errorf("backup hooks are set but SimpleDeploy is not connected to Docker to run them")
+		}
+		hookRunner = NewHookRunner(s.hookExec, project, defaultHookTimeout)
+	}
+	plan.preHooks, plan.postHooks = pre, post
+	plan.pipe = NewPipeline(strategy, target, hookRunner)
+	return plan, nil
 }
 
 // CheckMissed iterates configs and alerts if last run is overdue (>2x cron interval).
@@ -378,8 +390,18 @@ func (s *Scheduler) pruneOldRuns(ctx context.Context, cfg *store.BackupConfig, t
 	}
 
 	for _, old := range oldRuns {
-		if delErr := target.Delete(ctx, old.FilePath); delErr != nil {
-			log.Printf("delete old backup file=%s: %v", old.FilePath, delErr)
+		if old.FilePath != "" {
+			// A file that is already gone counts as pruned.
+			if delErr := target.Delete(ctx, old.FilePath); delErr != nil && !errors.Is(delErr, fs.ErrNotExist) {
+				// Keep the run (its file still exists) so the next prune retries.
+				log.Printf("delete old backup file=%s: %v", old.FilePath, delErr)
+				continue
+			}
+		}
+		// Drop the run so it is no longer offered for download/restore
+		// and later prunes do not pick it up again.
+		if err := s.store.DeleteBackupRun(old.ID); err != nil {
+			log.Printf("delete pruned backup run=%d: %v", old.ID, err)
 		}
 	}
 }
@@ -404,19 +426,6 @@ func isMissedBackup(cronExpr string, lastRun *time.Time) bool {
 
 	elapsed := time.Since(*lastRun)
 	return elapsed > 2*interval
-}
-
-func parseHooks(jsonStr string) []Hook {
-	jsonStr = strings.TrimSpace(jsonStr)
-	if jsonStr == "" || jsonStr == "null" {
-		return nil
-	}
-	var hooks []Hook
-	if err := json.Unmarshal([]byte(jsonStr), &hooks); err != nil {
-		log.Printf("parse hooks JSON: %v", err)
-		return nil
-	}
-	return hooks
 }
 
 func parsePaths(jsonStr string) []string {

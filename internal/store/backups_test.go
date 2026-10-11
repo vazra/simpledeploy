@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -286,6 +287,51 @@ func TestListOldBackupRuns(t *testing.T) {
 		if r.Status != "success" {
 			t.Errorf("Status = %q, want success", r.Status)
 		}
+	}
+}
+
+func TestDeleteBackupRun(t *testing.T) {
+	s := newTestStore(t)
+	app := makeTestApp(t, s)
+	cfg := makeTestBackupConfig(t, s, app.ID)
+
+	var ids []int64
+	for i := 0; i < 3; i++ {
+		run, err := s.CreateBackupRun(cfg.ID)
+		if err != nil {
+			t.Fatalf("CreateBackupRun: %v", err)
+		}
+		if err := s.UpdateBackupRunSuccess(run.ID, 10, fmt.Sprintf("dump-%d.sql.gz", i), "sha256:x"); err != nil {
+			t.Fatalf("UpdateBackupRunSuccess: %v", err)
+		}
+		ids = append(ids, run.ID)
+	}
+
+	if err := s.DeleteBackupRun(ids[0]); err != nil {
+		t.Fatalf("DeleteBackupRun: %v", err)
+	}
+	if _, err := s.GetBackupRun(ids[0]); err == nil {
+		t.Fatal("deleted run still readable")
+	}
+	runs, err := s.ListBackupRuns(cfg.ID)
+	if err != nil {
+		t.Fatalf("ListBackupRuns: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("len(runs) = %d, want 2", len(runs))
+	}
+	// A pruned run is not offered again by retention.
+	old, err := s.ListOldBackupRuns(cfg.ID, 1)
+	if err != nil {
+		t.Fatalf("ListOldBackupRuns: %v", err)
+	}
+	for _, r := range old {
+		if r.ID == ids[0] {
+			t.Fatal("deleted run listed for pruning again")
+		}
+	}
+	if err := s.DeleteBackupRun(ids[0]); err == nil {
+		t.Fatal("deleting a missing run should fail")
 	}
 }
 

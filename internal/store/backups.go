@@ -437,6 +437,23 @@ func (s *Store) UpdateBackupRunFailed(id int64, errMsg string) error {
 	return nil
 }
 
+// DeleteBackupRun removes a run row. Retention pruning calls it once the
+// run's file is gone so the run is no longer offered for download/restore.
+func (s *Store) DeleteBackupRun(id int64) error {
+	res, err := s.db.Exec(`DELETE FROM backup_runs WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete backup run: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("backup run %d not found", id)
+	}
+	return nil
+}
+
 const backupRunCols = `id, backup_config_id, status, size_bytes, checksum, file_path, compose_version_id, started_at, finished_at, error_msg`
 
 func (s *Store) ListBackupRuns(configID int64) ([]BackupRun, error) {

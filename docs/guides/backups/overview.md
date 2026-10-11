@@ -51,6 +51,7 @@ Works with AWS S3, MinIO, Cloudflare R2, and any S3-compatible storage.
 ## Operations
 
 - [Retention and scheduling](/guides/backups/retention/)
+- [Backup hooks](/guides/backups/hooks/)
 - [Restore](/guides/backups/restore/)
 - [System database backup](/guides/backups/system-db-backup/)
 

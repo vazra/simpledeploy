@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,6 +51,16 @@ func validateBackupConfig(ctx context.Context, cfg *store.BackupConfig) error {
 	if err := backup.ValidatePathsConfig(cfg.Strategy, cfg.Paths); err != nil {
 		return err
 	}
+	// The wizard calls time-based retention "days"; the column allows
+	// "count" and "time".
+	switch strings.TrimSpace(cfg.RetentionMode) {
+	case "", "count":
+		cfg.RetentionMode = "count"
+	case "time", "days":
+		cfg.RetentionMode = "time"
+	default:
+		return fmt.Errorf("retention mode must be %q (keep the last N backups) or %q (keep backups for N days)", "count", "time")
+	}
 	if cfg.Target == "s3" && cfg.TargetConfigJSON != "" {
 		var s3cfg backup.S3Config
 		if err := json.Unmarshal([]byte(cfg.TargetConfigJSON), &s3cfg); err != nil {
@@ -60,6 +71,96 @@ func validateBackupConfig(ctx context.Context, cfg *store.BackupConfig) error {
 		}
 	}
 	return nil
+}
+
+// validateBackupHooks checks cfg's pre/post hooks (types, limits, and that
+// each names a service in app's compose file) and stores them back in
+// canonical form, dropping entries in the old wizard format, which never
+// ran. Errors are human-readable and meant to be returned as 400. The run
+// re-checks hooks, and the executor only reaches app's own containers.
+func (s *Server) validateBackupHooks(cfg *store.BackupConfig, app *store.App) error {
+	if noHooks(cfg.PreHooks) && noHooks(cfg.PostHooks) {
+		return nil
+	}
+	composeCfg, composeErr := compose.ParseFile(app.ComposePath, "simpledeploy-"+app.Slug)
+	if composeErr != nil {
+		composeCfg = nil
+	}
+	var strategy backup.Strategy
+	if s.backupScheduler != nil {
+		if st, ok := s.backupScheduler.GetStrategy(cfg.Strategy); ok {
+			strategy = st
+		}
+	}
+	pre, post, _, err := backup.CheckHooks(cfg.PreHooks, cfg.PostHooks, composeCfg, strategy)
+	if err != nil {
+		return err
+	}
+	if len(pre)+len(post) > 0 && composeErr != nil {
+		return fmt.Errorf("backup hooks need this app's compose file to check the service names, but it could not be read. Fix the compose file, then save again")
+	}
+	if strings.TrimSpace(cfg.PreHooks) != "" {
+		cfg.PreHooks = backup.HooksJSON(pre)
+	}
+	if strings.TrimSpace(cfg.PostHooks) != "" {
+		cfg.PostHooks = backup.HooksJSON(post)
+	}
+	return nil
+}
+
+// commandHooks returns the hooks in raw that run commands inside a
+// container (exec, flush_*), each in canonical JSON.
+func commandHooks(raw string) []string {
+	hooks, _, err := backup.ParseHooks(raw)
+	if err != nil {
+		return nil
+	}
+	var cmds []string
+	for _, h := range hooks {
+		switch h.Type {
+		case backup.HookTypeExec, backup.HookTypeFlushRedis, backup.HookTypeFlushMySQL:
+			cmds = append(cmds, backup.HooksJSON([]backup.Hook{h}))
+		}
+	}
+	return cmds
+}
+
+// subset reports whether every entry of a is in b.
+func subset(a, b []string) bool {
+	for _, x := range a {
+		if !slices.Contains(b, x) {
+			return false
+		}
+	}
+	return true
+}
+
+// checkCommandHookPermission refuses new or changed command-running hooks
+// unless the caller is a super admin: manage users cannot edit the compose
+// file, so such hooks would give them new shell access inside the app's
+// containers. Keeping or removing the stored config's (prev) command hooks
+// is allowed, so a manage user can still edit the rest of the config.
+func checkCommandHookPermission(r *http.Request, cfg, prev *store.BackupConfig) error {
+	if u := GetAuthUser(r); u != nil && u.Role == "super_admin" {
+		return nil
+	}
+	var prevPre, prevPost []string
+	if prev != nil {
+		prevPre, prevPost = commandHooks(prev.PreHooks), commandHooks(prev.PostHooks)
+	}
+	if !subset(commandHooks(cfg.PreHooks), prevPre) || !subset(commandHooks(cfg.PostHooks), prevPost) {
+		return fmt.Errorf("only a super admin can add or change backup hooks that run commands (exec, flush). Stop and start hooks are allowed")
+	}
+	return nil
+}
+
+// noHooks reports whether a stored hooks value holds no entries.
+func noHooks(raw string) bool {
+	switch strings.TrimSpace(raw) {
+	case "", "null", "[]":
+		return true
+	}
+	return false
 }
 
 func (s *Server) handleListBackupConfigs(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +199,14 @@ func (s *Server) handleCreateBackupConfig(w http.ResponseWriter, r *http.Request
 	cfg.AppID = app.ID
 	if err := validateBackupConfig(r.Context(), &cfg); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.validateBackupHooks(&cfg, app); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := checkCommandHookPermission(r, &cfg, nil); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
@@ -166,6 +275,19 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	app, err := s.store.GetAppByID(existing.AppID)
+	if err != nil {
+		httpError(w, fmt.Errorf("get app: %w", err), http.StatusInternalServerError)
+		return
+	}
+	if err := s.validateBackupHooks(&cfg, app); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := checkCommandHookPermission(r, &cfg, existing); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
 
 	// Encrypt S3 target config if present
 	if cfg.Target == "s3" && cfg.TargetConfigJSON != "" && s.masterSecret != "" {
@@ -194,10 +316,7 @@ func (s *Server) handleUpdateBackupConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	appID := existing.AppID
-	var appSlug string
-	if app, err := s.store.GetAppByID(existing.AppID); err == nil {
-		appSlug = app.Slug
-	}
+	appSlug := app.Slug
 	afterJSON := backupCfgAuditJSON(&cfg)
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category: "backup",

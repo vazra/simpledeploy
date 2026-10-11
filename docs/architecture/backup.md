@@ -52,7 +52,7 @@ Filename: `{containerName}-{YYYYMMDD-HHMMSS}.sql.gz`
 
 Runs `docker exec <container> tar -czf - <paths...>` against the paths configured on the backup config. Tar strips leading `/` so the archive contents are relative (e.g. `var/lib/postgresql/data/...`). Restore extracts with `tar -xzf - -C /`, which recreates the absolute paths. Filename: `{containerName}-{YYYYMMDD-HHMMSS}.tar.gz`
 
-**Caveat for running databases.** Backing up a live postgres data directory produces a crash-consistent snapshot, but a volume *restore* over the same directory is racy because pg keeps files open. For any DB-backed volume restore, either stop the service via `pre_hooks: [stop]` + `post_hooks: [start]`, or use the dedicated DB strategy (postgres/mysql/mongo/redis) that speaks the protocol.
+**Caveat for running databases.** Backing up a live postgres data directory produces a crash-consistent snapshot, but a volume *restore* over the same directory is racy because pg keeps files open. Use the dedicated DB strategy (postgres/mysql/mongo/redis) that speaks the protocol. Stop/start hooks cannot help here: the volume backup and restore run `tar` inside the service's own container, so that service must stay running. Hooks can stop *other* services that write to the data (see [Backup hooks](#hooks)).
 
 ### MySQL / MariaDB (`internal/backup/mysql.go`)
 
@@ -121,20 +121,21 @@ sched.Start() // loads configs, schedules cron jobs
 3. Look up strategy and target factory by name
 4. Instantiate target from `TargetConfigJSON`
 5. Get app name for container naming (compose project `simpledeploy-<slug>`)
-6. Validate the paths for `volume`/`sqlite` (`validateRunPaths`), before any hook runs
-7. Call `strategy.Backup()` to get data stream
-8. Call `target.Upload()` to store it
-9. Update run to `success` with size and file path
-10. Prune old runs beyond `RetentionCount`
-11. On any error: update run to `failed` with error message
+6. `planRun`: validate the paths for `volume`/`sqlite` (`validateRunPaths`) and the hooks (`CheckHooks`), before any hook runs
+7. Run pre-hooks (see [Hooks](#hooks))
+8. Call `strategy.Backup()` to get data stream
+9. Call `target.Upload()` to store it, then run post-hooks
+10. Update run to `success` with size and file path
+11. Prune old runs beyond the retention limit (`RetentionCount`, or `RetentionDays` in `time` mode): delete each file from the target, then the run row (`DeleteBackupRun`), so pruned runs are not offered for download/restore or pruned again. A file already missing counts as deleted; any other delete error keeps the row for the next prune to retry
+12. On any error: update run to `failed` with error message
 
 ### Restore Flow (`RunRestore`)
 
 1. Fetch run and its config from DB
-2. Get strategy and target; resolve the container and paths as for a backup, then validate the paths
+2. Get strategy and target; resolve the container and paths as for a backup, then validate the paths and hooks (`planRun`)
 3. Call `target.Download()` to retrieve data
 4. If the run has a checksum, spool the download to a temp file while hashing it, and fail on mismatch before anything is applied (`Pipeline.RunRestore`)
-5. Call `strategy.Restore()` to apply it, with `MaxDecompressedBytes` from `runRestoreMaxBytes()`
+5. Run pre-hooks, call `strategy.Restore()` to apply it (with `MaxDecompressedBytes` from `runRestoreMaxBytes()`), then run post-hooks
 
 Both backup and restore run asynchronously (fired via `go` in API handlers).
 
@@ -149,6 +150,16 @@ Both backup and restore run asynchronously (fired via `go` in API handlers).
 **Concurrency.** `Server.restoreSem` (capacity 4) is shared by upload restores and `POST /api/backups/restore/{id}`. A full semaphore returns `429` with "too many restores in progress, try again later"; uploads are rejected before they touch disk.
 
 **Config validation.** `validateBackupConfig` runs on create and update and returns `400` with a readable message: `ValidateCron` (same parser as the scheduler), `ValidatePathsConfig` (absolute, clean, not `/`, no control characters, no element starting with `-`; SQLite paths must name a file and may not contain quotes, backslash, backtick or `$`), and `ValidateS3Endpoint`. The volume strategy also passes `--` to `tar` so no path is read as a flag.
+
+## Hooks
+
+`pre_hooks` / `post_hooks` on a config are JSON lists of `{type, service, command, timeout}` (`hooks.go`). Types: `stop`, `start`, `exec` (`sh -c <command>`), `flush_redis`, `flush_mysql`. User guide: [Backup hooks](/guides/backups/hooks/).
+
+**Scoping.** `HookRunner` is built per run with the app's compose project (`simpledeploy-<slug>`) and passes it with every call to `ContainerExecutor`, whose methods take `(project, service)`, never a container name. `DockerHookExecutor` (`hookexec.go`, wired in `serve` and the CLI backup commands) lists containers filtered by the `com.docker.compose.project` and `com.docker.compose.service` labels, re-checks both labels on each result, skips one-off (`compose run`) containers, and runs `docker exec <id> sh -c`, `docker stop <id>` or `docker start <id>` by container ID. A service with no matching container is a hook error. So a hook can never reach another app, SimpleDeploy itself, or other host containers, whatever the stored config says. `stop`/`start` act on every replica; `exec` uses the lowest-numbered running one.
+
+**Validation.** `CheckHooks` (parse with `ParseHooks`, then `ValidateHooks`): known type, non-empty service that is a service in the app's compose file, `timeout` 0 to `MaxHookTimeout` (3600s, 0 = 30s), `exec` needs a command, command at most `MaxHookCommandLen` (4096) with no NUL, at most `MaxHooks` (20) per list, and no pre-hook `stop` of a service the strategy detects (the strategy runs `docker exec` in it). The API (`validateBackupHooks`) runs it on create/update, answers `400` with the message, and stores the hooks in canonical form (`HooksJSON`); hooks need a readable compose file. `planRun` runs it again before each backup/restore because hooks can also arrive through sidecars and git sync (`configsync` writes them unchecked); an invalid hook fails the run before anything executes. Entries whose `service` is an object (saved by the old wizard, never run) are skipped with a log line and dropped on the next save.
+
+**Failure semantics.** Pre-hooks run in order and the first failure aborts (`RunPre`); the run fails, and post-hooks still run so a stopped service is started again. Post-hooks run after success or failure with cancellation removed (`context.WithoutCancel`); failures are logged warnings (`PipelineResult.Warnings`) and never fail the run. Hooks set while no executor is configured fail the run instead of being skipped.
 
 ## Database Schema
 
@@ -225,11 +236,13 @@ Config table shows friendly labels (e.g. "Database (PostgreSQL)" not "postgres",
 
 ### Backup Wizard (`ui/src/components/BackupWizard.svelte`)
 
-4-step FormModal:
+6-step FormModal:
 1. **What to back up**: auto-detects strategies from compose, shows availability
 2. **Where to store**: local or S3 with inline config form + connection test
 3. **Schedule**: visual cron builder (ScheduleBuilder component)
-4. **Retention**: count input + summary of all selections
+4. **Hooks**: optional custom pre/post commands (service name + command, saved as `exec` hooks). Stored hooks in the old object-service format are dropped on load
+5. **Retention**: count or days, plus upload verification
+6. **Review**: summary of all selections
 
 ### Schedule Builder (`ui/src/components/ScheduleBuilder.svelte`)
 
@@ -306,7 +319,7 @@ Separate from app backups. Lives in `internal/store/db_backup.go` and `internal/
 ## Known Limitations
 
 - **Trigger backup uses first config**: the per-app trigger (`POST /apps/{slug}/backups/run`) only runs the first config; use config-specific trigger (`POST /backups/configs/{id}/run`) to pick a specific one
-- **Volume restore over running DB is racy**: use DB-native strategy (postgres/mysql/mongo/redis) or stop/start hooks around the volume restore
+- **Volume restore over running DB is racy**: use DB-native strategy (postgres/mysql/mongo/redis). Hooks cannot stop the service the volume strategy runs `tar` in
 - **Let's Encrypt backup target**: none; S3 and local only. For any other object storage, implement a new `Target`
 
 ## File Index
@@ -317,6 +330,8 @@ internal/backup/
   target.go         Target interface
   scheduler.go      Scheduler (cron, RunBackup, RunRestore)
   pipeline.go       Hooks + checksum-verified restore spooling
+  hooks.go          Hook types, HookRunner, parsing and validation
+  hookexec.go       DockerHookExecutor (project/service-scoped docker exec/stop/start)
   paths.go          Path and cron validation
   tarsafe.go        Restore archive validation, spool files, size cap
   postgres.go       PostgreSQL strategy (pg_dump/psql)

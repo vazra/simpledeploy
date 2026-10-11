@@ -708,7 +708,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	backup.SetSpoolDir(filepath.Join(cfg.DataDir, "tmp"))
-	backupSched := backup.NewScheduler(db, nil)
+	// Hooks act only on containers of the backed-up app's compose project.
+	backupSched := backup.NewScheduler(db, backup.NewDockerHookExecutor(dc))
 	backupSched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
 	backupSched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
 	backupSched.RegisterStrategy("mongo", backup.NewMongoStrategy())
@@ -1208,7 +1209,13 @@ func persistGlobalSidecars(cfg *config.Config, db *store.Store) error {
 func newBackupScheduler(cfg *config.Config, db *store.Store) *backup.Scheduler {
 	// Stage restore archives on the data disk, as serve does.
 	backup.SetSpoolDir(filepath.Join(cfg.DataDir, "tmp"))
-	sched := backup.NewScheduler(db, nil)
+	// Without Docker, a config with hooks fails its run instead of
+	// skipping them.
+	var hookExec backup.ContainerExecutor
+	if dc, err := docker.NewClient(); err == nil {
+		hookExec = backup.NewDockerHookExecutor(dc)
+	}
+	sched := backup.NewScheduler(db, hookExec)
 	sched.RegisterStrategy("postgres", backup.NewPostgresStrategy())
 	sched.RegisterStrategy("mysql", backup.NewMySQLStrategy())
 	sched.RegisterStrategy("mongo", backup.NewMongoStrategy())

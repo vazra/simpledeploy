@@ -3,7 +3,9 @@ package backup
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +24,8 @@ type mockStore struct {
 	failedCall  *failedArgs
 	oldRuns     []store.BackupRun
 	oldRunsTime []store.BackupRun
+	deletedRuns []int64
+	composePath string
 }
 
 type successArgs struct {
@@ -91,8 +95,14 @@ func (m *mockStore) ListOldBackupRunsByTime(configID int64, maxAgeDays int) ([]s
 	return m.oldRunsTime, nil
 }
 
+func (m *mockStore) DeleteBackupRun(id int64) error {
+	m.deletedRuns = append(m.deletedRuns, id)
+	delete(m.runs, id)
+	return nil
+}
+
 func (m *mockStore) GetAppByID(id int64) (*store.App, error) {
-	return &store.App{ID: id, Name: "testapp", Slug: "testapp"}, nil
+	return &store.App{ID: id, Name: "testapp", Slug: "testapp", ComposePath: m.composePath}, nil
 }
 
 func (m *mockStore) GetBackupRun(id int64) (*store.BackupRun, error) {
@@ -136,8 +146,10 @@ func (s *mockStrategy) Restore(ctx context.Context, opts RestoreOpts) error {
 // --- mock target ---
 
 type mockTarget struct {
-	uploaded map[string][]byte
-	err      error
+	uploaded  map[string][]byte
+	err       error
+	deleted   []string
+	deleteErr map[string]error
 }
 
 func newMockTarget() *mockTarget {
@@ -166,6 +178,10 @@ func (t *mockTarget) Download(ctx context.Context, filename string) (io.ReadClos
 }
 
 func (t *mockTarget) Delete(ctx context.Context, filename string) error {
+	t.deleted = append(t.deleted, filename)
+	if err := t.deleteErr[filename]; err != nil {
+		return err
+	}
 	delete(t.uploaded, filename)
 	return nil
 }
@@ -371,24 +387,6 @@ func TestSetAlertFunc(t *testing.T) {
 	}
 }
 
-func TestParseHooks(t *testing.T) {
-	hooks := parseHooks(`[{"type":"stop","service":"db"}]`)
-	if len(hooks) != 1 {
-		t.Fatalf("len = %d, want 1", len(hooks))
-	}
-	if hooks[0].Type != "stop" {
-		t.Errorf("type = %q, want stop", hooks[0].Type)
-	}
-
-	// empty/null
-	if len(parseHooks("")) != 0 {
-		t.Error("empty string should return nil")
-	}
-	if len(parseHooks("null")) != 0 {
-		t.Error("null should return nil")
-	}
-}
-
 func TestParsePaths(t *testing.T) {
 	paths := parsePaths(`["/data","/config"]`)
 	if len(paths) != 2 {
@@ -459,5 +457,69 @@ func TestSchedulerRunRestoreSizePolicy(t *testing.T) {
 	}
 	if strategy.maxBytes != 3<<30 {
 		t.Errorf("MaxDecompressedBytes with %s=3 = %d, want %d", RestoreMaxGBEnv, strategy.maxBytes, int64(3<<30))
+	}
+}
+
+func TestPruneOldRunsDeletesFilesAndRuns(t *testing.T) {
+	for _, mode := range []string{"count", "time"} {
+		t.Run(mode, func(t *testing.T) {
+			st := newMockStore()
+			days := 7
+			cfg := &store.BackupConfig{ID: 1, AppID: 10, RetentionMode: mode, RetentionCount: 2, RetentionDays: &days}
+			old := []store.BackupRun{
+				{ID: 3, BackupConfigID: 1, Status: "success", FilePath: "old-3.tar.gz"},
+				{ID: 2, BackupConfigID: 1, Status: "success", FilePath: "old-2.tar.gz"},
+			}
+			if mode == "count" {
+				st.oldRuns = old
+			} else {
+				st.oldRunsTime = old
+			}
+			for i := range old {
+				st.runs[old[i].ID] = &old[i]
+			}
+			tgt := newMockTarget()
+			tgt.uploaded["old-3.tar.gz"] = []byte("x")
+			tgt.uploaded["old-2.tar.gz"] = []byte("y")
+
+			NewScheduler(st, nil).pruneOldRuns(context.Background(), cfg, tgt)
+
+			if got := strings.Join(tgt.deleted, ","); got != "old-3.tar.gz,old-2.tar.gz" {
+				t.Fatalf("target.Delete calls = %q", got)
+			}
+			if len(tgt.uploaded) != 0 {
+				t.Errorf("files left on target: %v", tgt.uploaded)
+			}
+			// Pruned runs must no longer be offered for download/restore.
+			if len(st.deletedRuns) != 2 || st.deletedRuns[0] != 3 || st.deletedRuns[1] != 2 {
+				t.Fatalf("deleted runs = %v, want [3 2]", st.deletedRuns)
+			}
+			if len(st.runs) != 0 {
+				t.Errorf("runs left = %v", st.runs)
+			}
+		})
+	}
+}
+
+func TestPruneOldRunsKeepsRunWhenFileDeleteFails(t *testing.T) {
+	st := newMockStore()
+	st.oldRuns = []store.BackupRun{
+		{ID: 5, BackupConfigID: 1, Status: "success", FilePath: "gone.tar.gz"},
+		{ID: 4, BackupConfigID: 1, Status: "success", FilePath: "stuck.tar.gz"},
+	}
+	tgt := newMockTarget()
+	tgt.deleteErr = map[string]error{
+		// Already removed (e.g. by an older version that kept the row):
+		// treat as pruned so it is not retried forever.
+		"gone.tar.gz": &os.PathError{Op: "remove", Path: "gone.tar.gz", Err: os.ErrNotExist},
+		// Real failure: keep the run so the next prune retries it.
+		"stuck.tar.gz": errors.New("s3 unavailable"),
+	}
+	cfg := &store.BackupConfig{ID: 1, RetentionMode: "count", RetentionCount: 1}
+
+	NewScheduler(st, nil).pruneOldRuns(context.Background(), cfg, tgt)
+
+	if len(st.deletedRuns) != 1 || st.deletedRuns[0] != 5 {
+		t.Fatalf("deleted runs = %v, want [5]", st.deletedRuns)
 	}
 }

@@ -11,6 +11,10 @@ Backups use a 5-field cron expression in the `schedule_cron` config field, e.g. 
 
 `retention_count` keeps the last N successful backup files; older files are deleted after each successful run. Failed runs do not count against retention.
 
+To keep backups for a number of days instead, set `retention_mode: "time"` (the API also accepts `"days"`) and `retention_days`. The default mode is `"count"`.
+
+A pruned backup also leaves the backup history, so it is no longer offered for download or restore. If deleting a file fails (for example S3 is unreachable), that backup stays listed and SimpleDeploy tries again after the next successful run.
+
 ## Backup labels
 
 Compose label shortcuts:

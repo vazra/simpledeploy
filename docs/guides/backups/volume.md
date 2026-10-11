@@ -17,7 +17,7 @@ Filename format: `{containerName}-{YYYYMMDD-HHMMSS}.tar.gz`
 
 ## Caveat for running databases
 
-Backing up a live postgres data directory produces a crash-consistent snapshot, but a volume *restore* over the same directory is racy because pg keeps files open. For any DB-backed volume restore, either stop the service via `pre_hooks: [stop]` + `post_hooks: [start]`, or use the dedicated DB strategy (postgres/mysql/mongo/redis) that speaks the protocol.
+Backing up a live postgres data directory produces a crash-consistent snapshot, but a volume *restore* over the same directory is racy because pg keeps files open. Use the dedicated DB strategy (postgres/mysql/mongo/redis) that speaks the protocol. Stop/start hooks cannot help here: the volume backup and restore run `tar` inside the service's own container, so that service must stay running. Hooks can stop *other* services that write to the data (see [Backup hooks](/guides/backups/hooks/)).
 
 ## Configure via compose labels
 

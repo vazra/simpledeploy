@@ -8,7 +8,7 @@
   import BackupWizard from './BackupWizard.svelte'
   import { toasts } from '../lib/stores/toast.js'
 
-  let { slug } = $props()
+  let { slug, allowCommandHooks = false } = $props()
 
   let configs = $state([])
   let runs = $state([])
@@ -159,7 +159,8 @@
   }
 
   function retentionLabel(cfg) {
-    if (cfg.retention_mode === 'days' && cfg.retention_days) return `${cfg.retention_days} days`
+    // The server stores time-based retention as "time"; older clients sent "days".
+    if ((cfg.retention_mode === 'time' || cfg.retention_mode === 'days') && cfg.retention_days) return `${cfg.retention_days} days`
     if (cfg.retention_count) return `Keep last ${cfg.retention_count}`
     return '-'
   }
@@ -393,7 +394,7 @@
   </div>
 {/if}
 
-<BackupWizard open={showWizard} {slug} {editConfig} onclose={closeWizard} oncreated={loadData} />
+<BackupWizard open={showWizard} {slug} {editConfig} {allowCommandHooks} onclose={closeWizard} oncreated={loadData} />
 
 {#if showRestoreModal}
   <Modal
