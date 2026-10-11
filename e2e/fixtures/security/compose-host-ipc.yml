@@ -1,4 +1,0 @@
-services:
-  web:
-    image: nginx:alpine
-    ipc: host

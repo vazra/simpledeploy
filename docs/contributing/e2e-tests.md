@@ -95,9 +95,13 @@ GHCR packages are **private by default**. Both CI workflows (`ci.yml`, `template
 
 ## Template validation
 
-Two layers guard the built-in app and service templates:
+Layers guarding the built-in app and service templates:
 
-- **`00-template-images.spec.js`** (runs in `e2e` and `e2e-lite`): imports `appTemplates.js` and `serviceTemplates.js`, collects every `image:` reference, and runs `docker manifest inspect` on each in parallel. Fails fast when a tag is typo'd, yanked, or private. Takes ~10-30s.
-- **`templates-deploy-all.spec.js`** (only runs under `make e2e-templates` / `E2E_TEMPLATES=1`): deploys every app template through the UI wizard, asserts the "Deployed" pill, then deletes the app via API. Expensive (pulls ~20 multi-service stacks), so it is excluded from both `e2e` and `e2e-lite`. The `.github/workflows/templates.yml` workflow triggers it automatically when `appTemplates.js`, `serviceTemplates.js`, or either template spec changes, so it runs once per template-edit PR.
+- **Vitests** (`ui/src/lib/__tests__/appTemplates.test.js`, `ui/src/components/__tests__/VisualEditor.test.js`): template data, rendering, and adding every service template in the visual editor.
+- **`30-app-templates-ui.spec.js`** (per-push suite): every app template passes `validate-compose` and `docker compose config`; multi-endpoint templates work in Quick test mode.
+- **`e2e/scripts/check-template-images.mjs`**: runs `docker manifest inspect` on every template image (retries transient registry errors; a rate limit only warns). Run by the Templates workflow, not the per-push suite, because it hits Docker Hub directly.
+- **`templates-deploy-all.spec.js`** (only under `make e2e-templates` / `E2E_TEMPLATES=1`): deploys every app template through the UI wizard and probes it over HTTP, then deletes it. Expensive (pulls ~20 multi-service stacks), so it is excluded from `e2e` and `e2e-lite`.
+
+`.github/workflows/templates.yml` runs the image check and the deploy matrix when templates, `internal/compose/**`, `internal/deployer/**` or `go.mod` change, and weekly (upstream tags get yanked; the mirror used by per-push E2E hides that).
 
 When adding or editing a template, bias toward running `make e2e-templates` locally before opening the PR; the CI workflow runs it too but locally you get faster feedback.

@@ -24,39 +24,50 @@ Each test gets a fresh browser context (isolated cookies) but shares the server 
 
 ## Test Files
 
+Every test must be able to fail when the feature it names breaks (see [Test design rules](#test-design-rules)). Behavior already pinned by Go tests or vitests is not repeated here; E2E covers what only the full stack can show.
+
 | File | What it covers |
 |------|---------------|
-| `01-setup.spec.js` | First-time admin account creation, validation |
-| `02-login.spec.js` | Login, logout, wrong password, session redirect |
-| `03-deploy.spec.js` | Deploy 3 apps via wizard, YAML validation, redeploy |
-| `04-dashboard.spec.js` | App cards, running status, metrics, search, nav |
-| `05-app-overview.spec.js` | App detail page, services list, tab navigation |
-| `06-app-actions.spec.js` | Stop, start, restart, pull & update, scale |
-| `07-app-config.spec.js` | Compose editor, environment variables |
-| `08-app-endpoints.spec.js` | Endpoints, TLS badges, advanced settings |
-| `09-app-logs.spec.js` | Log viewer, controls, deploy events |
-| `10-app-metrics.spec.js` | Chart rendering, time range switching |
-| `11-app-versions.spec.js` | Deploy history, version entries, redeploy + image verification |
-| `12-backups.spec.js` | Backup wizard UI + **functional roundtrip**: postgres insert→backup→drop→restore→verify, volume archive inspection, retention pruning, hooks, upload-restore, checksum |
-| `13-alerts.spec.js` | Webhooks CRUD + **functional dispatch**: webhook receiver + firing/resolved transitions + disabled rule + backup alerts |
-| `13b-webhook-formats.spec.js` | Payload schema per integration type: Slack, Telegram, Discord, custom default, template override |
-| `14-users.spec.js` | User CRUD, roles, API keys, RBAC (viewer access, super_admin guards, invalid key) |
-| `15-registries.spec.js` | Registry add/delete (UI only; see `29b` for functional pull+auth) |
-| `16-docker.spec.js` | Docker info, images, networks, volumes, prune |
-| `17-system.spec.js` | System info, maintenance, DB backup download + sqlite validation |
-| `18-profile.spec.js` | Profile edit, password change, theme toggle |
-| `20-security-validation.spec.js` | Compose security (privileged, host network/pid/ipc, caps, volumes), app name validation |
-| `21-user-validation.spec.js` | Duplicate username/email, short password, role guards, lockout |
-| `22-env-and-endpoints.spec.js` | Env var CRUD, endpoint management, IP access allowlist validation |
-| `23-rollback-and-restore.spec.js` | Deploy versions, rollback (verify image tag), backup restore |
-| `24-multi-user-isolation.spec.js` | Viewer role isolation, per-app access, API key auth |
-| `25-edge-cases.spec.js` | Audit log content, alert/webhook editing, dashboard filters, system prune |
-| `26-tls-ssl.spec.js` | **Isolated server** with `tls.mode=local`: self-signed cert serving, custom cert upload, endpoint TLS persistence |
-| `27-backup-s3.spec.js` | **MinIO fixture**: S3 roundtrip, checksum, presigned URL, retention, bogus-creds failure |
-| `28-db-strategies.spec.js` | MySQL, MongoDB, Redis, SQLite strategy detection + full roundtrip against real DB containers |
-| `29a-ratelimit.spec.js` | **Isolated server** with tight limits: burst→429, window recovery |
-| `29b-private-registry.spec.js` | **registry:2 fixture**: push private image, register creds via API, deploy succeeds; deploy fails when creds removed |
-| `99-cleanup.spec.js` | Remove all apps, verify clean dashboard |
+| `01-setup.spec.js` | First-run setup creates the admin (setup status flips, `/api/me` profile) |
+| `02-login.spec.js` | Login form (the only spec that uses it), wrong password 401, guarded routes, logout revokes the session server-side |
+| `03-deploy.spec.js` | Deploys e2e-nginx, e2e-multi, e2e-postgres via the wizard; invalid YAML blocked; name collision suggestion; containers, labels and proxy routing |
+| `03c-community-recipes.spec.js` | Recipe catalog from a local fixture server (isolated server): browse, import into the wizard, popularity count |
+| `04-dashboard.spec.js` | App cards and status badges match the API, host metrics reach the UI, search, card navigation |
+| `06-app-actions.spec.js` | Stop/start/restart/pull/scale through the UI, each verified in Docker and through the proxy |
+| `07-app-config.spec.js` | Edit the image in the compose editor, redeploy, container runs the new image |
+| `08-app-endpoints.spec.js` | Add an endpoint in Settings, TLS badge, added/removed/multiple domains route through the proxy |
+| `09-app-logs.spec.js` | A request through the proxy shows up in the live log viewer; events tab matches the API |
+| `10-app-metrics.spec.js` | Range switch returns data; request metrics grow with real traffic |
+| `11-app-versions.spec.js` | Version history in the UI matches the API; compose download equals the stored version |
+| `12-backups.spec.js` | Backup wizard saves the config; postgres backup, drop, restore roundtrip; volume archive contents; pre/post hooks run in the app container; upload-restore with checksum; tab refreshes live |
+| `13-alerts.spec.js` | Webhook create + Send Test to a local receiver; rule form keeps its app; CPU alert fires, resolves, no double-fire, disabled rule silent; backup alerts name and scope the right app |
+| `14-users.spec.js` | User and API key lifecycle through the UI (checked via API); RBAC: viewer and manage limits with exact status codes; deleting a user revokes their key |
+| `15-registries.spec.js` | Add/delete a registry; password never returned (see `29b` for real pulls) |
+| `16-docker.spec.js` | Docker page shows the daemon's real version, images, networks, volumes |
+| `17-system.spec.js` | System info matches the API, VACUUM, DB download is a real SQLite file, process logs, compact backup strips metrics |
+| `18-profile.spec.js` | Display name and password change (old password rejected, restored in finally) |
+| `18a-realtime.spec.js` | Users page updates over the realtime socket without a reload |
+| `20-activity.spec.js` | Activity rows for real actions, failed deploy shows its error inline, env change summary, purge |
+| `20-export-import.spec.js` | Export, import as a clone that reaches running, overwrite import with preview |
+| `20-security-validation.spec.js` | Compose security wiring (violations reported, nothing written), validate-compose matches deploy, app name rules |
+| `21-user-validation.spec.js` | Duplicate username/email, short password, own-role and self-delete guards change nothing |
+| `22-env-and-endpoints.spec.js` | Env round trip; IP allowlist enforced by the proxy (deny, then allow, then cleared) |
+| `23-rollback-and-restore.spec.js` | Rollback switches the running image and routes traffic; roll forward again |
+| `24-multi-user-isolation.spec.js` | Viewer session cannot mutate even a granted app |
+| `25-edge-cases.spec.js` | Login is recorded in the activity log; metric prune deletes only old rows |
+| `26-tls-ssl.spec.js` | **Isolated server**, `tls.mode=local`: internal-CA cert on one endpoint, uploaded custom cert on another |
+| `26a-config-recovery.spec.js` | **Isolated server**: DB wiped, restart rebuilds users, keys, webhooks, registries and per-app config from the config files |
+| `26b-gitsync.spec.js` | **Isolated server + bare git repo** (`E2E_GITSYNC=1`, on in CI): dashboard changes pushed, remote changes applied, conflict while the remote is offline |
+| `27-backup-s3.spec.js` | **MinIO fixture**: S3 roundtrip, presigned download checksum, bad credentials, retention prunes objects and runs |
+| `28-db-strategies.spec.js` | MySQL, MongoDB, Redis, SQLite backup/restore roundtrips against real containers |
+| `29a-ratelimit.spec.js` | **Isolated server**: exact allow/deny sequence, `Retry-After`, per-key buckets, recovery after the window |
+| `29b-private-registry.spec.js` | **registry:2 fixture**: deploy from a private registry; removing creds fails with an auth error |
+| `30-app-templates-ui.spec.js` | Every app template validates (validate-compose and `docker compose config`); multi-endpoint templates in Quick test mode |
+| `95-archive.spec.js` | Removing an app folder archives the app (containers and route gone); purge |
+| `99-cleanup.spec.js` | UI delete removes containers, folder and API entry; API delete of a multi-service app |
+| `templates-deploy-all.spec.js` | Opt-in (`E2E_TEMPLATES=1`, Templates workflow): deploys every app template and probes it over HTTP |
+
+Template image availability is checked by `scripts/check-template-images.mjs` in the Templates workflow (on template changes and weekly), not in the per-push suite.
 
 ## Test Fixtures
 
@@ -71,57 +82,52 @@ DB strategy fixtures (used by `28-db-strategies.spec.js`, deployed per-describe)
 - **compose-mysql.yml** - mysql:8 with root+user accounts
 - **compose-mongo.yml** - mongo:7 with root auth
 - **compose-redis.yml** - redis:7-alpine with volume at /data
-- **compose-sqlite.yml** - nginx with `simpledeploy.backup.strategy=sqlite` label and a seeded sqlite DB
+- **compose-sqlite.yml** - `gitea/gitea` image (ships sqlite3) with `simpledeploy.backup.strategy=sqlite` and a seeded sqlite DB; no package installs at test time
 
-Security fixture compose files in `fixtures/security/` are used for validation tests (never deployed):
-- **compose-privileged.yml**, **compose-host-network.yml**, **compose-host-pid.yml**, **compose-host-ipc.yml** - dangerous runtime options
-- **compose-dangerous-caps.yml** - SYS_ADMIN capability
-- **compose-dangerous-volumes.yml** - docker socket mount
-- **compose-path-traversal.yml** - path traversal in volume source
+`fixtures/helper-images.yml` is never deployed: it lists the images helpers run directly (MinIO, registry) so the mirror workflow copies them.
 
 ## External-system fixtures (containers managed by tests, not simpledeploy)
 
-Some specs spin up their own fixture containers via docker CLI and tear them down in `afterAll`. They're NOT managed by simpledeploy.
+Some specs spin up their own fixture containers via docker CLI and tear them down in `afterAll`. They're NOT managed by simpledeploy. With `E2E_USE_MIRROR=1` (CI) their images come from the GHCR mirror (`helpers/images.js`).
 
 - **MinIO** (`helpers/minio.js`, used by `27-backup-s3.spec.js`): runs `pgsty/silo` (maintained drop-in MinIO fork; official `minio/minio` images are gone) pinned to the same tag as the MinIO templates, on a random localhost port, and creates a bucket via the `mc` client bundled in that image. Use for testing the S3 target without real AWS credentials. Returns `{endpoint, accessKey, secretKey, bucket, mc(), listObjects(), stop()}`.
-- **Registry** (`helpers/registry.js`, used by `29b-private-registry.spec.js`) — runs `registry:2` with htpasswd auth on a random localhost port. Helper `pushImage(reg, from, toName)` handles pull→tag→login→push→logout. `startRegistry()` returns `{host, user, pass, stop()}`. Docker Desktop treats `127.0.0.0/8` as insecure by default; Linux Docker does too, so plain HTTP to `localhost:<port>` works.
+- **Registry** (`helpers/registry.js`, used by `29b-private-registry.spec.js`): runs `registry:2` with htpasswd auth (the file is copied in with `docker cp`, since macOS temp dirs are not visible to colima) on a random localhost port. Helper `pushImage(reg, from, toName)` handles pull→tag→login→push→logout. `startRegistry()` returns `{host, user, pass, stop()}`. Docker Desktop treats `127.0.0.0/8` as insecure by default; Linux Docker does too, so plain HTTP to `localhost:<port>` works.
 
 ## Helpers
 
 ### `helpers/auth.js`
 
 ```js
-import { loginAsAdmin, login, logout, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { loginAsAdmin, login, loginViaUI, logout, getState, TEST_ADMIN } from '../helpers/auth.js';
 
-// login as the test admin
-await loginAsAdmin(page);
-
-// login as specific user
-await login(page, 'username', 'password');
-
-// get server URL and config
+await loginAsAdmin(page);                    // API login (shares the page's cookies), then opens the dashboard
+await login(page, 'username', 'password');   // same, as another user
+await loginViaUI(page);                      // through the login form: only for specs testing the form (02)
 const { baseURL, port } = getState();
 ```
+
+Logging out revokes every session of that user (token version bump), including the cookie cached by `helpers/api.js`; call `apiLogin` again after a logout.
 
 ### `helpers/api.js`
 
 Direct API calls (no browser), useful for setup/teardown:
 
 ```js
-import { apiRequest, apiLogin, waitForAppStatus } from '../helpers/api.js';
+import { apiRequest, apiLogin, waitForAppStatus, waitForDeployDone } from '../helpers/api.js';
 
 await apiLogin('admin', 'password');
 await apiRequest('DELETE', '/api/apps/my-app');
 await waitForAppStatus('my-app', 'running', 60_000);
+await waitForDeployDone('my-app'); // a redeploy keeps status "running"; this waits for it to finish
 ```
 
 ### `helpers/server.js`
 
-Server lifecycle. `startServer` is exported so individual specs can spin up their own isolated server (used by `26-tls-ssl`, `29a-ratelimit`, `29b-private-registry`).
+Server lifecycle. The server config is written to `data_dir/server-config.yaml` (`data_dir/config.yml` is SimpleDeploy's own global config file). Specs that need their own server use `helpers/isolated.js` (`26`, `26a`, `29a`, `29b`, `03c`).
 
 - `buildBinary()` - runs `make build` (used only by global-setup)
 - `getBinaryPath()` - returns the already-built binary path without rebuilding
-- `startServer(binPath, overrides?)` - starts on random ports, waits for health. Overrides: `{proxyPort, dataDir, appsDir, tlsMode, ratelimit}`. `ratelimit` is `{requests, window, burst, by}` and applies to the auth/login rate limiter.
+- `startServer(binPath, overrides?)` - starts on random ports, waits for health. Overrides: `{proxyPort, dataDir, appsDir, tlsMode, ratelimit, recipesIndexURL}`. `ratelimit` applies to the management API limiter only.
 - `stopServer(server)` - kills process, cleans temp dirs
 
 ### `helpers/docker.js`
@@ -143,7 +149,7 @@ Mirror of `psql()` for the other DB strategies, used by `28-db-strategies.spec.j
 - `redisCmd(container, ...args)` — `docker exec ... redis-cli <args>`
 - `sqlite3Eval(container, dbPath, sql)` — `docker exec ... sqlite3 <path> <sql>`
 
-All log to `/tmp/e2e-dbclients-trace.log` for debugging. None use `sh -c`.
+None use `sh -c`. Errors include the full stdout/stderr.
 
 ### `helpers/proxy.js`
 
@@ -152,6 +158,7 @@ Reverse-proxy HTTP helpers. `fetchViaProxy(host, path, opts)` wraps curl under t
 - `fetchViaProxy(host, path, opts)` — returns `{status, ok, text(), json()}`
 - `curlHTTPS(host, port, path, opts)` — with `-k` (accept self-signed), for `26-tls-ssl`
 - `openSSLGetCert(host, port)` — parses `openssl s_client` output to a `{subject, issuer, notBefore, notAfter}` object
+- `waitForProxyStatus(host, status, {timeoutMs, bodyContains, path, proxyURL})` — polls until the route answers; use instead of sleeping after an endpoint change
 
 ### `helpers/webhook.js`
 
@@ -162,6 +169,7 @@ const receiver = await startWebhookReceiver();
 // receiver.url → http://127.0.0.1:<port>
 // receiver.received → array of {method, path, headers, body, at}
 // receiver.waitFor(predicate, timeoutMs) → resolves when a matching POST lands
+// receiver.onPath(path), receiver.countWhere(predicate): per-path assertions (probe/control rules)
 // receiver.clear(), receiver.stop()
 ```
 
@@ -169,10 +177,29 @@ const receiver = await startWebhookReceiver();
 
 Direct sqlite queries against simpledeploy's DB (different from `dbclients.js` which targets app containers).
 
-- `sqliteQuery(sql)`, `sqliteExec(sql)`, `tableCount(table)`
+- `sqliteQuery(sql)`, `sqliteExec(sql)`
 - `getAppId(slug)` — resolves an app slug to the FK used in metrics/alert tables
-- `insertMetricPoint({appSlug, cpu, memoryMb, tsSec, tier})` — injects synthetic metrics for deterministic alert evaluation
-- `injectHighCPUWindow(appSlug)` — shortcut that inserts 10 high-CPU points spread over the last minute
+- `replaceMetricsAtomic(appSlug, {...})` — swaps an app's metric points in one transaction (deterministic alert input)
+
+### `helpers/metrics.js`
+
+`startMetricRefresher(slug, high)` keeps a synthetic CPU window in place for the alert evaluator (first write throws; later errors surface in waits), `deleteAppMetrics(slug)`, `waitForCollectorCycle()` (lets an in-flight collector write land before the test starts).
+
+### `helpers/backups.js`
+
+`createBackupConfig`, `triggerAndWait`, `pollRunStatus`, `waitForNewRunForConfig`, `deleteAppConfigsFor`, `localBackupPath`, `waitForNextSecond` (backup filenames have 1s resolution).
+
+### `helpers/users.js`
+
+`findUser`, `deleteUserByName`, `waitForDeployEvent` / `latestDeployEventId` (wait for the deploy a 202 started), `waitForAppSettled` (no deploy running, app running, stored compose hash matches the file).
+
+### `helpers/isolated.js`
+
+`startIsolatedServer(opts)` returns `{server, cookie, api}` for a spec-owned server; `waitForAppStatusAt`, `loginAt`, `deployAt`, `stopGracefully` (SIGTERM and wait, so pending config writes flush), `stopIsolatedServer(server, logName)` (keeps the log in `test-results/`).
+
+### `helpers/recipes.js`
+
+Serves a one-recipe community catalog on 127.0.0.1 for `03c`.
 
 ### `helpers/minio.js`
 
@@ -259,9 +286,23 @@ await page.waitForSelector('aside', { timeout: 15_000 });
 const closeBtn = page.getByRole('button', { name: /close/i });
 await expect(closeBtn).toBeVisible({ timeout: 60_000 });
 
-// wait for toast notification
-await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 5_000 });
+// wait for a specific toast, then check the server state it claims
+await expect(page.getByRole('alert')).toHaveText('Profile updated');
 ```
+
+## Test design rules
+
+A test earns its place only if it would fail when the feature it names breaks, and only if Go tests or vitests cannot show the same thing (those take seconds; this suite takes minutes).
+
+- Assert the resulting server state (API, Docker, proxy, files), not just a toast or a visible heading. A toast check also needs its exact text: `[role="alert"]` matches error toasts too.
+- No conditional assertions: no `if (await x.isVisible())`, `.catch(() => false)` guards, or try/catch that swallows a failure. If an element may be missing, the test is wrong.
+- No fixed sleeps when a condition can be polled (`expect.poll`, `waitForResponse`, `waitForProxyStatus`, `waitForAppStatus`, `waitForDeployDone`).
+- Exact status codes, never ranges like `< 500` or `[200, 404]`.
+- Scope text matches to `main`, a table or a dialog. The activity sidebar is always in the DOM and lists app names, so page-wide `getByText(...).first()` passes on the wrong element.
+- Await background work: after a 202, wait for the app to settle before the test ends, or the next spec inherits a redeploy.
+- Put cleanup that later specs depend on in `finally`/`afterAll`. Restore anything shared (admin password, `e2e-nginx` env, allowlists).
+- A test for unfixed product behavior asserts the correct behavior and fails until the fix lands. Never skip or loosen it to get green.
+- Do not test pure rendering or client-side logic here; write a vitest.
 
 ## Server Configuration
 
@@ -272,9 +313,11 @@ The test server starts with these settings (see `helpers/server.js`):
 | `tls.mode` | `"off"` | No certs needed, avoids HTTPS complexity |
 | `management_port` | random | Prevents port conflicts |
 | `master_secret` | fixed string | Deterministic JWT/encryption for tests |
-| `ratelimit.requests` | 10000 | Prevents login failures across 91 tests |
+| `login_ratelimit.requests` | 10000 | Tests log in many times from 127.0.0.1 |
 | `data_dir` / `apps_dir` | temp dirs | Clean state per run, auto-cleaned |
 | `log_buffer_size` | 100 | Smaller buffer for test performance |
+
+Tick intervals are shortened through env (alert evaluation 2s, metrics flush 1s, status refresh 5s).
 
 ## Debugging Failures
 
@@ -390,17 +433,10 @@ Don't rely on real external services (S3, Telegram, Discord, Let's Encrypt). Sta
 
 - Tests cannot run individually. They depend on prior test state (setup -> deploy -> actions).
 - Docker image pulls on first run can be slow (~1-2min for nginx/redis/postgres).
-- The backup trigger test accepts any completion status (success or failed) since pg_dump may fail if postgres hasn't fully initialized.
 - Svelte 5 collapsible sections sometimes don't respond to Playwright's click. One test works around this.
 
 ## CI Integration
 
-```yaml
-# GitHub Actions example
-- name: E2E Tests
-  run: make e2e
-  env:
-    DOCKER_HOST: unix:///var/run/docker.sock
-```
-
-Requires a runner with Docker. The test suite is self-contained: builds the binary, manages its own server, cleans up after itself.
+- `.github/workflows/ci.yml` runs `make e2e` on every push to `main` with `E2E_USE_MIRROR=1` (images from the GHCR mirror, no Docker Hub limits) and `E2E_GITSYNC=1`. It uploads `playwright-report/` and `test-results/` (failure traces plus `server.log`, which global teardown copies out before deleting the temp dirs).
+- `.github/workflows/templates.yml` runs the template image check and the `templates-deploy-all` matrix when templates or the compose/deployer code change, and weekly.
+- Global teardown removes compose stacks left behind by failed specs (only stacks whose folder is under an `sd-e2e-*` temp dir).

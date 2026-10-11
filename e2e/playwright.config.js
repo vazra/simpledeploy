@@ -4,15 +4,12 @@ import { join } from 'path';
 // Git-sync spec requires E2E_GITSYNC=1: spawns isolated server + bare git repo.
 const GITSYNC_SPEC = '**/26b-gitsync.spec.js';
 
-// Slow specs skipped when E2E_LITE=1. Each pulls large images, spawns
-// auxiliary containers (MinIO, DB engines, local registry), or waits on
-// long timing windows (webhook delivery). Trims ~15 min from the suite.
+// Slow specs skipped when E2E_LITE=1. Each pulls large images or spawns
+// auxiliary containers (MinIO, DB engines, local registry).
 const LITE_SKIP = [
-  '**/13b-webhook-formats.spec.js',
   '**/27-backup-s3.spec.js',
   '**/28-db-strategies.spec.js',
   '**/29b-private-registry.spec.js',
-  '**/slow-*.spec.js',
 ];
 
 // Template deploy-all matrix. Expensive (pulls ~20 images across
