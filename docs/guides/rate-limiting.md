@@ -9,12 +9,12 @@ Rate limiting is per-app, configured with `simpledeploy.ratelimit.*` labels on a
 
 | Label | Default | Description |
 |-------|---------|-------------|
-| `simpledeploy.ratelimit.requests` | `200` (server config) | Allowed requests per window |
+| `simpledeploy.ratelimit.requests` | none | Allowed requests per window. Rate limiting is on only when this is set |
 | `simpledeploy.ratelimit.window` | `60s` | Length of the window |
-| `simpledeploy.ratelimit.burst` | `50` | Extra short-spike allowance over the steady rate |
+| `simpledeploy.ratelimit.burst` | `0` | Extra requests allowed in a short spike, on top of `requests` |
 | `simpledeploy.ratelimit.by` | `ip` | Key to bucket by: `ip`, `header:NAME`, or `path` |
 
-`requests`/`window` define the steady rate. `burst` lets a client briefly exceed it before getting throttled. Once the bucket is empty, clients get `429 Too Many Requests` with a `Retry-After: 60` header.
+`requests`/`window` define the steady rate. `burst` lets a client briefly go over it: once a window's `requests` are used up, up to `burst` more get through. A client that keeps going over is held to `requests` per window; the burst comes back after it stays within `requests` (or sends nothing) for a whole window. Without `burst`, the limit is exactly `requests` per window. Once nothing is left, clients get `429 Too Many Requests` with a `Retry-After: 60` header.
 
 ## Per-IP (most common)
 
@@ -31,7 +31,7 @@ services:
       simpledeploy.ratelimit.by: "ip"
 ```
 
-100 req/min/IP, with burst up to 120.
+100 req/min/IP. A short spike can reach 120 in one minute; a client that keeps going over is held to 100 a minute.
 
 ## Per API key (header)
 

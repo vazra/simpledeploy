@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
@@ -213,5 +216,117 @@ func TestScaleEndpointMissingBody(t *testing.T) {
 	srv.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+// blockingRunner is a deployer.CommandRunner that hands each compose call's
+// context to the test and blocks until released. Like exec.CommandContext,
+// it fails if that context is canceled.
+type blockingRunner struct {
+	ctxs    chan context.Context
+	release chan struct{}
+}
+
+func (b *blockingRunner) Run(ctx context.Context, _ string, args ...string) (string, string, error) {
+	if len(args) == 2 && args[1] == "version" {
+		return "", "", nil
+	}
+	b.ctxs <- ctx
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+	}
+	return "", "", ctx.Err()
+}
+
+// runnerReconciler routes lifecycle actions through a real deployer so the
+// context reaching the CommandRunner is the one the handler passed.
+type runnerReconciler struct {
+	mockReconcilerFull
+	d           *deployer.Deployer
+	runner      deployer.CommandRunner
+	composePath string
+}
+
+func (m *runnerReconciler) StopOne(ctx context.Context, slug string) error {
+	return m.d.Stop(ctx, slug)
+}
+func (m *runnerReconciler) StartOne(ctx context.Context, slug string) error {
+	return m.d.Start(ctx, slug)
+}
+func (m *runnerReconciler) ScaleOne(ctx context.Context, slug string, scales map[string]int) error {
+	return m.d.Scale(ctx, &compose.AppConfig{Name: slug, ComposePath: m.composePath}, scales)
+}
+func (m *runnerReconciler) RollbackOne(ctx context.Context, _ string, _ int64) error {
+	_, _, err := m.runner.Run(ctx, "docker", "compose", "up", "-d")
+	return err
+}
+
+func TestLifecycleActionsSurviveClientDisconnect(t *testing.T) {
+	scale, _ := json.Marshal(map[string]any{"scales": map[string]int{"web": 2}})
+	cases := []struct {
+		name, path string
+		body       []byte
+		rollback   bool
+	}{
+		{"stop", "/api/apps/myapp/stop", nil, false},
+		{"start", "/api/apps/myapp/start", nil, false},
+		{"scale", "/api/apps/myapp/scale", scale, false},
+		{"rollback", "/api/apps/myapp/rollback", nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newTestServer(t)
+			srv.SetAppsDir(t.TempDir())
+			runner := &blockingRunner{ctxs: make(chan context.Context, 1), release: make(chan struct{})}
+			d, err := deployer.New(runner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			composePath := filepath.Join(t.TempDir(), "docker-compose.yml")
+			if err := os.WriteFile(composePath, []byte("services:\n  web:\n    image: nginx\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			srv.SetReconciler(&runnerReconciler{d: d, runner: runner, composePath: composePath})
+
+			body := tc.body
+			if tc.rollback {
+				body, _ = json.Marshal(map[string]any{"version_id": seedVersion(t, srv, "myapp")})
+			}
+			reqCtx, closeTab := context.WithCancel(context.Background())
+			defer closeTab()
+			req := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewReader(body)).WithContext(reqCtx)
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(superAdminCookie(t, srv.jwt))
+			w := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				srv.Handler().ServeHTTP(w, req)
+				close(done)
+			}()
+
+			var opCtx context.Context
+			select {
+			case opCtx = <-runner.ctxs:
+			case <-time.After(5 * time.Second):
+				t.Fatal("compose command never ran")
+			}
+			closeTab()
+			if err := opCtx.Err(); err != nil {
+				t.Fatalf("compose command context canceled with the request: %v", err)
+			}
+			if _, ok := opCtx.Deadline(); !ok {
+				t.Error("compose command context has no timeout")
+			}
+			close(runner.release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("handler did not return")
+			}
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }

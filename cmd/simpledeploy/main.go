@@ -788,6 +788,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv.SetWebhookDispatcher(dispatcher)
 	auditRec := audit.NewRecorder(db)
 	auditRec.SetBus(eventBus)
+	auditRec.SetSyncTracking(srv.GitSyncPushing)
+	reconcilerAudit.SetSyncTracking(srv.GitSyncPushing)
 	srv.SetAudit(auditRec)
 	srv.SetBus(eventBus)
 	dep.SetAuditEmitter(&api.DeployerAuditAdapter{Rec: auditRec})

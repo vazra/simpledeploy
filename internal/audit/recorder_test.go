@@ -134,3 +134,44 @@ func TestRecorderNilSafe(t *testing.T) {
 		t.Fatalf("nil Recorder.Record returned non-zero id: %d", id)
 	}
 }
+
+func TestRecorderSyncPendingOnlyWhileGitSyncPushes(t *testing.T) {
+	s := openTestStore(t)
+	rec := NewRecorder(s)
+	ctx := context.Background()
+	status := func(id int64) string {
+		t.Helper()
+		got, err := s.GetActivity(ctx, id)
+		if err != nil {
+			t.Fatalf("GetActivity: %v", err)
+		}
+		if got.SyncStatus == nil {
+			return ""
+		}
+		return *got.SyncStatus
+	}
+
+	pushing := false
+	rec.SetSyncTracking(func() bool { return pushing })
+
+	id, _ := rec.Record(ctx, RecordReq{Category: "compose", Action: "changed"})
+	if got := status(id); got != "" {
+		t.Errorf("git sync off: sync_status = %q, want none", got)
+	}
+
+	pushing = true
+	id, _ = rec.Record(ctx, RecordReq{Category: "compose", Action: "changed"})
+	if got := status(id); got != "pending" {
+		t.Errorf("git sync on: sync_status = %q, want pending", got)
+	}
+	id, _ = rec.Record(ctx, RecordReq{Category: "lifecycle", Action: "stopped"})
+	if got := status(id); got != "" {
+		t.Errorf("non-synced action: sync_status = %q, want none", got)
+	}
+
+	// The pending row is what git sync stamps after a push.
+	ids, err := s.PendingSyncAuditIDs(ctx)
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("PendingSyncAuditIDs = %v, %v; want one row", ids, err)
+	}
+}

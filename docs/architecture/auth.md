@@ -31,7 +31,7 @@ API keys inherit the creator's role and per-app grants at the moment of creation
 
 ## Rate limiting
 
-A per-IP token bucket limits authentication attempts and dashboard requests. Defaults: 200 requests per 60 seconds with a burst of 50, keyed by IP. Configurable in `config.yaml`. Apps can override per-route via compose labels.
+A per-IP token bucket limits authentication attempts and dashboard requests. Defaults: 200 requests per 60 seconds, keyed by IP. Configurable in `config.yaml` (`ratelimit.burst` and `ratelimit.by` are ignored here). Proxied app traffic has its own per-app limits from compose labels.
 
 A separate, stricter limit on `/api/auth/login` blocks credential stuffing. After repeated failures, the account is temporarily locked.
 

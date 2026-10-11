@@ -27,6 +27,19 @@ func (s *Server) SetReconcilerRef(r gitsync.Reconciler) {
 	reconcilerRef = r
 }
 
+// GitSyncPushing reports whether git sync is running and pushes changes.
+// The audit recorder uses it to mark rows pending only when a push will
+// stamp them. Lock-free, since audit rows may be recorded under gsMu.
+func (s *Server) GitSyncPushing() bool { return s.gsPushing.Load() }
+
+func gitSyncPushes(gs *gitsync.Syncer) bool {
+	if gs == nil {
+		return false
+	}
+	st := gs.Status()
+	return st.Enabled && st.AutoPushEnabled
+}
+
 // ReloadGitSync stops the current syncer (if any), rebuilds config from DB+YAML,
 // and starts a new syncer. Returns the new status or an error.
 func (s *Server) ReloadGitSync(ctx context.Context) (*gitsync.Status, error) {
@@ -39,6 +52,7 @@ func (s *Server) ReloadGitSync(ctx context.Context) (*gitsync.Status, error) {
 			log.Printf("[gitsync] reload: stop existing: %v", err)
 		}
 		s.gs = nil
+		s.gsPushing.Store(false)
 	}
 
 	if s.cfg == nil || s.store == nil {
@@ -66,11 +80,13 @@ func (s *Server) ReloadGitSync(ctx context.Context) (*gitsync.Status, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gitsync.New: %w", err)
 	}
-	if err := gs.Start(ctx); err != nil {
+	// ctx is usually the request's; the syncer must outlive it (Stop ends it).
+	if err := gs.Start(context.WithoutCancel(ctx)); err != nil {
 		return nil, fmt.Errorf("gitsync.Start: %w", err)
 	}
 
 	s.gs = gs
+	s.gsPushing.Store(gitSyncPushes(gs))
 
 	// Re-wire configsync sidecar hook.
 	if s.cs != nil {

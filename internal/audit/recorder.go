@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/vazra/simpledeploy/internal/audit/render"
 	"github.com/vazra/simpledeploy/internal/events"
@@ -17,8 +18,9 @@ type Publisher interface {
 
 // Recorder writes audit events to the DB-backed audit_log table.
 type Recorder struct {
-	s   *store.Store
-	bus Publisher
+	s      *store.Store
+	bus    Publisher
+	syncOn atomic.Pointer[func() bool]
 }
 
 // NewRecorder creates a Recorder backed by the given store.
@@ -31,6 +33,21 @@ func (r *Recorder) SetBus(b Publisher) {
 		return
 	}
 	r.bus = b
+}
+
+// SetSyncTracking sets how the recorder learns whether git sync is pushing
+// changes. Sync-eligible rows are marked pending only while on returns true,
+// so Activity does not show "pending" forever when git sync is off. nil (the
+// default) marks every eligible row pending. Safe to call while recording.
+func (r *Recorder) SetSyncTracking(on func() bool) {
+	if r == nil {
+		return
+	}
+	if on == nil {
+		r.syncOn.Store(nil)
+		return
+	}
+	r.syncOn.Store(&on)
 }
 
 // RecordReq is the input to Recorder.Record.
@@ -72,6 +89,9 @@ func (r *Recorder) Record(ctx context.Context, req RecordReq) (int64, error) {
 	eligible := syncEligibleCategories[req.Category]
 	if req.Category == "lifecycle" && syncEligibleLifecycleActions[req.Action] {
 		eligible = true
+	}
+	if on := r.syncOn.Load(); eligible && on != nil && !(*on)() {
+		eligible = false
 	}
 	id, err := r.s.RecordAudit(ctx, store.AuditEntry{
 		AppID:            req.AppID,

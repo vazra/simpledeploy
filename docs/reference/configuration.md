@@ -73,12 +73,11 @@ metrics:
     - name: 1h
       retention: 8760h  # 1 year
 
-# Global rate limit defaults (per-app labels override)
+# Management API rate limit, per client IP. App traffic is limited only by
+# per-app simpledeploy.ratelimit.* labels.
 ratelimit:
   requests: 200
   window: 60s
-  burst: 50
-  by: ip              # ip | header:X-API-Key | path
 
 # Default registries applied to all apps (names reference stored registries)
 registries:
@@ -121,10 +120,10 @@ git_sync:
 | `master_secret` | string | **required** | Encryption/signing key |
 | `audit_retention_days` | int | `365` | Activity log retention in days; `0` = keep forever |
 | `metrics.tiers` | list | see above | Metrics rollup tiers |
-| `ratelimit.requests` | int | `200` | Default requests per window |
-| `ratelimit.window` | string | `60s` | Rate limit time window |
-| `ratelimit.burst` | int | `50` | Burst allowance |
-| `ratelimit.by` | string | `ip` | Rate limit key |
+| `ratelimit.requests` | int | `200` | Management API requests per window, per client IP |
+| `ratelimit.window` | string | `60s` | Management API rate limit window |
+| `ratelimit.burst` | int | `50` | Reserved, currently ignored. Per-app burst is the `simpledeploy.ratelimit.burst` label |
+| `ratelimit.by` | string | `ip` | Reserved, currently ignored (the management API always limits by IP) |
 | `registries` | list | `[]` | Default registry names for all apps |
 | `allowed_bind_paths` | list of string | `[]` | Absolute host folders apps may bind-mount even though they sit under a protected system folder (e.g. `["/home/media"]`). SimpleDeploy's data folder and other apps' folders stay protected. Do not list parents of sensitive folders such as `/var` or `/etc`. See [compose security validation](/reference/compose-labels/#compose-security-validation). |
 | `git_sync.enabled` | bool | `false` | Enable two-way git sync |

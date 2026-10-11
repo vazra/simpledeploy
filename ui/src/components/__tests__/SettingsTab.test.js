@@ -9,6 +9,7 @@ vi.mock('svelte-spa-router', () => ({
   default: null,
 }));
 
+import { push } from 'svelte-spa-router';
 import SettingsTab from '../SettingsTab.svelte';
 import { toasts } from '../../lib/stores/toast.js';
 
@@ -82,6 +83,7 @@ describe('SettingsTab', () => {
     routes = {};
     installFetch();
     for (const t of get(toasts)) toasts.remove(t.id);
+    push.mockClear();
   });
 
   afterEach(() => {
@@ -192,6 +194,32 @@ describe('SettingsTab', () => {
     await fireEvent.click(await findByText('Save'));
     await waitFor(() => expect(get(toasts).some((t) => t.type === 'error' && t.message === refusalText)).toBe(true));
     expect(getByLabelText('IP Allowlist').value).toBe('10.0.0.0/8');
+  });
+
+  async function deleteApp() {
+    const r = renderTab();
+    await fireEvent.click(r.getByRole('button', { name: /Danger Zone/i }));
+    await fireEvent.click(r.getByRole('button', { name: /Delete App/i }));
+    await fireEvent.click(r.getByRole('button', { name: 'Confirm' }));
+    return r;
+  }
+
+  it('stays on the page and shows the error when deleting the app fails', async () => {
+    routes['DELETE /api/apps/foo'] = () => json({ error: 'compose down failed: daemon unreachable' }, 500);
+    const { findByTestId } = await deleteApp();
+
+    await waitFor(() => expect(calls('DELETE', '/api/apps/foo')).toHaveLength(1));
+    expect((await findByTestId('delete-error')).textContent).toMatch(/daemon unreachable/);
+    expect(get(toasts).some((t) => t.type === 'error' && /daemon unreachable/.test(t.message))).toBe(true);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('goes back to the app list after the app is deleted', async () => {
+    routes['DELETE /api/apps/foo'] = () => json({ status: 'ok' });
+    const { queryByTestId } = await deleteApp();
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    expect(queryByTestId('delete-error')).toBeNull();
   });
 
   it('gives viewers a read-only environment editor', async () => {

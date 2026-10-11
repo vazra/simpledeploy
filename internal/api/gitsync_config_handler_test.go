@@ -2,9 +2,12 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/config"
+	"github.com/vazra/simpledeploy/internal/gitsync"
 )
 
 func gitPlainInit(path string, bare bool) (*git.Repository, error) {
@@ -310,5 +314,101 @@ func TestDisableGitSync(t *testing.T) {
 	kv, _ := srv.store.GetGitSyncConfig()
 	if len(kv) != 0 {
 		t.Errorf("expected empty DB after disable, got %v", kv)
+	}
+}
+
+func TestGitSyncPushingFollowsSyncer(t *testing.T) {
+	srv, _ := newTestServer(t)
+	newSyncer := func(push bool) *gitsync.Syncer {
+		t.Helper()
+		gs, err := gitsync.New(gitsync.Config{
+			Enabled:         true,
+			Remote:          "file://" + t.TempDir(),
+			Branch:          "main",
+			AppsDir:         t.TempDir(),
+			AutoPushEnabled: push,
+		}, srv.store, nil, nil)
+		if err != nil {
+			t.Fatalf("gitsync.New: %v", err)
+		}
+		return gs
+	}
+
+	if srv.GitSyncPushing() {
+		t.Error("no syncer: want false")
+	}
+	srv.SetGitSync(newSyncer(false))
+	if srv.GitSyncPushing() {
+		t.Error("pull-only syncer: want false")
+	}
+	srv.SetGitSync(newSyncer(true))
+	if !srv.GitSyncPushing() {
+		t.Error("pushing syncer: want true")
+	}
+
+	// Reloading with git sync turned off clears it.
+	srv.cfg = &config.Config{AppsDir: t.TempDir(), MasterSecret: "secret"}
+	srv.masterSecret = "secret"
+	if _, err := srv.ReloadGitSync(context.Background()); err != nil {
+		t.Fatalf("ReloadGitSync: %v", err)
+	}
+	if srv.GitSyncPushing() {
+		t.Error("after reload with git sync off: want false")
+	}
+
+	// Reloading with git sync on sets it again.
+	bare := t.TempDir()
+	if _, err := gitPlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetGitSyncConfig(map[string]string{"enabled": "true", "remote": "file://" + bare, "branch": "main"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.ReloadGitSync(context.Background()); err != nil {
+		t.Fatalf("ReloadGitSync: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.gs.Stop() })
+	if !srv.GitSyncPushing() {
+		t.Error("after reload with git sync on: want true")
+	}
+}
+
+// The handlers reload with r.Context(), which ends with the response. The
+// syncer started by the reload must keep running after that.
+func TestReloadGitSyncOutlivesRequest(t *testing.T) {
+	srv, _ := newTestServer(t)
+	appsDir := t.TempDir()
+	srv.cfg = &config.Config{AppsDir: appsDir, MasterSecret: "secret"}
+	srv.masterSecret = "secret"
+	bare := t.TempDir()
+	if _, err := gitPlainInit(bare, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.SetGitSyncConfig(map[string]string{"enabled": "true", "remote": "file://" + bare, "branch": "main"}); err != nil {
+		t.Fatal(err)
+	}
+
+	reqCtx, endRequest := context.WithCancel(context.Background())
+	if _, err := srv.ReloadGitSync(reqCtx); err != nil {
+		t.Fatalf("ReloadGitSync: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.gs.Stop() })
+	endRequest()
+	time.Sleep(100 * time.Millisecond) // let a request-bound worker exit
+
+	before := srv.gs.Status().HeadSHA
+	if err := os.MkdirAll(filepath.Join(appsDir, "foo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appsDir, "foo", "docker-compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv.gs.EnqueueCommit(nil, "test edit")
+	deadline := time.Now().Add(10 * time.Second)
+	for srv.gs.Status().HeadSHA == before {
+		if time.Now().After(deadline) {
+			t.Fatal("syncer stopped committing once the reload request ended")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }

@@ -45,10 +45,9 @@ Defaults assume a beefier host. On 1 vCPU:
 ratelimit:
   requests: 100
   window: 60s
-  burst: 25
 ```
 
-This blocks bursty scrapers that would otherwise pin CPU.
+This limits requests to the dashboard and management API. To slow down scrapers hitting your apps, add [rate limit labels](/guides/rate-limiting/) to those apps.
 
 ## Prune Docker regularly
 
