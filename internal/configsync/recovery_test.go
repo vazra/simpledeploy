@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -275,45 +274,42 @@ func TestReconcileDBFromFSSkipsAppsWithoutRow(t *testing.T) {
 }
 
 // TestDRImportFailureKeepsGlobalSidecar: when importing config.yml into an
-// empty DB fails part way, the first-boot seed must not overwrite config.yml
-// and secrets.yml with the incomplete DB.
+// empty DB fails, the first-boot seed must not overwrite config.yml with the
+// empty or incomplete DB.
 func TestDRImportFailureKeepsGlobalSidecar(t *testing.T) {
-	st := openTestStore(t)
-	dataDir := t.TempDir()
-	syncer := New(st, t.TempDir(), dataDir)
+	cases := []struct {
+		name   string
+		config string
+	}{
+		{"malformed yaml", "version: 1\nusers:\n  - username: admin\n    role: [super_admin\nregistries:\n  - name: ghcr\n"},
+		// The API key's user is missing: users import, then the key fails
+		// before registries.
+		{"dangling api key", "version: 1\nusers:\n  - username: admin\n    role: super_admin\napi_keys:\n  - username: gone\n    name: ci\nregistries:\n  - id: reg-1\n    name: ghcr\n    url: ghcr.io\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := openTestStore(t)
+			dataDir := t.TempDir()
+			syncer := New(st, t.TempDir(), dataDir)
+			path := filepath.Join(dataDir, globalSidecar)
+			if err := os.WriteFile(path, []byte(tc.config), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	// The API key's user is missing, so ImportGlobal fails after importing
-	// users and before registries.
-	sidecar := GlobalSidecar{
-		Version:    Version,
-		Users:      []UserEntry{{Username: "admin", Role: "super_admin"}},
-		APIKeys:    []APIKeyEntry{{Username: "gone", Name: "ci"}},
-		Registries: []RegistryEntry{{ID: "reg-1", Name: "ghcr", URL: "ghcr.io"}},
-	}
-	if err := atomicWriteYAMLMode(filepath.Join(dataDir, globalSidecar), 0644, sidecar); err != nil {
-		t.Fatal(err)
-	}
-	if err := syncer.WriteGlobalSecrets(&GlobalSecrets{
-		Version: Version,
-		Users:   []UserSecretsEntry{{Username: "admin", PasswordHash: "$2a$10$admin"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
+			if _, err := syncer.ImportGlobalIfEmpty(); err == nil {
+				t.Fatal("expected ImportGlobalIfEmpty to fail")
+			}
+			if err := RunFirstBootSeedIfNeeded(context.Background(), st, syncer, nil); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
 
-	if _, err := syncer.ImportGlobalIfEmpty(); err == nil {
-		t.Fatal("expected ImportGlobalIfEmpty to fail on the dangling API key")
-	}
-	if err := RunFirstBootSeedIfNeeded(context.Background(), st, syncer, nil); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	raw, err := os.ReadFile(filepath.Join(dataDir, globalSidecar))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"name: ghcr", "username: gone"} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("config.yml lost %q after a failed import:\n%s", want, raw)
-		}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(raw) != tc.config {
+				t.Errorf("config.yml rewritten after a failed import:\n%s", raw)
+			}
+		})
 	}
 }
