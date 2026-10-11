@@ -16,13 +16,26 @@ curl -X POST https://manage.yourdomain.com/api/alerts/rules \
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `app_id` | int | Target app (omit / null for system-wide) |
-| `metric` | string | `cpu_pct`, `mem_bytes`, `mem_pct` |
+| `app_id` | int | Target app (omit / null for system-wide; super_admin only) |
+| `metric` | string | `cpu_pct`, `mem_bytes`, `mem_pct`, or a backup event (below) |
 | `operator` | string | `>`, `<`, `>=`, `<=` |
 | `threshold` | float | Numeric threshold |
 | `duration_sec` | int | Sustained breach window before firing |
 | `webhook_id` | int | Webhook to dispatch to |
 | `enabled` | bool | Toggle without deleting |
+
+## Backup alerts
+
+Set `metric` to a backup event to get a message when backups run:
+
+| Metric | Sends a message when |
+|--------|----------------------|
+| `backup_failed` | a backup run fails |
+| `backup_success` | a backup run completes |
+| `backup_missed` | a scheduled backup is overdue (more than twice its interval) |
+| `backup_all` | any of the above |
+
+A rule with an `app_id` only reports that app's backups. A system-wide rule reports every app's backups. Backup rules send one message per event, so `threshold` and `duration_sec` are ignored (the API still requires an `operator`; use `>`).
 
 ## Compose label shortcuts
 

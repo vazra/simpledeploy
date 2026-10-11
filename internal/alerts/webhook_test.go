@@ -172,6 +172,50 @@ func TestWebhookSend(t *testing.T) {
 	}
 }
 
+func TestBackupAlertEventLabels(t *testing.T) {
+	cases := []struct {
+		eventType, display string
+	}{
+		{"backup_failed", "Backup Failed"},
+		{"backup_success", "Backup Succeeded"},
+		{"backup_missed", "Backup Missed"},
+	}
+	for _, tc := range cases {
+		ev := BackupAlertEvent{AppName: "myapp", Message: "msg", EventType: tc.eventType, FiredAt: time.Now()}.ToAlertEvent()
+		if ev.MetricDisplay != tc.display {
+			t.Errorf("%s: MetricDisplay = %q, want %q", tc.eventType, ev.MetricDisplay, tc.display)
+		}
+		// The rule fired; receivers filter on firing/resolved.
+		if ev.Status != "firing" {
+			t.Errorf("%s: Status = %q, want firing", tc.eventType, ev.Status)
+		}
+		if ev.Metric != tc.eventType {
+			t.Errorf("%s: Metric = %q", tc.eventType, ev.Metric)
+		}
+	}
+}
+
+// TestBackupSuccessSlackText: a success event must not read as a failure in
+// chat messages.
+func TestBackupSuccessSlackText(t *testing.T) {
+	ev := BackupAlertEvent{
+		AppName:   "myapp",
+		Strategy:  "postgres",
+		Message:   "backup completed successfully",
+		EventType: "backup_success",
+		FiredAt:   time.Now(),
+	}.ToAlertEvent()
+	for _, typ := range []string{"slack", "discord", "telegram"} {
+		body := captureSend(t, store.Webhook{Type: typ}, ev)
+		if strings.Contains(strings.ToLower(body), "fail") {
+			t.Errorf("%s payload for a success event mentions failure: %s", typ, body)
+		}
+		if !strings.Contains(body, "Backup Succeeded") {
+			t.Errorf("%s payload missing success label: %s", typ, body)
+		}
+	}
+}
+
 func TestWebhookSendError(t *testing.T) {
 	event := makeEvent()
 	d := NewWebhookDispatcherAllowPrivate()

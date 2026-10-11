@@ -2,9 +2,13 @@ package alerts
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -417,10 +421,13 @@ func TestEvaluateOnce_MultipleRules(t *testing.T) {
 	}
 }
 
-// Edge case: webhook failure should not prevent history creation
+// Edge case: webhook failure should not prevent history creation. Delivery is
+// single-shot: a failed send is not retried.
 func TestEvaluateOnce_WebhookFailure(t *testing.T) {
+	var webhookHits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.ReadAll(r.Body)
+		atomic.AddInt32(&webhookHits, 1)
 		w.WriteHeader(http.StatusInternalServerError) // webhook fails
 	}))
 	defer srv.Close()
@@ -447,6 +454,9 @@ func TestEvaluateOnce_WebhookFailure(t *testing.T) {
 	// history should still be created even though webhook failed
 	if len(ms.histories) != 1 {
 		t.Errorf("histories = %d, want 1 (should create despite webhook failure)", len(ms.histories))
+	}
+	if n := atomic.LoadInt32(&webhookHits); n != 1 {
+		t.Errorf("webhook hits = %d, want 1 (no retry)", n)
 	}
 }
 
@@ -514,4 +524,97 @@ func TestEnrichEvent(t *testing.T) {
 			t.Errorf("ValueDisplay = %q, want 42.0", e.ValueDisplay)
 		}
 	})
+}
+
+// dispatchBackup sends event through DispatchBackupAlert. Each rule gets its
+// own webhook at path "/r<rule id>"; the paths hit are returned sorted.
+func dispatchBackup(t *testing.T, al AppLookup, rules []store.AlertRule, event BackupAlertEvent) []string {
+	t.Helper()
+	var mu sync.Mutex
+	var hits []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.ReadAll(r.Body)
+		mu.Lock()
+		hits = append(hits, r.URL.Path)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ms := newMockAlertStore()
+	ms.rules = rules
+	for i := range ms.rules {
+		id := ms.rules[i].ID
+		ms.rules[i].WebhookID = id
+		ms.webhooks[id] = &store.Webhook{ID: id, Type: "slack", URL: fmt.Sprintf("%s/r%d", srv.URL, id)}
+	}
+	e := NewEvaluator(ms, al, &mockMetricQuerier{}, NewWebhookDispatcherAllowPrivate())
+	e.DispatchBackupAlert(event)
+
+	mu.Lock()
+	defer mu.Unlock()
+	sort.Strings(hits)
+	return hits
+}
+
+func TestDispatchBackupAlert_AppScoped(t *testing.T) {
+	alphaID, betaID := int64(1), int64(2)
+	al := &mockAppLookup{apps: map[int64]*store.App{
+		alphaID: {ID: alphaID, Name: "alpha", Slug: "alpha"},
+		betaID:  {ID: betaID, Name: "Beta Shop", Slug: "beta"},
+	}}
+	rules := []store.AlertRule{
+		{ID: 1, AppID: &alphaID, Metric: "backup_failed", Enabled: true},
+		{ID: 2, AppID: &betaID, Metric: "backup_failed", Enabled: true},
+		{ID: 3, Metric: "backup_failed", Enabled: true}, // global
+	}
+	cases := []struct {
+		name  string
+		appID int64
+		want  []string
+	}{
+		{"alpha", alphaID, []string{"/r1", "/r3"}},
+		{"beta", betaID, []string{"/r2", "/r3"}},
+		{"other", 3, []string{"/r3"}},
+		{"unknown", 0, []string{"/r3"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Display names may repeat; only the app ID decides scoping.
+			got := dispatchBackup(t, al, rules, BackupAlertEvent{AppID: tc.appID, AppName: "alpha", EventType: "backup_failed", FiredAt: time.Now()})
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("hits = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDispatchBackupAlert_EventTypeFilter(t *testing.T) {
+	appID := int64(1)
+	al := &mockAppLookup{apps: map[int64]*store.App{appID: {ID: appID, Name: "alpha", Slug: "alpha"}}}
+	rules := []store.AlertRule{
+		{ID: 1, Metric: "backup_failed", Enabled: true},
+		{ID: 2, Metric: "backup_success", Enabled: true},
+		{ID: 3, Metric: "backup_missed", Enabled: true},
+		{ID: 4, Metric: "backup_all", Enabled: true},
+		{ID: 5, Metric: "cpu_pct", Operator: ">", Threshold: 0, Enabled: true},
+		{ID: 6, AppID: &appID, Metric: "backup_success", Enabled: true},
+		{ID: 7, AppID: &appID, Metric: "backup_all", Enabled: true},
+	}
+	cases := []struct {
+		eventType string
+		want      []string
+	}{
+		{"backup_failed", []string{"/r1", "/r4", "/r7"}},
+		{"backup_success", []string{"/r2", "/r4", "/r6", "/r7"}},
+		{"backup_missed", []string{"/r3", "/r4", "/r7"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.eventType, func(t *testing.T) {
+			got := dispatchBackup(t, al, rules, BackupAlertEvent{AppID: appID, AppName: "alpha", EventType: tc.eventType, FiredAt: time.Now()})
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("hits = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

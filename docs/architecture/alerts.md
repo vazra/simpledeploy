@@ -9,7 +9,7 @@ The alerts package (`internal/alerts/`) evaluates user-defined rules against cur
 
 A rule is `(metric, op, threshold, duration_seconds, scope)`:
 
-- **metric**: `cpu_pct` (CPU percent, 100 = one core), `mem_pct` (memory as a percent of the container limit), `mem_bytes` (memory in bytes). Backup event rules use `backup_failed`, `backup_success`, `backup_missed` or `backup_all` (any backup event); they fire when the backup scheduler reports that event for the rule's app. The API rejects other metrics and operators.
+- **metric**: `cpu_pct` (CPU percent, 100 = one core), `mem_pct` (memory as a percent of the container limit), `mem_bytes` (memory in bytes). Backup event rules use `backup_failed`, `backup_success`, `backup_missed` or `backup_all` (any backup event); they fire when the backup scheduler reports that event for the rule's app, or for any app if the rule is global (see [Backup alerts](#backup-alerts)). The API rejects other metrics and operators.
 - **op**: `>`, `<`, `>=`, `<=`
 - **threshold**: numeric value (percent, count, etc.)
 - **duration**: condition must hold continuously for this many seconds
@@ -36,8 +36,12 @@ Templates (builtin and custom) are Go `text/template`s that render JSON. Before 
 
 Network safety: by default the dispatcher refuses URLs that resolve to reserved addresses, and the dialer re-checks the resolved IP at connect time (DNS rebinding). `isReservedIP` covers loopback, RFC 1918, link-local, multicast, unspecified, CGNAT (`100.64.0.0/10`), IETF/TEST-NET/benchmarking ranges, class E, IPv6 unique-local and discard, and the NAT64 local-use prefix `64:ff9b:1::/48`. Addresses in the well-known NAT64 prefix `64:ff9b::/96` are judged by the IPv4 address they embed, so DNS64 hosts can still reach public targets. Set `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS=1` to opt out (only for trusted internal targets). The S3 backup target uses a similar list (`SIMPLEDEPLOY_ALLOW_PRIVATE_S3`, see [Backup architecture](/architecture/backup/)).
 
-Failed dispatches retry with exponential backoff up to a small bound; persistent failures are recorded but not retried indefinitely.
+Delivery is single-shot: each notification is one POST with a 10 second timeout. A failed send (network error or HTTP status >= 400) is logged and not retried. A metric alert still records its `alert_history` row, so it will not fire again until it resolves.
 
-## Backup failure alerts
+## Backup alerts
 
-Backup runs that fail surface through the same alert pipeline using the `backup_failure` metric, so a single webhook can receive both metric and operational alerts.
+The backup scheduler reports events through a callback wired in `cmd/simpledeploy/main.go` to `Evaluator.DispatchBackupAlert`, so a single webhook can receive both metric and backup alerts. Event types are `backup_failed`, `backup_success` and `backup_missed` (from the periodic missed-schedule check). A rule matches when its metric equals the event type or is `backup_all`.
+
+Scope: a global rule (no app) fires for every app's events. An app-scoped rule fires only for its own app: the scheduler passes the app's ID with each event and the dispatcher compares it with the rule's app.
+
+Backup events have no threshold or duration and no `alert_history` row: every matching event sends one notification. The payload uses `Status` `firing` (the rule fired) for every event type, `MetricDisplay` `Backup Failed`, `Backup Succeeded` or `Backup Missed`, and the scheduler's message as `ValueDisplay`.

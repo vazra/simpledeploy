@@ -159,7 +159,9 @@ func (e *Evaluator) buildEvent(rule store.AlertRule, value float64, status strin
 	return event
 }
 
-// DispatchBackupAlert sends a backup alert to all matching webhooks.
+// DispatchBackupAlert sends a backup alert to all matching webhooks. A rule
+// scoped to an app fires only for that app's events; a global rule fires for
+// every app.
 func (e *Evaluator) DispatchBackupAlert(event BackupAlertEvent) {
 	rules, err := e.store.ListActiveAlertRules()
 	if err != nil {
@@ -170,12 +172,20 @@ func (e *Evaluator) DispatchBackupAlert(event BackupAlertEvent) {
 		if rule.Metric != event.EventType && rule.Metric != "backup_all" {
 			continue
 		}
+		if rule.AppID != nil && !e.backupEventForApp(event, *rule.AppID) {
+			continue
+		}
 		webhook, err := e.store.GetWebhook(rule.WebhookID)
 		if err != nil || webhook == nil {
 			continue
 		}
 		_ = e.dispatcher.Send(*webhook, alertEvent)
 	}
+}
+
+// backupEventForApp reports whether event came from app appID.
+func (e *Evaluator) backupEventForApp(event BackupAlertEvent, appID int64) bool {
+	return event.AppID != 0 && event.AppID == appID
 }
 
 func checkCondition(value float64, operator string, threshold float64) bool {

@@ -57,7 +57,7 @@ func newHookSched(t *testing.T, pre, post string, withExec bool) *hookSchedFixtu
 	f.sched.RegisterStrategy("mock", &eventStrategy{events: events})
 	tgt := newMockTarget()
 	f.sched.RegisterTargetFactory("mock", func(string) (Target, error) { return tgt, nil })
-	f.sched.SetAlertFunc(func(_, _, _, eventType string) { f.alerts = append(f.alerts, eventType) })
+	f.sched.SetAlertFunc(func(_ int64, _, _, _, eventType string) { f.alerts = append(f.alerts, eventType) })
 	return f
 }
 

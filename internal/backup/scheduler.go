@@ -17,7 +17,7 @@ import (
 )
 
 // BackupAlertFunc is a callback for backup-related alerts.
-type BackupAlertFunc func(appName, strategy, message, eventType string)
+type BackupAlertFunc func(appID int64, appName, strategy, message, eventType string)
 
 // BackupStore is the subset of store.Store needed by Scheduler.
 type BackupStore interface {
@@ -193,7 +193,7 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	if err != nil {
 		errMsg := err.Error()
 		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
-		s.sendAlert(app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
+		s.sendAlert(app.ID, app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
 		return fmt.Errorf("%s", errMsg)
 	}
 
@@ -206,7 +206,7 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	if err != nil {
 		errMsg := err.Error()
 		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
-		s.sendAlert(app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
+		s.sendAlert(app.ID, app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
 		return fmt.Errorf("pipeline: %w", err)
 	}
 
@@ -217,7 +217,7 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	// Prune old runs based on retention mode
 	s.pruneOldRuns(ctx, cfg, target)
 
-	s.sendAlert(app.Name, cfg.Strategy, "backup completed successfully", "backup_success")
+	s.sendAlert(app.ID, app.Name, cfg.Strategy, "backup completed successfully", "backup_success")
 	return nil
 }
 
@@ -353,14 +353,14 @@ func (s *Scheduler) CheckMissed() {
 			if err == nil {
 				appName = app.Name
 			}
-			s.sendAlert(appName, cfg.Strategy, "missed scheduled backup (overdue >2x interval)", "backup_missed")
+			s.sendAlert(cfg.AppID, appName, cfg.Strategy, "missed scheduled backup (overdue >2x interval)", "backup_missed")
 		}
 	}
 }
 
-func (s *Scheduler) sendAlert(appName, strategy, message, eventType string) {
+func (s *Scheduler) sendAlert(appID int64, appName, strategy, message, eventType string) {
 	if s.alertFunc != nil {
-		s.alertFunc(appName, strategy, message, eventType)
+		s.alertFunc(appID, appName, strategy, message, eventType)
 	}
 }
 
