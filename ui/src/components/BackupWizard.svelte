@@ -30,9 +30,6 @@
   let postHooks = $state([])
   let selectedPaths = $state([])
 
-  // Hook toggles for smart suggestions
-  let stopDuringBackup = $state(false)
-  let redisFlush = $state(false)
   let customPreHook = $state({ service: '', command: '' })
   let customPostHook = $state({ service: '', command: '' })
   let showCustomPre = $state(false)
@@ -102,8 +99,6 @@
     postHooks = []
     selectedPaths = []
     detectedPaths = []
-    stopDuringBackup = false
-    redisFlush = false
     customPreHook = { service: '', command: '' }
     customPostHook = { service: '', command: '' }
     showCustomPre = false
@@ -137,10 +132,17 @@
     }
 
     try {
-      if (cfg.pre_hooks) preHooks = typeof cfg.pre_hooks === 'string' ? JSON.parse(cfg.pre_hooks) : cfg.pre_hooks
-      if (cfg.post_hooks) postHooks = typeof cfg.post_hooks === 'string' ? JSON.parse(cfg.post_hooks) : cfg.post_hooks
+      if (cfg.pre_hooks) preHooks = storedHooks(cfg.pre_hooks)
+      if (cfg.post_hooks) postHooks = storedHooks(cfg.post_hooks)
       if (cfg.paths) selectedPaths = typeof cfg.paths === 'string' ? JSON.parse(cfg.paths) : cfg.paths
     } catch {}
+  }
+
+  // Older wizard versions saved the detected-service object as the
+  // service. Those hooks never ran and the server drops them, so skip them.
+  function storedHooks(raw) {
+    const list = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return Array.isArray(list) ? list.filter(h => h && typeof h.service === 'string') : []
   }
 
   async function loadDetection() {
@@ -224,26 +226,7 @@
   }
 
   function buildHooks() {
-    let pre = [...preHooks]
-    let post = [...postHooks]
-
-    if (stopDuringBackup) {
-      const strat = strategies.find(s => getStrategyType(s) === selectedStrategy)
-      const svc = strat?.services?.[0] || strat?.containers?.[0] || ''
-      if (svc) {
-        pre = [{ type: 'stop_container', service: svc }, ...pre]
-        post = [...post, { type: 'start_container', service: svc }]
-      }
-    }
-    if (redisFlush) {
-      const strat = strategies.find(s => getStrategyType(s) === selectedStrategy)
-      const svc = strat?.services?.[0] || strat?.containers?.[0] || ''
-      if (svc) {
-        pre = [{ type: 'exec', service: svc, command: 'redis-cli BGSAVE' }, ...pre]
-      }
-    }
-
-    return { pre, post }
+    return { pre: [...preHooks], post: [...postHooks] }
   }
 
   async function createBackup() {
@@ -337,8 +320,6 @@
   const unselectedCardClass = 'border-border/50 bg-surface-3/30 hover:border-border'
 
   let isVolumeLike = $derived(selectedStrategy === 'volume' || selectedStrategy === 'sqlite')
-  let isRedis = $derived(selectedStrategy === 'redis')
-  let showHookSuggestions = $derived(isVolumeLike || isRedis)
 </script>
 
 <FormModal {open} title={editConfig ? 'Edit Backup Config' : 'Configure Backup'} onclose={onclose}>
@@ -581,31 +562,8 @@
     <div class="space-y-4">
       <div class="mb-4">
         <h4 class="text-sm font-semibold text-text-primary">Pre/post backup hooks</h4>
-        <p class="text-xs text-text-muted mt-0.5">Optional commands to run before or after the backup.</p>
+        <p class="text-xs text-text-muted mt-0.5">Optional commands to run before or after the backup, inside one of this app's services. Most backups do not need any.</p>
       </div>
-
-      {#if showHookSuggestions}
-        <div class="space-y-3">
-          {#if isVolumeLike}
-            <label class="flex items-start gap-3 p-3 rounded-xl border border-border/50 bg-surface-3/30 cursor-pointer hover:border-border transition-colors">
-              <input type="checkbox" bind:checked={stopDuringBackup} class="mt-0.5 accent-accent" />
-              <div>
-                <p class="text-sm font-medium text-text-primary">Stop container during backup</p>
-                <p class="text-xs text-text-muted">Ensures data consistency by stopping the service before backing up files, then restarting after.</p>
-              </div>
-            </label>
-          {/if}
-          {#if isRedis}
-            <label class="flex items-start gap-3 p-3 rounded-xl border border-border/50 bg-surface-3/30 cursor-pointer hover:border-border transition-colors">
-              <input type="checkbox" bind:checked={redisFlush} class="mt-0.5 accent-accent" />
-              <div>
-                <p class="text-sm font-medium text-text-primary">Flush to disk before backup</p>
-                <p class="text-xs text-text-muted">Runs <code class="text-xs font-mono bg-surface-3 px-1 rounded">redis-cli BGSAVE</code> to ensure all data is written to disk.</p>
-              </div>
-            </label>
-          {/if}
-        </div>
-      {/if}
 
       <!-- Custom pre-hooks -->
       <div class="space-y-2">
@@ -632,7 +590,7 @@
 
         {#each preHooks as hook, i}
           <div class="flex items-center gap-2 px-3 py-2 bg-surface-3/20 rounded-lg text-xs">
-            <span class="font-mono text-text-secondary">{hook.service}: {hook.command}</span>
+            <span class="font-mono text-text-secondary">{hook.service}: {hook.command || hook.type}</span>
             <button type="button" onclick={() => removePreHook(i)} class="ml-auto text-text-muted hover:text-danger transition-colors">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -667,7 +625,7 @@
 
         {#each postHooks as hook, i}
           <div class="flex items-center gap-2 px-3 py-2 bg-surface-3/20 rounded-lg text-xs">
-            <span class="font-mono text-text-secondary">{hook.service}: {hook.command}</span>
+            <span class="font-mono text-text-secondary">{hook.service}: {hook.command || hook.type}</span>
             <button type="button" onclick={() => removePostHook(i)} class="ml-auto text-text-muted hover:text-danger transition-colors">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -682,7 +640,7 @@
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          Custom commands run inside the container as root.
+          Commands run with <code class="font-mono">sh -c</code> inside the named service's container, with the same access the app already has. A failed pre-backup command cancels the backup.
         </p>
       {/if}
     </div>

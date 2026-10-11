@@ -170,4 +170,79 @@ describe('BackupWizard', () => {
       });
     });
   });
+
+  describe('hooks', () => {
+    const detected = {
+      data: {
+        strategies: [{
+          strategy_type: 'volume',
+          label: 'Files & Volumes',
+          available: true,
+          services: [{ service_name: 'db', container_name: 'simpledeploy-foo-db-1', label: 'volume', paths: ['/data'] }],
+        }],
+      },
+      error: null,
+      status: 200,
+    };
+
+    async function toHooksStep(utils) {
+      for (let i = 0; i < 3; i++) await clickNext(utils); // steps 1 -> 4
+    }
+
+    async function finishFromHooks(utils, buttonName) {
+      for (let i = 0; i < 2; i++) await clickNext(utils); // steps 4 -> 6
+      await fireEvent.click(utils.getByRole('button', { name: buttonName }));
+    }
+
+    // The backup runs inside the detected service, so stopping it first
+    // would make every backup fail; the server refuses such hooks.
+    it('does not offer to stop the service being backed up', async () => {
+      api.detectStrategies.mockResolvedValue(detected);
+      const utils = render(BackupWizard, { open: true, slug: 'foo' });
+      await toHooksStep(utils);
+      expect(utils.queryByText('Stop container during backup')).toBeNull();
+      expect(utils.queryByRole('checkbox')).toBeNull();
+    });
+
+    it('saves a custom command as an exec hook with the service name', async () => {
+      api.detectStrategies.mockResolvedValue(detected);
+      const utils = render(BackupWizard, { open: true, slug: 'foo' });
+      await toHooksStep(utils);
+      await fireEvent.click(utils.getByText('Custom pre-backup command'));
+      await fireEvent.input(utils.getByPlaceholderText('Service name'), { target: { value: 'web' } });
+      await fireEvent.input(utils.getByPlaceholderText('Command to run'), { target: { value: 'sync' } });
+      await fireEvent.click(utils.getByRole('button', { name: 'Add' }));
+      await finishFromHooks(utils, 'Create Backup');
+      await waitFor(() => expect(api.createBackupConfig).toHaveBeenCalledTimes(1));
+      const [, cfg] = api.createBackupConfig.mock.calls[0];
+      expect(JSON.parse(cfg.pre_hooks)).toEqual([{ type: 'exec', service: 'web', command: 'sync' }]);
+      expect(JSON.parse(cfg.post_hooks)).toEqual([]);
+    });
+
+    it('drops hooks saved by the old wizard format when editing', async () => {
+      api.detectStrategies.mockResolvedValue(detected);
+      const editConfig = {
+        id: 9,
+        strategy: 'volume',
+        target: 'local',
+        schedule_cron: '0 2 * * *',
+        retention_mode: 'count',
+        retention_count: 3,
+        pre_hooks: JSON.stringify([
+          { type: 'stop_container', service: { service_name: 'db', container_name: 'simpledeploy-foo-db-1' } },
+          { type: 'exec', service: 'web', command: 'sync' },
+        ]),
+        post_hooks: JSON.stringify([{ type: 'start_container', service: { service_name: 'db' } }]),
+      };
+      const utils = render(BackupWizard, { open: true, slug: 'foo', editConfig });
+      await toHooksStep(utils);
+      expect(utils.container.textContent).not.toContain('[object Object]');
+      expect(utils.getByText('web: sync')).toBeTruthy();
+      await finishFromHooks(utils, 'Save Changes');
+      await waitFor(() => expect(api.updateBackupConfig).toHaveBeenCalledTimes(1));
+      const [, cfg] = api.updateBackupConfig.mock.calls[0];
+      expect(JSON.parse(cfg.pre_hooks)).toEqual([{ type: 'exec', service: 'web', command: 'sync' }]);
+      expect(JSON.parse(cfg.post_hooks)).toEqual([]);
+    });
+  });
 });
