@@ -55,7 +55,7 @@ Remove a deployed app.
 simpledeploy remove --name myapp
 ```
 
-Stops containers, removes network, deletes from store and apps directory.
+Stops containers, removes network, deletes from store and apps directory. Named data volumes are kept; list them with `docker volume ls --filter name=simpledeploy-myapp_` and delete with `docker volume rm`.
 
 ### `simpledeploy list`
 
