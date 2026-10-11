@@ -3,7 +3,10 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/deployer"
@@ -94,5 +97,37 @@ func TestRestartAndPullSkippedReportBusy(t *testing.T) {
 	}
 	if err := r.PullOne(context.Background(), "app"); !errors.Is(err, deployer.ErrDeployInProgress) {
 		t.Errorf("PullOne err = %v, want ErrDeployInProgress", err)
+	}
+}
+
+// A watcher reconcile skipped because another deploy of the app was running
+// is retried once that deploy finishes, so the newer file gets deployed.
+func TestSkippedReconcileRetriesAfterDeploy(t *testing.T) {
+	t.Setenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK", "true")
+	old := retryPoll
+	retryPoll = 10 * time.Millisecond
+	t.Cleanup(func() { retryPoll = old })
+
+	r, d, runner, st, appsDir := newDeployerEnv(t)
+	seedApp(t, st, appsDir, "app", safeCompose)
+	release := hold(t, d, "app")
+	if err := os.WriteFile(filepath.Join(appsDir, "app", "docker-compose.yml"), []byte("services:\n  web:\n    image: nginx:2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if runner.HasCall("docker", "up") {
+		t.Fatal("compose up ran while another deploy was in flight")
+	}
+
+	release()
+	deadline := time.Now().Add(5 * time.Second)
+	for !runner.HasCall("docker", "up") {
+		if time.Now().After(deadline) {
+			t.Fatal("skipped reconcile was not retried after the running deploy finished")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

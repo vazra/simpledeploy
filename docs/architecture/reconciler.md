@@ -23,6 +23,8 @@ There is no internal periodic tick. If you want a heartbeat sweep, restart the p
 
 Steps 3 are run as goroutines under a `chan struct{}` semaphore of capacity **3**, so at most 3 deploys execute concurrently. Step 4 runs serially after the wait.
 
+An app whose deploy is already running (an API deploy, rollback, restart or pull) is skipped in step 3, since that deploy may have read an older file. One `Reconcile()` is queued to run when it finishes (at most one per app); the hash check makes it a no-op when nothing changed.
+
 ## Hash detection
 
 Migration 008 added `apps.compose_hash` as a `TEXT` column. After every successful deploy, `deployApp()` writes the SHA-256 of the compose file. On the next reconcile, file hash is recomputed and compared. Match -> skip. Mismatch -> deploy. Failure to read -> log and skip. Hashing reads through `fsutil.ReadRegularFile`, so a symlinked file never hashes.

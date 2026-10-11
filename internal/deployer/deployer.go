@@ -74,12 +74,24 @@ func New(runner CommandRunner) (*Deployer, error) {
 	return d, nil
 }
 
-// runCmd uses RunStreaming when a DeployLog is available, otherwise falls back to d.runner.Run.
+// runCmd streams output to the DeployLog when one is available and the
+// runner is the real ExecRunner. Other runners (test fakes) go through Run,
+// and their output is replayed into the log afterwards.
 func (d *Deployer) runCmd(ctx context.Context, dl *DeployLog, name string, args ...string) (string, string, error) {
-	if dl != nil {
+	if _, real := d.runner.(*ExecRunner); real && dl != nil {
 		return RunStreaming(ctx, dl, name, args...)
 	}
-	return d.runner.Run(ctx, name, args...)
+	stdout, stderr, err := d.runner.Run(ctx, name, args...)
+	if dl != nil {
+		for _, out := range []struct{ text, stream string }{{stdout, "stdout"}, {stderr, "stderr"}} {
+			for _, l := range strings.Split(strings.TrimRight(out.text, "\n"), "\n") {
+				if l != "" {
+					dl.Send(OutputLine{Line: l, Stream: out.stream})
+				}
+			}
+		}
+	}
+	return stdout, stderr, err
 }
 
 func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...RegistryAuth) (result DeployResult) {
