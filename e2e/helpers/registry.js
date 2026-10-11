@@ -39,7 +39,7 @@ function dockerStdin(args, input) {
   });
 }
 
-// startRegistry spins up a registry:2 container with htpasswd-based basic auth
+// startRegistry spins up a registry:2.8.3 container with htpasswd-based basic auth
 // bound to a random localhost port. Returns { host, user, pass, container, stop() }.
 export async function startRegistry(opts = {}) {
   const user = opts.user || 'testuser';
@@ -68,7 +68,7 @@ export async function startRegistry(opts = {}) {
     '-e', 'REGISTRY_AUTH=htpasswd',
     '-e', 'REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm',
     '-e', 'REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd',
-    mirrored('registry:2'),
+    mirrored('registry:2.8.3'),
   ]);
   docker(['cp', authDir, `${container}:/auth`]);
   docker(['start', container]);

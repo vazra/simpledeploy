@@ -4,6 +4,6 @@ services:
   minio:
     image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
   registry:
-    image: registry:2
+    image: registry:2.8.3
   registry-push-source:
     image: nginx:alpine

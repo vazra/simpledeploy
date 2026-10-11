@@ -61,7 +61,7 @@ Every test must be able to fail when the feature it names breaks (see [Test desi
 | `27-backup-s3.spec.js` | **MinIO fixture**: S3 roundtrip, presigned download checksum, bad credentials, retention prunes objects and runs |
 | `28-db-strategies.spec.js` | MySQL, MongoDB, Redis, SQLite backup/restore roundtrips against real containers |
 | `29a-ratelimit.spec.js` | **Isolated server**: exact allow/deny sequence, `Retry-After`, per-key buckets, recovery after the window |
-| `29b-private-registry.spec.js` | **registry:2 fixture**: deploy from a private registry; removing creds fails with an auth error |
+| `29b-private-registry.spec.js` | **registry:2.8.3 fixture**: deploy from a private registry; removing creds fails with an auth error |
 | `30-app-templates-ui.spec.js` | Every app template validates (validate-compose and `docker compose config`); multi-endpoint templates in Quick test mode |
 | `95-archive.spec.js` | Removing an app folder archives the app (containers and route gone); purge |
 | `99-cleanup.spec.js` | UI delete removes containers, folder and API entry; API delete of a multi-service app |
@@ -91,7 +91,7 @@ DB strategy fixtures (used by `28-db-strategies.spec.js`, deployed per-describe)
 Some specs spin up their own fixture containers via docker CLI and tear them down in `afterAll`. They're NOT managed by simpledeploy. With `E2E_USE_MIRROR=1` (CI) their images come from the GHCR mirror (`helpers/images.js`).
 
 - **MinIO** (`helpers/minio.js`, used by `27-backup-s3.spec.js`): runs `pgsty/silo` (maintained drop-in MinIO fork; official `minio/minio` images are gone) pinned to the same tag as the MinIO templates, on a random localhost port, and creates a bucket via the `mc` client bundled in that image. Use for testing the S3 target without real AWS credentials. Returns `{endpoint, accessKey, secretKey, bucket, mc(), listObjects(), stop()}`.
-- **Registry** (`helpers/registry.js`, used by `29b-private-registry.spec.js`): runs `registry:2` with htpasswd auth (the file is copied in with `docker cp`, since macOS temp dirs are not visible to colima) on a random localhost port. Helper `pushImage(reg, from, toName)` handles pull→tag→login→push→logout. `startRegistry()` returns `{host, user, pass, stop()}`. Docker Desktop treats `127.0.0.0/8` as insecure by default; Linux Docker does too, so plain HTTP to `localhost:<port>` works.
+- **Registry** (`helpers/registry.js`, used by `29b-private-registry.spec.js`): runs `registry:2.8.3` with htpasswd auth (the file is copied in with `docker cp`, since macOS temp dirs are not visible to colima) on a random localhost port. Helper `pushImage(reg, from, toName)` handles pull→tag→login→push→logout. `startRegistry()` returns `{host, user, pass, stop()}`. Docker Desktop treats `127.0.0.0/8` as insecure by default; Linux Docker does too, so plain HTTP to `localhost:<port>` works.
 
 ## Helpers
 

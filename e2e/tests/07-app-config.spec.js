@@ -19,14 +19,15 @@ test.describe('App Configuration', () => {
     await main.getByRole('button', { name: 'YAML', exact: true }).click();
 
     const editor = main.locator('textarea').first();
-    await expect(editor).toHaveValue(/image: nginx:alpine\n/);
-    const edited = (await editor.inputValue()).replace('image: nginx:alpine', 'image: nginx:1.27-alpine');
+    // With E2E_USE_MIRROR=1 the stored image carries the mirror prefix.
+    await expect(editor).toHaveValue(/image: (\S+\/)?nginx:alpine\n/);
+    const edited = (await editor.inputValue()).replace(/image: (\S+\/)?nginx:alpine/, 'image: $1nginx:1.27-alpine');
     await editor.fill(edited);
     await main.getByRole('button', { name: 'Save & Deploy' }).click();
 
     const review = page.getByRole('dialog').filter({ hasText: 'Review Changes' });
-    await expect(review.getByText(/^- +image: nginx:alpine$/)).toBeVisible();
-    await expect(review.getByText(/^\+ +image: nginx:1\.27-alpine$/)).toBeVisible();
+    await expect(review.getByText(/^- +image: (\S+\/)?nginx:alpine$/)).toBeVisible();
+    await expect(review.getByText(/^\+ +image: (\S+\/)?nginx:1\.27-alpine$/)).toBeVisible();
     const deployRes = page.waitForResponse((r) => r.url().endsWith('/api/apps/deploy') && r.request().method() === 'POST');
     await review.getByRole('button', { name: 'Confirm & Deploy' }).click();
     expect((await deployRes).status()).toBe(202);

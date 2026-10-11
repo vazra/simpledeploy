@@ -21,11 +21,14 @@ test.describe('Activity changelog', () => {
     await loginAsAdmin(page);
   });
 
-  test('per-app deploy entries name the deployed version', async ({ page }) => {
+  // The deployer cannot know the version it deploys, so the summary leaves
+  // it out instead of claiming "version 0".
+  test('per-app deploy entries record successful deploys without a bogus version', async ({ page }) => {
     await openAppActivity(page, 'e2e-nginx');
     await page.locator('[data-testid="activity-filter-deploy"]').click();
     await expect(rows(page).filter({ hasText: 'deploy_succeeded' }).first()).toBeVisible();
-    await expect(rows(page).filter({ hasText: /Deploy succeeded \(version [1-9]\d*\)/ }).first()).toBeVisible();
+    await expect(rows(page).filter({ hasText: /Deploy succeeded/ }).first()).toBeVisible();
+    await expect(rows(page).filter({ hasText: /version 0\)/ })).toHaveCount(0);
   });
 
   test('global audit (system page) shows entries from multiple apps', async ({ page }) => {

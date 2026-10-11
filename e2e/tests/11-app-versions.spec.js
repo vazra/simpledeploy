@@ -20,8 +20,8 @@ test.describe('Deploy History', () => {
     }
     const latest = versions[0];
     const oldest = versions[versions.length - 1];
-    expect(latest.content).toContain('image: nginx:1.27-alpine');
-    expect(oldest.content).toContain('image: nginx:alpine');
+    expect(latest.content).toMatch(/image: (\S+\/)?nginx:1\.27-alpine\n/);
+    expect(oldest.content).toMatch(/image: (\S+\/)?nginx:alpine\n/);
 
     const dl = await fetch(`${getState().baseURL}/api/apps/e2e-nginx/versions/${latest.id}/download`, {
       headers: { Cookie: getSessionCookie() },
