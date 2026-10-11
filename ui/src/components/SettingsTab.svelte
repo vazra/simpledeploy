@@ -53,6 +53,7 @@
   let showDanger = $state(false)
   let showDeleteModal = $state(false)
   let deleting = $state(false)
+  let deleteError = $state('')
 
   // Export
   let exporting = $state(false)
@@ -190,9 +191,16 @@
 
   async function confirmDelete() {
     deleting = true
-    await api.removeApp(slug)
+    deleteError = ''
+    const res = await api.removeApp(slug)
     deleting = false
     showDeleteModal = false
+    // On failure the API call already toasted the reason; stay on the page
+    // so it is clear the app still exists.
+    if (res?.error) {
+      deleteError = res.error
+      return
+    }
     push('/')
   }
 
@@ -480,6 +488,11 @@
             Delete App
           </Button>
         </div>
+        {#if deleteError}
+          <p role="alert" data-testid="delete-error" class="mt-3 text-sm text-danger whitespace-pre-line break-words">
+            The app was not deleted: {deleteError}
+          </p>
+        {/if}
       </div>
     {/if}
   </div>
