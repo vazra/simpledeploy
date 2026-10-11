@@ -370,20 +370,20 @@ func TestSetAlertFunc(t *testing.T) {
 		Target:   "mock",
 	}
 
-	var alertCalled bool
+	var alertAppID int64
 	tgt := newMockTarget()
 	strategy := &mockStrategy{data: "data", filename: "f.tar"}
 
 	sched := NewScheduler(st, nil)
 	sched.RegisterStrategy("mock", strategy)
 	sched.RegisterTargetFactory("mock", func(string) (Target, error) { return tgt, nil })
-	sched.SetAlertFunc(func(appName, strategy, message, eventType string) {
-		alertCalled = true
+	sched.SetAlertFunc(func(appID int64, appName, strategy, message, eventType string) {
+		alertAppID = appID
 	})
 
 	_ = sched.RunBackup(context.Background(), 1)
-	if !alertCalled {
-		t.Error("alert func should have been called on success")
+	if alertAppID != 10 {
+		t.Errorf("alert app ID = %d, want 10 (alert func should be called with the config's app)", alertAppID)
 	}
 }
 

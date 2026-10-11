@@ -42,6 +42,6 @@ Delivery is single-shot: each notification is one POST with a 10 second timeout.
 
 The backup scheduler reports events through a callback wired in `cmd/simpledeploy/main.go` to `Evaluator.DispatchBackupAlert`, so a single webhook can receive both metric and backup alerts. Event types are `backup_failed`, `backup_success` and `backup_missed` (from the periodic missed-schedule check). A rule matches when its metric equals the event type or is `backup_all`.
 
-Scope: a global rule (no app) fires for every app's events. An app-scoped rule fires only for its own app. The scheduler identifies the app by display name, so the dispatcher loads the rule's app and compares names; a rule whose app cannot be loaded does not fire. Two apps sharing one display name would match each other's scoped rules.
+Scope: a global rule (no app) fires for every app's events. An app-scoped rule fires only for its own app: the scheduler passes the app's ID with each event and the dispatcher compares it with the rule's app.
 
 Backup events have no threshold or duration and no `alert_history` row: every matching event sends one notification. The payload uses `Status` `firing` (the rule fired) for every event type, `MetricDisplay` `Backup Failed`, `Backup Succeeded` or `Backup Missed`, and the scheduler's message as `ValueDisplay`.

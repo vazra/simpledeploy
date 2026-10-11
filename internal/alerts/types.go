@@ -51,6 +51,7 @@ func formatMetricValue(metric string, value float64) string {
 
 // BackupAlertEvent represents a backup-related alert.
 type BackupAlertEvent struct {
+	AppID     int64
 	AppName   string
 	Strategy  string
 	Message   string

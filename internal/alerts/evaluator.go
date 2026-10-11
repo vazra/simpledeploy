@@ -183,15 +183,9 @@ func (e *Evaluator) DispatchBackupAlert(event BackupAlertEvent) {
 	}
 }
 
-// backupEventForApp reports whether event came from app appID. The backup
-// scheduler identifies the app by its display name, so compare against the
-// rule's app; an app that cannot be loaded matches nothing.
+// backupEventForApp reports whether event came from app appID.
 func (e *Evaluator) backupEventForApp(event BackupAlertEvent, appID int64) bool {
-	app, err := e.appLookup.GetAppByID(appID)
-	if err != nil || app == nil {
-		return false
-	}
-	return app.Name == event.AppName
+	return event.AppID != 0 && event.AppID == appID
 }
 
 func checkCondition(value float64, operator string, threshold float64) bool {

@@ -2,7 +2,6 @@ package alerts
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -527,12 +526,6 @@ func TestEnrichEvent(t *testing.T) {
 	})
 }
 
-type failingAppLookup struct{}
-
-func (failingAppLookup) GetAppByID(id int64) (*store.App, error) {
-	return nil, errors.New("not found")
-}
-
 // dispatchBackup sends event through DispatchBackupAlert. Each rule gets its
 // own webhook at path "/r<rule id>"; the paths hit are returned sorted.
 func dispatchBackup(t *testing.T, al AppLookup, rules []store.AlertRule, event BackupAlertEvent) []string {
@@ -576,32 +569,23 @@ func TestDispatchBackupAlert_AppScoped(t *testing.T) {
 		{ID: 3, Metric: "backup_failed", Enabled: true}, // global
 	}
 	cases := []struct {
-		appName string
-		want    []string
+		name  string
+		appID int64
+		want  []string
 	}{
-		{"alpha", []string{"/r1", "/r3"}},
-		{"Beta Shop", []string{"/r2", "/r3"}}, // scheduler reports the display name
-		{"gamma", []string{"/r3"}},
+		{"alpha", alphaID, []string{"/r1", "/r3"}},
+		{"beta", betaID, []string{"/r2", "/r3"}},
+		{"other", 3, []string{"/r3"}},
+		{"unknown", 0, []string{"/r3"}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.appName, func(t *testing.T) {
-			got := dispatchBackup(t, al, rules, BackupAlertEvent{AppName: tc.appName, EventType: "backup_failed", FiredAt: time.Now()})
+		t.Run(tc.name, func(t *testing.T) {
+			// Display names may repeat; only the app ID decides scoping.
+			got := dispatchBackup(t, al, rules, BackupAlertEvent{AppID: tc.appID, AppName: "alpha", EventType: "backup_failed", FiredAt: time.Now()})
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("hits = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestDispatchBackupAlert_ScopedRuleAppLookupFails(t *testing.T) {
-	appID := int64(1)
-	rules := []store.AlertRule{
-		{ID: 1, AppID: &appID, Metric: "backup_all", Enabled: true},
-		{ID: 2, Metric: "backup_all", Enabled: true},
-	}
-	got := dispatchBackup(t, failingAppLookup{}, rules, BackupAlertEvent{AppName: "alpha", EventType: "backup_failed", FiredAt: time.Now()})
-	if want := []string{"/r2"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("hits = %v, want %v", got, want)
 	}
 }
 
@@ -627,7 +611,7 @@ func TestDispatchBackupAlert_EventTypeFilter(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.eventType, func(t *testing.T) {
-			got := dispatchBackup(t, al, rules, BackupAlertEvent{AppName: "alpha", EventType: tc.eventType, FiredAt: time.Now()})
+			got := dispatchBackup(t, al, rules, BackupAlertEvent{AppID: appID, AppName: "alpha", EventType: tc.eventType, FiredAt: time.Now()})
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("hits = %v, want %v", got, tc.want)
 			}
