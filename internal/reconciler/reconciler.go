@@ -345,7 +345,7 @@ func (r *Reconciler) RestartOne(ctx context.Context, slug string) error {
 	}
 	result := r.deployer.Restart(ctx, cfg)
 	if result.Skipped {
-		return nil
+		return deployer.ErrDeployInProgress
 	}
 	action := "restart"
 	status := "running"
@@ -434,7 +434,7 @@ func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
 	}
 	result := r.deployer.Pull(ctx, cfg, auths)
 	if result.Skipped {
-		return nil
+		return deployer.ErrDeployInProgress
 	}
 	action := "pull"
 	status := "running"
@@ -609,6 +609,12 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 		return &compose.ViolationError{Violations: v}
 	}
 
+	// Never swap the file under a running deploy: it would be skipped
+	// below and leave this version on disk without running it.
+	if r.IsDeploying(slug) {
+		return deployer.ErrDeployInProgress
+	}
+	prev, prevErr := fsutil.ReadRegularFile(composePath)
 	if err := fsutil.WriteFileAtomic(composePath, composeData, 0o600); err != nil {
 		return fmt.Errorf("write compose: %w", err)
 	}
@@ -625,7 +631,14 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 	cvID := versionID
 	result := r.deployer.RollbackDeploy(ctx, cfg, ver.Version, &cvID, auths...)
 	if result.Skipped {
-		return nil
+		// A deploy started after the check above. Put the current file
+		// back so the version that did not run is not deployed later.
+		if prevErr == nil {
+			if err := fsutil.WriteFileAtomic(composePath, prev, 0o600); err != nil {
+				log.Printf("[reconciler] restore %s compose after skipped rollback: %v", slug, err)
+			}
+		}
+		return deployer.ErrDeployInProgress
 	}
 
 	action := "rollback"

@@ -82,12 +82,14 @@ Deploy an app by uploading a compose file. `name` becomes the slug and the compo
 // Request
 {"name": "myapp", "compose": "<base64-encoded compose file>"}
 
-// Response 201
-{"name": "myapp", "status": "deployed"}
+// Response 202 (deploy runs in the background)
+{"name": "myapp", "status": "started"}
 
 // Response 400 (compose file fails security checks)
 {"error": "compose file contains disallowed directives", "violations": ["service \"web\": privileged mode not allowed"]}
 ```
+
+A compose file saved while the app is already deploying (or restarting, pulling, rolling back) is deployed as soon as that finishes.
 
 Requires `super_admin`. Rollback and version restore check the stored version with the app's current `.env`: one that fails the checks or does not load gets the same `400` `{error, violations}` body, and one using a domain another app now has gets `409`.
 
@@ -139,7 +141,7 @@ Stop, start, scale and rollback wait for `docker compose` to finish before respo
 
 ### `POST /api/apps/{slug}/restart`
 
-Restart the app's existing containers in place (`docker compose restart`). Containers are not recreated, so compose changes and newer images are not picked up (use pull or a deploy for that). Runs in the background and returns `202` with `{"status": "started"}`.
+Restart the app's existing containers in place (`docker compose restart`). Containers are not recreated, so compose changes and newer images are not picked up (use pull or a deploy for that). Runs in the background and returns `202` with `{"status": "started"}`. `409` while a deploy, rollback, restart or pull of the app is still running; try again when it finishes.
 
 ### `POST /api/apps/{slug}/stop`
 
@@ -151,7 +153,7 @@ Start stopped containers. Returns `{"status": "ok"}`.
 
 ### `POST /api/apps/{slug}/pull`
 
-Pull latest images and redeploy. Uses configured registry auth if available. Runs in the background and returns `202` with `{"status": "started"}`.
+Pull latest images and redeploy. Uses configured registry auth if available. Runs in the background and returns `202` with `{"status": "started"}`. `409` while another deploy, rollback, restart or pull of the app is running.
 
 ### `POST /api/apps/{slug}/scale`
 
@@ -197,7 +199,7 @@ Rollback to a previous compose version.
 {"status": "ok"}
 ```
 
-`400` with `{error, violations}` when the version fails today's checks or does not load; `409` when one of its domains now belongs to another app.
+`400` with `{error, violations}` when the version fails today's checks or does not load; `409` when one of its domains now belongs to another app, or while a deploy, restart or pull of the app is running (nothing changes; try again when it finishes). When `docker compose` fails, `500` with `rollback failed: compose up: <reason>: exit status 1`.
 
 ### `GET /api/apps/{slug}/events`
 

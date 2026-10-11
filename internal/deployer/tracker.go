@@ -2,9 +2,14 @@ package deployer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 )
+
+// ErrDeployInProgress is returned for an action that cannot run because a
+// deploy (or rollback, restart, pull) of the same app is still running.
+var ErrDeployInProgress = errors.New("a deploy is already running for this app, try again when it finishes")
 
 type OutputLine struct {
 	Line     string         `json:"line"`
