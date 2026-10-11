@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.4](https://github.com/vazra/simpledeploy/compare/v1.4.3...v1.4.4) (2026-10-10)
+
+
+### Bug Fixes
+
+* alert rule validation, push-retry conflicts, git sync E2E repairs ([#116](https://github.com/vazra/simpledeploy/issues/116)) ([5562fd8](https://github.com/vazra/simpledeploy/commit/5562fd880651a10f1e777290e86534f875704e80))
+* backup wizard S3 credentials and connection test ([#106](https://github.com/vazra/simpledeploy/issues/106)) ([808b166](https://github.com/vazra/simpledeploy/commit/808b166c5969df08000a6f202be446a20a143dee))
+* **deps:** update Go dependencies (compose-go 2.16, Caddy 2.11.7) ([#112](https://github.com/vazra/simpledeploy/issues/112)) ([ed49367](https://github.com/vazra/simpledeploy/commit/ed493670613ab4ddd01c7073d1a4fb00f6d5370c))
+* **gitsync:** keep pulls working in pull-only mode ([#108](https://github.com/vazra/simpledeploy/issues/108)) ([009b832](https://github.com/vazra/simpledeploy/commit/009b832178b62995fcf9f075e4b5420a43e50e5a))
+* **proxy:** keep app-set security headers; record upstream failures with error status ([#115](https://github.com/vazra/simpledeploy/issues/115)) ([557aed5](https://github.com/vazra/simpledeploy/commit/557aed5ceec7cb27427ff6c08754c9c40ddf976f))
+* replace removed minio/minio image with pgsty/silo ([#109](https://github.com/vazra/simpledeploy/issues/109)) ([b8a5b74](https://github.com/vazra/simpledeploy/commit/b8a5b74eb7e39193c86a64a8185e8a98879f1dde))
+* **store:** enforce foreign keys on every connection; safe migrations; auto_vacuum ([#117](https://github.com/vazra/simpledeploy/issues/117)) ([58c0ec4](https://github.com/vazra/simpledeploy/commit/58c0ec4f028ca5d1356b8a3bea925b01a0a0acc5))
+
 ## [1.4.3](https://github.com/vazra/simpledeploy/compare/v1.4.2...v1.4.3) (2026-10-10)
 
 
