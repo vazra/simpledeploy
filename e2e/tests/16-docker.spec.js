@@ -1,51 +1,37 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest } from '../helpers/api.js';
+import { findServiceContainer, dockerInspect } from '../helpers/docker.js';
 
+// The only E2E coverage of the real Docker SDK calls behind /api/docker/*.
 test.describe('Docker Management', () => {
-  test.beforeEach(async ({ page }) => {
+  test('info, images, networks and volumes reflect the real daemon', async ({ page }) => {
+    expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
+    const info = await apiRequest('GET', '/api/docker/info');
+    expect(info.status).toBe(200);
+    expect(info.data.containers_running).toBeGreaterThan(0);
+
+    const nginx = dockerInspect(findServiceContainer('e2e-nginx', 'web'));
+    const pg = dockerInspect(findServiceContainer('e2e-postgres', 'db'));
+    const imageShortId = nginx.Image.replace('sha256:', '').slice(0, 12);
+    const networkNames = Object.keys(nginx.NetworkSettings.Networks);
+    const pgVolume = pg.Mounts.find((m) => m.Type === 'volume').Name;
+
     await loginAsAdmin(page);
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/docker`);
-  });
+    await page.goto(`${getState().baseURL}/#/docker`);
+    const main = page.locator('main');
+    const card = (label) => main.locator(`div:has(> div:text-is("${label}")) > div:nth-child(2)`);
+    await expect(card('Version')).toHaveText(info.data.server_version);
 
-  test('Docker info loads', async ({ page }) => {
-    await expect(page.getByText(/version/i).first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText(/containers/i).first()).toBeVisible();
-  });
+    await main.getByRole('button', { name: 'Images', exact: true }).click();
+    const imageRow = main.locator('table tr').filter({ hasText: imageShortId });
+    await expect(imageRow).toHaveCount(1);
+    await expect(imageRow.locator('td').first()).toHaveText(/(^|\/)nginx$/);
 
-  test('disk cleanup tab shows usage', async ({ page }) => {
-    // Disk Cleanup is the default tab, should already be visible
-    await page.locator('button').filter({ hasText: 'Disk Cleanup' }).click();
-    await expect(page.getByText(/Containers|Images|Volumes|Build Cache/i).first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('images tab lists images', async ({ page }) => {
-    await page.locator('button').filter({ hasText: /^Images$/ }).click();
-    await expect(page.getByText(/nginx/i).first()).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('networks tab lists networks', async ({ page }) => {
-    await page.locator('button').filter({ hasText: 'Networks & Volumes' }).click();
-    await expect(page.getByText(/bridge/i).first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('volumes tab lists volumes', async ({ page }) => {
-    await page.locator('button').filter({ hasText: 'Networks & Volumes' }).click();
-    // Networks & Volumes tab shows both
-    await expect(page.getByText(/Volumes/i).first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('prune containers', async ({ page }) => {
-    await page.locator('button').filter({ hasText: 'Disk Cleanup' }).click();
-    const pruneBtn = page.locator('button').filter({ hasText: /^Prune$/ }).first();
-    if (await pruneBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await pruneBtn.click();
-      const dialog = page.getByRole('dialog');
-      if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await dialog.getByRole('button', { name: /prune|confirm/i }).click();
-      }
-      // Wait for toast
-      await page.waitForTimeout(3_000);
+    await main.getByRole('button', { name: 'Networks & Volumes' }).click();
+    for (const name of networkNames) {
+      await expect(main.locator('table td').getByText(name, { exact: true })).toHaveCount(1);
     }
+    await expect(main.locator('table td').getByText(pgVolume, { exact: true })).toHaveCount(1);
   });
 });

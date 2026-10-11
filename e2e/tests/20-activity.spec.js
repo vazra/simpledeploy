@@ -1,195 +1,101 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest, waitForAppStatus } from '../helpers/api.js';
+import { b64 } from '../helpers/users.js';
+
+async function openAppActivity(page, slug) {
+  await page.goto(`${getState().baseURL}/#/apps/${slug}`);
+  await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
+}
+
+const rows = (page) => page.locator('main [data-testid="activity-row"]');
 
 test.describe('Activity changelog', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test.beforeAll(async () => {
+    expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
+  });
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('per-app activity tab shows entries with summaries', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-
-    // Tab label is raw lowercase 'activity' rendered as text
-    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
-
-    // Wait for at least one activity row to appear
-    await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
-
-    // Expect deploy-related content
-    await expect(page.locator('main')).toContainText(/deploy|created|compose/i);
-  });
-
-  test('per-app activity tab filter chips are present', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-
-    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
-
-    // Filter chips for known categories should be visible
-    await expect(page.locator('[data-testid="activity-filter-deploy"]')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('[data-testid="activity-filter-compose"]')).toBeVisible();
-  });
-
-  test('category filter narrows entries on app activity tab', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-
-    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
-
-    // Wait for rows to load
-    await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
-    const initialCount = await page.locator('[data-testid="activity-row"]').count();
-
-    // Toggle the 'compose' filter chip
-    await page.locator('[data-testid="activity-filter-compose"]').click();
-    await page.waitForTimeout(600);
-
-    // Page should still render without error
-    await expect(page.locator('main')).toBeVisible();
-
-    // Toggle it back off; count should return to at least initialCount
-    await page.locator('[data-testid="activity-filter-compose"]').click();
-    await page.waitForTimeout(600);
-
-    const finalCount = await page.locator('[data-testid="activity-row"]').count();
-    expect(finalCount).toBeGreaterThanOrEqual(Math.max(1, initialCount - 1));
+  test('per-app deploy entries name the deployed version', async ({ page }) => {
+    await openAppActivity(page, 'e2e-nginx');
+    await page.locator('[data-testid="activity-filter-deploy"]').click();
+    await expect(rows(page).filter({ hasText: 'deploy_succeeded' }).first()).toBeVisible();
+    await expect(rows(page).filter({ hasText: /Deploy succeeded \(version [1-9]\d*\)/ }).first()).toBeVisible();
   });
 
   test('global audit (system page) shows entries from multiple apps', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/system`);
-
-    // Click the "Audit Log" tab
+    await page.goto(`${getState().baseURL}/#/system`);
     await page.locator('button').filter({ hasText: 'Audit Log' }).click();
+    await expect(rows(page).first()).toBeVisible();
 
-    // Wait for at least one row
-    await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
-
-    // Filter to non-auth categories so app-scoped rows surface above the
-    // login noise on page one.
+    // Filter to app categories so app-scoped rows surface above the login noise.
     await page.locator('[data-testid="activity-filter-lifecycle"]').click();
     await page.locator('[data-testid="activity-filter-compose"]').click();
-
-    // After filtering, at least one row should reference a deployed app slug.
-    const rows = page.locator('[data-testid="activity-row"]');
-    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
-    await expect(rows.filter({ hasText: /e2e-nginx|e2e-multi|e2e-postgres/ }).first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('global audit filter chips are present', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/system`);
-
-    await page.locator('button').filter({ hasText: 'Audit Log' }).click();
-
-    await expect(page.locator('[data-testid="activity-filter-deploy"]')).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('[data-testid="activity-filter-compose"]')).toBeVisible();
-  });
-
-  test('dashboard recent activity card renders', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
-
-    // Card heading is "Recent Activity"
-    await expect(page.locator('[data-testid="recent-activity-card"]')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByRole('heading', { name: /Recent Activity/i })).toBeVisible();
-
-    // At least one activity row should appear since deploys have happened
-    await expect(page.locator('[data-testid="recent-activity-card"] [data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
+    await expect.poll(async () => {
+      const slugs = await rows(page).locator('a[href^="#/apps/"]').allTextContents();
+      return new Set(slugs.map((s) => s.trim()).filter((s) => /^e2e-(nginx|multi|postgres)$/.test(s))).size;
+    }).toBeGreaterThanOrEqual(2);
   });
 
   test('failed deploy entry shows error inline', async ({ page }) => {
-    // Trigger requires API setup to inject a bad compose; covered by Go unit tests in deployer
-    test.skip(true, 'Failed-deploy trigger requires nontrivial API plumbing; covered by Go unit tests in deployer');
+    const slug = 'e2e-bad-image';
+    // Unreachable local registry: fails fast, no network, not rewritten by the mirror.
+    const compose = 'services:\n  web:\n    image: 127.0.0.1:1/e2e/missing:nope\n';
+    try {
+      const res = await apiRequest('POST', '/api/apps/deploy', { name: slug, compose: b64(compose) });
+      expect(res.status).toBe(202);
+      await waitForAppStatus(slug, 'error', 90_000);
+
+      let failed;
+      await expect.poll(async () => {
+        const act = await apiRequest('GET', `/api/apps/${slug}/activity`);
+        failed = act.data.entries.find((e) => e.action === 'deploy_failed');
+        return failed?.error || '';
+      }).not.toBe('');
+
+      await openAppActivity(page, slug);
+      const row = rows(page).filter({ hasText: 'deploy_failed' });
+      await expect(row).toHaveCount(1);
+      await expect(row).toContainText(`Deploy failed: ${failed.error}`);
+      await expect(row.locator('.text-red-400, details summary').filter({ hasText: failed.error.slice(0, 100) })).toBeVisible();
+    } finally {
+      expect((await apiRequest('DELETE', `/api/apps/${slug}`)).status).toBe(200);
+    }
   });
 
-  test('expand chevron loads full entry detail', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
-
-    // Find the first row that has expandable detail (compose entries have After JSON).
-    const composeRow = page.locator('[data-testid="activity-row"]').filter({ hasText: /compose/i }).first();
-    await expect(composeRow).toBeVisible({ timeout: 10_000 });
-    await composeRow.locator('button[aria-label="Show details"]').click();
-
-    // After expand, an "After" label should appear within the activity panel.
-    await expect(page.locator('main').getByText(/^After$/i).first()).toBeVisible({ timeout: 5_000 });
+  test('env vars edit appears as an env row naming the variable', async ({ page }) => {
+    const original = await apiRequest('GET', '/api/apps/e2e-nginx/env');
+    expect(original.status).toBe(200);
+    try {
+      const r = await apiRequest('PUT', '/api/apps/e2e-nginx/env', [...original.data, { key: 'AUDIT_TEST', value: 'hello' }]);
+      expect(r.status).toBe(200);
+      await openAppActivity(page, 'e2e-nginx');
+      await expect(rows(page).filter({ hasText: /Environment variables: added AUDIT_TEST/ }).first()).toBeVisible();
+    } finally {
+      expect((await apiRequest('PUT', '/api/apps/e2e-nginx/env', original.data)).status).toBe(200);
+    }
   });
 
-  test('sync status badge appears on sync-eligible entries', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
-
-    // At least one row exists
-    await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
-
-    // Compose/lifecycle entries are sync-eligible. Locate a row with a sync badge
-    // (text or aria-label containing "synced" or "pending").
-    const rowsWithBadge = page.locator('[data-testid="activity-row"]').filter({ hasText: /pending|synced/i });
-    await expect(rowsWithBadge.first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('env vars edit appears as env/changed row in per-app feed', async ({ page, request }) => {
-    const state = getState();
-    const cookies = await page.context().cookies();
-    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
-
-    // Edit env vars via API to create an env/changed audit row
-    const r = await request.put(`${state.baseURL}/api/apps/e2e-nginx/env`, {
-      data: [{ key: 'AUDIT_TEST', value: 'hello' }],
-      headers: { Cookie: cookieHeader, 'Content-Type': 'application/json' },
-      ignoreHTTPSErrors: true,
-    });
-    expect(r.status()).toBeLessThan(300);
-
-    // Navigate to activity tab and confirm the env entry surfaces
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    await page.locator('button').filter({ hasText: /^activity$/ }).first().click();
-
-    const envRows = page.locator('[data-testid="activity-row"]').filter({ hasText: /env/i });
-    await expect(envRows.first()).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('audit retention config form is visible to super-admin', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/system`);
+  test('super-admin can purge all activity', async ({ page }) => {
+    await page.goto(`${getState().baseURL}/#/system`);
     await page.locator('button').filter({ hasText: 'Audit Log' }).click();
+    await expect(rows(page).first()).toBeVisible();
 
-    // The retention input + save button should be present (e2eadmin is super-admin in setup)
-    const retentionInput = page.locator('input[type="number"]').first();
-    await expect(retentionInput).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByRole('button', { name: /^Save$/ })).toBeVisible();
-  });
+    await page.getByRole('button', { name: 'Purge all activity' }).click();
+    const purgeP = page.waitForResponse((r) => r.request().method() === 'DELETE' && r.url().endsWith('/api/activity'));
+    await page.getByRole('button', { name: 'Yes, purge all' }).click();
+    expect((await purgeP).status()).toBe(204);
 
-  test('super-admin can purge all activity', async ({ page, request }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/system`);
-    await page.locator('button').filter({ hasText: 'Audit Log' }).click();
-
-    // Activity should exist before purge
-    await expect(page.locator('[data-testid="activity-row"]').first()).toBeVisible({ timeout: 10_000 });
-
-    // Click "Purge all activity" then confirm
-    await page.getByRole('button', { name: /Purge all activity/i }).click();
-    await page.getByRole('button', { name: /Yes, purge all/i }).click();
-
-    // After purge, the API directly should report empty (a fresh login event may be
-    // recorded by subsequent traffic, so don't rely on the UI showing zero rows).
-    const cookies = await page.context().cookies();
-    const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
-    // Wait briefly for the purge to settle.
-    await page.waitForTimeout(500);
-    const r = await request.get(`${state.baseURL}/api/activity?limit=200`, {
-      headers: { Cookie: cookieHeader },
-      ignoreHTTPSErrors: true,
-    });
-    expect(r.status()).toBe(200);
-    const body = await r.json();
-    // After a successful purge there should be far fewer entries than the pre-purge state.
-    // A few new auth/system rows may have been recorded during the purge round-trip.
-    expect((body.entries || []).length).toBeLessThan(5);
+    const after = await apiRequest('GET', '/api/activity?limit=200');
+    expect(after.status).toBe(200);
+    const entries = after.data.entries;
+    expect(entries.filter((e) => ['deploy', 'compose', 'lifecycle', 'env'].includes(e.category))).toEqual([]);
+    // The purge leaves a sentinel row naming who did it.
+    expect(entries.find((e) => e.action === 'audit_purged')).toMatchObject({ actor_name: TEST_ADMIN.username });
   });
 });

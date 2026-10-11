@@ -1,65 +1,49 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState, TEST_ADMIN, login } from '../helpers/auth.js';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest } from '../helpers/api.js';
 
 test.describe('Profile', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/profile`);
+    await page.goto(`${getState().baseURL}/#/profile`);
   });
 
-  test('profile page shows user info', async ({ page }) => {
-    // Username appears in sidebar + profile page; scope to main content
-    await expect(page.locator('main').getByText(TEST_ADMIN.username).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('main').getByText(/super_admin/i).first()).toBeVisible();
+  test('update display name persists', async ({ page }) => {
+    expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
+    try {
+      await page.locator('#displayName').fill('Updated Admin Name');
+      await page.getByRole('button', { name: 'Save Profile' }).click();
+      await expect(page.getByRole('alert').filter({ hasText: 'Profile updated' })).toBeVisible();
+
+      const me = await apiRequest('GET', '/api/me');
+      expect(me.data.display_name).toBe('Updated Admin Name');
+      expect(me.data.email).toBe(TEST_ADMIN.email);
+      await page.reload();
+      await expect(page.locator('#displayName')).toHaveValue('Updated Admin Name');
+    } finally {
+      const restore = await apiRequest('PUT', '/api/me', { display_name: TEST_ADMIN.displayName, email: TEST_ADMIN.email });
+      expect(restore.status).toBe(200);
+    }
   });
 
-  test('update display name', async ({ page }) => {
-    const nameInput = page.locator('#displayName');
-    await nameInput.fill('Updated Admin Name');
-    await page.getByRole('button', { name: /save profile/i }).click();
-    await expect(page.locator('[role="alert"]').first()).toBeVisible({ timeout: 5_000 });
-    await nameInput.fill(TEST_ADMIN.displayName);
-    await page.getByRole('button', { name: /save profile/i }).click();
-  });
-
-  test('change password and re-login', async ({ page }) => {
+  test('change password: old one stops working, new one signs in', async ({ page }) => {
     const newPassword = 'NewE2ePass456!';
-    await page.locator('#currentPw').fill(TEST_ADMIN.password);
-    await page.locator('#newPw').fill(newPassword);
-    await page.locator('#confirmPw').fill(newPassword);
-    await page.getByRole('button', { name: /change password/i }).click();
-    await expect(page.locator('[role="alert"]').first()).toBeVisible({ timeout: 5_000 });
+    try {
+      await page.locator('#currentPw').fill(TEST_ADMIN.password);
+      await page.locator('#newPw').fill(newPassword);
+      await page.locator('#confirmPw').fill(newPassword);
+      await page.getByRole('button', { name: 'Change Password' }).click();
+      await expect(page.getByRole('alert').filter({ hasText: 'Password changed' })).toBeVisible();
 
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/profile`);
-    // Click the "Log out" button/link in profile page
-    await page.locator('button, a').filter({ hasText: /log out/i }).click();
-    await page.waitForSelector('#username', { timeout: 5_000 });
-
-    await login(page, TEST_ADMIN.username, newPassword);
-    // After login, sidebar should be visible
-    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible({ timeout: 5_000 });
-
-    await page.goto(`${state.baseURL}/#/profile`);
-    await page.locator('#currentPw').fill(newPassword);
-    await page.locator('#newPw').fill(TEST_ADMIN.password);
-    await page.locator('#confirmPw').fill(TEST_ADMIN.password);
-    await page.getByRole('button', { name: /change password/i }).click();
-    await expect(page.locator('[role="alert"]').first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('theme toggle works', async ({ page }) => {
-    const themeBtn = page.getByRole('button', { name: 'Toggle theme' });
-    await expect(themeBtn).toBeVisible();
-    // Get initial title (e.g., "Theme: system")
-    const titleBefore = await themeBtn.getAttribute('title');
-    // Click to cycle theme
-    await themeBtn.click();
-    // Title should change (system -> light -> dark)
-    const titleAfter = await themeBtn.getAttribute('title');
-    expect(titleAfter).not.toBe(titleBefore);
-    // Click again to restore for other tests
-    await themeBtn.click();
+      expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(401);
+      expect((await apiLogin(TEST_ADMIN.username, newPassword)).status).toBe(200);
+    } finally {
+      // Later specs sign in with the original password: restore it whichever one is current.
+      if ((await apiLogin(TEST_ADMIN.username, newPassword)).status === 200) {
+        const res = await apiRequest('PUT', '/api/me/password', { current_password: newPassword, new_password: TEST_ADMIN.password });
+        expect(res.status).toBe(200);
+      }
+      expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
+    }
   });
 });

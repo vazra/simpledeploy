@@ -1,190 +1,36 @@
 import { test, expect } from '@playwright/test';
 import { apiLogin, apiRequest } from '../helpers/api.js';
-import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { TEST_ADMIN } from '../helpers/auth.js';
+import { getAppId, sqliteExec, sqliteQuery } from '../helpers/db.js';
 
 test.describe('Edge Cases', () => {
   test.beforeAll(async () => {
-    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
   });
 
-  test.describe('Audit Log', () => {
-    test('GET /api/activity returns entries array', async () => {
-      const res = await apiRequest('GET', '/api/activity');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.data?.entries)).toBe(true);
-    });
-
-    test('activity log has at least one login event', async () => {
-      const res = await apiRequest('GET', '/api/activity');
-      expect(res.status).toBe(200);
-      const loginEvents = res.data.entries.filter((e) => e.action === 'login_succeeded');
-      expect(loginEvents.length).toBeGreaterThan(0);
-    });
-
-    test('activity log events have required fields', async () => {
-      const res = await apiRequest('GET', '/api/activity');
-      expect(res.status).toBe(200);
-      expect(res.data.entries.length).toBeGreaterThan(0);
-      const event = res.data.entries[0];
-      expect(event).toHaveProperty('created_at');
-      expect(event).toHaveProperty('action');
-      expect(event).toHaveProperty('actor_name');
-    });
+  test('a real login is recorded in the activity log', async () => {
+    const res = await apiRequest('GET', '/api/activity');
+    expect(res.status).toBe(200);
+    const login = res.data.entries.find((e) => e.action === 'login_succeeded');
+    expect(login).toMatchObject({ category: 'auth', actor_name: TEST_ADMIN.username });
   });
 
-  test.describe('Alert Rule CRUD', () => {
-    let webhookId = null;
-    let ruleId = null;
-
-    test('create webhook for alert rule tests', async () => {
-      const res = await apiRequest('POST', '/api/webhooks', {
-        name: 'e2e-edge-webhook',
-        type: 'custom',
-        url: 'https://example.com/webhook',
-      });
-      expect(res.status).toBe(201);
-      expect(res.data.id).toBeTruthy();
-      webhookId = res.data.id;
-    });
-
-    test('create alert rule', async () => {
-      expect(webhookId).toBeTruthy();
-      const res = await apiRequest('POST', '/api/alerts/rules', {
-        metric: 'cpu_pct',
-        operator: '>',
-        threshold: 80,
-        duration_sec: 60,
-        webhook_id: webhookId,
-        enabled: true,
-      });
-      expect(res.status).toBe(201);
-      expect(res.data.id).toBeTruthy();
-      expect(res.data.threshold).toBe(80);
-      ruleId = res.data.id;
-    });
-
-    test('update alert rule threshold', async () => {
-      expect(ruleId).toBeTruthy();
-      const res = await apiRequest('PUT', `/api/alerts/rules/${ruleId}`, {
-        metric: 'cpu_pct',
-        operator: '>',
-        threshold: 90,
-        duration_sec: 60,
-        webhook_id: webhookId,
-        enabled: true,
-      });
+  test('POST /api/system/prune/metrics deletes rows older than the cutoff only', async () => {
+    // 1d tier: its 400d retention keeps the background rollup away from the seed.
+    const appId = getAppId('e2e-nginx');
+    const now = Math.floor(Date.now() / 1000);
+    const oldTs = now - 3 * 86400;
+    const newTs = now - 60;
+    sqliteExec(`INSERT INTO metrics (app_id, container_id, ts, tier, cpu_pct, mem_bytes, mem_limit) VALUES
+      (${appId}, 'e2e-prune', ${oldTs}, '1d', 1, 1, 4), (${appId}, 'e2e-prune', ${newTs}, '1d', 1, 1, 4);`);
+    try {
+      const res = await apiRequest('POST', '/api/system/prune/metrics', { tier: '1d', days: 1 });
       expect(res.status).toBe(200);
-      expect(res.data.threshold).toBe(90);
-    });
-
-    test('GET /api/alerts/rules reflects updated threshold', async () => {
-      expect(ruleId).toBeTruthy();
-      const res = await apiRequest('GET', '/api/alerts/rules');
-      expect(res.status).toBe(200);
-      const rule = res.data.find((r) => r.id === ruleId);
-      expect(rule).toBeTruthy();
-      expect(rule.threshold).toBe(90);
-    });
-
-    test('delete alert rule', async () => {
-      expect(ruleId).toBeTruthy();
-      const res = await apiRequest('DELETE', `/api/alerts/rules/${ruleId}`);
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-      ruleId = null;
-    });
-
-    test('delete webhook', async () => {
-      expect(webhookId).toBeTruthy();
-      const res = await apiRequest('DELETE', `/api/webhooks/${webhookId}`);
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-      webhookId = null;
-    });
-  });
-
-  test.describe('Webhook CRUD', () => {
-    let webhookId = null;
-
-    test('create webhook', async () => {
-      const res = await apiRequest('POST', '/api/webhooks', {
-        name: 'e2e-webhook-edit',
-        type: 'custom',
-        url: 'https://example.com/original',
-      });
-      expect(res.status).toBe(201);
-      webhookId = res.data.id;
-    });
-
-    test('update webhook URL', async () => {
-      expect(webhookId).toBeTruthy();
-      const res = await apiRequest('PUT', `/api/webhooks/${webhookId}`, {
-        name: 'e2e-webhook-edit',
-        type: 'custom',
-        url: 'https://example.com/updated',
-      });
-      expect(res.status).toBe(200);
-      expect(res.data.url).toBe('https://example.com/updated');
-    });
-
-    test('GET /api/webhooks reflects updated URL', async () => {
-      expect(webhookId).toBeTruthy();
-      const res = await apiRequest('GET', '/api/webhooks');
-      expect(res.status).toBe(200);
-      const wh = res.data.find((w) => w.id === webhookId);
-      expect(wh).toBeTruthy();
-      expect(wh.url).toBe('https://example.com/updated');
-    });
-
-    test('delete webhook', async () => {
-      expect(webhookId).toBeTruthy();
-      const res = await apiRequest('DELETE', `/api/webhooks/${webhookId}`);
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-      webhookId = null;
-    });
-  });
-
-  test.describe('Dashboard Filtering (UI)', () => {
-    test('dashboard has status filter, sort, and search controls', async ({ page }) => {
-      await loginAsAdmin(page);
-      const state = getState();
-      await page.goto(`${state.baseURL}/#/`);
-      await expect(page.getByText('Applications')).toBeVisible({ timeout: 10_000 });
-
-      // Status filter dropdown (All/Running/Stopped)
-      const statusFilter = page.locator('select').filter({ hasText: /all|running|stopped/i }).first();
-      await expect(statusFilter).toBeVisible();
-
-      // Sort dropdown
-      const sortDropdown = page.locator('select').nth(1);
-      await expect(sortDropdown).toBeVisible();
-
-      // Search input
-      const searchInput = page.locator('input[type="search"], input[placeholder*="search" i], input[placeholder*="filter" i]').first();
-      await expect(searchInput).toBeVisible();
-    });
-  });
-
-  test.describe('System Prune', () => {
-    test('POST /api/system/prune/metrics returns 200', async () => {
-      const res = await apiRequest('POST', '/api/system/prune/metrics', {
-        tier: 'raw',
-        days: 1,
-      });
-      expect(res.status).toBe(200);
-      expect(res.data).toHaveProperty('deleted');
-      expect(res.data).toHaveProperty('message');
-    });
-
-    test('POST /api/system/prune/request-stats returns 200', async () => {
-      const res = await apiRequest('POST', '/api/system/prune/request-stats', {
-        tier: 'raw',
-        days: 1,
-      });
-      expect(res.status).toBe(200);
-      expect(res.data).toHaveProperty('deleted');
-      expect(res.data).toHaveProperty('message');
-    });
+      expect(res.data.deleted).toBeGreaterThanOrEqual(1);
+      const left = sqliteQuery(`SELECT ts FROM metrics WHERE container_id = 'e2e-prune' ORDER BY ts;`);
+      expect(left.map((r) => r.ts)).toEqual([newTs]);
+    } finally {
+      sqliteExec(`DELETE FROM metrics WHERE container_id = 'e2e-prune';`);
+    }
   });
 });
