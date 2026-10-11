@@ -125,7 +125,7 @@ sched.Start() // loads configs, schedules cron jobs
 7. Call `strategy.Backup()` to get data stream
 8. Call `target.Upload()` to store it
 9. Update run to `success` with size and file path
-10. Prune old runs beyond `RetentionCount`
+10. Prune old runs beyond the retention limit (`RetentionCount`, or `RetentionDays` in `time` mode): delete each file from the target, then the run row (`DeleteBackupRun`), so pruned runs are not offered for download/restore or pruned again. A file already missing counts as deleted; any other delete error keeps the row for the next prune to retry
 11. On any error: update run to `failed` with error message
 
 ### Restore Flow (`RunRestore`)

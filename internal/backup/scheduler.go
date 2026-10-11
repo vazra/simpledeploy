@@ -3,7 +3,9 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ type BackupStore interface {
 	ListOldBackupRunsByTime(configID int64, maxAgeDays int) ([]store.BackupRun, error)
 	GetAppByID(id int64) (*store.App, error)
 	GetBackupRun(id int64) (*store.BackupRun, error)
+	DeleteBackupRun(id int64) error
 }
 
 // Scheduler runs scheduled backups and handles restore requests.
@@ -378,8 +381,18 @@ func (s *Scheduler) pruneOldRuns(ctx context.Context, cfg *store.BackupConfig, t
 	}
 
 	for _, old := range oldRuns {
-		if delErr := target.Delete(ctx, old.FilePath); delErr != nil {
-			log.Printf("delete old backup file=%s: %v", old.FilePath, delErr)
+		if old.FilePath != "" {
+			// A file that is already gone counts as pruned.
+			if delErr := target.Delete(ctx, old.FilePath); delErr != nil && !errors.Is(delErr, fs.ErrNotExist) {
+				// Keep the run (its file still exists) so the next prune retries.
+				log.Printf("delete old backup file=%s: %v", old.FilePath, delErr)
+				continue
+			}
+		}
+		// Drop the run so it is no longer offered for download/restore
+		// and later prunes do not pick it up again.
+		if err := s.store.DeleteBackupRun(old.ID); err != nil {
+			log.Printf("delete pruned backup run=%d: %v", old.ID, err)
 		}
 	}
 }
