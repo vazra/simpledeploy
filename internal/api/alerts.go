@@ -304,16 +304,64 @@ func alertRuleAuditJSON(r *store.AlertRule) []byte {
 	return b
 }
 
-func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		AppID       *int64  `json:"app_id"`
-		Metric      string  `json:"metric"`
-		Operator    string  `json:"operator"`
-		Threshold   float64 `json:"threshold"`
-		DurationSec int     `json:"duration_sec"`
-		WebhookID   int64   `json:"webhook_id"`
-		Enabled     bool    `json:"enabled"`
+// alertRuleReq is the body of POST and PUT /api/alerts/rules. The app is
+// named by app_id or app_slug (the UI sends the slug); neither means a
+// global rule.
+type alertRuleReq struct {
+	AppID       *int64  `json:"app_id"`
+	AppSlug     string  `json:"app_slug"`
+	Metric      string  `json:"metric"`
+	Operator    string  `json:"operator"`
+	Threshold   float64 `json:"threshold"`
+	DurationSec int     `json:"duration_sec"`
+	WebhookID   int64   `json:"webhook_id"`
+	Enabled     bool    `json:"enabled"`
+}
+
+// alertRuleApp resolves the app a rule targets and checks the caller may
+// mutate rules for it (canMutateForApp). If both app_id and app_slug are
+// set they must name the same app. An unknown slug is a 400 for
+// super_admin; other callers get the answer they would get for an app they
+// cannot reach, so they cannot probe which apps exist. On failure the
+// response is written and ok is false.
+func (s *Server) alertRuleApp(w http.ResponseWriter, r *http.Request, req *alertRuleReq) (appID *int64, appSlug string, ok bool) {
+	if req.AppSlug == "" {
+		if !s.canMutateForApp(w, r, req.AppID) {
+			return nil, "", false
+		}
+		if req.AppID != nil {
+			if app, err := s.store.GetAppByID(*req.AppID); err == nil {
+				appSlug = app.Slug
+			}
+		}
+		return req.AppID, appSlug, true
 	}
+	app, err := s.store.GetAppBySlug(req.AppSlug)
+	if err != nil {
+		if u := GetAuthUser(r); u != nil && u.Role == "super_admin" {
+			http.Error(w, fmt.Sprintf("app %q not found", req.AppSlug), http.StatusBadRequest)
+			return nil, "", false
+		}
+		// No app has id 0, so this writes the same 401/403/404 as for an
+		// existing app the caller has no access to.
+		var none int64
+		if s.canMutateForApp(w, r, &none) {
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+		return nil, "", false
+	}
+	if !s.canMutateForApp(w, r, &app.ID) {
+		return nil, "", false
+	}
+	if req.AppID != nil && *req.AppID != app.ID {
+		http.Error(w, "app_id and app_slug name different apps", http.StatusBadRequest)
+		return nil, "", false
+	}
+	return &app.ID, app.Slug, true
+}
+
+func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
+	var req alertRuleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
@@ -326,7 +374,8 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
-	if !s.canMutateForApp(w, r, req.AppID) {
+	appID, appSlug, ok := s.alertRuleApp(w, r, &req)
+	if !ok {
 		return
 	}
 	// verify webhook exists
@@ -335,7 +384,8 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule := &store.AlertRule{
-		AppID:       req.AppID,
+		AppID:       appID,
+		AppSlug:     appSlug,
 		Metric:      req.Metric,
 		Operator:    req.Operator,
 		Threshold:   req.Threshold,
@@ -346,10 +396,6 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.CreateAlertRule(rule); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
-	}
-	var appID *int64
-	if req.AppID != nil {
-		appID = req.AppID
 	}
 	afterJSON := alertRuleAuditJSON(rule)
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
@@ -400,15 +446,7 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	var req struct {
-		AppID       *int64  `json:"app_id"`
-		Metric      string  `json:"metric"`
-		Operator    string  `json:"operator"`
-		Threshold   float64 `json:"threshold"`
-		DurationSec int     `json:"duration_sec"`
-		WebhookID   int64   `json:"webhook_id"`
-		Enabled     bool    `json:"enabled"`
-	}
+	var req alertRuleReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
@@ -422,18 +460,13 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 	if existing != nil && !s.canMutateForApp(w, r, existing.AppID) {
 		return
 	}
-	if !s.canMutateForApp(w, r, req.AppID) {
+	appID, appSlug, ok := s.alertRuleApp(w, r, &req)
+	if !ok {
 		return
-	}
-	var appSlug string
-	if req.AppID != nil {
-		if app, err := s.store.GetAppByID(*req.AppID); err == nil {
-			appSlug = app.Slug
-		}
 	}
 	rule := &store.AlertRule{
 		ID:          id,
-		AppID:       req.AppID,
+		AppID:       appID,
 		AppSlug:     appSlug,
 		Metric:      req.Metric,
 		Operator:    req.Operator,
@@ -451,10 +484,6 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 		beforeJSON = alertRuleAuditJSON(existing)
 	}
 	afterJSON := alertRuleAuditJSON(rule)
-	var appID *int64
-	if req.AppID != nil {
-		appID = req.AppID
-	}
 	_, _ = s.audit.Record(r.Context(), audit.RecordReq{
 		Category: "alert",
 		Action:   "changed",

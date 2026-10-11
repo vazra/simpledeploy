@@ -17,6 +17,7 @@ curl -X POST https://manage.yourdomain.com/api/alerts/rules \
 | Field | Type | Notes |
 |-------|------|-------|
 | `app_id` | int | Target app (omit / null for system-wide; super_admin only) |
+| `app_slug` | string | Target app by slug, instead of `app_id`. If both are set they must name the same app. An unknown slug is rejected with `400` |
 | `metric` | string | `cpu_pct`, `mem_bytes`, `mem_pct`, or a backup event (below) |
 | `operator` | string | `>`, `<`, `>=`, `<=` |
 | `threshold` | float | Numeric threshold |
@@ -35,7 +36,7 @@ Set `metric` to a backup event to get a message when backups run:
 | `backup_missed` | a scheduled backup is overdue (more than twice its interval) |
 | `backup_all` | any of the above |
 
-A rule with an `app_id` only reports that app's backups. A system-wide rule reports every app's backups. Backup rules send one message per event, so `threshold` and `duration_sec` are ignored (the API still requires an `operator`; use `>`).
+A rule for an app (`app_id` or `app_slug`) only reports that app's backups. A system-wide rule reports every app's backups. Backup rules send one message per event, so `threshold` and `duration_sec` are ignored (the API still requires an `operator`; use `>`).
 
 ## Compose label shortcuts
 

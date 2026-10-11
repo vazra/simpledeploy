@@ -376,12 +376,14 @@ Create alert rule.
 }
 ```
 
-Metrics: `cpu_pct`, `mem_bytes`, `mem_pct`.
+Metrics: `cpu_pct`, `mem_bytes`, `mem_pct`, and the backup events `backup_failed`, `backup_success`, `backup_missed`, `backup_all`.
 Operators: `>`, `<`, `>=`, `<=`.
+
+Name the app with `app_id` or `app_slug` (`"app_slug": "myapp"`). If both are set they must name the same app. Omit both for a system-wide rule (super_admin only). An unknown `app_slug` returns `400` for super_admin; `manage` users get `404` for apps they cannot manage, whether or not the app exists.
 
 ### `PUT /api/alerts/rules/{id}`
 
-Update alert rule.
+Update alert rule. Same body as `POST`; send the full rule, since an omitted app makes it system-wide.
 
 ### `DELETE /api/alerts/rules/{id}`
 
