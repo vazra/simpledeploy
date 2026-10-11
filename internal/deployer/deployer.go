@@ -130,10 +130,10 @@ func (d *Deployer) Deploy(ctx context.Context, app *compose.AppConfig, auths ...
 		args = append([]string{"--config", tmpDir}, args...)
 	}
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
-	output := strings.TrimSpace(stdout + "\n" + stderr)
+	output := redactAuths(strings.TrimSpace(stdout+"\n"+stderr), auths)
 	status, services := d.finishDeploy(ctx, dl, app.Name, project, "deploy", err)
 	if err != nil {
-		return DeployResult{Output: output, Err: fmt.Errorf("compose up: %w", err), Status: status, Services: services}
+		return DeployResult{Output: output, Err: composeError("compose up", err, stderr, auths), Status: status, Services: services}
 	}
 	return DeployResult{Output: output, Status: status, Services: services}
 }
@@ -188,10 +188,10 @@ func (d *Deployer) RollbackDeploy(ctx context.Context, app *compose.AppConfig, v
 		args = append([]string{"--config", tmpDir}, args...)
 	}
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", args...)
-	output := strings.TrimSpace(stdout + "\n" + stderr)
+	output := redactAuths(strings.TrimSpace(stdout+"\n"+stderr), auths)
 	status, services := d.finishDeploy(ctx, dl, app.Name, project, "deploy", err)
 	if err != nil {
-		return DeployResult{Output: output, Err: fmt.Errorf("compose up: %w", err), Status: status, Services: services}
+		return DeployResult{Output: output, Err: composeError("compose up", err, stderr, auths), Status: status, Services: services}
 	}
 	return DeployResult{Output: output, Status: status, Services: services}
 }
@@ -234,7 +234,7 @@ func (d *Deployer) Restart(ctx context.Context, app *compose.AppConfig) DeployRe
 	output := strings.TrimSpace(stdout + "\n" + stderr)
 	status, services := d.finishDeploy(ctx, dl, app.Name, project, "restart", err)
 	if err != nil {
-		return DeployResult{Output: output, Err: fmt.Errorf("compose restart: %w", err), Status: status, Services: services}
+		return DeployResult{Output: output, Err: composeError("compose restart", err, stderr, nil), Status: status, Services: services}
 	}
 	return DeployResult{Output: output, Status: status, Services: services}
 }
@@ -286,10 +286,10 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 	}
 
 	stdout, stderr, err := d.runCmd(ctx, dl, "docker", pullArgs...)
-	output := strings.TrimSpace(stdout + "\n" + stderr)
+	output := redactAuths(strings.TrimSpace(stdout+"\n"+stderr), auths)
 	if err != nil {
 		d.Tracker.DoneWithLogStatus(app.Name, "pull_failed", "failed", nil)
-		return DeployResult{Output: output, Err: fmt.Errorf("compose pull: %w", err), Status: "failed"}
+		return DeployResult{Output: output, Err: composeError("compose pull", err, stderr, auths), Status: "failed"}
 	}
 
 	upArgs := []string{
@@ -304,7 +304,7 @@ func (d *Deployer) Pull(ctx context.Context, app *compose.AppConfig, auths []Reg
 	output = strings.TrimSpace(output)
 	status, services := d.finishDeploy(ctx, dl, app.Name, project, "pull", err)
 	if err != nil {
-		return DeployResult{Output: output, Err: fmt.Errorf("compose up after pull: %w", err), Status: status, Services: services}
+		return DeployResult{Output: output, Err: composeError("compose up after pull", err, stderr, nil), Status: status, Services: services}
 	}
 	return DeployResult{Output: output, Status: status, Services: services}
 }

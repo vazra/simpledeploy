@@ -50,5 +50,8 @@ func renderDeployFailed(before, after []byte) (string, string) {
 func renderDeployRollback(before, after []byte) (string, string) {
 	var a deployView
 	_ = json.Unmarshal(after, &a)
+	if a.Error != "" {
+		return fmt.Sprintf("Rollback to version %d failed: %s", a.Version, a.Error), ""
+	}
 	return fmt.Sprintf("Rolled back to version %d", a.Version), ""
 }
