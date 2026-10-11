@@ -14,7 +14,7 @@
 
 import { test, expect } from '@playwright/test';
 import { execFileSync, execSync, spawn } from 'child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, createWriteStream } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, createWriteStream, renameSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHmac } from 'crypto';
@@ -116,6 +116,18 @@ async function poll(fn, timeoutMs = 10_000, intervalMs = 500) {
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error(`poll timed out after ${timeoutMs}ms; last=${JSON.stringify(last)}`);
+}
+
+// Contents of a file on the bare remote's branch, or null if absent.
+function remoteFile(bareRepoPath, path, branch = 'main') {
+  try {
+    return execFileSync('git', ['--git-dir', bareRepoPath, 'show', `${branch}:${path}`], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
 }
 
 function stopProc(srv) {
@@ -282,8 +294,11 @@ test.describe('Git sync: roundtrip + conflict', () => {
     webhookId = whRes.data.id || whRes.data.ID;
     expect(webhookId).toBeTruthy();
 
-    // Wait for debounce + commit to flush (poll_interval=1s, debounce ~500ms)
-    await new Promise((r) => setTimeout(r, 6_000));
+    // Wait until the server has pushed the app and the webhook.
+    await poll(
+      () => remoteFile(bareRepoPath, `${APP_SLUG}/docker-compose.yml`) && remoteFile(bareRepoPath, '_global.yml')?.includes('gs-slack'),
+      20_000,
+    );
 
     // Clone bare repo and assert files
     cloneDir = mkdtempSync(join(tmpdir(), 'sd-gitsync-clone-'));
@@ -380,27 +395,13 @@ test.describe('Git sync: roundtrip + conflict', () => {
   // Test 3: Conflict surfaces in status, local wins
   // -------------------------------------------------------------------------
 
-  test('Conflict surfaces in status and local wins', async () => {
+  // A real conflict needs both sides to change the same file before the
+  // server sees the remote change. With a 1s poll that only happens while
+  // the remote is unreachable, so take it offline, edit on the server (the
+  // commit stays local), restore it, and push a conflicting edit.
+  test('Conflict while remote unreachable: recorded in status, server version wins', async () => {
     expect(cloneDir, 'cloneDir must be set from previous tests').toBeTruthy();
     expect(webhookId, 'webhookId must be set from test 1').toBeTruthy();
-
-    // Let the post-pull window from test 2 close: dashboard writes right
-    // after a pull are treated as re-renders of the pulled files.
-    await new Promise((r) => setTimeout(r, 3_000));
-
-    // Pull latest into clone so it's up to date
-    execFileSync('git', ['pull'], { cwd: cloneDir });
-
-    // Modify webhook name in clone to "from-remote" and push
-    const globalPath = join(cloneDir, '_global.yml');
-    expect(existsSync(globalPath), '_global.yml missing from clone').toBe(true);
-    let globalContent = readFileSync(globalPath, 'utf-8');
-    // Replace the webhook name (may be gs-slack or from earlier renames).
-    // Anchor on the webhooks list: a bare /name:/ also matches "username:".
-    const renamed = globalContent.replace(/(webhooks:\s*\n\s*- name: )\S+/, '$1from-remote');
-    expect(renamed, 'webhook entry not found in _global.yml').not.toBe(globalContent);
-    globalContent = renamed;
-    writeFileSync(globalPath, globalContent);
 
     const gitEnv = {
       ...process.env,
@@ -409,48 +410,59 @@ test.describe('Git sync: roundtrip + conflict', () => {
       GIT_COMMITTER_NAME: 'test',
       GIT_COMMITTER_EMAIL: 'test@test',
     };
-    execFileSync('git', ['add', globalPath], { cwd: cloneDir, env: gitEnv });
-    execFileSync('git', ['commit', '-m', 'remote: rename webhook to from-remote'], { cwd: cloneDir, env: gitEnv });
-    execFileSync('git', ['push'], { cwd: cloneDir, env: gitEnv });
-
-    // On the server, update webhook name to "from-server"
-    const updateRes = await api('PUT', `/api/webhooks/${webhookId}`, {
-      name: 'from-server',
-      url: 'https://hooks.slack.com/fake/gs-test',
-      type: 'slack',
-      events: ['deploy_success'],
-    });
-    expect(updateRes.ok, `webhook update failed: ${JSON.stringify(updateRes.data)}`).toBe(true);
-
-    // Wait for server configsync debounce to commit the "from-server" name
+    // Wait until the server has pushed everything, then let the post-pull
+    // window pass (suppressTail, 1.2s): writes inside it count as re-renders
+    // of pulled files, not dashboard edits.
+    const git = (cwd, ...args) => execFileSync('git', args, { cwd, env: gitEnv, encoding: 'utf-8' }).trim();
+    await poll(() => git(srv.appsDir, 'rev-parse', 'HEAD') === git(bareRepoPath, 'rev-parse', 'main'), 20_000);
     await new Promise((r) => setTimeout(r, 2_000));
 
-    // Trigger git webhook to force pull (conflict: remote has "from-remote", local has "from-server")
-    const body = JSON.stringify({ ref: 'refs/heads/main' });
-    const wh = await triggerWebhook(baseURL, cookie, WEBHOOK_SECRET, body);
-    expect([200, 202, 204]).toContain(wh.status);
+    const offlinePath = `${bareRepoPath}.offline`;
+    renameSync(bareRepoPath, offlinePath);
+    try {
+      const updateRes = await api('PUT', `/api/webhooks/${webhookId}`, {
+        name: 'from-server',
+        url: 'https://hooks.slack.com/fake/gs-test',
+        type: 'slack',
+        events: ['deploy_success'],
+      });
+      expect(updateRes.ok, `webhook update failed: ${JSON.stringify(updateRes.data)}`).toBe(true);
 
-    // Assert RecentConflicts non-empty in /api/git/status
-    const conflictStatus = await poll(async () => {
+      // The server commits locally; the push cannot reach the remote.
+      await poll(() => {
+        try {
+          return execFileSync('git', ['show', 'HEAD:_global.yml'], { cwd: srv.appsDir, encoding: 'utf-8' }).includes('from-server');
+        } catch {
+          return false;
+        }
+      }, 15_000);
+
+      // Conflicting edit to the same line, pushed straight into the offline
+      // repo so the server cannot see it before its own commit exists.
+      git(cloneDir, 'pull', '-q', `file://${offlinePath}`, 'main');
+      const globalPath = join(cloneDir, '_global.yml');
+      const before = readFileSync(globalPath, 'utf-8');
+      const renamed = before.replace(/(webhooks:\s*\n\s*- name: )\S+/, '$1from-remote');
+      expect(renamed, 'webhook entry not found in _global.yml').not.toBe(before);
+      writeFileSync(globalPath, renamed);
+      git(cloneDir, 'commit', '-qam', 'remote: rename webhook to from-remote');
+      git(cloneDir, 'push', '-q', `file://${offlinePath}`, 'HEAD:main');
+    } finally {
+      renameSync(offlinePath, bareRepoPath);
+    }
+
+    const status = await poll(async () => {
       const r = await api('GET', '/api/git/status', null);
-      if (!r.ok) return null;
-      const conflicts = r.data?.RecentConflicts ?? r.data?.recent_conflicts ?? [];
-      return Array.isArray(conflicts) && conflicts.length > 0 ? r.data : null;
+      return r.ok && (r.data.RecentConflicts || []).some((c) => c.Path === '_global.yml') ? r.data : null;
     }, 20_000);
+    expect(status.RecentConflicts.find((c) => c.Path === '_global.yml').RemoteSHA).toBeTruthy();
 
-    expect(conflictStatus, 'no RecentConflicts in /api/git/status after conflict').toBeTruthy();
-    const conflicts = conflictStatus.RecentConflicts ?? conflictStatus.recent_conflicts;
-    const firstConflict = conflicts[0];
-    const path = firstConflict?.Path ?? firstConflict?.path ?? '';
-    expect(path, 'conflict Path should be non-empty').toBeTruthy();
-
-    // Server's webhook name should still be "from-server" (local wins)
+    // Server version wins in the dashboard and is pushed back to the remote.
     const whListRes = await api('GET', '/api/webhooks', null);
     expect(whListRes.ok).toBe(true);
-    const webhooks = Array.isArray(whListRes.data) ? whListRes.data : [];
-    const serverWh = webhooks.find((w) => (w.id ?? w.ID) === webhookId);
-    expect(serverWh, 'webhook not found after conflict').toBeTruthy();
-    const serverName = serverWh?.name ?? serverWh?.Name;
-    expect(serverName, 'local webhook name should win (from-server)').toBe('from-server');
+    const serverWh = whListRes.data.find((w) => w.id === webhookId);
+    expect(serverWh?.name, 'dashboard webhook name should stay from-server').toBe('from-server');
+    await poll(() => remoteFile(bareRepoPath, '_global.yml')?.includes('from-server'), 20_000);
+    expect(remoteFile(bareRepoPath, '_global.yml')).not.toContain('from-remote');
   });
 });

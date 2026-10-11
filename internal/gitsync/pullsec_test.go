@@ -870,3 +870,76 @@ func TestPushRetryRecordsConflicts(t *testing.T) {
 	}
 	t.Fatalf("conflict from push retry not recorded; status conflicts = %+v", e.gs.Status().RecentConflicts)
 }
+
+// A commit whose push failed because the remote was unreachable is pushed
+// on the next sync once the remote is back, without waiting for another
+// dashboard edit.
+func TestSyncPushesCommitsLeftByFailedPush(t *testing.T) {
+	e := newSecEnv(t, func(e *secEnv) {
+		seedApp(t, e.st, e.appsDir, "app1")
+	}, nil)
+	before := remoteHead(t, e.bareDir)
+
+	offline := e.bareDir + ".offline"
+	if err := os.Rename(e.bareDir, offline); err != nil {
+		t.Fatal(err)
+	}
+	auditID, err := e.st.RecordAudit(e.ctx, store.AuditEntry{
+		ActorSource: "ui", Category: "compose", Action: "changed", Summary: "offline edit", SyncEligible: true,
+	})
+	if err != nil {
+		t.Fatalf("RecordAudit: %v", err)
+	}
+	compose := filepath.Join(e.appsDir, "app1", "docker-compose.yml")
+	writeFile(t, compose, "services:\n  web:\n    image: nginx:offline-edit\n")
+	prev := e.gs.Status().HeadSHA
+	e.gs.EnqueueCommit([]string{compose}, "edit while remote unreachable")
+	drainCommits(t, e.gs, 10*time.Second)
+	local := waitForHeadUpdate(t, e.gs, prev, 10*time.Second)
+	waitFor(t, 10*time.Second, "audit row marked failed", func() bool {
+		a, err := e.st.GetActivity(e.ctx, auditID)
+		return err == nil && a.SyncStatus != nil && *a.SyncStatus == "failed"
+	})
+	if err := os.Rename(offline, e.bareDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteHead(t, e.bareDir); got != before {
+		t.Fatalf("remote moved while offline: %s -> %s", before, got)
+	}
+
+	if err := e.gs.SyncNow(e.ctx); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	if got := remoteHead(t, e.bareDir); got != local {
+		t.Fatalf("remote head = %s, want local commit %s pushed", got, local)
+	}
+	if msg := e.gs.Status().LastSyncError; msg != "" {
+		t.Fatalf("LastSyncError = %q after successful push", msg)
+	}
+	a, err := e.st.GetActivity(e.ctx, auditID)
+	if err != nil || a.SyncStatus == nil || *a.SyncStatus != "synced" || a.SyncCommitSHA != local {
+		t.Fatalf("audit row after retry = %+v (err %v), want synced at %s", a, err, local)
+	}
+}
+
+// Pull-only mode never pushes, even with unpushed local commits.
+func TestSyncPullOnlyDoesNotPushLocalCommits(t *testing.T) {
+	e := newSecEnv(t, func(e *secEnv) {
+		seedApp(t, e.st, e.appsDir, "app1")
+	}, nil)
+	before := remoteHead(t, e.bareDir)
+	e.gs.cfg.AutoPushEnabled = false
+	compose := filepath.Join(e.appsDir, "app1", "docker-compose.yml")
+	writeFile(t, compose, "services:\n  web:\n    image: nginx:local-only\n")
+	prev := e.gs.Status().HeadSHA
+	e.gs.EnqueueCommit([]string{compose}, "local edit")
+	drainCommits(t, e.gs, 10*time.Second)
+	waitForHeadUpdate(t, e.gs, prev, 10*time.Second)
+
+	if err := e.gs.SyncNow(e.ctx); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	if got := remoteHead(t, e.bareDir); got != before {
+		t.Fatalf("pull-only mode pushed: remote %s -> %s", before, got)
+	}
+}
