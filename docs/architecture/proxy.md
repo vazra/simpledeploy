@@ -56,7 +56,7 @@ All three are registered in `init()` of their respective files in [/internal/pro
 
 ### `simpledeploy_ratelimit`
 
-[/internal/proxy/ratelimit.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/ratelimit.go). Per-domain configs registered via `RateLimiters.Set(domain, cfg)` from `SetRoutes`. Each domain has its own `domainLimiter` keyed by client IP (default), header value, or query param depending on `simpledeploy.ratelimit.by`. Each domain keeps at most 10,000 buckets: when full, buckets idle for a whole window are evicted first, then the least recently used. Keys longer than 128 bytes are stored as their SHA-256.
+[/internal/proxy/ratelimit.go](https://github.com/vazra/simpledeploy/blob/main/internal/proxy/ratelimit.go). Per-domain configs registered via `RateLimiters.Set(domain, cfg)` from `SetRoutes`. Each domain has its own `domainLimiter` keyed by client IP (default), header value, or path depending on `simpledeploy.ratelimit.by`. Each bucket allows `requests` per window; a window starts at the bucket's first request after the previous one ended. With `burst` > 0, up to `burst` more requests pass once the window's `requests` are used up. The burst refills only after a whole window within `requests` (or with no requests), so a client that keeps going over is held to `requests` per window. `burst` 0 (label unset) is a plain fixed window. Each domain keeps at most 10,000 buckets: when full, buckets idle for a whole window are evicted first, then the least recently used. Keys longer than 128 bytes are stored as their SHA-256.
 
 ### `simpledeploy_ipaccess`
 

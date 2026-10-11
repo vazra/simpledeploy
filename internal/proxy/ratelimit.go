@@ -128,6 +128,8 @@ type domainLimiter struct {
 type rlBucket struct {
 	key        string
 	tokens     int
+	spare      int  // burst allowance left, used once tokens run out
+	over       bool // a request went past tokens this window
 	lastReset  time.Time
 	lastAccess time.Time
 }
@@ -171,28 +173,40 @@ func (d *domainLimiter) allow(key string) bool {
 	} else {
 		if len(d.buckets) >= d.maxBuckets {
 			// Full. Buckets idle for a whole window would restart with full
-			// tokens anyway, so dropping them loses nothing; if none are,
-			// drop the least recently used.
+			// tokens anyway, so dropping them loses little (at most a spent
+			// burst); if none are, drop the least recently used.
 			d.evictIdle(now.Add(-d.window))
 			for len(d.buckets) >= d.maxBuckets && d.lru.Len() > 0 {
 				d.removeElement(d.lru.Back())
 			}
 		}
-		b = &rlBucket{key: key, tokens: d.requests, lastReset: now}
+		b = &rlBucket{key: key, tokens: d.requests, spare: d.burst, lastReset: now}
 		d.buckets[key] = d.lru.PushFront(b)
 	}
 	b.lastAccess = now
 
-	if now.Sub(b.lastReset) >= d.window {
+	if elapsed := now.Sub(b.lastReset); elapsed >= d.window {
+		// The burst comes back only after a whole window within requests
+		// (or with no requests at all), so a client that keeps going over
+		// is held to the steady rate.
+		if !b.over || elapsed >= 2*d.window {
+			b.spare = d.burst
+		}
+		b.over = false
 		b.tokens = d.requests
 		b.lastReset = now
 	}
 
-	if b.tokens <= 0 {
-		return false
+	if b.tokens > 0 {
+		b.tokens--
+		return true
 	}
-	b.tokens--
-	return true
+	b.over = true
+	if b.spare > 0 {
+		b.spare--
+		return true
+	}
+	return false
 }
 
 // evictIdle removes buckets last used before cutoff, oldest first.

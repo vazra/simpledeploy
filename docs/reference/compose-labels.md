@@ -226,10 +226,10 @@ See [Rate limiting](/guides/rate-limiting/) for the full guide, including key ty
 
 | Label | Default | Description |
 |-------|---------|-------------|
-| `simpledeploy.ratelimit.requests` | global default (200) | Max requests per window |
-| `simpledeploy.ratelimit.window` | global default (60s) | Time window |
-| `simpledeploy.ratelimit.burst` | global default (50) | Burst allowance above limit |
-| `simpledeploy.ratelimit.by` | global default (ip) | Rate limit key |
+| `simpledeploy.ratelimit.requests` | none (no limit) | Max requests per window. Required to turn rate limiting on |
+| `simpledeploy.ratelimit.window` | `60s` | Time window |
+| `simpledeploy.ratelimit.burst` | `0` | Extra requests allowed in a short spike, on top of `requests` |
+| `simpledeploy.ratelimit.by` | `ip` | Rate limit key |
 
 ## Request Tracking Labels
 

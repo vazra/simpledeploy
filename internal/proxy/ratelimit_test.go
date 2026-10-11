@@ -291,3 +291,55 @@ func TestRateLimitHandlerHostWithPortAndCase(t *testing.T) {
 		}
 	}
 }
+
+// allowN sends n requests for key and returns how many were allowed.
+func allowN(d *domainLimiter, key string, n int) int {
+	ok := 0
+	for i := 0; i < n; i++ {
+		if d.allow(key) {
+			ok++
+		}
+	}
+	return ok
+}
+
+func TestDomainLimiterBurst(t *testing.T) {
+	now := time.Unix(1000, 0)
+	d := newDomainLimiter(&RateLimitConfig{Requests: 3, Window: time.Minute, Burst: 2, By: "ip"})
+	d.now = func() time.Time { return now }
+
+	steps := []struct {
+		name      string
+		send, got int
+	}{
+		{"spike uses burst", 10, 5},
+		{"burst spent: held to requests", 10, 3},
+		{"still over: burst stays spent", 10, 3},
+		{"calm window", 2, 2},
+		{"burst back after a calm window", 10, 5},
+	}
+	for _, s := range steps {
+		if got := allowN(d, "a", s.send); got != s.got {
+			t.Fatalf("%s: allowed %d of %d, want %d", s.name, got, s.send, s.got)
+		}
+		now = now.Add(time.Minute)
+	}
+
+	// A whole window with no requests also brings the burst back.
+	now = now.Add(time.Minute)
+	if got := allowN(d, "a", 10); got != 5 {
+		t.Fatalf("after idle window: allowed %d, want 5", got)
+	}
+}
+
+func TestDomainLimiterNoBurstIsFixedWindow(t *testing.T) {
+	now := time.Unix(1000, 0)
+	d := newDomainLimiter(&RateLimitConfig{Requests: 3, Window: time.Minute, By: "ip"})
+	d.now = func() time.Time { return now }
+	for i := 0; i < 4; i++ {
+		if got := allowN(d, "a", 10); got != 3 {
+			t.Fatalf("window %d: allowed %d, want 3", i, got)
+		}
+		now = now.Add(time.Minute)
+	}
+}
