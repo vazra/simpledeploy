@@ -14,7 +14,9 @@ export const TEST_ADMIN = {
   email: 'e2e@test.local',
 };
 
-export async function login(page, username, password) {
+// loginViaUI signs in through the login form. Use it where the form itself
+// is under test; everything else uses login(), which is faster.
+export async function loginViaUI(page, username, password) {
   const state = getState();
   await page.goto(`${state.baseURL}/#/login`);
   // Wait for login form to finish loading (setupStatus check)
@@ -25,6 +27,18 @@ export async function login(page, username, password) {
   await page.getByRole('button', { name: 'Sign In' }).waitFor({ timeout: 5_000 });
   await page.getByRole('button', { name: 'Sign In' }).click();
   // Wait for sidebar <aside> to appear (reliable post-login indicator)
+  await page.waitForSelector('aside:not([data-testid="activity-sidebar"])', { timeout: 15_000 });
+}
+
+// login signs in through the API (page.request shares the browser context's
+// cookie jar), then opens the dashboard.
+export async function login(page, username, password) {
+  const state = getState();
+  const res = await page.request.post(`${state.baseURL}/api/auth/login`, {
+    data: { username: username || TEST_ADMIN.username, password: password || TEST_ADMIN.password },
+  });
+  if (!res.ok()) throw new Error(`login failed: ${res.status()} ${await res.text()}`);
+  await page.goto(`${state.baseURL}/#/`);
   await page.waitForSelector('aside:not([data-testid="activity-sidebar"])', { timeout: 15_000 });
 }
 

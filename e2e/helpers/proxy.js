@@ -36,6 +36,27 @@ export async function fetchViaProxy(hostHeader, path = '/', opts = {}) {
   };
 }
 
+// waitForProxyStatus polls host through the proxy until it answers
+// wantStatus (and, if given, a body containing bodyContains). opts is passed
+// to fetchViaProxy (e.g. proxyURL for an isolated server).
+export async function waitForProxyStatus(host, wantStatus, { timeoutMs = 15_000, bodyContains = null, path = '/', ...opts } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let last = 0;
+  let lastBody = '';
+  while (Date.now() < deadline) {
+    const r = await fetchViaProxy(host, path, opts);
+    last = r.status;
+    const body = await r.text();
+    lastBody = body.slice(0, 80);
+    if (r.status === wantStatus && (!bodyContains || body.includes(bodyContains))) {
+      return { ...r, text: async () => body };
+    }
+    await new Promise((res) => setTimeout(res, 300));
+  }
+  const hint = bodyContains ? ` body~${JSON.stringify(bodyContains)}` : '';
+  throw new Error(`host ${host} did not reach status ${wantStatus}${hint} within ${timeoutMs}ms (last=${last}, lastBody=${lastBody})`);
+}
+
 export function curlViaProxy(hostHeader, path = '/', opts = {}) {
   const state = getState();
   const base = opts.proxyURL || state.proxyURL;

@@ -10,6 +10,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import net from 'net';
+import { mirrored } from './images.js';
 
 function getAvailablePort() {
   return new Promise((resolve, reject) => {
@@ -50,12 +51,11 @@ export async function startRegistry(opts = {}) {
   const authDir = join(tmp, 'auth');
   execFileSync('mkdir', ['-p', authDir]);
 
-  // Generate htpasswd entry via httpd image (avoids requiring htpasswd on host).
-  // httpd's htpasswd -Bbn prints to stdout.
-  const htpasswdLine = docker([
-    'run', '--rm', '--entrypoint', 'htpasswd', 'httpd:2',
-    '-Bbn', user, pass,
-  ]).trim();
+  // Precomputed bcrypt entry (`htpasswd -Bbn testuser testpass123`) for the
+  // default creds avoids pulling an image just to hash a password.
+  const htpasswdLine = user === 'testuser' && pass === 'testpass123'
+    ? 'testuser:$2y$05$EZbMr1D2P.keiaO2HXX1I.QXSVo2ty1OaInfvxJJpVV/exwzpR5CW'
+    : docker(['run', '--rm', '--entrypoint', 'htpasswd', 'httpd:2', '-Bbn', user, pass]).trim();
   writeFileSync(join(authDir, 'htpasswd'), htpasswdLine + '\n');
 
   // Run registry:2 with htpasswd auth.
@@ -67,7 +67,7 @@ export async function startRegistry(opts = {}) {
     '-e', 'REGISTRY_AUTH=htpasswd',
     '-e', 'REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm',
     '-e', 'REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd',
-    'registry:2',
+    mirrored('registry:2'),
   ]);
 
   const host = `localhost:${port}`;
@@ -100,10 +100,11 @@ export async function startRegistry(opts = {}) {
 // logs in, pushes, then logs out. Returns the full remote image ref.
 export function pushImage(reg, fromImage, toName) {
   const target = `${reg.host}/${toName}`;
-  try { docker(['pull', fromImage]); } catch (e) {
-    throw new Error(`pull ${fromImage} failed: ${e.message}`);
+  const source = mirrored(fromImage);
+  try { docker(['pull', source]); } catch (e) {
+    throw new Error(`pull ${source} failed: ${e.message}`);
   }
-  docker(['tag', fromImage, target]);
+  docker(['tag', source, target]);
   try {
     dockerStdin(
       ['login', '-u', reg.user, '--password-stdin', reg.host],

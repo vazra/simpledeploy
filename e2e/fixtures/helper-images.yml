@@ -1,0 +1,9 @@
+# Not deployed. Lists images that e2e helpers run directly (helpers/minio.js,
+# helpers/registry.js) so scripts/list-mirror-images.mjs mirrors them to GHCR.
+services:
+  minio:
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+  registry:
+    image: registry:2
+  registry-push-source:
+    image: nginx:alpine

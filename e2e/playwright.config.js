@@ -49,7 +49,6 @@ export default defineConfig({
     baseURL: `http://localhost:${process.env.SIMPLEDEPLOY_PORT || 8500}`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
   },
   projects: [
     {

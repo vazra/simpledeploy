@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'child_process';
 import net from 'net';
+import { mirrored } from './images.js';
 
 // MinIO fixture helper. Starts a MinIO-compatible server in a docker container
 // on a random host port, waits for health, creates a bucket, and exposes
@@ -10,7 +11,7 @@ import net from 'net';
 // and minio/mc from Docker Hub and quay.io/minio/* now requires login. Silo
 // keeps the MINIO_* env vars, ports, /minio/health/* routes and ships `mc`.
 // Same pinned tag as the MinIO app/service templates.
-const MINIO_IMAGE = 'pgsty/silo:RELEASE.2026-09-16T00-00-00Z';
+const MINIO_IMAGE = mirrored('pgsty/silo:RELEASE.2026-09-16T00-00-00Z');
 
 export const MINIO_ROOT_USER = 'minioadmin';
 export const MINIO_ROOT_PASSWORD = 'minioadmin123';

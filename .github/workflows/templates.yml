@@ -1,26 +1,33 @@
 name: Templates
 
-# Validate every app template by deploying it end-to-end. Triggered only
-# when template definitions change, so it runs once per template-edit PR
-# instead of on every push. Also exposed as a manual workflow_dispatch.
+# Validate every app template by deploying it end-to-end, and check that
+# every template image still resolves. Triggered when template definitions
+# or the code that parses/deploys them change, weekly (upstream tags get
+# yanked; the GHCR mirror used by per-push E2E hides that), and manually.
 on:
   pull_request:
     paths:
       - 'ui/src/lib/appTemplates.js'
       - 'ui/src/lib/serviceTemplates.js'
       - 'e2e/tests/templates-deploy-all.spec.js'
-      - 'e2e/tests/00-template-images.spec.js'
+      - 'e2e/scripts/check-template-images.mjs'
       - 'e2e/helpers/template-probes.js'
-      - 'internal/compose/inject.go'
+      - 'internal/compose/**'
+      - 'internal/deployer/**'
+      - 'go.mod'
   push:
     branches: [main]
     paths:
       - 'ui/src/lib/appTemplates.js'
       - 'ui/src/lib/serviceTemplates.js'
       - 'e2e/tests/templates-deploy-all.spec.js'
-      - 'e2e/tests/00-template-images.spec.js'
+      - 'e2e/scripts/check-template-images.mjs'
       - 'e2e/helpers/template-probes.js'
-      - 'internal/compose/inject.go'
+      - 'internal/compose/**'
+      - 'internal/deployer/**'
+      - 'go.mod'
+  schedule:
+    - cron: '17 4 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -31,6 +38,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  template-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Every template image resolves
+        run: node e2e/scripts/check-template-images.mjs
+
   deploy-all:
     # Shard the ~20-template matrix across parallel runners. Each shard
     # builds its own binary, runs its own server, and pre-pulls only the

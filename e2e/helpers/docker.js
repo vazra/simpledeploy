@@ -68,8 +68,6 @@ export function countServiceReplicas(appSlug, serviceName) {
   ]).length;
 }
 
-import { appendFileSync } from 'fs';
-
 export function psql(containerName, user, db, sql) {
   try {
     const out = execFileSync(
@@ -77,16 +75,10 @@ export function psql(containerName, user, db, sql) {
       ['exec', containerName, 'psql', '-U', user, '-d', db, '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', sql],
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
     );
-    try {
-      appendFileSync('/tmp/e2e-psql-trace.log', `[OK ${new Date().toISOString()}] container=${containerName}\nSQL: ${sql}\nOUT: ${JSON.stringify(out)}\n---\n`);
-    } catch {}
     return out.trim();
   } catch (e) {
     const stderr = e.stderr ? e.stderr.toString() : '';
     const stdout = e.stdout ? e.stdout.toString() : '';
-    try {
-      appendFileSync('/tmp/e2e-psql-trace.log', `[ERR ${new Date().toISOString()}] container=${containerName} exitCode=${e.status}\nSQL: ${sql}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}\n---\n`);
-    } catch {}
     throw new Error(
       `psql failed container=${containerName} exitCode=${e.status} signal=${e.signal}\nSQL: ${sql}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`,
     );
