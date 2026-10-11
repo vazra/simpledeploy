@@ -113,7 +113,8 @@
     selectedTarget = cfg.target || 'local'
     cronExpr = cfg.schedule_cron || '0 2 * * *'
     retentionCount = cfg.retention_count || 7
-    retentionMode = cfg.retention_mode || 'count'
+    // The server stores days-based retention as "time".
+    retentionMode = cfg.retention_mode === 'time' ? 'days' : (cfg.retention_mode || 'count')
     retentionDays = cfg.retention_days || 30
     verifyUpload = cfg.verify_upload || false
 

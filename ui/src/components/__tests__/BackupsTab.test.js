@@ -24,6 +24,16 @@ describe('BackupsTab', () => {
     await waitFor(() => expect(container.firstChild).not.toBeNull());
   });
 
+  // The server stores time-based retention as "time".
+  it('shows days retention for configs stored with mode time', async () => {
+    apiMock.listBackupConfigs.mockResolvedValueOnce({
+      data: [{ id: 1, strategy: 'postgres', target: 'local', schedule_cron: '0 2 * * *', retention_mode: 'time', retention_days: 14, retention_count: 0 }],
+      error: null,
+    });
+    const { findByText } = render(BackupsTab, { slug: 'foo' });
+    expect(await findByText('14 days')).toBeTruthy();
+  });
+
   it('labels the upload-restore target as an optional service name', async () => {
     apiMock.listBackupConfigs.mockResolvedValueOnce({ data: [{ id: 1, strategy: 'postgres' }], error: null });
     const { findByText, getByLabelText, getByTestId } = render(BackupsTab, { slug: 'foo' });

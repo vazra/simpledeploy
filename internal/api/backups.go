@@ -50,6 +50,16 @@ func validateBackupConfig(ctx context.Context, cfg *store.BackupConfig) error {
 	if err := backup.ValidatePathsConfig(cfg.Strategy, cfg.Paths); err != nil {
 		return err
 	}
+	// The wizard calls time-based retention "days"; the column allows
+	// "count" and "time".
+	switch strings.TrimSpace(cfg.RetentionMode) {
+	case "", "count":
+		cfg.RetentionMode = "count"
+	case "time", "days":
+		cfg.RetentionMode = "time"
+	default:
+		return fmt.Errorf("retention mode must be %q (keep the last N backups) or %q (keep backups for N days)", "count", "time")
+	}
 	if cfg.Target == "s3" && cfg.TargetConfigJSON != "" {
 		var s3cfg backup.S3Config
 		if err := json.Unmarshal([]byte(cfg.TargetConfigJSON), &s3cfg); err != nil {

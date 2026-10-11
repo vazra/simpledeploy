@@ -171,6 +171,25 @@ describe('BackupWizard', () => {
     });
   });
 
+  it('keeps days retention when editing a config stored with mode time', async () => {
+    const editConfig = {
+      id: 4,
+      strategy: 'volume',
+      target: 'local',
+      schedule_cron: '0 2 * * *',
+      retention_mode: 'time',
+      retention_count: 0,
+      retention_days: 14,
+    };
+    const utils = render(BackupWizard, { open: true, slug: 'foo', editConfig });
+    for (let i = 0; i < 5; i++) await clickNext(utils); // steps 1 -> 6
+    await fireEvent.click(utils.getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => expect(api.updateBackupConfig).toHaveBeenCalledTimes(1));
+    const [, cfg] = api.updateBackupConfig.mock.calls[0];
+    expect(cfg.retention_mode).toBe('days');
+    expect(cfg.retention_days).toBe(14);
+  });
+
   describe('hooks', () => {
     const detected = {
       data: {

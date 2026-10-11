@@ -173,3 +173,40 @@ func TestUpdateBackupConfigHooksValidated(t *testing.T) {
 		t.Fatalf("stored pre_hooks = %q", got.PreHooks)
 	}
 }
+
+// The wizard sends retention_mode "days"; the database only allows
+// "count" and "time".
+func TestCreateBackupConfigRetentionMode(t *testing.T) {
+	cases := []struct {
+		mode     string
+		wantCode int
+		wantMode string
+	}{
+		{"days", http.StatusCreated, "time"},
+		{"time", http.StatusCreated, "time"},
+		{"count", http.StatusCreated, "count"},
+		{"", http.StatusCreated, "count"},
+		{"weekly", http.StatusBadRequest, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			srv, st, cookie := newHooksTestServer(t)
+			body := backupCfgBody("", "")
+			body["retention_mode"] = tc.mode
+			body["retention_days"] = 14
+			w := postBackupCfg(t, srv, cookie, body)
+			if w.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d; body: %s", w.Code, tc.wantCode, w.Body.String())
+			}
+			if tc.wantMode == "" {
+				return
+			}
+			var resp store.BackupConfig
+			json.NewDecoder(w.Body).Decode(&resp)
+			stored, _ := st.GetBackupConfig(resp.ID)
+			if stored.RetentionMode != tc.wantMode {
+				t.Fatalf("stored retention_mode = %q, want %q", stored.RetentionMode, tc.wantMode)
+			}
+		})
+	}
+}
