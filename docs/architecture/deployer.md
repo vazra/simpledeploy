@@ -23,6 +23,12 @@ Each app's compose project is named `simpledeploy-<app-slug>`. This isolates app
 
 The whole sequence is wrapped in a tracker that the API surfaces as live deploy logs over WebSocket and as a "deploying" flag on the app.
 
+## Failure messages
+
+When a tracked `docker compose` command (deploy, rollback, restart, pull) exits non-zero, `Err` is a `*ComposeError` whose `Detail` says why: the last few stderr lines (at most 3, 1000 bytes, keeping the end) that are not progress (`Container x  Started`, `web Pulling`, layer downloads) or warnings, with repeats dropped (a failed pull prints the same error twice). Compose prints its error last, so this is normally the single line that names the problem. `Error()` reads `compose up: <detail>: exit status 1`; that string is what the `deploy_failed` / `rollback` audit row, the activity feed, and the logs show. The full output stays in the deploy log and the `deploy_events` row.
+
+Registry credentials reach docker only through the temporary config file (never args or stdin), so compose output does not contain them. As defense in depth, each registry password and its base64 `user:password` form are replaced with `[redacted]` in `Detail` and in the stored output. Detail and output are visible to the same users who can open the app's deploy log.
+
 ## Compose check before `up`
 
 `Deploy`, `RollbackDeploy`, `Pull`, `Scale` and `Cancel` (which runs a follow-up `up`) all call `checkComposeFile` before running `docker compose`. It re-reads `docker-compose.yml` from disk with `compose.ParseFile`, which interpolates `${VARS}` from the app's `.env` and the server environment the way `docker compose` does and refuses a symlinked compose file or `.env`, then runs `compose.ValidateComposeSecurity`. A file changed after the caller parsed it (git sync, version restore, manual edit) is therefore still checked right before it runs. `Restart` (`compose restart`) and `Stop`/`Start` do not create containers and skip the check.

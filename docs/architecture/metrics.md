@@ -45,4 +45,4 @@ A separate code path in the proxy package (the `simpledeploy_metrics` Caddy modu
 
 ## Pruning
 
-Pruning runs nightly. Manual prune is exposed at `POST /api/system/prune/{metrics,request-stats}` for emergencies.
+Pruning runs nightly. Manual prune is exposed at `POST /api/system/prune/{metrics,request-stats}` for emergencies (super admin). The body is `{"tier": "raw", "days": 30}`: `tier` is one of `raw`, `1m`, `5m`, `1h`, `1d` (default `raw`) and `days` defaults to 30. An unknown tier or an unreadable body returns `400` and deletes nothing.

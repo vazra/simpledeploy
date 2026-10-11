@@ -392,6 +392,15 @@ func TestDeployRollback(t *testing.T) {
 	}
 }
 
+// A failed rollback must say so and why, not "Rolled back".
+func TestDeployRollbackFailed(t *testing.T) {
+	s, _ := Render("deploy", "rollback", nil, []byte(`{"version":5,"error":"compose up: port is already allocated: exit status 1"}`))
+	want := "Rollback to version 5 failed: compose up: port is already allocated: exit status 1"
+	if s != want {
+		t.Errorf("summary = %q, want %q", s, want)
+	}
+}
+
 // --- lifecycle ---
 
 func TestLifecycleCreated(t *testing.T) {

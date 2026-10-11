@@ -23,6 +23,8 @@ There is no internal periodic tick. If you want a heartbeat sweep, restart the p
 
 Steps 3 are run as goroutines under a `chan struct{}` semaphore of capacity **3**, so at most 3 deploys execute concurrently. Step 4 runs serially after the wait.
 
+An app whose deploy is already running (an API deploy, rollback, restart or pull) is skipped in step 3, since that deploy may have read an older file. One `Reconcile()` is queued to run when it finishes (at most one per app); the hash check makes it a no-op when nothing changed.
+
 ## Hash detection
 
 Migration 008 added `apps.compose_hash` as a `TEXT` column. After every successful deploy, `deployApp()` writes the SHA-256 of the compose file. On the next reconcile, file hash is recomputed and compared. Match -> skip. Mismatch -> deploy. Failure to read -> log and skip. Hashing reads through `fsutil.ReadRegularFile`, so a symlinked file never hashes.
@@ -57,7 +59,7 @@ After every deploy (success or fail), `apps.status` is updated to `running` or `
 
 ## Compose versions
 
-Migration 009 also added `compose_versions`. After every successful deploy, the current compose file content is inserted with the same hash; the 10 most recent per app are kept. The UI's "Versions" tab lists these, and `RollbackOne(slug, versionID)` writes the saved content back to disk and triggers a redeploy. The version must belong to the app (`ErrVersionNotFound` otherwise), and it is checked with the app's current `.env` against today's rules before it replaces the file, so a refused rollback leaves the current file in place.
+Migration 009 also added `compose_versions`. After every successful deploy, the current compose file content is inserted with the same hash; the 10 most recent per app are kept. The UI's "Versions" tab lists these, and `RollbackOne(slug, versionID)` writes the saved content back to disk and triggers a redeploy. The version must belong to the app (`ErrVersionNotFound` otherwise), and it is checked with the app's current `.env` against today's rules before it replaces the file, so a refused rollback leaves the current file in place. While another tracked operation (deploy, rollback, restart, pull) of the app runs, `RollbackOne` returns `deployer.ErrDeployInProgress` without touching the file (the API answers `409`); if one starts between that check and the deployer's own, the previous file is written back. `RestartOne` and `PullOne` return the same error when skipped, and their API handlers check first and answer `409` instead of a `202` that would do nothing.
 
 ## Registry credential resolution
 

@@ -25,6 +25,20 @@ simpledeploy registry list
 - Network issue: confirm DNS works (`getent hosts registry-1.docker.io`) and outbound 443 is open.
 - Rate limited by Docker Hub: log in to a paid account or use a registry mirror.
 
+## Deploy failed
+
+**Symptom:** The app shows `error` and the activity feed says `Deploy failed: compose up: <reason>: exit status 1` (or `Rollback to version N failed: ...`).
+
+**What it means:** `docker compose up` itself stopped with an error. `<reason>` is the last lines docker compose printed, so it usually names the problem. The full output is in the deploy log and the app's deploy history.
+
+**Common reasons:**
+- `pull access denied` or `unauthorized`: the image name or tag is wrong, or the image is private. Fix the `image:` line or add the registry under **Settings -> Registries**.
+- `port is already allocated`: another app or program uses that host port. Pick a different host port in `ports:`.
+- `manifest unknown` or `not found`: the tag does not exist.
+- `required variable X is missing a value`: add `X` in the **Config** tab.
+
+Fix the cause and redeploy.
+
 ## Deploy reported "Unstable"
 
 **Symptom:** The deploy wizard shows a yellow "Unstable" status. The per-service summary lists one or more services as `restarting`, `unhealthy`, or with `restarted Nx`.

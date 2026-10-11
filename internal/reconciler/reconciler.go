@@ -60,7 +60,17 @@ type Reconciler struct {
 	syncer       *configsync.Syncer     // nil means configsync disabled
 	audit        *audit.Recorder        // nil-safe
 	bus          *events.Bus            // nil-safe
+
+	retryMu  sync.Mutex
+	retrying map[string]bool // slugs with a reconcile queued behind a running deploy
 }
+
+// retryPoll is how often a reconcile queued behind a running deploy checks
+// whether that deploy finished; retryMaxWait caps the wait.
+var (
+	retryPoll    = time.Second
+	retryMaxWait = 30 * time.Minute
+)
 
 // scanResult is one pass over the apps directory.
 type scanResult struct {
@@ -167,8 +177,10 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		// (handleDeploy spawns its own goroutine). Without this guard the
 		// watcher-triggered reconcile races against the API goroutine,
 		// double-dispatches docker compose for the same project, and
-		// orphans the WS subscribers watching the first deploy.
+		// orphans the WS subscribers watching the first deploy. That deploy
+		// may have read an older file, so check again once it finishes.
 		if r.IsDeploying(slug) {
+			r.reconcileAfterDeploy(slug)
 			continue
 		}
 		wg.Add(1)
@@ -345,7 +357,7 @@ func (r *Reconciler) RestartOne(ctx context.Context, slug string) error {
 	}
 	result := r.deployer.Restart(ctx, cfg)
 	if result.Skipped {
-		return nil
+		return deployer.ErrDeployInProgress
 	}
 	action := "restart"
 	status := "running"
@@ -434,7 +446,7 @@ func (r *Reconciler) PullOne(ctx context.Context, slug string) error {
 	}
 	result := r.deployer.Pull(ctx, cfg, auths)
 	if result.Skipped {
-		return nil
+		return deployer.ErrDeployInProgress
 	}
 	action := "pull"
 	status := "running"
@@ -563,6 +575,37 @@ func (r *Reconciler) CancelOne(ctx context.Context, slug string) error {
 	return r.deployer.Cancel(ctx, cfg)
 }
 
+// reconcileAfterDeploy runs one Reconcile after slug's running deploy
+// finishes. At most one is queued per slug; a Reconcile that skips again
+// while it runs does not queue another, so this cannot loop.
+func (r *Reconciler) reconcileAfterDeploy(slug string) {
+	r.retryMu.Lock()
+	if r.retrying[slug] {
+		r.retryMu.Unlock()
+		return
+	}
+	if r.retrying == nil {
+		r.retrying = map[string]bool{}
+	}
+	r.retrying[slug] = true
+	r.retryMu.Unlock()
+
+	go func() {
+		defer func() {
+			r.retryMu.Lock()
+			delete(r.retrying, slug)
+			r.retryMu.Unlock()
+		}()
+		deadline := time.Now().Add(retryMaxWait)
+		for r.IsDeploying(slug) && time.Now().Before(deadline) {
+			time.Sleep(retryPoll)
+		}
+		if err := r.Reconcile(context.Background()); err != nil {
+			log.Printf("[reconciler] reconcile after skipped deploy of %s: %v", slug, err)
+		}
+	}()
+}
+
 func (r *Reconciler) IsDeploying(slug string) bool {
 	if d, ok := r.deployer.(*deployer.Deployer); ok {
 		return d.Tracker.IsDeploying(slug)
@@ -609,6 +652,12 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 		return &compose.ViolationError{Violations: v}
 	}
 
+	// Never swap the file under a running deploy: it would be skipped
+	// below and leave this version on disk without running it.
+	if r.IsDeploying(slug) {
+		return deployer.ErrDeployInProgress
+	}
+	prev, prevErr := fsutil.ReadRegularFile(composePath)
 	if err := fsutil.WriteFileAtomic(composePath, composeData, 0o600); err != nil {
 		return fmt.Errorf("write compose: %w", err)
 	}
@@ -625,7 +674,14 @@ func (r *Reconciler) RollbackOne(ctx context.Context, slug string, versionID int
 	cvID := versionID
 	result := r.deployer.RollbackDeploy(ctx, cfg, ver.Version, &cvID, auths...)
 	if result.Skipped {
-		return nil
+		// A deploy started after the check above. Put the current file
+		// back so the version that did not run is not deployed later.
+		if prevErr == nil {
+			if err := fsutil.WriteFileAtomic(composePath, prev, 0o600); err != nil {
+				log.Printf("[reconciler] restore %s compose after skipped rollback: %v", slug, err)
+			}
+		}
+		return deployer.ErrDeployInProgress
 	}
 
 	action := "rollback"
@@ -848,8 +904,10 @@ func (r *Reconciler) deployApp(ctx context.Context, slug string, cfg *compose.Ap
 	}
 	result := r.deployer.Deploy(ctx, cfg, auths...)
 	if result.Skipped {
-		// Another in-flight deploy for this slug is handling store updates
-		// and WS notifications; nothing more to do here.
+		// Another in-flight deploy for this slug handles store updates and
+		// WS notifications. The file may have changed after that deploy read
+		// it, so reconcile again once it finishes (a no-op when unchanged).
+		r.reconcileAfterDeploy(slug)
 		return nil
 	}
 

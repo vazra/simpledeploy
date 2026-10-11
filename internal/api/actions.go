@@ -14,6 +14,7 @@ import (
 
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
@@ -41,10 +42,24 @@ func detachedCtx(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(r.Context()), composeOpTimeout)
 }
 
+// refuseWhileDeploying answers 409 when a deploy of slug is running. Restart
+// and pull run in the background, where the deployer would skip them
+// silently after the client already got 202.
+func refuseWhileDeploying(w http.ResponseWriter, rec reconciler, slug string) bool {
+	if !rec.IsDeploying(slug) {
+		return false
+	}
+	http.Error(w, deployer.ErrDeployInProgress.Error(), http.StatusConflict)
+	return true
+}
+
 func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	if s.reconciler == nil {
 		http.Error(w, "reconciler not configured", http.StatusInternalServerError)
+		return
+	}
+	if refuseWhileDeploying(w, s.reconciler, slug) {
 		return
 	}
 	ctx := r.Context()
@@ -115,6 +130,9 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	if s.reconciler == nil {
 		http.Error(w, "reconciler not configured", http.StatusInternalServerError)
+		return
+	}
+	if refuseWhileDeploying(w, s.reconciler, slug) {
 		return
 	}
 	go func() {
@@ -374,6 +392,18 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, compose.ErrDotEnv) {
 			http.Error(w, dotEnvProblem, http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, deployer.ErrDeployInProgress) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		// docker compose ran and failed: say why (secrets are already
+		// removed; the app's deploy log shows the same output).
+		var ce *deployer.ComposeError
+		if errors.As(err, &ce) {
+			log.Printf("[api] rollback %s: %v", slug, err)
+			http.Error(w, "rollback failed: "+ce.Error(), http.StatusInternalServerError)
 			return
 		}
 		httpError(w, err, http.StatusInternalServerError)

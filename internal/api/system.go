@@ -4,13 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -77,8 +80,12 @@ type appSummary struct {
 
 type pruneRequest struct {
 	Days int    `json:"days"`
-	Tier string `json:"tier"` // raw, 1m, 5m, 1h — empty defaults to "raw"
+	Tier string `json:"tier"` // one of pruneTiers; empty defaults to "raw"
 }
+
+// pruneTiers are the tiers a manual prune accepts.
+var pruneTiers = []string{"raw", "1m", "5m", "1h", "1d"}
+
 type pruneResponse struct {
 	Deleted int64  `json:"deleted"`
 	Message string `json:"message"`
@@ -208,21 +215,32 @@ func (s *Server) handleStorageBreakdown(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(storageBreakdownResponse{Metrics: metrics, RequestStats: rs})
 }
 
-func parsePruneRequest(r *http.Request) pruneRequest {
+// parsePruneRequest reads a prune body. An empty body or tier means raw
+// and 30 days. An unknown tier is an error, so a typo never prunes another
+// tier.
+func parsePruneRequest(r *http.Request) (pruneRequest, error) {
 	var req pruneRequest
-	json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		return req, errors.New("invalid request body")
+	}
 	if req.Days <= 0 {
 		req.Days = 30
 	}
-	validTiers := map[string]bool{"raw": true, "1m": true, "5m": true, "1h": true, "1d": true}
-	if !validTiers[req.Tier] {
+	if req.Tier == "" {
 		req.Tier = "raw"
 	}
-	return req
+	if !slices.Contains(pruneTiers, req.Tier) {
+		return req, fmt.Errorf("unknown tier %q: use one of %s", req.Tier, strings.Join(pruneTiers, ", "))
+	}
+	return req, nil
 }
 
 func (s *Server) handlePruneMetrics(w http.ResponseWriter, r *http.Request) {
-	req := parsePruneRequest(r)
+	req, err := parsePruneRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	cutoff := time.Now().AddDate(0, 0, -req.Days)
 	n, err := s.store.PruneMetrics(req.Tier, cutoff)
 	if err != nil {
@@ -234,7 +252,11 @@ func (s *Server) handlePruneMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePruneRequestMetrics(w http.ResponseWriter, r *http.Request) {
-	req := parsePruneRequest(r)
+	req, err := parsePruneRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	cutoff := time.Now().AddDate(0, 0, -req.Days)
 	n, err := s.store.PruneRequestMetrics(req.Tier, cutoff)
 	if err != nil {

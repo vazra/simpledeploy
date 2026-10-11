@@ -24,7 +24,7 @@ The activity log is a persistent, queryable record of everything that changes in
 | `webhook` | Webhooks created/changed/removed |
 | `registry` | Registry credentials added/removed |
 | `access` | User app-access grants and revocations |
-| `deploy` | Deploy succeeded, deploy failed (with error), rollback |
+| `deploy` | Deploy succeeded, deploy failed (with the reason docker compose gave), rollback (or why it failed) |
 | `lifecycle` | App created, stopped, started, restarted, scaled, removed |
 | `auth` | Login success/failure, password change (global only) |
 | `system` | User CRUD, API key CRUD, public-host change, git sync config, retention settings (global only) |
