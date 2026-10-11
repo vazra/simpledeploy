@@ -191,7 +191,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if body.Username == "" {
+	if strings.TrimSpace(body.Username) == "" {
 		http.Error(w, "username is required", http.StatusBadRequest)
 		return
 	}
@@ -247,27 +247,30 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	// Pointers distinguish an absent profile field (keep) from an explicit
+	// empty string (clear).
 	var body struct {
-		DisplayName     string `json:"display_name"`
-		Email           string `json:"email"`
-		Role            string `json:"role"`
-		Password        string `json:"password"`
-		CurrentPassword string `json:"current_password"`
+		DisplayName     *string `json:"display_name"`
+		Email           *string `json:"email"`
+		Role            string  `json:"role"`
+		Password        string  `json:"password"`
+		CurrentPassword string  `json:"current_password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if body.Email != "" {
-		if taken, _ := s.store.EmailTaken(body.Email, id); taken {
-			http.Error(w, "email already in use", http.StatusConflict)
+	target, err := s.store.GetUserByID(id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-	}
-	if err := s.store.UpdateProfile(id, body.DisplayName, body.Email); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+
+	// Validate everything before writing so a rejected request changes nothing.
 	if body.Role != "" {
 		if !validRole(body.Role) {
 			http.Error(w, "invalid role: must be super_admin, manage, or viewer", http.StatusBadRequest)
@@ -277,11 +280,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "cannot change your own role", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.UpdateUserRole(id, body.Role); err != nil {
-			httpError(w, err, http.StatusInternalServerError)
+	}
+	if body.Email != nil && *body.Email != "" {
+		if taken, _ := s.store.EmailTaken(*body.Email, id); taken {
+			http.Error(w, "email already in use", http.StatusConflict)
 			return
 		}
 	}
+	var newHash string
 	if body.Password != "" {
 		if len(body.Password) < 8 {
 			http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
@@ -301,12 +307,35 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "your password is incorrect", http.StatusBadRequest)
 			return
 		}
-		hash, err := auth.HashPassword(body.Password)
-		if err != nil {
+		if newHash, err = auth.HashPassword(body.Password); err != nil {
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}
-		if err := s.store.UpdatePassword(id, hash); err != nil {
+	}
+
+	if body.DisplayName != nil || body.Email != nil {
+		displayName, email := target.DisplayName, target.Email
+		if body.DisplayName != nil {
+			displayName = *body.DisplayName
+		}
+		if body.Email != nil {
+			email = *body.Email
+		}
+		if err := s.store.UpdateProfile(id, displayName, email); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	// Skip unchanged roles: UpdateUserRole bumps token_version, which would
+	// sign the user out on every profile edit (the UI always sends role).
+	if body.Role != "" && body.Role != target.Role {
+		if err := s.store.UpdateUserRole(id, body.Role); err != nil {
+			httpError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
+	if newHash != "" {
+		if err := s.store.UpdatePassword(id, newHash); err != nil {
 			httpError(w, err, http.StatusInternalServerError)
 			return
 		}

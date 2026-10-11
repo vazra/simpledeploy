@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,4 +200,59 @@ func TestSetupBlockedWhenUsersExist(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", w.Code)
 	}
+}
+
+func newEmptySetupServer(t *testing.T) (*Server, *store.Store) {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return NewServer(0, s, auth.NewJWTManager("test-secret", 24*time.Hour), nil), s
+}
+
+func assertStillNeedsSetup(t *testing.T, srv *Server, s *store.Store) {
+	t.Helper()
+	if n, err := s.UserCount(); err != nil || n != 0 {
+		t.Fatalf("user count = %d (err %v), want 0", n, err)
+	}
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/setup/status", nil))
+	var resp map[string]bool
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if !resp["needs_setup"] {
+		t.Errorf("needs_setup = false, want true after rejected setup")
+	}
+}
+
+func TestSetupRejectsEmptyUsername(t *testing.T) {
+	for _, name := range []string{"", "   ", "\t"} {
+		srv, s := newEmptySetupServer(t)
+		w := postJSON(t, srv, "/api/setup", map[string]string{
+			"username": name,
+			"password": "securepassword",
+		})
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("username %q: status = %d, want 400; body: %s", name, w.Code, w.Body.String())
+		}
+		assertStillNeedsSetup(t, srv, s)
+	}
+}
+
+func TestSetupRejectsShortPassword(t *testing.T) {
+	srv, s := newEmptySetupServer(t)
+	w := postJSON(t, srv, "/api/setup", map[string]string{
+		"username": "admin",
+		"password": "short",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "at least 8") {
+		t.Errorf("body = %q, want password length message", w.Body.String())
+	}
+	assertStillNeedsSetup(t, srv, s)
 }

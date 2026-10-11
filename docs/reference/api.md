@@ -45,11 +45,11 @@ Clear session cookie. Returns `{"status": "ok"}`.
 
 ### `POST /api/setup`
 
-Create initial admin account. Only works when no users exist.
+Create initial admin account. Only works when no users exist. `username` must not be blank and `password` must be at least 8 characters; otherwise `400` and setup stays pending.
 
 ```json
 // Request
-{"username": "admin", "password": "secret"}
+{"username": "admin", "password": "secret123"}
 
 // Response 201
 {"username": "admin", "role": "super_admin"}
@@ -402,7 +402,15 @@ List users.
 Create user.
 
 ```json
-{"username": "dev", "password": "secret", "role": "manage"}
+{"username": "dev", "password": "secret123", "role": "manage"}
+```
+
+### `PUT /api/users/{id}`
+
+Update a user. Every field is optional; omitted fields keep their current value, and an empty `display_name` or `email` clears it. Setting `password` also requires `current_password` (the caller's own password). The request is validated in full before anything is saved, so a `400`/`409` changes nothing. You cannot change your own role.
+
+```json
+{"display_name": "Dev", "email": "dev@example.com", "role": "viewer"}
 ```
 
 ### `DELETE /api/users/{id}`

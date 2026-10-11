@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
@@ -194,6 +195,10 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.TrimSpace(req.Username) == "" {
+		http.Error(w, "username is required", http.StatusBadRequest)
+		return
+	}
 	if len(req.Password) < 8 {
 		http.Error(w, "password must be at least 8 characters", http.StatusBadRequest)
 		return
