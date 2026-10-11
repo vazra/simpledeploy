@@ -36,7 +36,9 @@ export async function startServer(binPath, overrides = {}) {
   const proxyPort = overrides.proxyPort || await getAvailablePort();
   const dataDir = overrides.dataDir || mkdtempSync(join(tmpdir(), 'sd-e2e-data-'));
   const appsDir = overrides.appsDir || mkdtempSync(join(tmpdir(), 'sd-e2e-apps-'));
-  const configPath = join(dataDir, 'config.yml');
+  // Not data_dir/config.yml: that path is SimpleDeploy's own global sidecar,
+  // which would overwrite this file (and a restart would read it back).
+  const configPath = join(dataDir, 'server-config.yaml');
   const logPath = join(dataDir, 'server.log');
   const tlsMode = overrides.tlsMode || 'off';
   // ratelimit override only affects the auth/API rate limiter (cfg.RateLimit).
@@ -71,7 +73,10 @@ export async function startServer(binPath, overrides = {}) {
     `  window: "60s"`,
   ].join('\n');
 
-  writeFileSync(configPath, config);
+  // recipesIndexURL points the community catalog at a local fixture
+  // (helpers/recipes.js) instead of the live one.
+  const recipesLine = overrides.recipesIndexURL ? `\nrecipes_index_url: "${overrides.recipesIndexURL}"` : '';
+  writeFileSync(configPath, config + recipesLine);
 
   console.log(`[e2e] Starting server on port ${port}...`);
   console.log(`[e2e] Data dir: ${dataDir}`);

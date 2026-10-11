@@ -119,3 +119,18 @@ export async function apiRequestAt(baseURL, method, path, body, sessionCookie) {
   try { data = JSON.parse(text); } catch { data = text; }
   return { status: res.status, data, ok: res.ok, setCookie };
 }
+
+// waitForDeployDone polls until no deploy, restart or pull is in flight for
+// slug and returns the app. Call it once the deploy has visibly started:
+// unlike waitForAppStatus it cannot pass on the pre-deploy status.
+export async function waitForDeployDone(slug, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    const res = await apiRequest('GET', `/api/apps/${slug}`);
+    last = res.data;
+    if (res.ok && res.data && res.data.deploying === false) return res.data;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`App ${slug} still deploying after ${timeoutMs}ms (last: ${JSON.stringify(last)})`);
+}

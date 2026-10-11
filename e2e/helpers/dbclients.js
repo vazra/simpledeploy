@@ -3,16 +3,6 @@
 // matching the pattern used by psql() in helpers/docker.js to avoid quoting hazards.
 
 import { execFileSync } from 'child_process';
-import { appendFileSync } from 'fs';
-
-function trace(tag, container, payload, outOrErr) {
-  try {
-    appendFileSync(
-      '/tmp/e2e-dbclients-trace.log',
-      `[${tag} ${new Date().toISOString()}] container=${container}\nCMD: ${payload}\nOUT: ${JSON.stringify(outOrErr)}\n---\n`,
-    );
-  } catch {}
-}
 
 function runArgv(container, argv, stdinBuf) {
   const opts = { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] };
@@ -22,12 +12,10 @@ function runArgv(container, argv, stdinBuf) {
   }
   try {
     const out = execFileSync('docker', argv, opts);
-    trace('OK', container, argv.join(' '), out);
     return out.trim();
   } catch (e) {
     const stderr = e.stderr ? e.stderr.toString() : '';
     const stdout = e.stdout ? e.stdout.toString() : '';
-    trace('ERR', container, argv.join(' '), { status: e.status, stdout, stderr });
     throw new Error(
       `docker exec failed container=${container} exitCode=${e.status}\nARGV: ${argv.join(' ')}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`,
     );

@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'child_process';
 import net from 'net';
+import { mirrored } from './images.js';
 
 // MinIO fixture helper. Starts a MinIO-compatible server in a docker container
 // on a random host port, waits for health, creates a bucket, and exposes
@@ -10,7 +11,7 @@ import net from 'net';
 // and minio/mc from Docker Hub and quay.io/minio/* now requires login. Silo
 // keeps the MINIO_* env vars, ports, /minio/health/* routes and ships `mc`.
 // Same pinned tag as the MinIO app/service templates.
-const MINIO_IMAGE = 'pgsty/silo:RELEASE.2026-09-16T00-00-00Z';
+const MINIO_IMAGE = mirrored('pgsty/silo:RELEASE.2026-09-16T00-00-00Z');
 
 export const MINIO_ROOT_USER = 'minioadmin';
 export const MINIO_ROOT_PASSWORD = 'minioadmin123';
@@ -92,22 +93,16 @@ export async function startMinIO({ bucket = 'e2e-backups' } = {}) {
   const accessKey = MINIO_ROOT_USER;
   const secretKey = MINIO_ROOT_PASSWORD;
 
-  // mc runs the bundled client in a short-lived container, configured via env
-  // MC_HOST_local. Use host networking via host.docker.internal on mac/windows,
-  // or --add-host for linux. We pass the endpoint as http://host.docker.internal:PORT
-  // because mc runs inside docker.
+  // mc runs the client bundled in the MinIO container itself, against
+  // localhost:9000 inside that container.
   function mc(args, opts = {}) {
-    const mcHost = `http://${accessKey}:${secretKey}@host.docker.internal:${port}`;
     try {
       return execFileSync(
         'docker',
         [
-          'run', '--rm',
-          '--add-host', 'host.docker.internal:host-gateway',
-          '-e', `MC_HOST_local=${mcHost}`,
-          '--entrypoint', 'mc',
-          MINIO_IMAGE,
-          ...args,
+          'exec',
+          '-e', `MC_HOST_local=http://${accessKey}:${secretKey}@localhost:9000`,
+          containerName, 'mc', ...args,
         ],
         { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], ...opts },
       );
@@ -121,44 +116,16 @@ export async function startMinIO({ bucket = 'e2e-backups' } = {}) {
   // Create the bucket via mc.
   mc(['mb', '--ignore-existing', `local/${bucket}`]);
 
+  // listObjects returns every object under prefix, keys relative to it.
+  // An empty or missing prefix lists nothing; any other mc error throws.
   function listObjects(prefix = '') {
-    const target = prefix ? `local/${bucket}/${prefix}` : `local/${bucket}`;
-    // mc ls --json emits one JSON document per line.
-    let out;
-    try {
-      out = mc(['ls', '--json', target]);
-    } catch (e) {
-      // Empty listing can return non-zero on some mc versions; treat as empty.
-      if (/no such|not found/i.test(String(e.message))) return [];
-      // Fallback: try plain ls
-      try {
-        const plain = mc(['ls', target]);
-        return plain
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => {
-            const parts = line.split(/\s+/);
-            return { key: parts[parts.length - 1], size: 0 };
-          });
-      } catch {
-        return [];
-      }
-    }
-    const entries = [];
-    for (const line of out.split('\n')) {
-      const s = line.trim();
-      if (!s) continue;
-      try {
-        const obj = JSON.parse(s);
-        if (obj.key || obj.name) {
-          entries.push({ key: obj.key || obj.name, size: obj.size || 0 });
-        }
-      } catch {
-        // ignore non-json lines
-      }
-    }
-    return entries;
+    const target = prefix ? `local/${bucket}/${prefix.replace(/\/?$/, '/')}` : `local/${bucket}`;
+    const out = mc(['ls', '--recursive', '--json', target]);
+    return out
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line))
+      .map((obj) => ({ key: obj.key, size: obj.size || 0 }));
   }
 
   function stop() {

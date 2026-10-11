@@ -1,43 +1,36 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest } from '../helpers/api.js';
 
+// UI add/delete only; 29b covers a real authenticated pull.
 test.describe('Registries', () => {
-  test.beforeEach(async ({ page }) => {
+  test('add a registry, then delete it', async ({ page }) => {
+    expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
     await loginAsAdmin(page);
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/registries`);
-  });
+    await page.goto(`${getState().baseURL}/#/registries`);
 
-  test('registries page loads', async ({ page }) => {
-    await expect(page.getByText(/registr/i).first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('add registry', async ({ page }) => {
-    await page.getByRole('button', { name: /add registry/i }).click();
-
-    // SlidePanel opens with role="dialog"
+    await page.getByRole('button', { name: 'Add Registry' }).click();
     const panel = page.getByRole('dialog');
-    await expect(panel).toBeVisible({ timeout: 5_000 });
+    const field = (label) => panel.locator(`div:has(> label:text-is("${label}")) > input`);
+    await field('Name').fill('GitHub CR');
+    await field('URL').fill('ghcr.io');
+    await field('Username').fill('testuser');
+    await field('Password').fill('testtoken');
+    await panel.getByRole('button', { name: 'Add Registry' }).click();
 
-    // Form fields in order: Name (no placeholder), URL, Username, Password
-    const inputs = panel.locator('input');
-    await inputs.nth(0).fill('GitHub CR');  // Name
-    await panel.getByPlaceholder('registry.example.com').fill('ghcr.io');  // URL
-    await inputs.nth(2).fill('testuser');  // Username
-    await inputs.nth(3).fill('testtoken');  // Password
+    const row = page.locator('main table tr').filter({ hasText: 'ghcr.io' });
+    await expect(row).toContainText('GitHub CR');
+    await expect(row).toContainText('testuser');
+    const list = await apiRequest('GET', '/api/registries');
+    expect(list.status).toBe(200);
+    const reg = list.data.find((r) => r.url === 'ghcr.io');
+    expect(reg).toMatchObject({ name: 'GitHub CR', username: 'testuser' });
+    // Credentials are write-only.
+    expect(JSON.stringify(list.data)).not.toContain('testtoken');
 
-    await panel.getByRole('button', { name: /add registry/i }).click();
-    await expect(page.getByText('ghcr.io')).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('delete registry', async ({ page }) => {
-    const deleteBtn = page.getByRole('button', { name: /delete/i }).first();
-    if (await deleteBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await deleteBtn.click();
-      const dialog = page.getByRole('dialog');
-      if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await dialog.getByRole('button', { name: /delete|confirm/i }).click();
-      }
-    }
+    await row.getByRole('button', { name: 'Delete' }).click();
+    await expect(row).toHaveCount(0);
+    const after = await apiRequest('GET', '/api/registries');
+    expect(after.data.find((r) => r.url === 'ghcr.io')).toBeUndefined();
   });
 });

@@ -1,70 +1,47 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
+import { existsSync } from 'fs';
+import { join } from 'path';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest } from '../helpers/api.js';
+import { listAppContainers } from '../helpers/docker.js';
 
+// Removes the apps 03-deploy created (e2e-nginx is purged by 95-archive),
+// checking that a delete really tears the app down.
 test.describe('Cleanup', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async () => {
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+  });
+
+  test('Delete App in Settings removes the app, its containers and its folder', async ({ page }) => {
+    const state = getState();
+    const slug = 'e2e-postgres';
+    expect(listAppContainers(slug).length).toBeGreaterThan(0);
+
     await loginAsAdmin(page);
+    await page.goto(`${state.baseURL}/#/apps/${slug}`);
+    await page.locator('main').getByRole('button', { name: 'settings', exact: true }).click();
+    await page.getByRole('button', { name: 'Danger Zone' }).click();
+    await page.getByRole('button', { name: 'Delete App' }).click();
+
+    const removed = page.waitForResponse((r) => r.url().endsWith(`/api/apps/${slug}`) && r.request().method() === 'DELETE');
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm' }).click();
+    expect((await removed).status()).toBe(200);
+    await expect(page).toHaveURL(`${state.baseURL}/#/`);
+    await expect(page.locator('main').getByRole('heading', { name: slug, exact: true })).toHaveCount(0);
+
+    expect((await apiRequest('GET', `/api/apps/${slug}`)).status).toBe(404);
+    expect(listAppContainers(slug)).toEqual([]);
+    expect(existsSync(join(state.appsDir, slug))).toBe(false);
   });
 
-  test('remove postgres app', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-postgres`);
-    await page.locator('button').filter({ hasText: 'settings' }).click();
+  test('DELETE removes every service of a multi-service app', async () => {
+    const slug = 'e2e-multi';
+    const services = () => listAppContainers(slug).map((n) => n.replace(/^simpledeploy-e2e-multi-(\w+)-\d+$/, '$1')).sort();
+    expect([...new Set(services())]).toEqual(['cache', 'web']);
 
-    // Expand Danger Zone section
-    const dangerBtn = page.locator('button').filter({ hasText: 'Danger Zone' });
-    await dangerBtn.click();
-
-    const deleteBtn = page.getByRole('button', { name: /delete app/i });
-    await deleteBtn.click();
-
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible({ timeout: 3_000 });
-    const confirmInput = dialog.locator('input');
-    if (await confirmInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await confirmInput.fill('e2e-postgres');
-    }
-    await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
-
-    // After delete, redirects to dashboard which shows "Applications" heading
-    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible({ timeout: 15_000 });
-  });
-
-  test('remove multi app', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-multi`);
-    await page.locator('button').filter({ hasText: 'settings' }).click();
-
-    // Expand Danger Zone section
-    const dangerBtn = page.locator('button').filter({ hasText: 'Danger Zone' });
-    await dangerBtn.click();
-
-    const deleteBtn = page.getByRole('button', { name: /delete app/i });
-    await deleteBtn.click();
-
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible({ timeout: 3_000 });
-    const confirmInput = dialog.locator('input');
-    if (await confirmInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await confirmInput.fill('e2e-multi');
-    }
-    await dialog.getByRole('button', { name: /delete|confirm|remove/i }).click();
-    await expect(page.locator('aside:not([data-testid="activity-sidebar"])')).toBeVisible({ timeout: 15_000 });
-  });
-
-  test('remove nginx app', async ({ page }) => {
-    // Use API to remove since UI may hang if app is in deploying state
-    const { apiLogin: login, apiRequest: req } = await import('../helpers/api.js');
-    await login('e2eadmin', 'E2eTestPass123!');
-    const res = await req('DELETE', '/api/apps/e2e-nginx');
-    // Accept any result (app may already be gone from prior test failures)
-    expect(res.status === 200 || res.status === 404).toBeTruthy();
-  });
-
-  test('dashboard reflects app removals', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
-    // Verify dashboard loads and shows Applications section
-    await expect(page.getByText('Applications')).toBeVisible({ timeout: 10_000 });
+    const res = await apiRequest('DELETE', `/api/apps/${slug}`);
+    expect(res.status).toBe(200);
+    expect(listAppContainers(slug)).toEqual([]);
+    expect((await apiRequest('GET', `/api/apps/${slug}`)).status).toBe(404);
   });
 });

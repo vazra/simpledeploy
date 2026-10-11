@@ -1,142 +1,55 @@
 import { test, expect } from '@playwright/test';
 import { apiRequest, apiLogin } from '../helpers/api.js';
-import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { TEST_ADMIN } from '../helpers/auth.js';
+import { waitForProxyStatus } from '../helpers/proxy.js';
+import { waitForAppSettled } from '../helpers/users.js';
 
-test.describe('Env Vars, Endpoints, and IP Access', () => {
+const HOST = 'nginx-test.local';
+
+test.describe('Env Vars and IP Access', () => {
   test.beforeAll(async () => {
-    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    expect((await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password)).status).toBe(200);
   });
 
-  test.describe('Env Variables (API)', () => {
-    test('GET env returns array', async () => {
-      const res = await apiRequest('GET', '/api/apps/e2e-nginx/env');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.data)).toBe(true);
-    });
+  test('env vars round-trip through the app .env and clear', async () => {
+    const put = await apiRequest('PUT', '/api/apps/e2e-nginx/env', [{ key: 'E2E_TEST', value: 'hello' }]);
+    expect(put.status).toBe(200);
+    expect(put.data.status).toBe('ok');
+    const got = await apiRequest('GET', '/api/apps/e2e-nginx/env');
+    expect(got.status).toBe(200);
+    expect(got.data).toEqual([expect.objectContaining({ key: 'E2E_TEST', value: 'hello' })]);
 
-    test('PUT env with vars succeeds', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/env', [
-        { key: 'E2E_TEST', value: 'hello' },
-      ]);
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-    });
-
-    test('GET env confirms persistence', async () => {
-      const res = await apiRequest('GET', '/api/apps/e2e-nginx/env');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.data)).toBe(true);
-      const found = res.data.find((v) => v.key === 'E2E_TEST');
-      expect(found).toBeDefined();
-      expect(found.value).toBe('hello');
-    });
-
-    test('PUT env with empty array clears vars', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/env', []);
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-    });
-
-    test('GET env confirms cleared', async () => {
-      const res = await apiRequest('GET', '/api/apps/e2e-nginx/env');
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.data)).toBe(true);
-      expect(res.data.length).toBe(0);
-    });
+    const clear = await apiRequest('PUT', '/api/apps/e2e-nginx/env', []);
+    expect(clear.status).toBe(200);
+    const cleared = await apiRequest('GET', '/api/apps/e2e-nginx/env');
+    expect(cleared.data).toEqual([]);
   });
 
-  test.describe('Env Variables (UI)', () => {
-    test('settings page has Environment Variables heading', async ({ page }) => {
-      await loginAsAdmin(page);
-      const state = getState();
-      await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-      await page.getByRole('button', { name: 'Settings' }).click();
-      await expect(
-        page.getByText('Environment Variables', { exact: false }).first()
-      ).toBeVisible({ timeout: 10_000 });
-    });
-
-    test('settings page has Add Variable button', async ({ page }) => {
-      await loginAsAdmin(page);
-      const state = getState();
-      await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-      await page.getByRole('button', { name: 'Settings' }).click();
-      await expect(
-        page.getByRole('button', { name: /Add Variable/i }).first()
-      ).toBeVisible({ timeout: 10_000 });
-    });
+  test('invalid CIDR in the IP allowlist is rejected', async () => {
+    const res = await apiRequest('PUT', '/api/apps/e2e-nginx/access', { allow: '10.0.0.0/33' });
+    expect(res.status).toBe(400);
   });
 
-  test.describe('Endpoints (API)', () => {
-    let originalEndpoints;
-
-    test.beforeAll(async () => {
-      // Capture current app endpoints to restore later
-      const res = await apiRequest('GET', '/api/apps/e2e-nginx');
-      if (res.ok && res.data?.endpoints) {
-        originalEndpoints = res.data.endpoints;
-      } else {
-        originalEndpoints = [{ domain: 'nginx-test.local', port: '80', tls: 'off', service: 'nginx' }];
-      }
-    });
-
-    test('PUT endpoints with new endpoint succeeds', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/endpoints', [
-        { domain: 'nginx-e2e-updated.local', port: '80', tls: 'off', service: 'nginx' },
-      ]);
+  test('IP allowlist is enforced by the proxy: deny, allow, then cleared', async () => {
+    // Each change rewrites the compose label; the watcher then redeploys the
+    // app, so wait for that before the next change.
+    const setAllow = async (allow) => {
+      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/access', { allow });
       expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-      expect(Array.isArray(res.data.endpoints)).toBe(true);
-    });
-
-    test('PUT endpoints restores original', async () => {
-      const endpoints = originalEndpoints.length > 0
-        ? originalEndpoints
-        : [{ domain: 'nginx-test.local', port: '80', tls: 'off', service: 'nginx' }];
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/endpoints', endpoints);
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-    });
-  });
-
-  test.describe('IP Access (API)', () => {
-    test('PUT access with single IP returns 200', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/access', {
-        allow: '192.168.1.1',
-      });
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-    });
-
-    test('PUT access with CIDR returns 200', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/access', {
-        allow: '10.0.0.0/8',
-      });
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-    });
-
-    test('PUT access with comma-separated IPs and CIDR returns 200', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/access', {
-        allow: '192.168.1.1, 10.0.0.0/8',
-      });
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-    });
-
-    test('PUT access with invalid CIDR returns 400', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/access', {
-        allow: '10.0.0.0/33',
-      });
-      expect(res.status).toBe(400);
-    });
-
-    test('PUT access with empty string clears and returns 200', async () => {
-      const res = await apiRequest('PUT', '/api/apps/e2e-nginx/access', {
-        allow: '',
-      });
-      expect(res.status).toBe(200);
-      expect(res.data.status).toBe('ok');
-    });
+      await waitForAppSettled('e2e-nginx');
+    };
+    try {
+      // Requests arrive from 127.0.0.1, which this list does not cover: 404.
+      await setAllow('192.168.1.1, 10.0.0.0/8');
+      await waitForProxyStatus(HOST, 404);
+      await setAllow('127.0.0.0/8');
+      await waitForProxyStatus(HOST, 200, { bodyContains: 'Welcome to nginx' });
+    } finally {
+      // Later specs need nginx-test.local reachable without an allowlist.
+      await setAllow('');
+      const compose = await apiRequest('GET', '/api/apps/e2e-nginx/compose');
+      expect(compose.data).not.toMatch(/simpledeploy\.access\.allow:\s*["']?[0-9]/);
+      await waitForProxyStatus(HOST, 200, { bodyContains: 'Welcome to nginx' });
+    }
   });
 });

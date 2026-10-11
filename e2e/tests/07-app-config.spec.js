@@ -1,21 +1,45 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, waitForDeployDone } from '../helpers/api.js';
+import { dockerCLI } from '../helpers/docker.js';
+import { waitForProxyStatus } from '../helpers/proxy.js';
 
 test.describe('App Configuration', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeAll(async () => {
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+  });
+
+  // Leaves e2e-nginx on nginx:1.27-alpine with a second compose version,
+  // which 11-app-versions and 23-rollback-and-restore build on.
+  test('Save & Deploy from the YAML editor redeploys with the edited image', async ({ page }) => {
     await loginAsAdmin(page);
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-  });
+    await page.goto(`${getState().baseURL}/#/apps/e2e-nginx`);
+    await page.getByRole('button', { name: 'settings', exact: true }).click();
+    const main = page.locator('main');
+    await main.getByRole('button', { name: 'YAML', exact: true }).click();
 
-  test('view compose file in config tab', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).click();
-    await expect(page.getByText('nginx:alpine')).toBeVisible({ timeout: 5_000 });
-  });
+    const editor = main.locator('textarea').first();
+    // With E2E_USE_MIRROR=1 the stored image carries the mirror prefix.
+    await expect(editor).toHaveValue(/image: (\S+\/)?nginx:alpine\n/);
+    const edited = (await editor.inputValue()).replace(/image: (\S+\/)?nginx:alpine/, 'image: $1nginx:1.27-alpine');
+    await editor.fill(edited);
+    await main.getByRole('button', { name: 'Save & Deploy' }).click();
 
-  test('environment variables section visible', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).click();
-    await expect(page.getByText(/environment variables/i).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByRole('button', { name: /add variable/i })).toBeVisible();
+    const review = page.getByRole('dialog').filter({ hasText: 'Review Changes' });
+    await expect(review.getByText(/^- +image: (\S+\/)?nginx:alpine$/)).toBeVisible();
+    await expect(review.getByText(/^\+ +image: (\S+\/)?nginx:1\.27-alpine$/)).toBeVisible();
+    const deployRes = page.waitForResponse((r) => r.url().endsWith('/api/apps/deploy') && r.request().method() === 'POST');
+    await review.getByRole('button', { name: 'Confirm & Deploy' }).click();
+    expect((await deployRes).status()).toBe(202);
+    await expect(review).toBeHidden();
+
+    // One docker ps call: the container is replaced mid-poll.
+    await expect.poll(() => dockerCLI([
+      'ps', '--format', '{{.Image}}',
+      '--filter', 'label=com.docker.compose.project=simpledeploy-e2e-nginx',
+      '--filter', 'label=com.docker.compose.service=web',
+    ]).trim(), { timeout: 90_000 }).toMatch(/^(\S+\/)?nginx:1\.27-alpine$/);
+    expect((await waitForDeployDone('e2e-nginx')).Status).toBe('running');
+    await waitForProxyStatus('nginx-test.local', 200, { timeoutMs: 30_000, bodyContains: 'Welcome to nginx' });
   });
 });

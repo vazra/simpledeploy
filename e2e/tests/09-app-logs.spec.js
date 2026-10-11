@@ -1,38 +1,38 @@
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest } from '../helpers/api.js';
+import { fetchViaProxy } from '../helpers/proxy.js';
 
 test.describe('App Logs', () => {
+  test.beforeAll(async () => {
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+  });
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    await page.getByRole('button', { name: /logs/i }).click();
+    await page.goto(`${getState().baseURL}/#/apps/e2e-nginx`);
   });
 
-  test('log viewer renders', async ({ page }) => {
-    const logContainer = page.locator('.font-mono').first();
-    await expect(logContainer).toBeVisible({ timeout: 10_000 });
+  test('log viewer streams a fresh nginx access log line', async ({ page }) => {
+    await page.getByRole('button', { name: 'logs', exact: true }).click();
+    const marker = `/e2e-log-${Date.now()}`;
+    const r = await fetchViaProxy('nginx-test.local', marker);
+    expect(r.status).toBe(404);
+    // nginx access log -> docker logs -> logs WS -> viewer.
+    await expect(page.locator('main').getByText(new RegExp(`"GET ${marker} HTTP/1\\.1" 404`))).toBeVisible();
   });
 
-  test('log controls visible', async ({ page }) => {
-    const followBtn = page.getByText(/following|paused/i).first();
-    await expect(followBtn).toBeVisible({ timeout: 5_000 });
-  });
+  test('events tab lists the deploy events from the API', async ({ page }) => {
+    const res = await apiRequest('GET', '/api/apps/e2e-nginx/events');
+    expect(res.status).toBe(200);
+    const actions = res.data.map((e) => e.action);
+    expect(actions).toContain('deploy');
+    expect(actions.filter((a) => /_(failed|unstable)$/.test(a))).toEqual([]);
 
-  test('clear button works', async ({ page }) => {
-    const clearBtn = page.getByRole('button', { name: /clear/i });
-    if (await clearBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await clearBtn.click();
-    }
-  });
-
-  test('deploy logs available in events tab', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/apps/e2e-nginx`);
-    const eventsBtn = page.getByRole('button', { name: /event|history/i });
-    if (await eventsBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await eventsBtn.click();
-      await expect(page.getByText(/deploy/i).first()).toBeVisible({ timeout: 5_000 });
+    await page.getByRole('button', { name: 'events', exact: true }).click();
+    const main = page.locator('main');
+    for (const action of new Set(actions)) {
+      await expect(main.getByText(action, { exact: true })).toHaveCount(actions.filter((a) => a === action).length);
     }
   });
 });

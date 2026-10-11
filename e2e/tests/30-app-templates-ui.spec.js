@@ -1,104 +1,74 @@
-// App template UI coverage.
-// Iterates every app template in ui/src/lib/appTemplates.js. For each:
-//  1. open the deploy wizard
-//  2. click the template card
-//  3. fill any required primary vars (secrets auto-generate)
-//  4. click Apply
-//  5. verify the wizard advances to step 1 and reports a valid compose
-//  6. Back to picker for the next template
-// No actual deployment happens here — that's covered by the slow
-// deploy-each spec. This test is fast and runs in lite mode.
+// App templates (ui/src/lib/appTemplates.js) must render to compose files
+// that both SimpleDeploy's validator and docker compose accept, or the
+// wizard deploys something that fails. The full deploy matrix lives in
+// templates-deploy-all.spec.js (E2E_TEMPLATES=1).
 
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
-import { appTemplates } from '../../ui/src/lib/appTemplates.js';
+import { execFileSync } from 'child_process';
+import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
+import { apiLogin, apiRequest } from '../helpers/api.js';
+import { appTemplates, applyVars, applyAccessMode, countEndpoints, generateSecret } from '../../ui/src/lib/appTemplates.js';
 
-test.describe('App templates - UI validation', () => {
-  test.describe.configure({ mode: 'serial' });
-
-  test.beforeEach(async ({ page }) => {
-    await loginAsAdmin(page);
-  });
-
-  // Fill a single variable field based on its rendered input type.
-  async function fillVariable(dialog, v, templateId) {
-    const input = dialog.locator(`#tpl-var-${v.key}`);
-    if (!(await input.isVisible().catch(() => false))) return;
-
-    if (v.type === 'enum') {
-      const opts = v.options || [];
-      const def = v.default || opts[0]?.value;
-      if (def) await input.selectOption(String(def));
-      return;
-    }
-
-    // Skip if already filled (defaults / auto-generated secrets).
-    const existing = await input.inputValue().catch(() => '');
-    if (existing && existing.length > 0) return;
-
-    let value = '';
-    switch (v.type) {
-      case 'domain':
-        value = `${templateId}.e2e.test`;
-        break;
-      case 'email':
-        value = 'e2e@example.com';
-        break;
-      case 'number':
-        value = String(v.default ?? 8080);
-        break;
-      case 'secret':
-        // Picker auto-fills on open; only reach here if generation failed.
-        value = 'E2eTestSecretValue12345';
-        break;
-      default:
-        value = v.default != null ? String(v.default) : `e2e-${v.key}`;
-    }
-    await input.fill(value);
+// Values as the template picker would fill them in Custom domain mode, with
+// a distinct domain per domain variable.
+function varsFor(tpl) {
+  const vars = {};
+  for (const v of tpl.variables || []) {
+    if (v.type === 'domain') vars[v.key] = `${v.key.replace(/_/g, '-')}.${tpl.id}.e2e.test`;
+    else if (v.default != null) vars[v.key] = v.default;
+    else if (v.type === 'secret') vars[v.key] = generateSecret(v.generate?.length || 24, v.generate?.charset || 'base58');
+    else if (v.type === 'email') vars[v.key] = 'e2e@example.com';
+    else vars[v.key] = `e2e-${v.key}`;
   }
+  return vars;
+}
 
-  test(`renders ${appTemplates.length} templates in grid`, async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
-    await page.getByRole('button', { name: 'Deploy App' }).first().click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: /^browse templates$/i }).click();
+test.describe('App templates', () => {
+  test(`all ${appTemplates.length} templates render to a compose file the server and docker compose accept`, async () => {
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    const failures = [];
     for (const tpl of appTemplates) {
-      await expect(
-        dialog.getByRole('button', { name: `Use template ${tpl.name}` }),
-      ).toBeVisible();
+      const compose = applyAccessMode(applyVars(tpl.compose, varsFor(tpl)), 'custom');
+      // JSON is valid YAML, so the rendered tree is sent as-is.
+      const text = JSON.stringify(compose);
+      const res = await apiRequest('POST', '/api/apps/validate-compose', { compose: Buffer.from(text).toString('base64') });
+      if (res.status !== 200 || res.data.valid !== true) {
+        failures.push(`${tpl.id}: validate-compose ${res.status} ${JSON.stringify(res.data)}`);
+      }
+      // SimpleDeploy's parser skips compose consistency checks (e.g. a
+      // service using an undeclared named volume); docker compose up does not.
+      try {
+        execFileSync('docker', ['compose', '-p', 'sd-e2e-template-check', '-f', '-', 'config', '--quiet'], {
+          input: text, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8',
+        });
+      } catch (e) {
+        failures.push(`${tpl.id}: docker compose config: ${(e.stderr || e.message).trim()}`);
+      }
     }
+    expect(failures).toEqual([]);
   });
 
-  // One test per template keeps failures isolated and the report legible.
-  for (const tpl of appTemplates) {
-    test(`template "${tpl.name}" applies to a valid compose`, async ({ page }) => {
-      const state = getState();
+  // Quick test (the default access mode) gives every domain variable the
+  // same sslip.io name; multi-endpoint templates must still deploy.
+  test('multi-endpoint templates apply to a valid compose in the default Quick test mode', async ({ page }) => {
+    const multi = appTemplates.filter((t) => countEndpoints(t.compose) > 1);
+    expect(multi.length).toBeGreaterThan(0);
+    await loginAsAdmin(page);
+    const state = getState();
+    for (const tpl of multi) {
       await page.goto(`${state.baseURL}/#/`);
+      await page.reload();
       await page.getByRole('button', { name: 'Deploy App' }).first().click();
       const dialog = page.getByRole('dialog');
-      await expect(dialog).toBeVisible();
       await dialog.getByRole('button', { name: /^browse templates$/i }).click();
-
       await dialog.getByRole('button', { name: `Use template ${tpl.name}` }).click();
 
-      // Expand advanced/secrets accordion if the template has hidden vars so
-      // we can verify auto-generated secrets are populated.
-      const hasHidden = (tpl.variables || []).some((v) => v.hidden);
-      if (hasHidden) {
-        await dialog.getByText(/advanced \/ secrets/i).click();
-      }
-
-      for (const v of tpl.variables || []) {
-        await fillVariable(dialog, v, tpl.id);
-      }
-
+      const validated = page.waitForResponse((r) => r.url().endsWith('/api/apps/validate-compose'));
       await dialog.getByRole('button', { name: /^apply/i }).click();
-
-      // Step 1: expect the valid-compose indicator to appear. Validation
-      // happens server-side, so allow room for the round-trip.
-      await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 15_000 });
-    });
-  }
+      const res = await validated;
+      expect(res.status()).toBe(200);
+      expect(await res.json(), `${tpl.id} in Quick test mode`).toEqual({ valid: true });
+      await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible();
+    }
+  });
 });

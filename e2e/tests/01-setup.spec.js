@@ -1,58 +1,34 @@
 import { test, expect } from '@playwright/test';
 import { getState, TEST_ADMIN } from '../helpers/auth.js';
 
+// Creates the admin the rest of the suite uses. Setup input validation is a
+// unit concern (ui Login.test.js, internal/api/auth_test.go).
 test.describe('Initial Setup', () => {
-  test('redirects to login when no users exist', async ({ page }) => {
+  test('creates the first admin account through the setup form', async ({ page }) => {
     const state = getState();
-    await page.goto(state.baseURL);
-    await expect(page).toHaveURL(/login/);
-  });
+    const before = await page.request.get(`${state.baseURL}/api/setup/status`);
+    expect(await before.json()).toEqual({ needs_setup: true });
 
-  test('shows setup mode on login page', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/login`);
-    await expect(page.getByRole('button', { name: 'Create Account' })).toBeVisible();
-  });
-
-  test('rejects empty username', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/login`);
-    await page.locator('#password').fill(TEST_ADMIN.password);
-    await page.locator('#confirmPassword').fill(TEST_ADMIN.password);
-    await page.getByRole('button', { name: 'Create Account' }).click();
-    await expect(page.getByRole('button', { name: 'Create Account' })).toBeVisible();
-  });
-
-  test('rejects short password', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/login`);
-    await page.locator('#username').fill(TEST_ADMIN.username);
-    await page.locator('#password').fill('short');
-    await page.locator('#confirmPassword').fill('short');
-    await page.getByRole('button', { name: 'Create Account' }).click();
-    await expect(page.getByRole('button', { name: 'Create Account' })).toBeVisible();
-  });
-
-  test('rejects mismatched passwords', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/login`);
-    await page.locator('#username').fill(TEST_ADMIN.username);
-    await page.locator('#password').fill(TEST_ADMIN.password);
-    await page.locator('#confirmPassword').fill('DifferentPass123!');
-    await page.getByRole('button', { name: 'Create Account' }).click();
-    await expect(page.getByText(/match/i)).toBeVisible();
-  });
-
-  test('creates admin account successfully', async ({ page }) => {
-    const state = getState();
     await page.goto(`${state.baseURL}/#/login`);
     await page.locator('#displayName').fill(TEST_ADMIN.displayName);
     await page.locator('#email').fill(TEST_ADMIN.email);
     await page.locator('#username').fill(TEST_ADMIN.username);
     await page.locator('#password').fill(TEST_ADMIN.password);
     await page.locator('#confirmPassword').fill(TEST_ADMIN.password);
+    const setupRes = page.waitForResponse((r) => r.url().endsWith('/api/setup') && r.request().method() === 'POST');
     await page.getByRole('button', { name: 'Create Account' }).click();
-    // SPA uses hash routing; wait for sidebar/nav to confirm dashboard loaded
-    await page.waitForSelector('aside nav, nav', { timeout: 10_000 });
+    expect((await setupRes).status()).toBe(201);
+    await page.waitForSelector('aside:not([data-testid="activity-sidebar"])', { timeout: 15_000 });
+
+    const me = await page.request.get(`${state.baseURL}/api/me`);
+    expect(me.status()).toBe(200);
+    const body = await me.json();
+    expect(body.username).toBe(TEST_ADMIN.username);
+    expect(body.role).toBe('super_admin');
+    expect(body.display_name).toBe(TEST_ADMIN.displayName);
+    expect(body.email).toBe(TEST_ADMIN.email);
+
+    const after = await page.request.get(`${state.baseURL}/api/setup/status`);
+    expect(await after.json()).toEqual({ needs_setup: false });
   });
 });

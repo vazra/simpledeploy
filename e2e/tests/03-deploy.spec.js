@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { loginAsAdmin, getState } from '../helpers/auth.js';
+import { loginAsAdmin, TEST_ADMIN } from '../helpers/auth.js';
 import {
   findServiceContainer,
   containerRunning,
@@ -10,9 +10,8 @@ import {
   listAppContainers,
   dockerExec,
 } from '../helpers/docker.js';
-import { fetchViaProxy } from '../helpers/proxy.js';
-import { apiRequest, apiLogin } from '../helpers/api.js';
-import { TEST_ADMIN } from '../helpers/auth.js';
+import { fetchViaProxy, waitForProxyStatus } from '../helpers/proxy.js';
+import { apiRequest, apiLogin, waitForAppStatus } from '../helpers/api.js';
 
 const FIXTURES = join(import.meta.dirname, '..', 'fixtures');
 
@@ -28,131 +27,100 @@ async function deployApp(page, appName, composeContent) {
   await dialog.getByRole('button', { name: /build it yourself/i }).click();
   await dialog.getByPlaceholder('my-app').fill(appName);
   await dialog.getByRole('button', { name: 'YAML' }).click();
-  const editor = dialog.locator('textarea').last();
-  await editor.fill(composeContent);
-  await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
+  await dialog.locator('textarea').last().fill(composeContent);
+  await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
   await dialog.getByRole('button', { name: 'Next' }).click();
   await dialog.getByRole('button', { name: 'Deploy' }).click();
   await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
-  const viewAppBtn = dialog.getByRole('button', { name: 'View App' });
-  if (await viewAppBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await viewAppBtn.click();
-  }
+  await dialog.getByRole('button', { name: 'View App' }).click();
+  await expect(page).toHaveURL(new RegExp(`#/apps/${appName}$`));
+  await expect(page.locator('h1')).toHaveText(appName);
+  await waitForAppStatus(appName, 'running', 15_000);
 }
 
 test.describe('Deploy Apps', () => {
+  test.beforeAll(async () => {
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+  });
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
   test('deploy nginx app', async ({ page }) => {
-    const compose = readFixture('compose-nginx.yml');
-    await deployApp(page, 'e2e-nginx', compose);
+    await deployApp(page, 'e2e-nginx', readFixture('compose-nginx.yml'));
   });
 
   test('deploy multi-service app', async ({ page }) => {
-    const compose = readFixture('compose-multi.yml');
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
-    await deployApp(page, 'e2e-multi', compose);
+    await deployApp(page, 'e2e-multi', readFixture('compose-multi.yml'));
   });
 
   test('deploy postgres app', async ({ page }) => {
-    const compose = readFixture('compose-postgres.yml');
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
-    await deployApp(page, 'e2e-postgres', compose);
+    await deployApp(page, 'e2e-postgres', readFixture('compose-postgres.yml'));
   });
 
-  test('reject invalid YAML', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
+  test('invalid YAML fails server validation and blocks Next', async ({ page }) => {
+    const bad = 'this is not: valid: yaml: [';
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: /build it yourself/i }).click();
     await dialog.getByPlaceholder('my-app').fill('bad-app');
     await dialog.getByRole('button', { name: 'YAML' }).click();
-    const editor = dialog.locator('textarea').last();
-    await editor.fill('this is not: valid: yaml: [');
-    await expect(dialog.getByText(/failed|error|invalid/i).first()).toBeVisible({ timeout: 10_000 });
+    const validated = page.waitForResponse((r) =>
+      r.url().endsWith('/api/apps/validate-compose') &&
+      r.request().postDataJSON()?.compose === Buffer.from(bad).toString('base64'));
+    await dialog.locator('textarea').last().fill(bad);
+    const res = await validated;
+    expect(res.status()).toBe(200);
+    expect((await res.json()).valid).toBe(false);
+    await expect(dialog.getByText(/^Invalid compose file:/)).toBeVisible();
+    await expect(dialog.getByText('Valid compose file', { exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
-  test('deploying same template twice auto-suggests name-2', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
+  test('template deploy reusing an existing name suggests name-2 and keeps the original', async ({ page }) => {
+    const before = await apiRequest('GET', '/api/apps/e2e-nginx');
+    expect(before.status).toBe(200);
+    const beforeHash = before.data.ComposeHash;
+    expect(beforeHash).toBeTruthy();
 
-    // First deploy: pick nginx-static template, name it collide-tpl.
-    await page.getByRole('button', { name: 'Deploy App' }).first().click();
-    let dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: /browse templates/i }).click();
-    await dialog.getByRole('button', { name: /use template nginx static site/i }).click();
-    // On vars step: default access mode is quick-test with prefilled host. Apply.
-    await dialog.getByRole('button', { name: /apply/i }).click();
-    // Step 1: set app name.
-    const nameInput = dialog.getByPlaceholder('my-app');
-    await expect(nameInput).toBeVisible();
-    await nameInput.fill('collide-tpl');
-    await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
-    await dialog.getByRole('button', { name: 'Next' }).click();
-    await dialog.getByRole('button', { name: 'Deploy' }).click();
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
-    // Close wizard via View App (matches the deployApp helper).
-    const viewApp = dialog.getByRole('button', { name: 'View App' });
-    if (await viewApp.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await viewApp.click();
-    } else {
-      await page.keyboard.press('Escape');
-    }
-    await expect(dialog).toBeHidden({ timeout: 10_000 });
-    await page.goto(`${state.baseURL}/#/`);
+    try {
+      await page.getByRole('button', { name: 'Deploy App' }).first().click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: /browse templates/i }).click();
+      await dialog.getByRole('button', { name: /use template nginx static site/i }).click();
+      await dialog.getByRole('button', { name: /^custom domain$/i }).click();
+      await dialog.locator('#tpl-var-domain').fill('tpl-e2e.localhost');
+      await dialog.getByRole('button', { name: /^apply/i }).click();
+      await dialog.getByPlaceholder('my-app').fill('e2e-nginx');
+      await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
+      await dialog.getByRole('button', { name: 'Next' }).click();
+      await dialog.getByRole('button', { name: 'Deploy' }).click();
 
-    // Second deploy: same template, same name -> expect name-taken modal.
-    await page.getByRole('button', { name: 'Deploy App' }).first().click();
-    dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: /browse templates/i }).click();
-    await dialog.getByRole('button', { name: /use template nginx static site/i }).click();
-    await dialog.getByRole('button', { name: /apply/i }).click();
-    const nameInput2 = dialog.getByPlaceholder('my-app');
-    await nameInput2.fill('collide-tpl');
-    await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
-    await dialog.getByRole('button', { name: 'Next' }).click();
-    await dialog.getByRole('button', { name: 'Deploy' }).click();
+      const modal = page.getByTestId('name-taken-modal');
+      await expect(modal).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('name-taken-input')).toHaveValue('e2e-nginx-2');
+      await modal.getByRole('button', { name: 'Deploy' }).click();
+      await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
 
-    // Expect the name-taken modal with pre-filled suggestion "collide-tpl-2".
-    const modal = page.getByTestId('name-taken-modal');
-    await expect(modal).toBeVisible({ timeout: 15_000 });
-    const suggestionInput = page.getByTestId('name-taken-input');
-    await expect(suggestionInput).toHaveValue('collide-tpl-2');
-    await modal.getByRole('button', { name: 'Deploy' }).click();
-
-    await expect(dialog.getByText('Deployed', { exact: true })).toBeVisible({ timeout: 300_000 });
-
-    // Both apps should exist.
-    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
-    const list = await apiRequest('GET', '/api/apps');
-    const names = (list.data || []).map((a) => a.Name || a.name);
-    expect(names).toContain('collide-tpl');
-    expect(names).toContain('collide-tpl-2');
-
-    // Clean up: leaving these apps behind pollutes the shared proxy with
-    // local-TLS endpoints, which breaks later plain-HTTP tests.
-    for (const slug of ['collide-tpl', 'collide-tpl-2']) {
-      await apiRequest('DELETE', `/api/apps/${slug}`);
+      // The template's domain variable reaches the deployed app.
+      const copy = await waitForAppStatus('e2e-nginx-2', 'running', 15_000);
+      expect(copy.Domain).toBe('tpl-e2e.localhost');
+      const after = await apiRequest('GET', '/api/apps/e2e-nginx');
+      expect(after.data.ComposeHash).toBe(beforeHash);
+    } finally {
+      // Leftover template endpoints break later plain-HTTP specs.
+      await apiRequest('DELETE', '/api/apps/e2e-nginx-2');
     }
   });
 
   test('manual deploy with existing name shows inline error and does not overwrite', async ({ page }) => {
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/`);
-
-    // Capture existing compose hash for e2e-nginx before the attempt.
-    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
     const before = await apiRequest('GET', '/api/apps/e2e-nginx');
-    expect(before.ok).toBe(true);
-    const beforeHash = before.data && (before.data.ComposeHash || before.data.compose_hash);
+    expect(before.status).toBe(200);
+    const beforeHash = before.data.ComposeHash;
+    expect(beforeHash).toBeTruthy();
 
     // Attempt a manual deploy reusing e2e-nginx name with a different compose.
     await page.getByRole('button', { name: 'Deploy App' }).first().click();
@@ -161,62 +129,41 @@ test.describe('Deploy Apps', () => {
     await dialog.getByRole('button', { name: /build it yourself/i }).click();
     await dialog.getByPlaceholder('my-app').fill('e2e-nginx');
     await dialog.getByRole('button', { name: 'YAML' }).click();
-    const editor = dialog.locator('textarea').last();
     // A valid but different compose (distinct image tag) so hash would change if it overwrote.
-    await editor.fill(
+    await dialog.locator('textarea').last().fill(
       "services:\n  web:\n    image: nginx:1.25-alpine\n    ports:\n      - '8080:80'\n"
     );
-    await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
     await dialog.getByRole('button', { name: 'Next' }).click();
     await dialog.getByRole('button', { name: 'Deploy' }).click();
 
     // Expect inline name error on step 1 (no overwrite path in manual source).
-    await expect(dialog.getByText(/already exists/i).first()).toBeVisible({ timeout: 10_000 });
-    // No template suggestion modal should appear for manual source.
+    await expect(dialog.getByText(/already exists/i)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('name-taken-modal')).toHaveCount(0);
 
-    // Verify the original e2e-nginx compose hash is unchanged.
     const after = await apiRequest('GET', '/api/apps/e2e-nginx');
-    const afterHash = after.data && (after.data.ComposeHash || after.data.compose_hash);
-    expect(afterHash).toBe(beforeHash);
+    expect(after.data.ComposeHash).toBe(beforeHash);
   });
 });
 
-test.describe.configure({ mode: 'serial' });
 test.describe('Deploy - Functional', () => {
   test('nginx container is running with correct image and labels', async () => {
     const name = findServiceContainer('e2e-nginx', 'web');
     expect(name, 'expected to find e2e-nginx web container').toBeTruthy();
     expect(containerRunning(name)).toBe(true);
-    const img = containerImage(name);
     // Tolerate the GHCR image mirror (E2E_USE_MIRROR=1 rewrites image
-    // refs server-side), so match on the trailing repo:tag instead of
-    // anchoring at the start.
-    expect(img).toMatch(/(^|\/)nginx:/);
+    // refs server-side), so match on the trailing repo:tag.
+    expect(containerImage(name)).toMatch(/(^|\/)nginx:alpine$/);
     const info = dockerInspect(name);
     expect(info.Config.Labels['com.docker.compose.project']).toBe('simpledeploy-e2e-nginx');
     expect(info.Config.Labels['com.docker.compose.service']).toBe('web');
   });
 
   test('proxy routes HTTP traffic for nginx-test.local', async () => {
-    // Caddy reload after deploy is async; poll until the route is live.
-    const deadline = Date.now() + 30_000;
-    let res, body = '';
-    while (Date.now() < deadline) {
-      res = await fetchViaProxy('nginx-test.local', '/');
-      if (res.status === 200) {
-        body = await res.text();
-        if (body.includes('Welcome to nginx')) break;
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    expect(res.status).toBe(200);
-    expect(body).toContain('Welcome to nginx');
-
-    const missing = await fetchViaProxy('nonexistent.local', '/');
-    const missingBody = await missing.text();
+    await waitForProxyStatus('nginx-test.local', 200, { timeoutMs: 30_000, bodyContains: 'Welcome to nginx' });
     // Caddy returns 200 with empty body when no route matches; ensure no nginx content.
-    expect(missingBody).not.toContain('Welcome to nginx');
+    const missing = await fetchViaProxy('nonexistent.local', '/');
+    expect(await missing.text()).not.toContain('Welcome to nginx');
   });
 
   test('multi-service deploy runs both services and routes traffic', async () => {
@@ -225,14 +172,10 @@ test.describe('Deploy - Functional', () => {
     for (const c of containers) {
       expect(containerRunning(c)).toBe(true);
     }
-    const res = await fetchViaProxy('multi-test.local', '/');
-    expect(res.status).toBe(200);
-    const body = await res.text();
-    expect(body).toContain('Welcome to nginx');
+    await waitForProxyStatus('multi-test.local', 200, { timeoutMs: 30_000, bodyContains: 'Welcome to nginx' });
 
-    const redis = containers.find((n) => n.includes('cache')) || findServiceContainer('e2e-multi', 'cache');
+    const redis = findServiceContainer('e2e-multi', 'cache');
     expect(redis, 'expected to find redis/cache container').toBeTruthy();
-    const out = dockerExec(redis, 'redis-cli PING').trim();
-    expect(out).toBe('PONG');
+    expect(dockerExec(redis, 'redis-cli PING').trim()).toBe('PONG');
   });
 });

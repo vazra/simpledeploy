@@ -1,51 +1,65 @@
 // E2E: Community recipes browse + import flow.
 //
-// Hits the live community catalog at vazra.github.io/simpledeploy-recipes.
-// The catalog must contain at least the seed recipe `nginx-static` for this
-// spec to pass. Catalog source: https://github.com/vazra/simpledeploy-recipes
-//
-// This spec only imports a recipe into the wizard editor; it does not deploy
-// (no DNS/domain dependency, fast).
+// Runs against an isolated server whose recipes_index_url points at a local
+// fixture catalog (helpers/recipes.js), so the spec never depends on the
+// live catalog. It imports a recipe into the wizard editor; it does not deploy.
 
 import { test, expect } from '@playwright/test';
-import { loginAsAdmin } from '../helpers/auth.js';
+import { startServer, stopServer, getBinaryPath } from '../helpers/server.js';
+import { apiRequestAt } from '../helpers/api.js';
+import { TEST_ADMIN } from '../helpers/auth.js';
+import { startRecipesCatalog, FIXTURE_RECIPE } from '../helpers/recipes.js';
 
 test.describe('community recipes', () => {
-  test.beforeEach(async ({ page }) => {
-    await loginAsAdmin(page);
+  let catalog = null;
+  let server = null;
+
+  test.beforeAll(async () => {
+    catalog = await startRecipesCatalog();
+    server = await startServer(getBinaryPath(), { recipesIndexURL: catalog.indexURL });
+    const setup = await apiRequestAt(server.baseURL, 'POST', '/api/setup', {
+      username: TEST_ADMIN.username,
+      password: TEST_ADMIN.password,
+      display_name: TEST_ADMIN.displayName,
+      email: TEST_ADMIN.email,
+    });
+    expect(setup.status).toBe(201);
+  });
+
+  test.afterAll(async () => {
+    stopServer(server);
+    if (catalog) await catalog.stop();
   });
 
   test('browse, view detail, import a recipe into deploy wizard', async ({ page }) => {
-    await page.getByRole('button', { name: 'Deploy App' }).first().click();
-    const dialog = page.getByRole('dialog').first();
-    await expect(dialog).toBeVisible();
+    const login = await page.request.post(`${server.baseURL}/api/auth/login`, {
+      data: { username: TEST_ADMIN.username, password: TEST_ADMIN.password },
+    });
+    expect(login.status()).toBe(200);
+    await page.goto(`${server.baseURL}/#/`);
 
-    // Open the templates grid first (step 0 has Browse Templates / Build it yourself).
-    await dialog.getByRole('button', { name: /^browse templates$/i }).click();
+    await page.locator('main').getByRole('button', { name: 'Deploy App' }).first().click();
+    const wizard = page.getByRole('dialog');
+    await expect(wizard).toBeVisible();
+    await wizard.getByRole('button', { name: /^browse templates$/i }).click();
+    await wizard.getByRole('button', { name: /^browse community recipes$/i }).click();
 
-    // Open the community recipes browser from the template picker.
-    await dialog.getByRole('button', { name: /^browse community recipes$/i }).click();
-
-    // The browser opens as its own dialog. Scope subsequent queries to it.
     const browser = page.getByRole('dialog', { name: /browse community recipes/i });
-    await expect(browser).toBeVisible({ timeout: 15_000 });
+    await expect(browser).toBeVisible();
+    await browser.getByRole('button', { name: new RegExp(FIXTURE_RECIPE.name) }).click();
 
-    // Live catalog must contain the nginx-static seed recipe.
-    const card = browser.getByRole('button', { name: /nginx static site/i });
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-
-    // Detail view shows README + Use Recipe button.
-    await expect(browser.getByRole('button', { name: /^use recipe$/i })).toBeVisible({ timeout: 10_000 });
-
-    // Import the recipe.
+    // README comes from the catalog through the server's file proxy.
+    await expect(browser.locator('pre')).toContainText('Fixture README marker e2e-readme-7f3a.');
     await browser.getByRole('button', { name: /^use recipe$/i }).click();
+    await expect(browser).toBeHidden();
 
-    // Wizard advances to step 1 with YAML editor in 'yaml' mode.
-    // The compose textarea should contain the recipe body.
-    const editor = dialog.locator('textarea').last();
-    await expect(editor).toBeVisible({ timeout: 10_000 });
-    const yamlText = await editor.inputValue();
-    expect(yamlText.toLowerCase()).toMatch(/image:\s*nginx/);
+    await expect(wizard.locator('textarea').last()).toHaveValue(FIXTURE_RECIPE.compose);
+    await expect(wizard.getByPlaceholder('my-app')).toHaveValue(FIXTURE_RECIPE.id);
+    await expect(wizard.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 10_000 });
+
+    // Using a recipe records a compose pull for the popularity report.
+    const pop = await page.request.get(`${server.baseURL}/api/recipes/community/popularity`);
+    expect(pop.status()).toBe(200);
+    expect((await pop.json()).recipes).toEqual([{ recipe_id: FIXTURE_RECIPE.id, count: 1 }]);
   });
 });
