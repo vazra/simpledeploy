@@ -205,7 +205,7 @@ List deploy events (deploys, rollbacks).
 
 ### `POST /api/apps/validate-compose`
 
-Validate a compose file without deploying. Requires `super_admin`.
+Validate a compose file without deploying. Requires `super_admin` (it backs the deploy wizard; parsing resolves files on the host). Runs the same checks as deploying it as a new app, so `valid: true` means `POST /api/apps/deploy` will accept the file. `errors` holds the parse error, or the same violation messages deploy returns in `violations`.
 
 ```json
 // Request
@@ -214,8 +214,8 @@ Validate a compose file without deploying. Requires `super_admin`.
 // Response 200
 {"valid": true}
 
-// Response 200 (parse error)
-{"valid": false, "errors": ["..."]}
+// Response 200 (parse error or security/endpoint violations)
+{"valid": false, "errors": ["service \"web\": privileged mode not allowed"]}
 ```
 
 ## Metrics Endpoints

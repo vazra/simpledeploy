@@ -129,34 +129,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid base64 compose data", http.StatusBadRequest)
 		return
 	}
-
-	// Optional image mirror: when SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX is set
-	// (E2E/CI or dev), rewrite docker.io-bound image refs to the mirror
-	// before the compose file is persisted.
-	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
-		composeData = mirror.RewriteCompose(composeData, prefix)
-	}
-
-	// Pin published host ports to 127.0.0.1 so external traffic must go
-	// through Caddy (which enforces simpledeploy.access.allow IP allowlist
-	// and simpledeploy.ratelimit.* per-app). Otherwise an unauthenticated
-	// attacker could reach the app raw on the published port and bypass
-	// the proxy controls entirely. Operator can opt out by setting
-	// SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true.
-	if os.Getenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK") != "true" {
-		composeData = mirror.RewritePortsLoopback(composeData)
-	}
-
-	// Attach the shared public network so endpoint services are reachable
-	// from the host-native Caddy without requiring published ports. On failure,
-	// log and fall through with the original bytes so the validator below can
-	// still produce a useful error.
-	if injected, changed, err := compose.InjectSharedNetwork(composeData, "simpledeploy-public"); err != nil {
-		log.Printf("[deploy] inject shared network for %s: %v (continuing)", body.Name, err)
-	} else {
-		composeData = injected
-		_ = changed
-	}
+	composeData = deployRewrites(composeData, body.Name)
 
 	appDir := filepath.Join(s.appsDir, body.Name)
 	composePath := filepath.Join(appDir, "docker-compose.yml")
@@ -249,6 +222,38 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		"name":   body.Name,
 		"status": "started",
 	})
+}
+
+// deployRewrites applies the rewrites a deployed compose file gets before it
+// is checked and written. validate-compose uses it too so both see the same file.
+func deployRewrites(composeData []byte, name string) []byte {
+	// Optional image mirror: when SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX is set
+	// (E2E/CI or dev), rewrite docker.io-bound image refs to the mirror
+	// before the compose file is persisted.
+	if prefix := os.Getenv("SIMPLEDEPLOY_IMAGE_MIRROR_PREFIX"); prefix != "" {
+		composeData = mirror.RewriteCompose(composeData, prefix)
+	}
+
+	// Pin published host ports to 127.0.0.1 so external traffic must go
+	// through Caddy (which enforces simpledeploy.access.allow IP allowlist
+	// and simpledeploy.ratelimit.* per-app). Otherwise an unauthenticated
+	// attacker could reach the app raw on the published port and bypass
+	// the proxy controls entirely. Operator can opt out by setting
+	// SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK=true.
+	if os.Getenv("SIMPLEDEPLOY_DISABLE_PORT_LOOPBACK") != "true" {
+		composeData = mirror.RewritePortsLoopback(composeData)
+	}
+
+	// Attach the shared public network so endpoint services are reachable
+	// from the host-native Caddy without requiring published ports. On failure,
+	// log and fall through with the original bytes so the validator can
+	// still produce a useful error.
+	if injected, _, err := compose.InjectSharedNetwork(composeData, "simpledeploy-public"); err != nil {
+		log.Printf("[deploy] inject shared network for %s: %v (continuing)", name, err)
+	} else {
+		composeData = injected
+	}
+	return composeData
 }
 
 func (s *Server) handleRemoveApp(w http.ResponseWriter, r *http.Request) {
@@ -368,22 +373,32 @@ func (s *Server) handleValidateCompose(w http.ResponseWriter, r *http.Request) {
 		Valid  bool     `json:"valid"`
 		Errors []string `json:"errors,omitempty"`
 	}
-
-	// Parse from memory as if in an empty folder: no temp file, and no
-	// stray .env in a shared temp dir can feed the interpolation.
-	virtualPath := filepath.Join(os.TempDir(), "simpledeploy-validate", "docker-compose.yml")
-	_, parseErr := compose.ParseContent(composeData, virtualPath, "validate", nil)
-	if parseErr != nil {
+	reply := func(errs []string) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(validateResponse{
-			Valid:  false,
-			Errors: []string{"Invalid compose file: " + parseErr.Error()},
-		})
-		return
+		json.NewEncoder(w).Encode(validateResponse{Valid: len(errs) == 0, Errors: errs})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(validateResponse{Valid: true})
+	// Check exactly what a deploy of a new app would check: same rewrites,
+	// same rules, same messages. Parse from memory as if in an empty, new
+	// app folder inside apps_dir, so relative binds into other apps' folders
+	// are caught. The folder name starts with "." so no app can own it, and
+	// no .env feeds the interpolation.
+	composeData = deployRewrites(composeData, "validate")
+	baseDir := s.appsDir
+	if baseDir == "" {
+		baseDir = filepath.Join(os.TempDir(), "simpledeploy-validate")
+	}
+	virtualPath := filepath.Join(baseDir, ".validate-compose", "docker-compose.yml")
+	parsed, parseErr := compose.ParseContent(composeData, virtualPath, "validate", nil)
+	if v, ok := violationsOf(parseErr); ok {
+		reply(v)
+		return
+	}
+	if parseErr != nil {
+		reply([]string{"Invalid compose file: " + parseErr.Error()})
+		return
+	}
+	reply(compose.ValidateComposeForDeploy(parsed))
 }
 
 func (s *Server) handleGetCompose(w http.ResponseWriter, r *http.Request) {
