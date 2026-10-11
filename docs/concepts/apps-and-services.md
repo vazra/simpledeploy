@@ -13,7 +13,7 @@ One app, many services. The app is the unit of deployment, scheduling, backup, a
 
 ## Naming
 
-The slug is the directory name under `apps_dir/`. It must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`. Path-traversal characters and leading dots are rejected. The slug is used everywhere: API paths (`/api/apps/<slug>/...`), Docker project name, log buffer keys, container name lookups, backup file naming.
+The slug is the directory name under `apps_dir/`. Use lowercase letters, digits, hyphens and underscores, starting with a letter or digit, up to 63 characters (`^[a-z0-9][a-z0-9_-]{0,62}$`). The dashboard, `POST /api/apps/deploy` and bundle import enforce this, because `docker compose` refuses uppercase letters and dots in project names. Slugs of apps named under the older, looser rule (`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`) stay listed and removable, but cannot deploy until moved to a valid folder name. The slug is used everywhere: API paths (`/api/apps/<slug>/...`), Docker project name, log buffer keys, container name lookups, backup file naming.
 
 The Docker Compose project name is always `simpledeploy-<slug>`. SimpleDeploy passes `-p simpledeploy-<slug>` to every `docker compose` invocation in [/internal/deployer/deployer.go](https://github.com/vazra/simpledeploy/blob/main/internal/deployer/deployer.go). This means container names look like `simpledeploy-myapp-web-1`, and the `com.docker.compose.project` label on every managed container starts with `simpledeploy-`. The metrics collector uses that prefix to filter.
 

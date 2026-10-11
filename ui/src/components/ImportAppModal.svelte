@@ -1,6 +1,7 @@
 <script>
   import Button from './Button.svelte'
   import { api } from '../lib/api.js'
+  import { appNameError } from '../lib/slug.js'
 
   let { open = false, onclose = () => {}, onImported = () => {} } = $props()
 
@@ -90,7 +91,8 @@
     if (open && e.key === 'Escape') handleClose()
   }
 
-  let canImport = $derived(!!file && !!slug.trim() && !importing)
+  let slugError = $derived(slug.trim() ? appNameError(slug.trim()) : '')
+  let canImport = $derived(!!file && !!slug.trim() && !slugError && !importing)
 
   function formatDelta(n) {
     if (n > 0) return `+${n}`
@@ -213,8 +215,11 @@
             type="text"
             bind:value={slug}
             placeholder="my-app"
-            class="w-full px-3 py-2 bg-input-bg border border-border/50 rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30"
+            class="w-full px-3 py-2 bg-input-bg border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/30 {slugError ? 'border-danger/50' : 'border-border/50'}"
           />
+          {#if slugError}
+            <p data-testid="import-slug-error" class="text-xs text-danger mt-1">{slugError}</p>
+          {/if}
         </div>
 
         {#if errorMsg}

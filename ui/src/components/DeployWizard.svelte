@@ -9,6 +9,7 @@
   import { appTemplates, categories, applyVars, applyAccessMode, suggestName } from '../lib/appTemplates.js'
   import { api } from '../lib/api.js'
   import { errorLines } from '../lib/apiErrors.js'
+  import { appNameError, APP_NAME_HINT } from '../lib/slug.js'
 
   let { open = false, onclose = () => {}, onComplete = () => {}, onAppsChanged = () => {}, initialTemplateId = null } = $props()
 
@@ -156,17 +157,9 @@
   let validateTimer = $state(null)
   let visualErrors = $state({})
 
-  const NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/
-
-  function validateName(val) {
-    if (!val.trim()) return 'App name is required'
-    if (!NAME_REGEX.test(val)) return 'Must start with alphanumeric, then alphanumeric/dot/hyphen/underscore, max 63 chars'
-    return ''
-  }
-
   function handleNameInput(e) {
     appName = e.currentTarget.value
-    nameError = appName.trim() ? validateName(appName) : ''
+    nameError = appName.trim() ? appNameError(appName) : ''
   }
 
   function encodeBase64(str) {
@@ -597,7 +590,7 @@
             {#if nameError}
               <p class="text-xs text-danger mt-1">{nameError}</p>
             {:else}
-              <p class="text-xs text-text-muted mt-1">Alphanumeric, dots, hyphens, underscores. Max 63 chars.</p>
+              <p class="text-xs text-text-muted mt-1">{APP_NAME_HINT}</p>
             {/if}
           </div>
 
@@ -847,7 +840,7 @@
         <Button size="sm" variant="secondary" onclick={() => { nameTakenOpen = false; step = 1 }}>Cancel</Button>
         <Button size="sm" onclick={() => {
           const candidate = nameTakenSuggestion.trim()
-          const err = validateName(candidate)
+          const err = appNameError(candidate)
           if (err) { nameTakenError = err; return }
           appName = candidate
           nameError = ''

@@ -76,7 +76,7 @@ Get app details. Returns 404 for unauthorized apps (not 403).
 
 ### `POST /api/apps/deploy`
 
-Deploy an app by uploading a compose file.
+Deploy an app by uploading a compose file. `name` becomes the slug and the compose project `simpledeploy-<name>`, so it must be lowercase letters, digits, `-` and `_`, starting with a letter or digit, max 63 characters (`400` otherwise).
 
 ```json
 // Request

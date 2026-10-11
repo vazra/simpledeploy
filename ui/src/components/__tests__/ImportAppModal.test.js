@@ -127,4 +127,21 @@ describe('ImportAppModal', () => {
     const err = await findByTestId('import-error');
     expect(err.textContent).toMatch(/slug already exists/);
   });
+
+  // docker compose rejects uppercase and dots in project names.
+  it('shows inline error and disables Import for a slug compose cannot use', async () => {
+    const { getByTestId, getByRole, queryByTestId } = render(ImportAppModal, {
+      open: true,
+      onclose: () => {},
+      onImported: () => {},
+    });
+    await setFile(getByTestId('import-file'), mkFile());
+    await fireEvent.input(getByTestId('import-slug'), { target: { value: 'My.App' } });
+    expect(getByTestId('import-slug-error').textContent).toMatch(/lowercase letters, numbers, hyphens/);
+    expect(getByRole('button', { name: /^Import$/ })).toBeDisabled();
+
+    await fireEvent.input(getByTestId('import-slug'), { target: { value: 'my-app' } });
+    expect(queryByTestId('import-slug-error')).toBeNull();
+    expect(getByRole('button', { name: /^Import$/ })).not.toBeDisabled();
+  });
 });

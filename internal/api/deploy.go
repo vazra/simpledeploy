@@ -20,7 +20,17 @@ import (
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
+// validAppName matches any slug an existing install may hold, including
+// names from before validNewAppName. Use it to vet slugs of existing apps
+// (path safety); names that will run as a compose project use validNewAppName.
 var validAppName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
+
+// validNewAppName is the rule for names that get deployed. The deployer runs
+// `docker compose -p simpledeploy-<name>`, and compose only accepts project
+// names made of lowercase letters, digits, '-' and '_'.
+var validNewAppName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+const invalidAppNameMsg = "invalid app name: use only lowercase letters, numbers, hyphens (-) and underscores (_), starting with a letter or number (max 63 characters)"
 
 // dotEnvProblem is shown when the .env next to a compose file stops it from
 // being checked (compose.ErrDotEnv).
@@ -65,8 +75,8 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name and compose are required", http.StatusBadRequest)
 		return
 	}
-	if !validAppName.MatchString(body.Name) {
-		http.Error(w, "invalid app name: must match [a-zA-Z0-9][a-zA-Z0-9._-]{0,62}", http.StatusBadRequest)
+	if !validNewAppName.MatchString(body.Name) {
+		http.Error(w, invalidAppNameMsg, http.StatusBadRequest)
 		return
 	}
 

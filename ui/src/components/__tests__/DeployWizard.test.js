@@ -28,4 +28,22 @@ describe('DeployWizard', () => {
       expect(onclose).toHaveBeenCalled();
     }
   });
+
+  // docker compose rejects uppercase and dots in project names, so the
+  // wizard must flag them before deploy.
+  it('shows an inline error for app names compose cannot use', async () => {
+    const { getByText, getByPlaceholderText, queryByText } = render(DeployWizard, { open: true });
+    await fireEvent.click(getByText('Build it yourself'));
+    const input = getByPlaceholderText('my-app');
+
+    await fireEvent.input(input, { target: { value: 'MyApp' } });
+    expect(getByText('Use lowercase letters only, for example "myapp"')).toBeInTheDocument();
+
+    await fireEvent.input(input, { target: { value: 'my.app' } });
+    expect(getByText(/Dots and spaces are not allowed/)).toBeInTheDocument();
+
+    await fireEvent.input(input, { target: { value: 'my-app' } });
+    expect(queryByText(/Dots and spaces are not allowed/)).toBeNull();
+    expect(getByText(/Lowercase letters, numbers, hyphens/)).toBeInTheDocument();
+  });
 });
