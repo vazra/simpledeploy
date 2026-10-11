@@ -1,296 +1,110 @@
-/**
- * DR: sidecar config recovery after DB wipe.
- *
- * Spawns its own isolated server (fresh data + apps dirs). Does NOT touch the
- * shared server from global-setup. Requires the binary to be built first:
- *   make build-go   # or make build
- *
- * Run standalone:
- *   cd e2e && npx playwright test 26a-config-recovery.spec.js --reporter=list
- */
+// 26a-config-recovery.spec.js
+//
+// Disaster recovery from config sidecars (docs/operations/config-sidecars.md):
+// stop the server, delete the SQLite DB, start again with the same data and
+// apps dirs. Users, API keys, registries and webhooks come back from
+// {data_dir}/config.yml (+ secrets.yml); alert rules and access grants from
+// {apps_dir}/<app>/simpledeploy.yml. Runs on its own isolated server.
 
 import { test, expect } from '@playwright/test';
-import { rmSync, existsSync, unlinkSync, mkdtempSync } from 'fs';
+import { existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
-import { getBinaryPath, startServer } from '../helpers/server.js';
-import { apiRequestAt } from '../helpers/api.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import {
+  startIsolatedServer, stopIsolatedServer, stopGracefully, isRunning, loginAt, deployAt, waitForAppStatusAt,
+} from '../helpers/isolated.js';
 
 const ADMIN = { username: 'dr-admin', password: 'DrTestPass123!', displayName: 'DR Admin', email: 'dr@test.local' };
+const EDITOR = { username: 'dr-editor', password: 'DrEditor123!' };
+const APP = 'dr-nginx';
+const COMPOSE = 'services:\n  web:\n    image: nginx:alpine\n';
 
-/** Bootstrap admin account via POST /api/setup. */
-async function setupAdmin(baseURL) {
-  const res = await apiRequestAt(baseURL, 'POST', '/api/setup', ADMIN, null);
-  if (!res.ok) throw new Error(`setup failed: ${res.status} ${JSON.stringify(res.data)}`);
-  return res;
-}
-
-/** Login and return sessionCookie. */
-async function login(baseURL) {
-  const res = await apiRequestAt(baseURL, 'POST', '/api/auth/login', {
-    username: ADMIN.username,
-    password: ADMIN.password,
-  }, null);
-  if (!res.ok) throw new Error(`login failed: ${res.status} ${JSON.stringify(res.data)}`);
-  if (!res.setCookie) throw new Error('no session cookie after login');
-  return res.setCookie;
-}
-
-/** Authenticated request against an isolated server. */
-function at(baseURL, cookie) {
-  return (method, path, body) => apiRequestAt(baseURL, method, path, body, cookie);
-}
-
-/** Minimal nginx compose (no external ports to avoid collision). */
-const COMPOSE_NGINX = `services:
-  web:
-    image: nginx:alpine
-`;
-
-/** Stop a server process without deleting its data dirs. */
-function stopProc(srv) {
-  if (!srv) return;
-  try { srv.proc.kill('SIGTERM'); } catch {}
-}
-
-/** Delete SQLite DB files from dataDir. */
-function wipeDB(dataDir) {
-  for (const suffix of ['simpledeploy.db', 'simpledeploy.db-wal', 'simpledeploy.db-shm']) {
-    const p = join(dataDir, suffix);
-    if (existsSync(p)) unlinkSync(p);
-  }
-}
-
-/** Wait until GET /api/health returns 200. */
-async function waitHealthy(baseURL, timeoutMs = 20_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${baseURL}/api/health`);
-      if (res.ok) return;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  throw new Error(`server at ${baseURL} not healthy after ${timeoutMs}ms`);
-}
-
-// ---------------------------------------------------------------------------
-// Test
-// ---------------------------------------------------------------------------
-
-// TODO: this DR test is aspirational. Multiple layers still need work:
-// the sync debounce doesn't guarantee a flush before server stop, and
-// login-after-restore fails. Skip until the sidecar recovery flow is
-// re-proven end to end.
-test.describe.skip('DR: sidecar recovery after DB wipe', () => {
-  test.setTimeout(120_000);
-
-  let srv1 = null;
+test.describe('DR: sidecar recovery after DB wipe', () => {
+  let server = null;
+  let api = null;
 
   test.afterAll(async () => {
-    // Kill any leftover server. Dirs are cleaned below or already cleaned.
-    stopProc(srv1);
-    if (srv1) {
-      for (const dir of [srv1.dataDir, srv1.appsDir]) {
-        try { rmSync(dir, { recursive: true, force: true }); } catch {}
-      }
-    }
+    if (!server) return;
+    if (isRunning(server)) await api('DELETE', `/api/apps/${APP}`);
+    await stopIsolatedServer(server, '26a-config-recovery');
   });
 
-  test('DB wipe and restart recovers app, webhook, alert rule, registry, user', async () => {
-    const bin = getBinaryPath();
+  test('restart on a wiped DB restores config from the sidecars', async () => {
+    test.setTimeout(240_000);
+    let cookie;
+    ({ server, cookie, api } = await startIsolatedServer({ admin: ADMIN }));
+    const { dataDir, appsDir } = server;
 
-    // -----------------------------------------------------------------------
-    // Phase 1: start fresh server, seed data
-    // -----------------------------------------------------------------------
-    srv1 = await startServer(bin);
-    const { baseURL, dataDir, appsDir } = srv1;
+    // Seed one of each mirrored setting.
+    await deployAt(api, APP, COMPOSE);
+    const app = await waitForAppStatusAt(server.baseURL, cookie, APP, 'running');
 
-    await setupAdmin(baseURL);
-    const cookie = await login(baseURL);
-    const api = at(baseURL, cookie);
-
-    // Deploy nginx app
-    const deployRes = await api('POST', '/api/apps/deploy', {
-      name: 'dr-nginx',
-      compose: Buffer.from(COMPOSE_NGINX).toString('base64'),
+    const wh = await api('POST', '/api/webhooks', { name: 'dr-hook', type: 'slack', url: 'http://127.0.0.1:9/dr-hook' });
+    expect(wh.status, JSON.stringify(wh.data)).toBe(201);
+    const rule = await api('POST', '/api/alerts/rules', {
+      app_id: app.ID, webhook_id: wh.data.id, metric: 'cpu_pct', operator: '>', threshold: 90, duration_sec: 300, enabled: true,
     });
-    expect(deployRes.ok, `deploy failed: ${JSON.stringify(deployRes.data)}`).toBe(true);
+    expect(rule.status, JSON.stringify(rule.data)).toBe(201);
+    const reg = await api('POST', '/api/registries', { name: 'dr-ghcr', url: 'ghcr.io', username: 'dr-user', password: 'dr-fake-token' });
+    expect(reg.status, JSON.stringify(reg.data)).toBe(201);
+    const user = await api('POST', '/api/users', { ...EDITOR, role: 'manage', display_name: 'DR Editor', email: 'editor@dr.local' });
+    expect(user.status, JSON.stringify(user.data)).toBe(201);
+    const grant = await api('POST', `/api/users/${user.data.id}/access`, { app_slug: APP });
+    expect(grant.status, JSON.stringify(grant.data)).toBe(200);
+    const key = await api('POST', '/api/apikeys', { name: 'dr-key' });
+    expect(key.status, JSON.stringify(key.data)).toBe(201);
 
-    // Wait for app to appear in list (reconciler may take a moment)
-    let appFound = false;
-    const appDeadline = Date.now() + 30_000;
-    while (Date.now() < appDeadline) {
-      const r = await api('GET', '/api/apps', null);
-      if (r.ok && Array.isArray(r.data) && r.data.some((a) => a.slug === 'dr-nginx' || a.Slug === 'dr-nginx')) {
-        appFound = true;
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 500));
+    // Stop right after the last change: shutdown must flush the debounced
+    // sidecar writes.
+    await stopGracefully(server);
+
+    const globalSidecar = readFileSync(join(dataDir, 'config.yml'), 'utf-8');
+    for (const re of [/username: dr-admin/, /username: dr-editor/, /name: dr-hook/, /name: dr-ghcr/, /name: dr-key/]) {
+      expect(globalSidecar, 'config.yml after shutdown').toMatch(re);
     }
-    expect(appFound, 'dr-nginx not visible in /api/apps after deploy').toBe(true);
-
-    // Create webhook
-    const whRes = await api('POST', '/api/webhooks', {
-      name: 'dr-slack',
-      url: 'https://hooks.slack.com/fake/dr-test',
-      type: 'slack',
-      events: ['deploy_success'],
-    });
-    expect(whRes.ok, `webhook create failed: ${JSON.stringify(whRes.data)}`).toBe(true);
-    const webhookId = whRes.data.id || whRes.data.ID;
-    expect(webhookId).toBeTruthy();
-
-    // Look up app_id (alerts API expects numeric id, not slug)
-    const appsRes = await api('GET', '/api/apps', null);
-    const drApp = (appsRes.data || []).find((a) => (a.slug || a.Slug) === 'dr-nginx');
-    expect(drApp, 'dr-nginx app not found').toBeTruthy();
-    const appId = drApp.id || drApp.ID;
-
-    // Create alert rule
-    const ruleRes = await api('POST', '/api/alerts/rules', {
-      app_id: appId,
-      webhook_id: webhookId,
-      metric: 'cpu_pct',
-      operator: '>',
-      threshold: 90,
-      duration_sec: 300,
-      enabled: true,
-    });
-    expect(ruleRes.ok, `alert rule create failed: ${JSON.stringify(ruleRes.data)}`).toBe(true);
-    const ruleId = ruleRes.data.id || ruleRes.data.ID;
-    expect(ruleId).toBeTruthy();
-
-    // Create registry
-    const regRes = await api('POST', '/api/registries', {
-      name: 'dr-ghcr',
-      url: 'ghcr.io',
-      username: 'dr-user',
-      password: 'dr-fake-token',
-    });
-    expect(regRes.ok, `registry create failed: ${JSON.stringify(regRes.data)}`).toBe(true);
-    const registryId = regRes.data.id || regRes.data.ID;
-    expect(registryId).toBeTruthy();
-
-    // Create additional user
-    const userRes = await api('POST', '/api/users', {
-      username: 'dr-editor',
-      password: 'DrEditor123!',
-      role: 'admin',
-    });
-    expect(userRes.ok, `user create failed: ${JSON.stringify(userRes.data)}`).toBe(true);
-
-    // -----------------------------------------------------------------------
-    // Phase 2: verify sidecars exist
-    // -----------------------------------------------------------------------
-    // Give syncer a moment to flush sidecars
-    await new Promise((r) => setTimeout(r, 1_000));
-
-    const globalSidecar = join(dataDir, 'config.yml');
-    const appSidecar = join(appsDir, 'dr-nginx', 'simpledeploy.yml');
-
-    expect(existsSync(globalSidecar), `global sidecar missing: ${globalSidecar}`).toBe(true);
-    expect(existsSync(appSidecar), `app sidecar missing: ${appSidecar}`).toBe(true);
-
-    // -----------------------------------------------------------------------
-    // Phase 3: stop server 1, wipe DB
-    // -----------------------------------------------------------------------
-    stopProc(srv1);
-    await new Promise((r) => setTimeout(r, 500));
-
-    wipeDB(dataDir);
-
-    expect(existsSync(join(dataDir, 'simpledeploy.db')), 'DB should be deleted').toBe(false);
-    // Sidecars must still be present
-    expect(existsSync(globalSidecar), 'global sidecar must survive wipe').toBe(true);
-    expect(existsSync(appSidecar), 'app sidecar must survive wipe').toBe(true);
-
-    // -----------------------------------------------------------------------
-    // Phase 4: start second server with SAME dataDir + appsDir
-    // -----------------------------------------------------------------------
-    const { port: port2, proxyPort: proxyPort2 } = srv1; // ports are freed; grab new ones via startServer
-    const srv2 = await startServer(bin, { dataDir, appsDir });
-    // Update srv1 ref so afterAll cleanup handles dirs
-    srv1 = null; // dirs already owned by srv2; prevent double-delete in afterAll
-
-    const baseURL2 = srv2.baseURL;
-
-    try {
-      // -----------------------------------------------------------------------
-      // Phase 5: login with same admin creds (proves user recovery from config.yml)
-      // -----------------------------------------------------------------------
-      const cookie2 = await login(baseURL2);
-      const api2 = at(baseURL2, cookie2);
-
-      // -----------------------------------------------------------------------
-      // Phase 6: assert config recovery
-      // -----------------------------------------------------------------------
-
-      // App recovered
-      const appsRes = await api2('GET', '/api/apps', null);
-      expect(appsRes.ok, `GET /api/apps failed: ${appsRes.status}`).toBe(true);
-      const apps = Array.isArray(appsRes.data) ? appsRes.data : [];
-      const recoveredApp = apps.find((a) => (a.slug || a.Slug) === 'dr-nginx');
-      expect(recoveredApp, 'dr-nginx app not recovered after DB wipe').toBeTruthy();
-
-      // Webhook recovered
-      const whListRes = await api2('GET', '/api/webhooks', null);
-      expect(whListRes.ok, `GET /api/webhooks failed: ${whListRes.status}`).toBe(true);
-      const webhooks = Array.isArray(whListRes.data) ? whListRes.data : [];
-      const recoveredWh = webhooks.find((w) => (w.name || w.Name) === 'dr-slack');
-      expect(recoveredWh, 'dr-slack webhook not recovered').toBeTruthy();
-
-      // Alert rule recovered
-      const rulesRes = await api2('GET', '/api/alerts/rules', null);
-      expect(rulesRes.ok, `GET /api/alerts/rules failed: ${rulesRes.status}`).toBe(true);
-      const rules = Array.isArray(rulesRes.data) ? rulesRes.data : [];
-      const recoveredRule = rules.find(
-        (r) => (r.app_slug || r.AppSlug) === 'dr-nginx' && (r.metric || r.Metric) === 'cpu',
-      );
-      expect(recoveredRule, 'alert rule not recovered').toBeTruthy();
-
-      // Registry recovered
-      const regListRes = await api2('GET', '/api/registries', null);
-      expect(regListRes.ok, `GET /api/registries failed: ${regListRes.status}`).toBe(true);
-      const registries = Array.isArray(regListRes.data) ? regListRes.data : [];
-      const recoveredReg = registries.find((r) => (r.name || r.Name) === 'dr-ghcr');
-      expect(recoveredReg, 'dr-ghcr registry not recovered').toBeTruthy();
-
-      // Extra user recovered
-      const usersRes = await api2('GET', '/api/users', null);
-      expect(usersRes.ok, `GET /api/users failed: ${usersRes.status}`).toBe(true);
-      const users = Array.isArray(usersRes.data) ? usersRes.data : [];
-      const recoveredUser = users.find((u) => (u.username || u.Username) === 'dr-editor');
-      expect(recoveredUser, 'dr-editor user not recovered').toBeTruthy();
-
-      // -----------------------------------------------------------------------
-      // Phase 7: historical tables are empty (no metrics, no deploy events)
-      // -----------------------------------------------------------------------
-      const metricsRes = await api2('GET', '/api/apps/dr-nginx/metrics?range=1h', null);
-      // Endpoint may return 200 with empty data or 404 if no metrics recorded.
-      // Either is acceptable; what matters is no crash.
-      if (metricsRes.ok && metricsRes.data && typeof metricsRes.data === 'object') {
-        const series = metricsRes.data.series || metricsRes.data.data || [];
-        // series may be an empty array or contain zero data points; both are fine.
-        // We just assert it's an array (no unexpected shape).
-        expect(Array.isArray(series) || series === null).toBe(true);
-      }
-
-      const eventsRes = await api2('GET', '/api/apps/dr-nginx/events', null);
-      if (eventsRes.ok) {
-        const events = Array.isArray(eventsRes.data) ? eventsRes.data : [];
-        // Deploy events are historical; should be empty after DB wipe.
-        expect(events.length).toBe(0);
-      }
-    } finally {
-      stopProc(srv2);
-      for (const dir of [srv2.dataDir, srv2.appsDir]) {
-        try { rmSync(dir, { recursive: true, force: true }); } catch {}
-      }
+    const appSidecarPath = join(appsDir, APP, 'simpledeploy.yml');
+    const appSidecar = readFileSync(appSidecarPath, 'utf-8');
+    for (const re of [/metric: cpu_pct/, /webhook: dr-hook/, /username: dr-editor/]) {
+      expect(appSidecar, 'simpledeploy.yml after shutdown').toMatch(re);
     }
+
+    for (const f of ['simpledeploy.db', 'simpledeploy.db-wal', 'simpledeploy.db-shm']) {
+      rmSync(join(dataDir, f), { force: true });
+    }
+    expect(existsSync(join(dataDir, 'simpledeploy.db'))).toBe(false);
+
+    // Same dirs, fresh ports. Logging in with the old admin password proves
+    // the users table came back from config.yml.
+    ({ server, cookie, api } = await startIsolatedServer({ setup: false, admin: ADMIN, dataDir, appsDir, logName: '26a-restart' }));
+    await expect.poll(() => readFileSync(server.logPath, 'utf-8'), { timeout: 5_000 })
+      .toContain('[configsync] imported global sidecar into empty DB');
+
+    const users = await api('GET', '/api/users');
+    expect(users.status).toBe(200);
+    const editor = users.data.find((u) => u.username === EDITOR.username);
+    expect(editor, JSON.stringify(users.data)).toMatchObject({ role: 'manage', display_name: 'DR Editor', email: 'editor@dr.local' });
+    await loginAt(server.baseURL, EDITOR.username, EDITOR.password);
+
+    const byKey = await fetch(`${server.baseURL}/api/apps`, { headers: { Authorization: `Bearer ${key.data.key}` } });
+    expect(byKey.status, 'API key restored').toBe(200);
+
+    const webhooks = await api('GET', '/api/webhooks');
+    const hook = webhooks.data.find((w) => w.name === 'dr-hook');
+    expect(hook, JSON.stringify(webhooks.data)).toMatchObject({ type: 'slack', url: 'http://127.0.0.1:9/dr-hook' });
+
+    // Registry credentials are encrypted with master_secret; the decrypted
+    // username proves they survived.
+    const regs = await api('GET', '/api/registries');
+    expect(regs.data.find((r) => r.name === 'dr-ghcr'), JSON.stringify(regs.data)).toMatchObject({ url: 'ghcr.io', username: 'dr-user' });
+
+    // The reconciler re-adopts the app from apps_dir and imports its sidecar.
+    await waitForAppStatusAt(server.baseURL, cookie, APP, 'running', 60_000);
+    await expect.poll(async () => {
+      const rules = await api('GET', '/api/alerts/rules');
+      return rules.data.filter((r) => r.app_slug === APP)
+        .map((r) => ({ metric: r.metric, operator: r.operator, threshold: r.threshold, duration_sec: r.duration_sec, webhook_id: r.webhook_id, enabled: r.enabled }));
+    }, { message: 'alert rule restored from simpledeploy.yml', timeout: 20_000 })
+      .toEqual([{ metric: 'cpu_pct', operator: '>', threshold: 90, duration_sec: 300, webhook_id: hook.id, enabled: true }]);
+    const access = await api('GET', `/api/users/${editor.id}/access`);
+    expect(access.data, 'access grant restored from simpledeploy.yml').toEqual([APP]);
   });
 });
