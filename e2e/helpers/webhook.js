@@ -39,15 +39,22 @@ export async function startWebhookReceiver() {
         setResponder: (fn) => (responder = fn),
         clear: () => (received.length = 0),
         stop: () => new Promise((r) => server.close(() => r())),
-        waitFor: async (predicate, timeoutMs = 20_000) => {
+        // waitFor resolves with the first request matching predicate. On
+        // timeout the error lists what did arrive, plus describe() if given.
+        waitFor: async (predicate, timeoutMs = 20_000, describe) => {
           const deadline = Date.now() + timeoutMs;
           while (Date.now() < deadline) {
             const match = received.find(predicate);
             if (match) return match;
             await new Promise((r) => setTimeout(r, 200));
           }
-          throw new Error(`webhook not received matching predicate within ${timeoutMs}ms. got ${received.length} requests`);
+          const got = received.map((r) => `${r.path} ${r.rawBody.slice(0, 120)}`).join('; ');
+          const extra = describe ? describe() : '';
+          throw new Error(`webhook not received matching predicate within ${timeoutMs}ms. got ${received.length} requests: [${got}] ${extra}`);
         },
+        // onPath returns requests received on path (e.g. '/', '/probe').
+        onPath: (path) => received.filter((r) => r.path === path),
+        countWhere: (predicate) => received.filter(predicate).length,
       });
     });
   });

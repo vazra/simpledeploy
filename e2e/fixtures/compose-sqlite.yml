@@ -1,20 +1,19 @@
 services:
-  web:
-    image: nginx:alpine
-    ports:
-      - "8097:80"
-    command: >
-      sh -c "
-      apk add --no-cache sqlite &&
-      mkdir -p /data &&
-      sqlite3 /data/test.db \"CREATE TABLE IF NOT EXISTS e2e_items(id INTEGER PRIMARY KEY, v TEXT);\" &&
-      nginx -g 'daemon off;'
-      "
+  app:
+    # Gitea itself does not run: the image is used because it ships sqlite3
+    # and busybox (sh, tar, cp) and is already mirrored for the Gitea
+    # template, so the fixture needs no package download at test time.
+    image: gitea/gitea:1.26
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        sqlite3 /data/test.db "CREATE TABLE IF NOT EXISTS e2e_items(id INTEGER PRIMARY KEY, v TEXT);" &&
+        trap 'exit 0' TERM INT &&
+        while :; do sleep 1; done
     volumes:
       - sqlitedata:/data
     labels:
       simpledeploy.backup.strategy: "sqlite"
-      simpledeploy.endpoints.0.port: "80"
-      simpledeploy.endpoints.0.tls: "off"
 volumes:
   sqlitedata:

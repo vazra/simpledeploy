@@ -1,352 +1,254 @@
 import { test, expect } from '@playwright/test';
 import { loginAsAdmin, getState, TEST_ADMIN } from '../helpers/auth.js';
-import { apiLogin, apiRequest } from '../helpers/api.js';
+import { apiLogin, apiRequest, waitForAppStatus } from '../helpers/api.js';
 import { startWebhookReceiver } from '../helpers/webhook.js';
-import {
-  sqliteQuery,
-  sqliteExec,
-  injectHighCPUWindow,
-  insertMetricPoint,
-  getAppId,
-  replaceMetricsAtomic,
-} from '../helpers/db.js';
+import { sqliteQuery, sqliteExec, getAppId } from '../helpers/db.js';
+import { deleteAppMetrics, startMetricRefresher } from '../helpers/metrics.js';
+import { createBackupConfig } from '../helpers/backups.js';
+
+const UI_HOOK = 'E2E Test Hook';
+
+async function listWebhooks() {
+  const res = await apiRequest('GET', '/api/webhooks');
+  expect(res.status).toBe(200);
+  return res.data;
+}
+
+async function listRules() {
+  const res = await apiRequest('GET', '/api/alerts/rules');
+  expect(res.status).toBe(200);
+  return res.data;
+}
+
+async function createWebhook(body) {
+  const res = await apiRequest('POST', '/api/webhooks', body);
+  expect(res.status, `webhook create: ${JSON.stringify(res.data)}`).toBe(201);
+  return res.data.id;
+}
+
+async function createRule(body) {
+  const res = await apiRequest('POST', '/api/alerts/rules', { operator: '>', enabled: true, ...body });
+  expect(res.status, `rule create: ${JSON.stringify(res.data)}`).toBe(201);
+  return res.data.id;
+}
+
+// deleteRule drops the rule's alert history first: deleting a rule keeps its
+// history rows (rule_id set to NULL).
+async function deleteRule(id) {
+  sqliteExec(`DELETE FROM alert_history WHERE rule_id=${id};`);
+  const res = await apiRequest('DELETE', `/api/alerts/rules/${id}`);
+  expect(res.status, `delete rule ${id}`).toBe(200);
+}
 
 test.describe('Alerts & Webhooks', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  let receiver;
+
+  test.beforeAll(async () => {
+    const login = await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    expect(login.status).toBe(200);
+    receiver = await startWebhookReceiver();
+  });
+
+  test.afterAll(async () => {
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    // Leftovers from a failed test; deleting the webhook cascades to its rules.
+    for (const w of (await listWebhooks()).filter((w) => w.name === UI_HOOK)) {
+      await apiRequest('DELETE', `/api/webhooks/${w.id}`);
+    }
+    await receiver.stop();
+  });
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    const state = getState();
-    await page.goto(`${state.baseURL}/#/alerts`);
+    await page.goto(`${getState().baseURL}/#/alerts`);
   });
 
-  test('alerts page loads', async ({ page }) => {
-    await expect(page.getByText(/webhook/i).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(/alert rule/i).first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('create webhook', async ({ page }) => {
-    await page.getByRole('button', { name: /add webhook/i }).click();
+  test('create webhook, with a test send from the form', async ({ page }) => {
+    const url = `${receiver.url}/ui`;
+    await page.getByRole('button', { name: 'Add Webhook' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    await dialog.getByPlaceholder(/my webhook/i).fill('E2E Test Hook');
-    const typeSelect = dialog.locator('select').first();
-    await typeSelect.selectOption('custom');
-    await dialog.getByPlaceholder(/https:\/\//i).fill('https://httpbin.org/post');
+    await dialog.getByPlaceholder('My Webhook').fill(UI_HOOK);
+    await dialog.locator('select').first().selectOption('custom');
+    await dialog.getByPlaceholder('https://example.com/webhook').fill(url);
 
-    await dialog.getByRole('button', { name: /create/i }).click();
-    await expect(page.getByText('E2E Test Hook')).toBeVisible({ timeout: 5_000 });
-  });
+    await dialog.getByRole('button', { name: 'Send Test' }).click();
+    const hit = await receiver.waitFor((r) => r.path === '/ui', 10_000);
+    expect(hit.body).toMatchObject({ app: 'my-app', metric: 'cpu_pct', status: 'firing' });
 
-  test('test webhook', async ({ page }) => {
-    const testBtn = page.getByRole('button', { name: /test/i }).first();
-    if (await testBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await testBtn.click();
-      await expect(page.locator('[role="alert"]').first()).toBeVisible({ timeout: 10_000 });
-    }
+    await dialog.getByRole('button', { name: 'Create' }).click();
+    await expect(dialog).toBeHidden();
+
+    const hook = (await listWebhooks()).find((w) => w.name === UI_HOOK);
+    expect(hook).toMatchObject({ type: 'custom', url });
+    await expect(page.locator('main table').first().getByRole('row', { name: new RegExp(UI_HOOK) })).toBeVisible();
   });
 
   test('create alert rule', async ({ page }) => {
-    await page.getByRole('button', { name: /add rule/i }).click();
+    const hook = (await listWebhooks()).find((w) => w.name === UI_HOOK);
+    expect(hook, 'webhook from the previous test').toBeTruthy();
+
+    await page.getByRole('button', { name: 'Add Rule' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
 
-    const nameInput = dialog.getByPlaceholder(/name|rule/i);
-    if (await nameInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await nameInput.fill('E2E CPU Alert');
-    }
+    const select = (optionText) => dialog.locator('select', { has: page.locator('option', { hasText: optionText }) });
+    await select('All Apps').selectOption('e2e-nginx');
+    await select('CPU Usage').selectOption('cpu_pct');
+    await select('above').selectOption('>');
+    await dialog.locator('input[type="number"]').first().fill('90');
+    await select('Select webhook').selectOption(String(hook.id));
+    await dialog.getByRole('button', { name: 'Create' }).click();
+    await expect(dialog).toBeHidden();
 
-    const metricSelect = dialog.locator('select').filter({ hasText: /cpu|metric/i }).first();
-    if (await metricSelect.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await metricSelect.selectOption({ index: 0 });
-    }
-
-    const thresholdInput = dialog.locator('input[type="number"]').first();
-    if (await thresholdInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await thresholdInput.fill('90');
-    }
-
-    const webhookSelect = dialog.locator('select').last();
-    if (await webhookSelect.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      const options = await webhookSelect.locator('option').allTextContents();
-      if (options.length > 1) {
-        await webhookSelect.selectOption({ index: 1 });
-      }
-    }
-
-    await dialog.getByRole('button', { name: /create|save/i }).click();
-    await expect(page.getByText(/cpu/i).first()).toBeVisible({ timeout: 5_000 });
-  });
-
-  test('view alert history', async ({ page }) => {
-    await expect(page.getByText(/history/i).first()).toBeVisible({ timeout: 5_000 });
+    const rule = (await listRules()).find((r) => r.webhook_id === hook.id);
+    // The rule must keep the app picked in the form, not become an all-apps rule.
+    expect(rule).toMatchObject({ metric: 'cpu_pct', operator: '>', threshold: 90, enabled: true, app_slug: 'e2e-nginx' });
+    await expect(page.locator('main table').nth(1).getByRole('row', { name: /CPU Usage > 90\.0%/ })).toBeVisible();
   });
 
   test('delete alert rule', async ({ page }) => {
-    const deleteBtn = page.locator('button').filter({ hasText: /delete/i }).last();
-    if (await deleteBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await deleteBtn.click();
-      const dialog = page.getByRole('dialog');
-      if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await dialog.getByRole('button', { name: /delete|confirm/i }).click();
-      }
-    }
+    const hook = (await listWebhooks()).find((w) => w.name === UI_HOOK);
+    expect(hook, 'webhook from the earlier test').toBeTruthy();
+
+    const row = page.locator('main table').nth(1).getByRole('row', { name: /CPU Usage > 90\.0%/ });
+    await row.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm' }).click();
+
+    await expect(row).toHaveCount(0);
+    expect((await listRules()).filter((r) => r.webhook_id === hook.id)).toEqual([]);
   });
 
   test('delete webhook', async ({ page }) => {
-    const deleteBtn = page.locator('button').filter({ hasText: /delete/i }).first();
-    if (await deleteBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await deleteBtn.click();
-      const dialog = page.getByRole('dialog');
-      if (await dialog.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await dialog.getByRole('button', { name: /delete|confirm/i }).click();
-      }
-    }
+    const row = page.locator('main table').first().getByRole('row', { name: new RegExp(UI_HOOK) });
+    await row.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Confirm' }).click();
+
+    await expect(row).toHaveCount(0);
+    expect((await listWebhooks()).some((w) => w.name === UI_HOOK)).toBe(false);
   });
 });
 
-// -----------------------------------------------------------------------------
-// Functional dispatch tests: exercise the real evaluator + webhook dispatcher
-// against a local HTTP receiver by injecting synthetic metric points.
-// -----------------------------------------------------------------------------
-
+// Functional dispatch: the real evaluator + webhook dispatcher against a
+// local receiver, driven by synthetic metric points. The evaluator ticks
+// every 2s in e2e and walks enabled rules in id order, sending each webhook
+// synchronously. So once a rule created later (higher id) has fired, every
+// earlier rule was evaluated in that same tick; probe/control rules use this
+// to prove that something did NOT fire without sleeping.
 test.describe('Alerts - Functional Dispatch', () => {
   test.describe.configure({ mode: 'serial' });
 
-  // Evaluator ticks every 30s in production. Give it 2+ cycles before giving up.
-  const EVAL_WAIT_MS = 75_000;
+  const EVAL_WAIT_MS = 20_000;
   const APP_SLUG = 'e2e-nginx';
   const DURATION_SEC = 60;
 
   let receiver;
+  let appId;
   let webhookId;
   let ruleId;
-  let backupRuleIds = [];
-  let backupConfigIds = [];
-  let nginxWasRunning = false;
+  const ruleIds = [];
+  const webhookIds = [];
+  const backupConfigIds = [];
 
-  function deleteAppMetrics(slug) {
-    sqliteExec(
-      `DELETE FROM metrics WHERE app_id = (SELECT id FROM apps WHERE slug='${slug}');`,
-    );
-  }
+  const cpuEvents = (path, status) =>
+    receiver.onPath(path).filter((r) => r.body.metric === 'cpu_pct' && r.body.status === status);
 
-  function injectLowCPUWindow(slug, cpuPct = 5) {
-    const now = Math.floor(Date.now() / 1000);
-    for (let i = 0; i < 10; i++) {
-      insertMetricPoint({
-        appSlug: slug,
-        cpu: cpuPct,
-        memoryMb: 50,
-        tsSec: now - i * 5,
-      });
-    }
-  }
-
-  // Periodically refresh high-CPU metrics so the evaluator always sees a full
-  // window of breaching points even if the real collector writes low values.
-  function startMetricRefresher(slug, high) {
-    let stopped = false;
-    const tick = () => {
-      if (stopped) return;
-      try {
-        // Single transaction: DELETE the real collector's points AND the
-        // previous injected window, then INSERT the fresh window. Non-atomic
-        // delete+insert would let a fast evaluator tick (2s) see an empty
-        // window, resolve the alert, then re-fire on the next tick.
-        replaceMetricsAtomic(slug, {
-          cpu: high ? 95 : 5,
-          memoryMb: high ? 100 : 50,
-        });
-      } catch (e) {
-        // ignore transient sqlite lock errors
-      }
-    };
-    tick();
-    const handle = setInterval(tick, 5_000);
-    return () => {
-      stopped = true;
-      clearInterval(handle);
-    };
+  // fireProbe adds a rule identical to the main one on its own webhook path
+  // and waits for it to fire.
+  async function fireProbe(path, refresher) {
+    const whId = await createWebhook({ name: `E2E ${path}`, type: 'custom', url: `${receiver.url}${path}` });
+    webhookIds.push(whId);
+    const id = await createRule({ app_id: appId, metric: 'cpu_pct', threshold: 80, duration_sec: DURATION_SEC, webhook_id: whId });
+    ruleIds.push(id);
+    await receiver.waitFor((r) => r.path === path && r.body.status === 'firing', EVAL_WAIT_MS, refresher.lastError);
+    return id;
   }
 
   test.beforeAll(async () => {
-    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    const login = await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
+    expect(login.status).toBe(200);
     receiver = await startWebhookReceiver();
+    appId = getAppId(APP_SLUG);
 
-    // Record current app status so we can restore it after tests.
-    const appRes = await apiRequest('GET', `/api/apps/${APP_SLUG}`);
-    nginxWasRunning = appRes.ok && (appRes.data.Status || appRes.data.status) === 'running';
-
-    // Stop the app so the real metric collector does not clobber our
-    // synthetic data points during the test window.
-    if (nginxWasRunning) {
-      await apiRequest('POST', `/api/apps/${APP_SLUG}/stop`);
-      // give docker a moment to settle
-      await new Promise((r) => setTimeout(r, 3_000));
-    }
-
+    // Stop the app so the real collector does not write points for it.
+    const stop = await apiRequest('POST', `/api/apps/${APP_SLUG}/stop`);
+    expect(stop.status).toBe(200);
     deleteAppMetrics(APP_SLUG);
 
-    // Create the shared webhook pointing at our local receiver.
-    const whRes = await apiRequest('POST', '/api/webhooks', {
-      name: 'E2E Dispatch Hook',
-      type: 'custom',
-      url: receiver.url,
-    });
-    expect(whRes.ok, `webhook create failed: ${JSON.stringify(whRes)}`).toBeTruthy();
-    webhookId = whRes.data.id;
+    webhookId = await createWebhook({ name: 'E2E Dispatch Hook', type: 'custom', url: receiver.url });
+    webhookIds.push(webhookId);
   });
 
   test.afterAll(async () => {
-    // Best-effort cleanup; swallow errors so cleanup specs still run.
+    await apiLogin(TEST_ADMIN.username, TEST_ADMIN.password);
     try {
-      for (const id of backupRuleIds) {
-        await apiRequest('DELETE', `/api/alerts/rules/${id}`);
-      }
-      if (ruleId) {
-        await apiRequest('DELETE', `/api/alerts/rules/${ruleId}`);
-      }
-      if (webhookId) {
-        await apiRequest('DELETE', `/api/webhooks/${webhookId}`);
-      }
-      for (const id of backupConfigIds) {
-        await apiRequest('DELETE', `/api/backups/configs/${id}`);
-      }
-      // Clear synthetic metrics + alert history rows for our rule.
+      for (const id of [ruleId, ...ruleIds].filter(Boolean)) await deleteRule(id);
+      for (const id of webhookIds) await apiRequest('DELETE', `/api/webhooks/${id}`);
+      for (const id of backupConfigIds) await apiRequest('DELETE', `/api/backups/configs/${id}`);
       deleteAppMetrics(APP_SLUG);
-      if (ruleId) {
-        sqliteExec(`DELETE FROM alert_history WHERE rule_id=${ruleId};`);
-      }
-      for (const id of backupRuleIds) {
-        sqliteExec(`DELETE FROM alert_history WHERE rule_id=${id};`);
-      }
-    } catch {}
-
-    if (receiver) await receiver.stop();
-
-    // Restore original app state so downstream tests (14-19) see it running.
-    if (nginxWasRunning) {
-      try { await apiRequest('POST', `/api/apps/${APP_SLUG}/start`); } catch {}
+      await receiver.stop();
+    } finally {
+      const start = await apiRequest('POST', `/api/apps/${APP_SLUG}/start`);
+      expect(start.status).toBe(200);
+      await waitForAppStatus(APP_SLUG, 'running', 60_000);
     }
   });
 
-  test('CPU threshold breach fires webhook', async () => {
-    test.setTimeout(120_000);
-
-    const appId = getAppId(APP_SLUG);
-
-    // Create the alert rule.
-    const ruleRes = await apiRequest('POST', '/api/alerts/rules', {
-      app_id: appId,
-      metric: 'cpu_pct',
-      operator: '>',
-      threshold: 80,
-      duration_sec: DURATION_SEC,
-      webhook_id: webhookId,
-      enabled: true,
-    });
-    expect(ruleRes.ok, `rule create failed: ${JSON.stringify(ruleRes)}`).toBeTruthy();
-    ruleId = ruleRes.data.id;
+  test('CPU threshold breach fires webhook once while it persists', async () => {
+    ruleId = await createRule({ app_id: appId, metric: 'cpu_pct', threshold: 80, duration_sec: DURATION_SEC, webhook_id: webhookId });
 
     receiver.clear();
-    const stopRefresh = startMetricRefresher(APP_SLUG, true);
-
+    const refresher = startMetricRefresher(APP_SLUG, { high: true });
     try {
       const hit = await receiver.waitFor(
-        (r) => r.body && r.body.status === 'firing' && r.body.metric === 'cpu_pct',
+        (r) => r.path === '/' && r.body.status === 'firing' && r.body.metric === 'cpu_pct',
         EVAL_WAIT_MS,
+        refresher.lastError,
       );
-      expect(hit.body.status).toBe('firing');
-      expect(hit.body.metric).toBe('cpu_pct');
-      expect(hit.body.app).toBe(APP_SLUG);
-      expect(Number(hit.body.value)).toBeGreaterThanOrEqual(80);
-    } finally {
-      stopRefresh();
-    }
+      expect(Object.keys(hit.body).sort()).toEqual(['app', 'metric', 'status', 'threshold', 'value']);
+      expect(hit.body).toMatchObject({ app: APP_SLUG, metric: 'cpu_pct', status: 'firing', threshold: 80 });
+      expect(hit.body.value).toBeGreaterThanOrEqual(80);
 
-    // Verify alert_history has a firing row (resolved_at NULL).
-    const hist = sqliteQuery(
-      `SELECT id, rule_id, resolved_at FROM alert_history WHERE rule_id=${ruleId};`,
-    );
-    expect(hist.length).toBeGreaterThan(0);
-    const open = hist.find((h) => h.resolved_at === null);
-    expect(open, 'expected an unresolved alert history row').toBeTruthy();
+      // The history row is written right after the webhook is sent.
+      await expect
+        .poll(() => sqliteQuery(`SELECT id FROM alert_history WHERE rule_id=${ruleId} AND resolved_at IS NULL;`).length)
+        .toBe(1);
+
+      // Two later ticks (one per probe) must not fire the main rule again.
+      await fireProbe('/probe1', refresher);
+      await fireProbe('/probe2', refresher);
+      expect(cpuEvents('/', 'firing'), 'main rule fired again while still firing').toHaveLength(1);
+    } finally {
+      refresher.stop();
+    }
+    for (const id of ruleIds.splice(0)) await deleteRule(id);
   });
 
   test('alert resolves when metrics drop below threshold', async () => {
-    test.setTimeout(120_000);
-
     receiver.clear();
-    deleteAppMetrics(APP_SLUG);
-    const stopRefresh = startMetricRefresher(APP_SLUG, false);
-
+    const refresher = startMetricRefresher(APP_SLUG, { high: false });
     try {
       const hit = await receiver.waitFor(
-        (r) => r.body && r.body.status === 'resolved' && r.body.metric === 'cpu_pct',
+        (r) => r.path === '/' && r.body.status === 'resolved' && r.body.metric === 'cpu_pct',
         EVAL_WAIT_MS,
+        refresher.lastError,
       );
-      expect(hit.body.status).toBe('resolved');
+      expect(hit.body).toMatchObject({ app: APP_SLUG, metric: 'cpu_pct', status: 'resolved' });
     } finally {
-      stopRefresh();
+      refresher.stop();
     }
 
-    const hist = sqliteQuery(
-      `SELECT id, resolved_at FROM alert_history WHERE rule_id=${ruleId};`,
-    );
-    const resolved = hist.find((h) => h.resolved_at !== null);
-    expect(resolved, 'expected at least one resolved alert history row').toBeTruthy();
-  });
-
-  test('no double-fire while condition persists', async () => {
-    test.setTimeout(120_000);
-
-    receiver.clear();
-    deleteAppMetrics(APP_SLUG);
-    const stopRefresh = startMetricRefresher(APP_SLUG, true);
-
-    try {
-      // Wait for the (re-)fire.
-      await receiver.waitFor(
-        (r) => r.body && r.body.status === 'firing' && r.body.metric === 'cpu_pct',
-        EVAL_WAIT_MS,
-      );
-
-      // Keep the breach active through a few evaluator cycles and count fires.
-      // With the e2e 2s evaluator tick, 15s is plenty to prove "no re-fire".
-      await new Promise((r) => setTimeout(r, 15_000));
-      // A second "firing" is only a double-fire if no "resolved" came in
-      // between (the real collector can briefly report low CPU on a busy
-      // runner, which legitimately resolves and re-fires the alert).
-      const events = receiver.received.filter(
-        (r) => r.body && r.body.metric === 'cpu_pct' && (r.body.status === 'firing' || r.body.status === 'resolved'),
-      );
-      const seq = events.map((e) => `${e.body.status}@${e.at}`).join(',');
-      let doubleFires = 0;
-      for (let i = 1; i < events.length; i++) {
-        if (events[i].body.status === 'firing' && events[i - 1].body.status === 'firing') doubleFires++;
-      }
-      expect(doubleFires, `fired again without resolving: ${seq}`).toBe(0);
-      expect(events.some((e) => e.body.status === 'firing'), `no firing event: ${seq}`).toBe(true);
-    } finally {
-      stopRefresh();
-    }
+    const hist = sqliteQuery(`SELECT resolved_at FROM alert_history WHERE rule_id=${ruleId};`);
+    expect(hist).toHaveLength(1);
+    expect(hist[0].resolved_at).not.toBeNull();
   });
 
   test('disabled rule does not fire', async () => {
-    test.setTimeout(180_000);
-
-    // Resolve first so a future enable+breach would be a fresh fire.
-    deleteAppMetrics(APP_SLUG);
-    const stopLow = startMetricRefresher(APP_SLUG, false);
-    await receiver.waitFor(
-      (r) => r.body && r.body.status === 'resolved' && r.body.metric === 'cpu_pct',
-      EVAL_WAIT_MS,
-    ).catch(() => {}); // may already be resolved
-    stopLow();
-
-    // Disable the rule.
     const upd = await apiRequest('PUT', `/api/alerts/rules/${ruleId}`, {
-      app_id: getAppId(APP_SLUG),
+      app_id: appId,
       metric: 'cpu_pct',
       operator: '>',
       threshold: 80,
@@ -354,111 +256,60 @@ test.describe('Alerts - Functional Dispatch', () => {
       webhook_id: webhookId,
       enabled: false,
     });
-    expect(upd.ok, `rule update failed: ${JSON.stringify(upd)}`).toBeTruthy();
+    expect(upd.status).toBe(200);
+    expect((await listRules()).find((r) => r.id === ruleId).enabled).toBe(false);
+    const open = sqliteQuery(`SELECT id FROM alert_history WHERE rule_id=${ruleId} AND resolved_at IS NULL;`);
+    expect(open, 'main rule must have no open alert, or a non-fire proves nothing').toEqual([]);
 
     receiver.clear();
-    deleteAppMetrics(APP_SLUG);
-    const stopRefresh = startMetricRefresher(APP_SLUG, true);
-
+    const refresher = startMetricRefresher(APP_SLUG, { high: true });
     try {
-      // e2e evaluator tick is 2s; 15s is ~7 ticks, enough to prove no fire.
-      await new Promise((r) => setTimeout(r, 15_000));
-      const cpuHits = receiver.received.filter(
-        (r) => r.body && r.body.metric === 'cpu_pct',
-      );
-      expect(cpuHits.length, `expected 0 cpu webhook calls, got ${cpuHits.length}`).toBe(0);
+      // The control rule (higher id) firing means the disabled rule's turn
+      // in that tick has passed.
+      await fireProbe('/control', refresher);
+      expect(cpuEvents('/', 'firing'), 'disabled rule fired').toEqual([]);
     } finally {
-      stopRefresh();
+      refresher.stop();
     }
+    for (const id of ruleIds.splice(0)) await deleteRule(id);
   });
 
-  test('backup_failed alert fires when backup run fails', async () => {
-    test.setTimeout(120_000);
+  test('backup_failed alert fires for the failing app only', async () => {
+    // A failed-backup rule scoped to another app, created first so its turn
+    // comes before the nginx rule's.
+    const otherHook = await createWebhook({ name: 'E2E Other App Hook', type: 'custom', url: `${receiver.url}/other` });
+    webhookIds.push(otherHook);
+    ruleIds.push(await createRule({ app_id: getAppId('e2e-postgres'), metric: 'backup_failed', threshold: 0, duration_sec: 0, webhook_id: otherHook }));
+    ruleIds.push(await createRule({ app_id: appId, metric: 'backup_failed', threshold: 0, duration_sec: 0, webhook_id: webhookId }));
 
-    const nginxAppId = getAppId('e2e-nginx');
-
-    const ruleRes = await apiRequest('POST', '/api/alerts/rules', {
-      app_id: nginxAppId,
-      metric: 'backup_failed',
-      operator: '>',
-      threshold: 0,
-      duration_sec: 0,
-      webhook_id: webhookId,
-      enabled: true,
-    });
-    expect(ruleRes.ok, `backup rule create failed: ${JSON.stringify(ruleRes)}`).toBeTruthy();
-    backupRuleIds.push(ruleRes.data.id);
-
-    // Postgres strategy against nginx app: pg_dump binary doesn't exist in the
-    // nginx container, so the docker exec reliably returns non-zero.
-    const createRes = await apiRequest('POST', '/api/apps/e2e-nginx/backups/configs', {
-      strategy: 'postgres',
-      target: 'local',
-      schedule_cron: '',
-      target_config_json: '',
-      retention_mode: 'count',
-      retention_count: 3,
-    });
-    expect(createRes.ok, `bad backup config create failed: ${JSON.stringify(createRes)}`).toBeTruthy();
-    const cfgId = createRes.data.id;
+    // nginx is stopped, so the dump's docker exec fails.
+    const cfgId = await createBackupConfig(APP_SLUG, { strategy: 'postgres', schedule_cron: '' });
     backupConfigIds.push(cfgId);
 
     receiver.clear();
-
     const trig = await apiRequest('POST', `/api/backups/configs/${cfgId}/run`);
-    expect([200, 202]).toContain(trig.status);
+    expect(trig.status).toBe(202);
 
-    const hit = await receiver.waitFor(
-      (r) => r.body && r.body.metric === 'backup_failed',
-      60_000,
-    );
-    expect(hit.body.metric).toBe('backup_failed');
-    expect(hit.body.status).toBe('firing');
+    const hit = await receiver.waitFor((r) => r.path === '/' && r.body.metric === 'backup_failed', 60_000);
+    expect(hit.body).toMatchObject({ app: APP_SLUG, metric: 'backup_failed', status: 'firing' });
+    expect(receiver.onPath('/other'), 'rule scoped to e2e-postgres fired for e2e-nginx').toEqual([]);
   });
 
-  test('backup_success alert fires when backup run succeeds', async () => {
-    test.setTimeout(120_000);
+  test('backup_success alert names the app and says it succeeded', async () => {
+    const slackHook = await createWebhook({ name: 'E2E Slack Hook', type: 'slack', url: `${receiver.url}/slack` });
+    webhookIds.push(slackHook);
+    ruleIds.push(await createRule({ app_id: getAppId('e2e-postgres'), metric: 'backup_success', threshold: 0, duration_sec: 0, webhook_id: slackHook }));
 
-    const pgAppId = getAppId('e2e-postgres');
-
-    const ruleRes = await apiRequest('POST', '/api/alerts/rules', {
-      app_id: pgAppId,
-      metric: 'backup_success',
-      operator: '>',
-      threshold: 0,
-      duration_sec: 0,
-      webhook_id: webhookId,
-      enabled: true,
-    });
-    expect(ruleRes.ok, `backup_success rule create failed: ${JSON.stringify(ruleRes)}`).toBeTruthy();
-    backupRuleIds.push(ruleRes.data.id);
-
-    const createRes = await apiRequest('POST', '/api/apps/e2e-postgres/backups/configs', {
-      strategy: 'postgres',
-      target: 'local',
-      schedule_cron: '',
-      target_config_json: '',
-      retention_mode: 'count',
-      retention_count: 3,
-    });
-    expect(createRes.ok, `backup config create failed: ${JSON.stringify(createRes)}`).toBeTruthy();
-    const cfgId = createRes.data.id;
+    const cfgId = await createBackupConfig('e2e-postgres', { strategy: 'postgres', schedule_cron: '', retention_count: 3 });
     backupConfigIds.push(cfgId);
 
     receiver.clear();
-
     const trig = await apiRequest('POST', `/api/backups/configs/${cfgId}/run`);
-    expect([200, 202]).toContain(trig.status);
+    expect(trig.status).toBe(202);
 
-    const hit = await receiver.waitFor(
-      (r) => r.body && r.body.metric === 'backup_success',
-      90_000,
-    );
-    expect(hit.body.metric).toBe('backup_success');
-    expect(hit.body.status).toBe('firing');
+    const hit = await receiver.waitFor((r) => r.path === '/slack', 90_000);
+    expect(hit.body.text).toContain('[firing] e2e-postgres');
+    expect(hit.body.text).toContain('Backup Succeeded');
+    expect(hit.body.text).not.toMatch(/failed/i);
   });
-
-  // Dispatcher sends once with no retry (internal/alerts/webhook.go Send:
-  // single http.Client.Do, returns error on status >= 400). Nothing to assert.
-  test.skip('webhook retry behavior', async () => {});
 });
