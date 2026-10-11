@@ -108,7 +108,6 @@ export const templateProbes = {
     ],
   },
 
-  'woodpecker-ci': { probe: null, reason: 'Requires forge OAuth credentials (GitHub/Gitea/GitLab) to boot' },
 
   'webhook-tester': {
     probes: [
