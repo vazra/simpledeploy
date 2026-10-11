@@ -14,17 +14,17 @@
 //     asserted via the status pill.
 //
 // `hostVar` is the key of the template variable that holds the domain to
-// route by. Defaults to 'domain' if omitted.
+// route by. Defaults to 'domain' if omitted. A probe without bodyIncludes
+// also needs a non-empty body (or a Location on a redirect), since Caddy
+// answers hosts without a route with an empty 200.
 
 export const templateProbes = {
   'nginx-static': {
-    // Raw `docker compose up` on this template serves nginx's default
-    // welcome page because Docker auto-populates a new named volume from
-    // the image content on first mount. SimpleDeploy's deployer pre-creates
-    // the volume, which suppresses that copy, so the deployed app serves
-    // an empty 200. We only assert reachability here, not body content.
+    // Docker populates the new, empty web-content volume from the image on
+    // first mount (also when compose created it beforehand), so nginx serves
+    // its welcome page.
     probes: [
-      { path: '/', statusMin: 200, statusMax: 404 },
+      { path: '/', statusMin: 200, statusMax: 200, bodyIncludes: 'Welcome to nginx' },
     ],
   },
 

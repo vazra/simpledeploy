@@ -10,20 +10,24 @@
 //      `domain`-typed variable gets a UNIQUE subdomain keyed off the var
 //      name so multi-endpoint templates (minio, mailpit, docker-registry)
 //      don't collide in Caddy's routing table.
-//   2. Deploy through the wizard. Assert terminal "Deployed" (or "Unstable"
-//      for `probe: null` templates where the stack can't serve without
-//      external setup by design).
+//   2. Deploy through the wizard. Probed templates must end "Deployed" or
+//      "Unstable"; `probe: null` templates (cannot serve without external
+//      setup by design) may also end "Failed" but every compose service must
+//      have a container.
 //   3. If a probe spec exists (see `helpers/template-probes.js`), probe
 //      each endpoint via `http://127.0.0.1:${proxyPort}<path>` with the
 //      template's filled domain as the `Host:` header and assert the
-//      expected status/body. This is the real reachability check.
-//   4. Delete the app via API before the next template.
+//      expected status/body. Without bodyIncludes a probe needs a non-empty
+//      body or a redirect with a Location, because Caddy answers hosts it
+//      has no route for with an empty 200.
+//   4. Delete the app via API, also when the test fails.
 
 import { test, expect } from '@playwright/test';
 import { getState, TEST_ADMIN } from '../helpers/auth.js';
 import { apiLogin, apiRequest } from '../helpers/api.js';
 import { appTemplates } from '../../ui/src/lib/appTemplates.js';
 import { templateProbes } from '../helpers/template-probes.js';
+import { findServiceContainer } from '../helpers/docker.js';
 import http from 'node:http';
 
 async function removeAppIfExists(slug) {
@@ -90,7 +94,7 @@ function httpGet({ proxyPort, host, path }) {
       (res) => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
         res.on('error', reject);
       }
     );
@@ -128,6 +132,12 @@ async function probeEndpoint({ proxyPort, host, path, statusMin, statusMax, body
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
+      const redirect = res.status >= 300 && res.status < 400;
+      if (!bodyIncludes && (redirect ? !res.headers.location : body.trim() === '')) {
+        lastErr = redirect ? 'redirect without Location' : 'empty body (no route?)';
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
       return { ok: true, status: res.status };
     } catch (err) {
       lastErr = String(err);
@@ -155,85 +165,90 @@ test.describe('Deploy every template (E2E_TEMPLATES=1)', () => {
       for (const v of tpl.variables || []) filledVars[v.key] = valueForVar(tpl, v);
 
       await removeAppIfExists(slug);
-
-      const state = getState();
-      await page.goto(`${state.baseURL}/#/`);
-      await page.getByRole('button', { name: 'Deploy App' }).first().click();
-      const dialog = page.getByRole('dialog');
-      await expect(dialog).toBeVisible();
-      await dialog.getByRole('button', { name: /^browse templates$/i }).click();
-      await dialog.getByRole('button', { name: `Use template ${tpl.name}` }).click();
-
-      // Custom domain mode so `domain` vars render as editable inputs
-      // (Quick test mode hides them behind an sslip.io helper).
-      await dialog.getByRole('button', { name: /^custom domain$/i }).click();
-
-      const hasHidden = (tpl.variables || []).some((v) => v.hidden);
-      if (hasHidden) await dialog.getByText(/advanced \/ secrets/i).click();
-
-      for (const v of tpl.variables || []) await fillVariable(dialog, v, tpl);
-
-      await dialog.getByRole('button', { name: /^apply/i }).click();
-
-      await dialog.getByPlaceholder('my-app').fill(slug);
-      await expect(dialog.getByText(/valid compose/i)).toBeVisible({ timeout: 20_000 });
-
-      await dialog.getByRole('button', { name: 'Next' }).click();
-      await dialog.getByRole('button', { name: 'Deploy' }).click();
-
-      // Terminal state. For probe: null templates we accept Unstable/Failed
-      // because the stack can't serve HTTP without external setup. For
-      // templates with a probe spec we require Deployed (the HTTP probe
-      // below is the real reachability check).
-      const statusBadge = dialog.locator('[data-testid="deploy-status"]');
-      if (probeSpec.probe === null) {
-        await expect(statusBadge).toHaveAttribute('data-deploy-status', /^(success|unstable|failed)$/, { timeout: 540_000 });
-        // No HTTP probe: document why.
-        console.log(`[templates] ${tpl.id}: probe skipped - ${probeSpec.reason}`);
-      } else {
-        await expect(statusBadge).toHaveAttribute('data-deploy-status', /^(success|unstable)$/, { timeout: 540_000 });
-
-        // Close the wizard so the next interaction path is clean. (The
-        // probe doesn't depend on UI state, but leaving dialogs open
-        // across tests has caused flakes in other specs.)
-        await page.keyboard.press('Escape').catch(() => {});
-
-        // Give the reconciler one tick (status refresh interval is 5s in
-        // e2e) to push routes into Caddy after the container is healthy.
-        await new Promise((r) => setTimeout(r, 6000));
-
-        for (const p of probeSpec.probes) {
-          const hostVar = p.hostVar || 'domain';
-          const host = filledVars[hostVar];
-          if (!host) {
-            throw new Error(`Template ${tpl.id} probe references unknown hostVar "${hostVar}"`);
-          }
-          const result = await probeEndpoint({
-            proxyPort: state.proxyPort,
-            host,
-            path: p.path,
-            statusMin: p.statusMin,
-            statusMax: p.statusMax,
-            bodyIncludes: p.bodyIncludes,
-            timeoutMs: p.timeoutMs || 120_000,
-          });
-          if (!result.ok) {
-            let diag = '';
-            try {
-              const statusRes = await apiRequest('GET', `/api/apps/${slug}/services`);
-              diag += `\nservices=${JSON.stringify(statusRes).slice(0, 300)}`;
-            } catch (e) { diag += `\nservices-fetch-err=${e.message}`; }
-            throw new Error(
-              `Probe failed for ${tpl.id} (host=${host} path=${p.path}): ${result.lastErr}\n` +
-              `last status=${result.lastStatus} body-prefix=${(result.lastBody || '').slice(0, 200)}` +
-              diag
-            );
-          }
-          console.log(`[templates] ${tpl.id}: probe ok (host=${host} path=${p.path} status=${result.status})`);
-        }
+      try {
+        await deployAndProbe(page, tpl, slug, probeSpec, filledVars);
+      } finally {
+        await removeAppIfExists(slug);
       }
-
-      await removeAppIfExists(slug);
     });
   }
 });
+
+async function deployAndProbe(page, tpl, slug, probeSpec, filledVars) {
+  const state = getState();
+  await page.goto(`${state.baseURL}/#/`);
+  await page.getByRole('button', { name: 'Deploy App' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: /^browse templates$/i }).click();
+  await dialog.getByRole('button', { name: `Use template ${tpl.name}` }).click();
+
+  // Custom domain mode so `domain` vars render as editable inputs
+  // (Quick test mode hides them behind an sslip.io helper).
+  await dialog.getByRole('button', { name: /^custom domain$/i }).click();
+
+  const hasHidden = (tpl.variables || []).some((v) => v.hidden);
+  if (hasHidden) await dialog.getByText(/advanced \/ secrets/i).click();
+
+  for (const v of tpl.variables || []) await fillVariable(dialog, v, tpl);
+
+  await dialog.getByRole('button', { name: /^apply/i }).click();
+
+  await dialog.getByPlaceholder('my-app').fill(slug);
+  await expect(dialog.getByText('Valid compose file', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  await dialog.getByRole('button', { name: 'Next' }).click();
+  await dialog.getByRole('button', { name: 'Deploy' }).click();
+
+  // Terminal state. probe: null templates cannot serve HTTP without
+  // external setup; probed templates must deploy and then pass the probe.
+  const statusBadge = dialog.locator('[data-testid="deploy-status"]');
+  if (probeSpec.probe === null) {
+    await expect(statusBadge).toHaveAttribute('data-deploy-status', /^(success|unstable|failed)$/, { timeout: 540_000 });
+    // "failed" is tolerated (e.g. a dependency never turns healthy), but
+    // compose must have created every service: a pull or compose error
+    // would leave some without a container.
+    const missing = Object.keys(tpl.compose.services).filter((svc) => !findServiceContainer(slug, svc));
+    expect(missing, `${tpl.id}: services without a container`).toEqual([]);
+    console.log(`[templates] ${tpl.id}: probe skipped - ${probeSpec.reason}`);
+  } else {
+    await expect(statusBadge).toHaveAttribute('data-deploy-status', /^(success|unstable)$/, { timeout: 540_000 });
+
+    // Close the wizard so the next interaction path is clean. (The
+    // probe doesn't depend on UI state, but leaving dialogs open
+    // across tests has caused flakes in other specs.)
+    await page.keyboard.press('Escape');
+
+    // probeEndpoint polls, so no wait for the route to appear.
+
+    for (const p of probeSpec.probes) {
+      const hostVar = p.hostVar || 'domain';
+      const host = filledVars[hostVar];
+      if (!host) {
+        throw new Error(`Template ${tpl.id} probe references unknown hostVar "${hostVar}"`);
+      }
+      const result = await probeEndpoint({
+        proxyPort: state.proxyPort,
+        host,
+        path: p.path,
+        statusMin: p.statusMin,
+        statusMax: p.statusMax,
+        bodyIncludes: p.bodyIncludes,
+        timeoutMs: p.timeoutMs || 120_000,
+      });
+      if (!result.ok) {
+        let diag = '';
+        try {
+          const statusRes = await apiRequest('GET', `/api/apps/${slug}/services`);
+          diag += `\nservices=${JSON.stringify(statusRes).slice(0, 300)}`;
+        } catch (e) { diag += `\nservices-fetch-err=${e.message}`; }
+        throw new Error(
+          `Probe failed for ${tpl.id} (host=${host} path=${p.path}): ${result.lastErr}\n` +
+          `last status=${result.lastStatus} body-prefix=${(result.lastBody || '').slice(0, 200)}` +
+          diag
+        );
+      }
+      console.log(`[templates] ${tpl.id}: probe ok (host=${host} path=${p.path} status=${result.status})`);
+    }
+  }
+}

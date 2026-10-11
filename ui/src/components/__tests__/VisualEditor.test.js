@@ -8,6 +8,7 @@ vi.mock('../../lib/api.js', async () => {
 
 import VisualEditor from '../VisualEditor.svelte';
 import { api } from '../../lib/api.js';
+import { serviceTemplates } from '../../lib/serviceTemplates.js';
 
 describe('VisualEditor (smoke)', () => {
   it('renders with an empty compose without crashing', () => {
@@ -164,5 +165,58 @@ describe('VisualEditor add service from template', () => {
     const next = onchange.mock.calls[0][0];
     expect(next.services.postgresql2.volumes).toEqual(['pgdata2:/var/lib/postgresql/data']);
     expect(next.volumes).toEqual({ pgdata: { driver: 'local' }, pgdata2: {} });
+  });
+});
+
+describe('VisualEditor service templates', () => {
+  async function addTemplate(r, tpl) {
+    await fireEvent.click(r.getByRole('button', { name: 'Add Service' }));
+    const picker = within(r.getByText('Quick start from a template').closest('details'));
+    await fireEvent.click(picker.getByText(tpl.name, { exact: true }).closest('button'));
+  }
+
+  // Named volume sources a template mounts (bind mounts start with / . or ~).
+  function namedVolumes(config) {
+    return (config.volumes || [])
+      .map((v) => (typeof v === 'string' ? v.split(':')[0] : v.source))
+      .filter((src) => src && !/^[/.~]/.test(src));
+  }
+
+  it('adds every template as a copy of its config, named after its id', async () => {
+    const onchange = vi.fn();
+    const r = render(VisualEditor, { compose: { services: { web: { image: 'nginx' } } }, slug: '', onchange });
+    for (const tpl of serviceTemplates) {
+      await addTemplate(r, tpl);
+      const out = onchange.mock.calls.at(-1)[0];
+      const name = tpl.id.replace(/-/g, '_');
+      expect(Object.keys(out.services), tpl.id).toEqual(['web', name]);
+      expect(out.services[name], tpl.id).toEqual(tpl.config);
+      expect(out.services[name], `${tpl.id} must not share the template object`).not.toBe(tpl.config);
+    }
+    expect(onchange).toHaveBeenCalledTimes(serviceTemplates.length);
+  });
+
+  it('suffixes the name when a service with that name exists', async () => {
+    const onchange = vi.fn();
+    const compose = { services: { postgresql: { image: 'postgres:15' }, postgresql2: { image: 'postgres:14' } } };
+    const r = render(VisualEditor, { compose, slug: '', onchange });
+    await addTemplate(r, serviceTemplates.find((t) => t.id === 'postgresql'));
+    const out = onchange.mock.calls.at(-1)[0];
+    expect(Object.keys(out.services)).toEqual(['postgresql', 'postgresql2', 'postgresql3']);
+    expect(out.services.postgresql).toEqual({ image: 'postgres:15' });
+  });
+
+  it('declares the named volumes a template mounts', async () => {
+    const withVolumes = serviceTemplates.filter((t) => namedVolumes(t.config).length > 0);
+    expect(withVolumes.length).toBeGreaterThan(0);
+    const onchange = vi.fn();
+    const r = render(VisualEditor, { compose: { services: {} }, slug: '', onchange });
+    for (const tpl of withVolumes) {
+      await addTemplate(r, tpl);
+      const out = onchange.mock.calls.at(-1)[0];
+      for (const vol of namedVolumes(tpl.config)) {
+        expect(Object.keys(out.volumes || {}), `${tpl.id} mounts ${vol}`).toContain(vol);
+      }
+    }
   });
 });
