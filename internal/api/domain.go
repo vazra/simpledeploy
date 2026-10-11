@@ -234,6 +234,16 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Endpoint labels are written onto their service; one naming a service
+	// the compose file lacks would be dropped, leaving the app unrouted.
+	services := make(map[string]bool, len(parsed.Services))
+	serviceNames := make([]string, 0, len(parsed.Services))
+	for _, svc := range parsed.Services {
+		services[svc.Name] = true
+		serviceNames = append(serviceNames, svc.Name)
+	}
+	sort.Strings(serviceNames)
+
 	// Validate: each endpoint needs a service and a domain whose shape will
 	// not break the proxy reload. Catching it here returns a per-endpoint
 	// error instead of failing the whole batch when Caddy validates routes.
@@ -254,6 +264,10 @@ func (s *Server) handleUpdateEndpoints(w http.ResponseWriter, r *http.Request) {
 		name := endpointName(*ep)
 		if ep.Service == "" {
 			http.Error(w, fmt.Sprintf("endpoint %s: service is required", name), http.StatusBadRequest)
+			return
+		}
+		if !services[ep.Service] {
+			http.Error(w, fmt.Sprintf("endpoint %s: service %q is not in this app's compose file (services: %s)", name, ep.Service, strings.Join(serviceNames, ", ")), http.StatusBadRequest)
 			return
 		}
 		if !compose.ValidProtocol(ep.Protocol) {

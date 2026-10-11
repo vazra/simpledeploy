@@ -37,8 +37,8 @@ func (s *Server) handleImportAppPreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "mode must be \"new\" or \"overwrite\"", http.StatusBadRequest)
 		return
 	}
-	if !validAppName.MatchString(slug) {
-		http.Error(w, "invalid slug", http.StatusBadRequest)
+	if !validNewAppName.MatchString(slug) {
+		http.Error(w, invalidAppNameMsg, http.StatusBadRequest)
 		return
 	}
 	file, _, err := r.FormFile("file")
@@ -201,8 +201,10 @@ func (s *Server) handleImportApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "mode must be \"new\" or \"overwrite\"", http.StatusBadRequest)
 		return
 	}
-	if !validAppName.MatchString(slug) {
-		http.Error(w, "invalid slug: must match [a-zA-Z0-9][a-zA-Z0-9._-]{0,62}", http.StatusBadRequest)
+	// Import always ends in a deploy, so the slug must be a usable compose
+	// project name, also when overwriting.
+	if !validNewAppName.MatchString(slug) {
+		http.Error(w, invalidAppNameMsg, http.StatusBadRequest)
 		return
 	}
 

@@ -163,6 +163,130 @@ func TestUpdateUserRejectsLegacyAdminRole(t *testing.T) {
 	}
 }
 
+func TestCreateUserRejectsBlankUsername(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
+		"username": "   ",
+		"password": "pass1234",
+	}, cookie)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if n, _ := st.UserCount(); n != 1 {
+		t.Errorf("user count = %d, want 1", n)
+	}
+}
+
+func putUser(t *testing.T, srv *Server, cookie *http.Cookie, id int64, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodPut, fmt.Sprintf("/api/users/%d", id), body, cookie))
+	return w
+}
+
+func TestUpdateUserRejectedOwnRoleChangeKeepsProfile(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+	admin, _ := st.GetUserByUsername("admin")
+	if err := st.UpdateProfile(admin.ID, "Admin", "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	w := putUser(t, srv, cookie, admin.ID, map[string]string{
+		"display_name": "Changed", "email": "changed@example.com", "role": "viewer",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	got, _ := st.GetUserByID(admin.ID)
+	if got.DisplayName != "Admin" || got.Email != "admin@example.com" || got.Role != "super_admin" {
+		t.Errorf("profile changed by rejected request: %+v", got)
+	}
+}
+
+func TestUpdateUserRoleOnlyKeepsProfile(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+	hash, _ := auth.HashPassword("p")
+	target, err := st.CreateUser("targ", hash, "manage", "Target", "t@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := putUser(t, srv, cookie, target.ID, map[string]string{"role": "viewer"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	got, _ := st.GetUserByID(target.ID)
+	if got.Role != "viewer" {
+		t.Errorf("role = %q, want viewer", got.Role)
+	}
+	if got.DisplayName != "Target" || got.Email != "t@example.com" {
+		t.Errorf("role-only PUT blanked profile: display_name=%q email=%q", got.DisplayName, got.Email)
+	}
+}
+
+func TestUpdateUserRejectedPasswordKeepsRoleAndProfile(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+	hash, _ := auth.HashPassword("p")
+	target, err := st.CreateUser("targ", hash, "manage", "Target", "t@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := putUser(t, srv, cookie, target.ID, map[string]string{
+		"display_name": "New", "email": "new@example.com", "role": "viewer", "password": "short",
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	got, _ := st.GetUserByID(target.ID)
+	if got.Role != "manage" || got.DisplayName != "Target" || got.Email != "t@example.com" {
+		t.Errorf("rejected request mutated user: %+v", got)
+	}
+}
+
+func TestUpdateUserExplicitEmptyClearsProfile(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+	hash, _ := auth.HashPassword("p")
+	target, err := st.CreateUser("targ", hash, "manage", "Target", "t@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// UI edit modal always sends all three fields; empty strings clear.
+	w := putUser(t, srv, cookie, target.ID, map[string]string{
+		"display_name": "", "email": "", "role": "manage",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	got, _ := st.GetUserByID(target.ID)
+	if got.DisplayName != "" || got.Email != "" {
+		t.Errorf("explicit empty fields not cleared: display_name=%q email=%q", got.DisplayName, got.Email)
+	}
+}
+
+func TestUpdateUserUnchangedRoleKeepsSession(t *testing.T) {
+	srv, st, cookie := setupUserTestServer(t)
+	admin, _ := st.GetUserByUsername("admin")
+	w := putUser(t, srv, cookie, admin.ID, map[string]string{
+		"display_name": "Admin", "email": "", "role": "super_admin",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, authedRequest(t, http.MethodGet, "/api/me", nil, cookie))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/me after profile edit = %d, want 200 (session revoked)", w.Code)
+	}
+}
+
+func TestUpdateUserUnknownID(t *testing.T) {
+	srv, _, cookie := setupUserTestServer(t)
+	w := putUser(t, srv, cookie, 9999, map[string]string{"display_name": "x"})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestListUsers(t *testing.T) {
 	srv, st, cookie := setupUserTestServer(t)
 

@@ -572,3 +572,23 @@ func TestOtherAppDomainsParseFallbacks(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleUpdateEndpoints_RejectsUnknownService(t *testing.T) {
+	srv, s := newTestServer(t)
+	path := writeEndpointApp(t, s, "svcapp", "keep.example.com")
+	before, _ := os.ReadFile(path)
+
+	w := putEndpoints(t, srv, "svcapp", superAdminCookie(t, srv.jwt), []compose.EndpointConfig{
+		{Domain: "keep.example.com", Port: "80", Service: "web"},
+		{Domain: "new.example.com", Port: "80", Service: "api"},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+	if want := `endpoint new.example.com: service "api" is not in this app's compose file (services: web)`; !strings.Contains(w.Body.String(), want) {
+		t.Errorf("body = %q, want %q", w.Body.String(), want)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Errorf("compose changed on rejection:\n%s", after)
+	}
+}

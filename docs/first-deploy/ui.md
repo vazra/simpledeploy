@@ -28,7 +28,7 @@ The fastest way to deploy if you already have the dashboard open.
 
    The sslip.io host used by Quick test is stored server-side as `public_host`. Click **Save as default** next to the host field to persist it so every future Quick test deploy reuses it.
 
-4. Give the app a **name** (becomes its slug in URLs and CLI). Lowercase letters, digits, dashes.
+4. Give the app a **name** (becomes its slug in URLs and CLI). Lowercase letters, digits, hyphens and underscores; no dots or spaces.
 
 5. Click **Deploy**. SimpleDeploy:
    - Writes the file to `/etc/simpledeploy/apps/<name>/docker-compose.yml`.

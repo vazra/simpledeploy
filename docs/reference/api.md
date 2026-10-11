@@ -45,11 +45,11 @@ Clear session cookie. Returns `{"status": "ok"}`.
 
 ### `POST /api/setup`
 
-Create initial admin account. Only works when no users exist.
+Create initial admin account. Only works when no users exist. `username` must not be blank and `password` must be at least 8 characters; otherwise `400` and setup stays pending.
 
 ```json
 // Request
-{"username": "admin", "password": "secret"}
+{"username": "admin", "password": "secret123"}
 
 // Response 201
 {"username": "admin", "role": "super_admin"}
@@ -76,7 +76,7 @@ Get app details. Returns 404 for unauthorized apps (not 403).
 
 ### `POST /api/apps/deploy`
 
-Deploy an app by uploading a compose file.
+Deploy an app by uploading a compose file. `name` becomes the slug and the compose project `simpledeploy-<name>`, so it must be lowercase letters, digits, `-` and `_`, starting with a letter or digit, max 63 characters (`400` otherwise).
 
 ```json
 // Request
@@ -121,7 +121,7 @@ The compose file is checked with the new values, like a compose edit. `400` with
 
 ### `PUT /api/apps/{slug}/endpoints`
 
-Replace the app's endpoints (written to the compose labels, routes reload automatically). Body: `[{"domain": "app.example.com", "service": "web", "port": "3000", "tls": "letsencrypt", "protocol": "http", "path": ""}]` (`protocol` and `path` optional).
+Replace the app's endpoints (written to the compose labels, routes reload automatically). Body: `[{"domain": "app.example.com", "service": "web", "port": "3000", "tls": "letsencrypt", "protocol": "http", "path": ""}]` (`protocol` and `path` optional). `service` must name a service in the app's compose file; otherwise `400` and nothing is changed.
 
 ### `PUT /api/apps/{slug}/access`
 
@@ -205,7 +205,7 @@ List deploy events (deploys, rollbacks).
 
 ### `POST /api/apps/validate-compose`
 
-Validate a compose file without deploying. Requires `super_admin`.
+Validate a compose file without deploying. Requires `super_admin` (it backs the deploy wizard; parsing resolves files on the host). Runs the same checks as deploying it as a new app, so `valid: true` means `POST /api/apps/deploy` will accept the file. `errors` holds the parse error, or the same violation messages deploy returns in `violations`.
 
 ```json
 // Request
@@ -214,8 +214,8 @@ Validate a compose file without deploying. Requires `super_admin`.
 // Response 200
 {"valid": true}
 
-// Response 200 (parse error)
-{"valid": false, "errors": ["..."]}
+// Response 200 (parse error or security/endpoint violations)
+{"valid": false, "errors": ["service \"web\": privileged mode not allowed"]}
 ```
 
 ## Metrics Endpoints
@@ -402,7 +402,15 @@ List users.
 Create user.
 
 ```json
-{"username": "dev", "password": "secret", "role": "manage"}
+{"username": "dev", "password": "secret123", "role": "manage"}
+```
+
+### `PUT /api/users/{id}`
+
+Update a user. Every field is optional; omitted fields keep their current value, and an empty `display_name` or `email` clears it. Setting `password` also requires `current_password` (the caller's own password). The request is validated in full before anything is saved, so a `400`/`409` changes nothing. You cannot change your own role.
+
+```json
+{"display_name": "Dev", "email": "dev@example.com", "role": "viewer"}
 ```
 
 ### `DELETE /api/users/{id}`

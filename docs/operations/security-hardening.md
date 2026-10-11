@@ -103,7 +103,7 @@ Users can only delete their own API keys. `super_admin` can delete any key.
 
 ### App Name Validation
 
-App names must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`. This prevents:
+New app names (deploy, import) must match `^[a-z0-9][a-z0-9_-]{0,62}$`, the characters `docker compose` accepts in a project name. Slugs of existing apps in API paths must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`, so apps named before the stricter rule can still be viewed and removed. Both prevent:
 - Path traversal attacks (`../../etc/cron.d`)
 - Null byte injection
 - Filesystem escapes

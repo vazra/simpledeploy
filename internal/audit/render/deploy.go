@@ -30,9 +30,14 @@ type deployView struct {
 	Error   string `json:"error"`
 }
 
+// renderDeploySucceeded omits the version when unknown: a normal deploy is
+// audited before the reconciler stores its compose version.
 func renderDeploySucceeded(before, after []byte) (string, string) {
 	var a deployView
 	_ = json.Unmarshal(after, &a)
+	if a.Version <= 0 {
+		return "Deploy succeeded", ""
+	}
 	return fmt.Sprintf("Deploy succeeded (version %d)", a.Version), ""
 }
 
