@@ -156,7 +156,7 @@ func TestPullRestoresDBAccessChangedDuringPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.gs.repo = repo
+	e.gs.repo.Store(repo)
 	e.gs.updateHeadSHA()
 	if err := e.st.ReplaceAppAccess(app.ID, []string{"bob"}); err != nil {
 		t.Fatalf("ReplaceAppAccess: %v", err)

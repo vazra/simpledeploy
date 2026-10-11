@@ -189,7 +189,9 @@ type Syncer struct {
 	cs  *configsync.Syncer
 	rec Reconciler
 
-	repo *git.Repository // set after Start
+	// repo is set after Start and re-opened before each commit, fetch and
+	// push (see reopenRepo); Status reads it from other goroutines.
+	repo atomic.Pointer[git.Repository]
 
 	commitCh chan commitReq // buffered
 	syncCh   chan syncReq   // buffered
@@ -340,10 +342,10 @@ func (g *Syncer) SyncNow(ctx context.Context) error {
 // recentCommits walks the repo log from HEAD and returns up to n CommitInfo entries.
 // Returns an empty slice when the repo is nil or has no commits.
 func (g *Syncer) recentCommits(n int) []CommitInfo {
-	if g.repo == nil {
+	if g.repo.Load() == nil {
 		return nil
 	}
-	logIter, err := g.repo.Log(&git.LogOptions{})
+	logIter, err := g.repo.Load().Log(&git.LogOptions{})
 	if err != nil {
 		return nil
 	}
@@ -517,7 +519,7 @@ func (g *Syncer) initRepo() error {
 			}
 		}
 	}
-	g.repo = repo
+	g.repo.Store(repo)
 	g.updateHeadSHA()
 	return nil
 }
@@ -573,7 +575,7 @@ func (g *Syncer) initFresh() error {
 	if err != nil {
 		return fmt.Errorf("gitsync: initial commit: %w", err)
 	}
-	g.repo = repo
+	g.repo.Store(repo)
 	g.updateHeadSHA()
 
 	// Ensure git user config is set for shell fallback operations (push --continue, etc.).
@@ -621,7 +623,7 @@ func (g *Syncer) remoteHasBranch() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	rem, err := g.repo.Remote("origin")
+	rem, err := g.repo.Load().Remote("origin")
 	if err != nil {
 		return false, err
 	}
@@ -714,10 +716,14 @@ func isAllowedPath(rel string) bool {
 // pushes when AutoPushEnabled. In pull-only mode the commit stays local and
 // audit rows stay pending (they record pushes).
 func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
-	if g.repo == nil {
+	if g.repo.Load() == nil {
 		return
 	}
-	wt, err := g.repo.Worktree()
+	if err := g.reopenRepo(); err != nil {
+		log.Printf("[gitsync] commit: %v", err)
+		return
+	}
+	wt, err := g.repo.Load().Worktree()
 	if err != nil {
 		log.Printf("[gitsync] worktree: %v", err)
 		return
@@ -802,7 +808,7 @@ func (g *Syncer) doCommit(ctx context.Context, req commitReq) {
 
 // doPull runs fetch+inspect then optionally apply depending on AutoApplyEnabled.
 func (g *Syncer) doPull(ctx context.Context) error {
-	if g.repo == nil {
+	if g.repo.Load() == nil {
 		return errors.New("gitsync: repo not initialized")
 	}
 
@@ -864,7 +870,7 @@ func (g *Syncer) ApplyPending(ctx context.Context) error {
 	if !g.cfg.Enabled {
 		return errors.New("gitsync: not enabled")
 	}
-	if g.repo == nil {
+	if g.repo.Load() == nil {
 		return errors.New("gitsync: repo not initialized")
 	}
 	if _, err := g.fetchAndInspect(); err != nil {
@@ -887,7 +893,11 @@ func (g *Syncer) fetchAndInspect() (fetched bool, err error) {
 		g.setError(err.Error())
 		return false, err
 	}
-	fetchErr := g.repo.Fetch(&git.FetchOptions{
+	if err := g.reopenRepo(); err != nil {
+		g.setError(err.Error())
+		return false, err
+	}
+	fetchErr := g.repo.Load().Fetch(&git.FetchOptions{
 		RemoteName: "origin",
 		Auth:       auth,
 		Force:      false,
@@ -921,15 +931,15 @@ func (g *Syncer) fetchAndInspect() (fetched bool, err error) {
 
 // countCommitsBehind returns how many commits origin/<branch> has that local HEAD does not.
 func (g *Syncer) countCommitsBehind() int {
-	if g.repo == nil {
+	if g.repo.Load() == nil {
 		return 0
 	}
-	localRef, err := g.repo.Head()
+	localRef, err := g.repo.Load().Head()
 	if err != nil {
 		return 0
 	}
 	remoteRefName := plumbing.NewRemoteReferenceName("origin", g.cfg.branch())
-	remoteRef, err := g.repo.Reference(remoteRefName, true)
+	remoteRef, err := g.repo.Load().Reference(remoteRefName, true)
 	if err != nil {
 		return 0
 	}
@@ -941,8 +951,8 @@ func (g *Syncer) countCommitsBehind() int {
 	// an unpushed access restore in pull-only mode) do not make the walk
 	// count the entire remote history.
 	stop := map[plumbing.Hash]bool{localRef.Hash(): true}
-	if localCommit, err := g.repo.CommitObject(localRef.Hash()); err == nil {
-		if remoteCommit, err := g.repo.CommitObject(remoteRef.Hash()); err == nil {
+	if localCommit, err := g.repo.Load().CommitObject(localRef.Hash()); err == nil {
+		if remoteCommit, err := g.repo.Load().CommitObject(remoteRef.Hash()); err == nil {
 			if bases, err := remoteCommit.MergeBase(localCommit); err == nil {
 				for _, b := range bases {
 					stop[b.Hash] = true
@@ -955,7 +965,7 @@ func (g *Syncer) countCommitsBehind() int {
 	}
 
 	// Walk from remoteRef back to localRef / merge base.
-	logIter, err := g.repo.Log(&git.LogOptions{From: remoteRef.Hash()})
+	logIter, err := g.repo.Load().Log(&git.LogOptions{From: remoteRef.Hash()})
 	if err != nil {
 		return 0
 	}
@@ -1001,7 +1011,7 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("gitsync: re-open after rebase: %w", err)
 	}
-	g.repo = repo
+	g.repo.Store(repo)
 	g.mu.Lock()
 	g.headSHA = newSHA
 	g.commitsBehind = 0
@@ -1238,7 +1248,7 @@ func findManagedSymlinks(appsDir string, scope symlinkScope) (map[string][]strin
 // trackedSymlinks returns the repo-relative paths that commit sha records
 // as symlinks (mode 120000).
 func (g *Syncer) trackedSymlinks(sha string) ([]string, error) {
-	commit, err := g.repo.CommitObject(plumbing.NewHash(sha))
+	commit, err := g.repo.Load().CommitObject(plumbing.NewHash(sha))
 	if err != nil {
 		return nil, fmt.Errorf("commit %s: %w", sha, err)
 	}
@@ -1485,7 +1495,7 @@ func (g *Syncer) securePulledTree(prevSHA, newSHA string, snap accessSnapshot) p
 // commitLocal stages relPaths and commits them without pushing. Returns
 // true when a commit was created.
 func (g *Syncer) commitLocal(relPaths []string, subject, reason string) (bool, error) {
-	wt, err := g.repo.Worktree()
+	wt, err := g.repo.Load().Worktree()
 	if err != nil {
 		return false, err
 	}
@@ -1523,11 +1533,11 @@ func (g *Syncer) diffPaths(fromSHA, toSHA string) ([]string, error) {
 	fromHash := plumbing.NewHash(fromSHA)
 	toHash := plumbing.NewHash(toSHA)
 
-	fromCommit, err := g.repo.CommitObject(fromHash)
+	fromCommit, err := g.repo.Load().CommitObject(fromHash)
 	if err != nil {
 		return nil, fmt.Errorf("commit %s: %w", fromSHA, err)
 	}
-	toCommit, err := g.repo.CommitObject(toHash)
+	toCommit, err := g.repo.Load().CommitObject(toHash)
 	if err != nil {
 		return nil, fmt.Errorf("commit %s: %w", toSHA, err)
 	}
@@ -1562,7 +1572,10 @@ func (g *Syncer) doPush() error {
 	if err != nil {
 		return err
 	}
-	pushErr := g.repo.Push(&git.PushOptions{
+	if err := g.reopenRepo(); err != nil {
+		return err
+	}
+	pushErr := g.repo.Load().Push(&git.PushOptions{
 		RemoteName: "origin",
 		Auth:       auth,
 		RefSpecs: []config.RefSpec{
@@ -1573,6 +1586,20 @@ func (g *Syncer) doPush() error {
 		return nil
 	}
 	return pushErr
+}
+
+// reopenRepo re-reads the repository from disk. Shell git (rebase, the
+// commits in commitPending, and the auto gc they can trigger) repacks
+// objects and deletes old packs, while a go-git handle keeps the pack list
+// it read when opened; without this, commits and pushes fail with "object
+// not found" from then on.
+func (g *Syncer) reopenRepo() error {
+	repo, err := git.PlainOpen(g.cfg.AppsDir)
+	if err != nil {
+		return fmt.Errorf("gitsync: open repo: %w", err)
+	}
+	g.repo.Store(repo)
+	return nil
 }
 
 func (g *Syncer) doPushWithRetry() error {
@@ -1587,7 +1614,7 @@ func (g *Syncer) doPushWithRetry() error {
 	if authErr != nil {
 		return fmt.Errorf("push retry auth: %w (initial push: %v)", authErr, err)
 	}
-	fetchErr := g.repo.Fetch(&git.FetchOptions{RemoteName: "origin", Auth: auth, Force: false})
+	fetchErr := g.repo.Load().Fetch(&git.FetchOptions{RemoteName: "origin", Auth: auth, Force: false})
 	if fetchErr != nil && fetchErr != git.NoErrAlreadyUpToDate {
 		return fmt.Errorf("push retry fetch: %w (initial push: %v)", fetchErr, err)
 	}
@@ -1710,10 +1737,10 @@ func (g *Syncer) currentHeadSHA() string {
 }
 
 func (g *Syncer) updateHeadSHA() {
-	if g.repo == nil {
+	if g.repo.Load() == nil {
 		return
 	}
-	ref, err := g.repo.Head()
+	ref, err := g.repo.Load().Head()
 	if err != nil {
 		return
 	}

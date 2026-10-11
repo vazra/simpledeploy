@@ -943,3 +943,39 @@ func TestSyncPullOnlyDoesNotPushLocalCommits(t *testing.T) {
 		t.Fatalf("pull-only mode pushed: remote %s -> %s", before, got)
 	}
 }
+
+// Shell git (rebase, commits, auto gc) can repack objects and delete the
+// packs a long-lived go-git handle had indexed. Pushes and commits must keep
+// working afterwards instead of failing with "object not found".
+func TestPushAfterShellRepack(t *testing.T) {
+	e := newSecEnv(t, func(e *secEnv) {
+		seedApp(t, e.st, e.appsDir, "app1")
+	}, nil)
+
+	compose := filepath.Join(e.appsDir, "app1", "docker-compose.yml")
+	writeFile(t, compose, "services:\n  web:\n    image: nginx:one\n")
+	prev := e.gs.Status().HeadSHA
+	e.gs.EnqueueCommit([]string{compose}, "first edit")
+	drainCommits(t, e.gs, 10*time.Second)
+	waitForHeadUpdate(t, e.gs, prev, 10*time.Second)
+
+	// What git's auto gc does: everything into one new pack, old packs and
+	// loose objects removed.
+	for _, args := range [][]string{{"repack", "-a", "-d", "-q"}, {"prune-packed"}} {
+		if out, err := gitExec(e.appsDir, args...); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	writeFile(t, compose, "services:\n  web:\n    image: nginx:two\n")
+	prev = e.gs.Status().HeadSHA
+	e.gs.EnqueueCommit([]string{compose}, "second edit")
+	drainCommits(t, e.gs, 10*time.Second)
+	local := waitForHeadUpdate(t, e.gs, prev, 10*time.Second)
+	if err := e.gs.SyncNow(e.ctx); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	if got := remoteHead(t, e.bareDir); got != local {
+		t.Fatalf("remote head = %s, want %s (last error %q)", got, local, e.gs.Status().LastSyncError)
+	}
+}
