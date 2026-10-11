@@ -1,6 +1,108 @@
 import { describe, it, expect } from 'vitest';
-import { serviceTemplates } from '../serviceTemplates.js';
+import { serviceTemplates, namedVolumeSource, addServiceToCompose } from '../serviceTemplates.js';
 import { appTemplates } from '../appTemplates.js';
+
+// Named volumes referenced by any service, as a sorted list.
+function referencedVolumes(compose) {
+  const names = new Set();
+  for (const svc of Object.values(compose.services || {})) {
+    for (const v of svc.volumes || []) {
+      const n = namedVolumeSource(v);
+      if (n) names.add(n);
+    }
+  }
+  return [...names].sort();
+}
+
+describe('namedVolumeSource', () => {
+  it('returns the volume name for short syntax named volumes', () => {
+    expect(namedVolumeSource('pgdata:/var/lib/postgresql/data')).toBe('pgdata');
+    expect(namedVolumeSource('my_vol.1:/data:ro')).toBe('my_vol.1');
+  });
+
+  it('returns null for bind mounts and anonymous volumes', () => {
+    expect(namedVolumeSource('/etc/localtime:/etc/localtime:ro')).toBeNull();
+    expect(namedVolumeSource('./data:/data')).toBeNull();
+    expect(namedVolumeSource('~/data:/data')).toBeNull();
+    expect(namedVolumeSource('${DATA_DIR}:/data')).toBeNull();
+    expect(namedVolumeSource('/data')).toBeNull();
+  });
+
+  it('handles long syntax', () => {
+    expect(namedVolumeSource({ type: 'volume', source: 'data', target: '/data' })).toBe('data');
+    expect(namedVolumeSource({ type: 'bind', source: '/srv', target: '/data' })).toBeNull();
+    expect(namedVolumeSource({ type: 'volume', target: '/data' })).toBeNull();
+  });
+});
+
+describe('addServiceToCompose', () => {
+  it.each(serviceTemplates.map((t) => [t.id, t]))(
+    '%s: declares every named volume its service references',
+    (_id, t) => {
+      const compose = { services: {} };
+      const name = addServiceToCompose(compose, t);
+      expect(name).toBe(t.id.replace(/-/g, '_'));
+      expect(compose.services[name].image).toBe(t.config.image);
+      expect(Object.keys(compose.volumes || {}).sort()).toEqual(referencedVolumes(compose));
+    },
+  );
+
+  it('each template added twice gets separate volumes for the second copy', () => {
+    for (const t of serviceTemplates) {
+      const compose = { services: {} };
+      addServiceToCompose(compose, t);
+      const second = addServiceToCompose(compose, t);
+      const first = referencedVolumes({ services: { a: compose.services[t.id.replace(/-/g, '_')] } });
+      const mine = referencedVolumes({ services: { a: compose.services[second] } });
+      expect(mine.filter((v) => first.includes(v)), t.id).toEqual([]);
+      expect(Object.keys(compose.volumes || {}).sort(), t.id).toEqual(referencedVolumes(compose));
+    }
+  });
+
+  it('suffixes clashing volumes like service names and keeps existing entries', () => {
+    const pg = serviceTemplates.find((t) => t.id === 'postgresql');
+    const compose = {
+      services: { other: { image: 'x', volumes: ['pgdata2:/x'] } },
+      volumes: { pgdata: { driver: 'local' } },
+    };
+    const name = addServiceToCompose(compose, pg);
+    expect(name).toBe('postgresql');
+    expect(compose.services.postgresql.volumes).toEqual(['pgdata3:/var/lib/postgresql/data']);
+    expect(compose.volumes).toEqual({ pgdata: { driver: 'local' }, pgdata3: {} });
+  });
+
+  it('does not declare bind mounts', () => {
+    const vols = ['data:/data', './conf:/conf:ro', '/srv/media:/media', '/cache'];
+    const compose = { services: {} };
+    addServiceToCompose(compose, { id: 'svc', config: { image: 'x:1', volumes: vols } });
+    expect(compose.volumes).toEqual({ data: {} });
+    expect(compose.services.svc.volumes).toEqual(vols);
+  });
+
+  it('rewrites long syntax sources when renaming', () => {
+    const tpl = { id: 'svc', config: { image: 'x:1', volumes: [{ type: 'volume', source: 'data', target: '/d' }] } };
+    const compose = { services: {}, volumes: { data: {} } };
+    addServiceToCompose(compose, tpl);
+    expect(compose.services.svc.volumes).toEqual([{ type: 'volume', source: 'data2', target: '/d' }]);
+    expect(compose.volumes).toEqual({ data: {}, data2: {} });
+  });
+
+  it('does not mutate the template config', () => {
+    const pg = serviceTemplates.find((t) => t.id === 'postgresql');
+    const before = JSON.stringify(pg.config);
+    const compose = { services: {}, volumes: { pgdata: {} } };
+    addServiceToCompose(compose, pg);
+    expect(JSON.stringify(pg.config)).toBe(before);
+  });
+
+  it('adds a blank service without template or for the blank id', () => {
+    const compose = {};
+    expect(addServiceToCompose(compose, null)).toBe('service');
+    expect(addServiceToCompose(compose, { id: 'blank' })).toBe('service2');
+    expect(compose.services.service).toEqual({ image: '', restart: 'unless-stopped' });
+    expect(compose.volumes).toBeUndefined();
+  });
+});
 
 describe('serviceTemplates integrity', () => {
   it('every template has required fields', () => {
@@ -62,6 +164,17 @@ describe('serviceTemplates integrity', () => {
       for (const vol of t.config.volumes || []) {
         expect(typeof vol).toBe('string');
         expect(vol.includes(':/'), `${t.id}: volume "${vol}" missing ":/"`).toBe(true);
+      }
+    }
+  });
+
+  // Host binds like /etc/localtime are refused by the server's compose
+  // security checks (protected system folder), so templates must only use
+  // named volumes.
+  it('volume entries are named volumes, never host bind mounts', () => {
+    for (const t of serviceTemplates) {
+      for (const vol of t.config.volumes || []) {
+        expect(namedVolumeSource(vol), `${t.id}: "${vol}" is not a named volume`).toBeTruthy();
       }
     }
   });

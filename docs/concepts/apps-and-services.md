@@ -44,7 +44,7 @@ Two services, one endpoint, one app named after the directory.
 
 ## Lifecycle
 
-Created when you (or the API) writes the compose file into `apps_dir/<slug>/`. Updated when the file content changes (SHA-256 hash compare). Removed when the directory disappears: the next reconcile pass calls `docker compose down --remove-orphans`. Deploy history is recorded in the `compose_versions` and `deploy_events` tables (migration 009).
+Created when you (or the API) writes the compose file into `apps_dir/<slug>/`. Updated when the file content changes (SHA-256 hash compare). Removed when the directory disappears: the next reconcile pass calls `docker compose down --remove-orphans`. Named volumes are kept, on this path and on Delete (see [Archived apps](/operations/archived-apps/#difference-from-ui-delete)). Deploy history is recorded in the `compose_versions` and `deploy_events` tables (migration 009).
 
 ## App status values
 

@@ -115,6 +115,31 @@ export function computeQuickTestDomain(slug, host) {
   return `${slug}.${host}.sslip.io`;
 }
 
+// Quick-test domains for every domain variable of a template, as {key: domain}.
+// The main var ("domain", else the first) gets <slug>.<host>.sslip.io; others
+// get <slug>-<name>, where name is the key minus "_domain" (e.g. console_domain
+// -> minio-console), so endpoints never share a hostname (the server rejects
+// duplicate domain+path endpoints).
+export function computeQuickTestDomains(variables, slug, host) {
+  const domainVars = (variables || []).filter((v) => v.type === 'domain');
+  const main = domainVars.find((v) => v.key === 'domain') || domainVars[0];
+  const out = {};
+  const used = new Set();
+  if (main) {
+    out[main.key] = computeQuickTestDomain(slug, host);
+    used.add(slug);
+  }
+  for (const v of domainVars) {
+    if (v === main) continue;
+    const name = v.key.toLowerCase().replace(/_?domain$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'alt';
+    let label = `${slug}-${name}`;
+    for (let i = 2; used.has(label); i++) label = `${slug}-${name}-${i}`;
+    used.add(label);
+    out[v.key] = computeQuickTestDomain(label, host);
+  }
+  return out;
+}
+
 // Transform compose according to access mode.
 // opts = { host, slug } (only used by quick-test indirectly; port-only uses labels).
 export function applyAccessMode(compose, mode, _opts) {
@@ -1533,97 +1558,7 @@ export const appTemplates = [
     ],
   },
 
-  // 19. woodpecker-ci
-  {
-    id: 'woodpecker-ci',
-    name: 'Woodpecker CI',
-    icon: '🪵',
-    category: 'ci',
-    description: 'Simple, container-native CI server with agent.',
-    tags: ['ci', 'woodpecker', 'pipelines', 'build'],
-    nameSuggestion: 'woodpecker',
-    advanced: false,
-    variables: [
-      domainVar,
-      {
-        key: 'admin_user',
-        label: 'Admin username (forge login)',
-        type: 'text',
-        required: true,
-        pattern: '^[a-zA-Z0-9_-]{2,64}$',
-        help: 'Your username on the Git forge (e.g. GitHub/Gitea) that becomes the Woodpecker admin.',
-      },
-      {
-        key: 'agent_secret',
-        label: 'Agent secret',
-        type: 'secret',
-        required: true,
-        hidden: true,
-        generate: { length: 64, charset: 'hex' },
-      },
-    ],
-    compose: {
-      services: {
-        server: {
-          image: 'woodpeckerci/woodpecker-server:v3',
-          restart: 'unless-stopped',
-          environment: {
-            WOODPECKER_OPEN: 'false',
-            WOODPECKER_ADMIN: '{{admin_user}}',
-            WOODPECKER_HOST: 'https://{{domain}}',
-            WOODPECKER_AGENT_SECRET: '{{agent_secret}}',
-          },
-          volumes: ['woodpecker-server-data:/var/lib/woodpecker'],
-          deploy: limits('0.5', '256M'),
-          healthcheck: {
-            test: ['CMD', 'wget', '-qO-', 'http://localhost:8000/healthz'],
-            interval: '30s',
-            timeout: '5s',
-            retries: 3,
-            start_period: '30s',
-          },
-          labels: {
-            'simpledeploy.endpoints.0.domain': '{{domain}}',
-            'simpledeploy.endpoints.0.port': '8000',
-            'simpledeploy.endpoints.0.tls': 'letsencrypt',
-            'simpledeploy.backup.strategy': 'volume',
-            'simpledeploy.backup.schedule': '0 3 * * *',
-            'simpledeploy.backup.target': 'local',
-            'simpledeploy.backup.retention': '14',
-            'simpledeploy.alert.cpu': '85',
-            'simpledeploy.alert.memory': '85',
-          },
-        },
-        agent: {
-          image: 'woodpeckerci/woodpecker-agent:v3',
-          restart: 'unless-stopped',
-          command: 'agent',
-          environment: {
-            WOODPECKER_SERVER: 'server:9000',
-            WOODPECKER_AGENT_SECRET: '{{agent_secret}}',
-            WOODPECKER_MAX_WORKFLOWS: '2',
-          },
-          volumes: ['/var/run/docker.sock:/var/run/docker.sock'],
-          depends_on: { server: { condition: 'service_healthy' } },
-          deploy: limits('0.5', '256M'),
-          healthcheck: {
-            test: ['CMD', '/bin/woodpecker-agent', 'ping'],
-            interval: '30s',
-            timeout: '5s',
-            retries: 3,
-            start_period: '20s',
-          },
-        },
-      },
-      volumes: { 'woodpecker-server-data': {} },
-    },
-    notes: [
-      'The agent mounts the host Docker socket to run pipelines. Treat pipeline access like shell access.',
-      'You must configure a forge (GitHub/Gitea/GitLab) in the server env before first login; see Woodpecker docs.',
-    ],
-  },
-
-  // 20. webhook-tester
+  // 19. webhook-tester
   {
     id: 'webhook-tester',
     name: 'Webhook Tester',

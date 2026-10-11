@@ -78,11 +78,13 @@ The **Delete** action on a live app is a full purge in one step: it tears down c
 
 The archive flow only triggers when the directory disappears **without** going through the Delete action: a manual `rm -rf`, a git sync pulling a delete, or any other out-of-band removal. The reasoning is that intentional UI deletes are deliberate; out-of-band removals are often accidents or git-driven config moves where preserving history is the safer default.
 
-| Path | Containers | App dir | DB row | History | Tombstone |
-|------|------------|---------|--------|---------|-----------|
-| UI Delete | removed | removed | removed | removed | none |
-| Filesystem removal | removed | already gone | retained (`archived_at` set) | retained | written |
-| Purge from archive | already gone | already gone | removed | removed | removed |
+| Path | Containers | App dir | DB row | History | Tombstone | Data volumes |
+|------|------------|---------|--------|---------|-----------|--------------|
+| UI Delete | removed | removed | removed | removed | none | kept |
+| Filesystem removal | removed | already gone | retained (`archived_at` set) | retained | written | kept |
+| Purge from archive | already gone | already gone | removed | removed | removed | kept |
+
+Containers are stopped with `docker compose down` (no `-v`), so named volumes (database files, uploads) are never deleted by SimpleDeploy. To free the space, delete them from the **Docker** page under **Networks & Volumes**, or run `docker volume rm` on the server. An app's volumes are named `simpledeploy-<slug>_<volume>`.
 
 ## Tombstone files
 

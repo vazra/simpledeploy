@@ -481,8 +481,8 @@
     {#if showDanger}
       <div class="px-5 pb-5 border-t border-red-500/20">
         <div class="pt-4 flex items-center justify-between gap-4">
-          <p class="text-sm text-text-secondary">
-            This will permanently remove <span class="font-medium text-text-primary">{app?.Name}</span> and all its data.
+          <p class="text-sm text-text-secondary" data-testid="delete-app-summary">
+            Permanently removes <span class="font-medium text-text-primary">{app?.Name}</span>: its containers, configuration and history. Its data volumes (databases, uploaded files) are kept on the server.
           </p>
           <Button variant="danger" size="sm" onclick={() => showDeleteModal = true} loading={deleting}>
             Delete App
@@ -502,7 +502,7 @@
 {#if showDeleteModal}
   <Modal
     title="Delete App"
-    message="This will permanently remove {app?.Name} and all its data. This cannot be undone."
+    message="This stops {app?.Name} and permanently removes its containers, configuration and history (deploys, backup schedules, alerts). This cannot be undone. Its data volumes (databases, uploaded files) are kept on the server. To free that space, delete them on the Docker page under Networks & Volumes; their names start with simpledeploy-{slug}_."
     onConfirm={confirmDelete}
     onCancel={() => showDeleteModal = false}
   />

@@ -10,6 +10,7 @@ import {
   applyAccessMode,
   countEndpoints,
   computeQuickTestDomain,
+  computeQuickTestDomains,
   isValidHost,
   isValidIPv4,
 } from '../appTemplates.js';
@@ -108,6 +109,50 @@ describe('applyAccessMode', () => {
 describe('computeQuickTestDomain', () => {
   it('formats slug.host.sslip.io', () => {
     expect(computeQuickTestDomain('my-app', '1.2.3.4')).toBe('my-app.1.2.3.4.sslip.io');
+  });
+});
+
+describe('computeQuickTestDomains', () => {
+  const d = (key, extra = {}) => ({ key, type: 'domain', ...extra });
+
+  it('gives the main domain var the plain slug', () => {
+    expect(computeQuickTestDomains([d('domain'), { key: 'x', type: 'text' }], 'app', '1.2.3.4'))
+      .toEqual({ domain: 'app.1.2.3.4.sslip.io' });
+  });
+
+  it('prefixes other domain vars by key so hostnames are distinct', () => {
+    expect(computeQuickTestDomains([d('domain'), d('console_domain'), d('ui_domain')], 'minio', '1.2.3.4'))
+      .toEqual({
+        domain: 'minio.1.2.3.4.sslip.io',
+        console_domain: 'minio-console.1.2.3.4.sslip.io',
+        ui_domain: 'minio-ui.1.2.3.4.sslip.io',
+      });
+  });
+
+  it('uses the first domain var as main when none is keyed "domain"', () => {
+    expect(computeQuickTestDomains([d('web_domain'), d('api_domain')], 'app', '1.2.3.4'))
+      .toEqual({ web_domain: 'app.1.2.3.4.sslip.io', api_domain: 'app-api.1.2.3.4.sslip.io' });
+  });
+
+  it('dedupes labels that sanitize to the same name', () => {
+    const out = computeQuickTestDomains([d('domain'), d('a_domain'), d('A_domain'), d('_domain')], 'app', '1.2.3.4');
+    expect(out.a_domain).toBe('app-a.1.2.3.4.sslip.io');
+    expect(out.A_domain).toBe('app-a-2.1.2.3.4.sslip.io');
+    expect(out._domain).toBe('app-alt.1.2.3.4.sslip.io');
+    expect(new Set(Object.values(out)).size).toBe(4);
+  });
+
+  it('every domain var of every app template gets a unique valid hostname', () => {
+    for (const t of appTemplates) {
+      const out = computeQuickTestDomains(t.variables, t.nameSuggestion, '1.2.3.4');
+      const keys = (t.variables || []).filter((v) => v.type === 'domain').map((v) => v.key);
+      expect(Object.keys(out).sort()).toEqual([...keys].sort());
+      expect(new Set(Object.values(out)).size).toBe(keys.length);
+      const vars = Object.fromEntries(keys.map((k) => [k, out[k]]));
+      for (const k of keys) {
+        expect(validateVars(t.variables.filter((v) => v.key === k), vars)).toEqual({});
+      }
+    }
   });
 });
 
@@ -317,7 +362,7 @@ describe('appTemplates integrity', () => {
   const categoryIds = new Set(categories.map((c) => c.id));
 
   it('has the expected number of templates', () => {
-    expect(appTemplates.length).toBe(20);
+    expect(appTemplates.length).toBe(19);
   });
 
   it('every template has required fields', () => {

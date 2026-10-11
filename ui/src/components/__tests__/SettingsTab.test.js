@@ -204,6 +204,20 @@ describe('SettingsTab', () => {
     return r;
   }
 
+  // Teardown runs `docker compose down` without -v, so named volumes survive.
+  it('says data volumes are kept when deleting the app, and where to remove them', async () => {
+    const r = renderTab();
+    await fireEvent.click(r.getByRole('button', { name: /Danger Zone/i }));
+    expect(r.container.textContent).not.toMatch(/all its data/);
+    expect(r.getByTestId('delete-app-summary').textContent).toMatch(/data volumes .* kept/i);
+    await fireEvent.click(r.getByRole('button', { name: /Delete App/i }));
+    const msg = r.getByRole('dialog').textContent;
+    expect(msg).not.toMatch(/all its data/);
+    expect(msg).toMatch(/kept on the server/);
+    expect(msg).toMatch(/Docker page/);
+    expect(msg).toMatch(/simpledeploy-foo_/);
+  });
+
   it('stays on the page and shows the error when deleting the app fails', async () => {
     routes['DELETE /api/apps/foo'] = () => json({ error: 'compose down failed: daemon unreachable' }, 500);
     const { findByTestId } = await deleteApp();
