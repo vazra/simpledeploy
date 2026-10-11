@@ -670,11 +670,10 @@ export function namedVolumeSource(entry) {
 // service never shares data with an existing one.
 export function addServiceToCompose(compose, template = null) {
   if (!compose.services) compose.services = {};
-  const blank = !template || template.id === 'blank';
-  const baseName = blank ? 'service' : template.id.replace(/-/g, '_');
+  const baseName = !template || template.id === 'blank' ? 'service' : template.id.replace(/-/g, '_');
   let name = baseName;
   for (let n = 2; compose.services[name]; n++) name = `${baseName}${n}`;
-  const svc = !blank && template.config
+  const svc = template?.config
     ? JSON.parse(JSON.stringify(template.config))
     : { image: '', restart: 'unless-stopped' };
 
