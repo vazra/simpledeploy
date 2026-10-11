@@ -7,6 +7,14 @@ const apiMock = vi.hoisted(() => ({
   detectStrategies: vi.fn(async () => ({ data: [], error: null })),
 }));
 vi.mock('../../lib/api.js', () => ({ api: apiMock }));
+const realtimeMock = vi.hoisted(() => ({
+  handlers: {},
+  register: vi.fn((topic, fn) => {
+    realtimeMock.handlers[topic] = fn;
+    return () => {};
+  }),
+}));
+vi.mock('../../lib/stores/realtime.svelte.js', () => ({ realtime: realtimeMock }));
 
 import BackupsTab from '../BackupsTab.svelte';
 
@@ -17,6 +25,16 @@ describe('BackupsTab', () => {
       expect(apiMock.listBackupConfigs).toHaveBeenCalledWith('foo');
       expect(apiMock.listBackupRuns).toHaveBeenCalledWith('foo');
     });
+  });
+
+  // Runs publish on app:<slug> when they start and finish.
+  it('refetches runs when the app topic fires', async () => {
+    render(BackupsTab, { slug: 'foo' });
+    await waitFor(() => expect(realtimeMock.register).toHaveBeenCalledWith('app:foo', expect.any(Function)));
+    const before = apiMock.listBackupRuns.mock.calls.length;
+    apiMock.listBackupRuns.mockResolvedValueOnce({ data: [{ id: 5, status: 'success', started_at: new Date().toISOString() }], error: null });
+    await realtimeMock.handlers['app:foo']();
+    expect(apiMock.listBackupRuns.mock.calls.length).toBe(before + 1);
   });
 
   it('renders without crashing when there are no configs', async () => {

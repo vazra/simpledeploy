@@ -13,11 +13,18 @@ import (
 
 	"github.com/robfig/cron/v3"
 	"github.com/vazra/simpledeploy/internal/compose"
+	"github.com/vazra/simpledeploy/internal/events"
 	"github.com/vazra/simpledeploy/internal/store"
 )
 
 // BackupAlertFunc is a callback for backup-related alerts.
 type BackupAlertFunc func(appID int64, appName, strategy, message, eventType string)
+
+// EventPublisher receives realtime notify-only events. *events.Bus
+// satisfies it.
+type EventPublisher interface {
+	Publish(ctx context.Context, e events.Event)
+}
 
 // BackupStore is the subset of store.Store needed by Scheduler.
 type BackupStore interface {
@@ -42,6 +49,7 @@ type Scheduler struct {
 	entries    map[int64]cron.EntryID
 	hookExec   ContainerExecutor
 	alertFunc  BackupAlertFunc
+	bus        EventPublisher
 	mu         sync.Mutex
 }
 
@@ -70,6 +78,36 @@ func (s *Scheduler) RegisterTargetFactory(name string, factory func(string) (Tar
 // SetAlertFunc sets the callback for backup alerts.
 func (s *Scheduler) SetAlertFunc(fn BackupAlertFunc) {
 	s.alertFunc = fn
+}
+
+// SetEventBus wires the realtime events bus, told when a backup or restore
+// run starts and finishes so open Backups views refresh. nil disables it.
+func (s *Scheduler) SetEventBus(b EventPublisher) {
+	s.bus = b
+}
+
+// publishRun notifies the UI that a run of app slug started or finished.
+func (s *Scheduler) publishRun(ctx context.Context, slug string) {
+	if s.bus == nil || slug == "" {
+		return
+	}
+	for _, e := range events.BackupRunEvents(slug) {
+		s.bus.Publish(ctx, e)
+	}
+}
+
+// appSlug returns the slug of app appID, or "" if it cannot be loaded.
+func (s *Scheduler) appSlug(appID int64) string {
+	if app, err := s.store.GetAppByID(appID); err == nil && app != nil {
+		return app.Slug
+	}
+	return ""
+}
+
+// failRun marks run failed and notifies the UI.
+func (s *Scheduler) failRun(ctx context.Context, runID int64, slug, errMsg string) {
+	_ = s.store.UpdateBackupRunFailed(runID, errMsg)
+	s.publishRun(ctx, slug)
 }
 
 // GetStrategy returns a registered strategy by name.
@@ -160,39 +198,41 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	if err != nil {
 		return fmt.Errorf("create backup run: %w", err)
 	}
+	slug := s.appSlug(cfg.AppID)
+	s.publishRun(ctx, slug)
 
 	strategy, ok := s.strategies[cfg.Strategy]
 	if !ok {
 		errMsg := fmt.Sprintf("unknown strategy: %s", cfg.Strategy)
-		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		s.failRun(ctx, run.ID, slug, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	factory, ok := s.targets[cfg.Target]
 	if !ok {
 		errMsg := fmt.Sprintf("unknown target: %s", cfg.Target)
-		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		s.failRun(ctx, run.ID, slug, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	target, err := factory(cfg.TargetConfigJSON)
 	if err != nil {
 		errMsg := fmt.Sprintf("create target: %v", err)
-		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		s.failRun(ctx, run.ID, slug, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	app, err := s.store.GetAppByID(cfg.AppID)
 	if err != nil {
 		errMsg := fmt.Sprintf("get app: %v", err)
-		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		s.failRun(ctx, run.ID, slug, errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	plan, err := s.planRun(cfg, app, strategy, target)
 	if err != nil {
 		errMsg := err.Error()
-		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		s.failRun(ctx, run.ID, slug, errMsg)
 		s.sendAlert(app.ID, app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
 		return fmt.Errorf("%s", errMsg)
 	}
@@ -205,17 +245,19 @@ func (s *Scheduler) RunBackup(ctx context.Context, cfgID int64) error {
 	result, err := plan.pipe.RunBackup(ctx, opts, plan.preHooks, plan.postHooks)
 	if err != nil {
 		errMsg := err.Error()
-		_ = s.store.UpdateBackupRunFailed(run.ID, errMsg)
+		s.failRun(ctx, run.ID, slug, errMsg)
 		s.sendAlert(app.ID, app.Name, cfg.Strategy, fmt.Sprintf("backup failed: %s", errMsg), "backup_failed")
 		return fmt.Errorf("pipeline: %w", err)
 	}
 
 	if err := s.store.UpdateBackupRunSuccess(run.ID, result.SizeBytes, result.FilePath, result.Checksum); err != nil {
+		s.publishRun(ctx, slug)
 		return fmt.Errorf("update run success: %w", err)
 	}
 
 	// Prune old runs based on retention mode
 	s.pruneOldRuns(ctx, cfg, target)
+	s.publishRun(ctx, slug)
 
 	s.sendAlert(app.ID, app.Name, cfg.Strategy, "backup completed successfully", "backup_success")
 	return nil
@@ -232,6 +274,9 @@ func (s *Scheduler) RunRestore(ctx context.Context, runID int64) error {
 	if err != nil {
 		return fmt.Errorf("get backup config: %w", err)
 	}
+	slug := s.appSlug(cfg.AppID)
+	s.publishRun(ctx, slug)
+	defer s.publishRun(ctx, slug)
 
 	strategy, ok := s.strategies[cfg.Strategy]
 	if !ok {
