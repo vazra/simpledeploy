@@ -36,7 +36,7 @@ Templates (builtin and custom) are Go `text/template`s that render JSON. Before 
 
 Network safety: by default the dispatcher refuses URLs that resolve to reserved addresses, and the dialer re-checks the resolved IP at connect time (DNS rebinding). `isReservedIP` covers loopback, RFC 1918, link-local, multicast, unspecified, CGNAT (`100.64.0.0/10`), IETF/TEST-NET/benchmarking ranges, class E, IPv6 unique-local and discard, and the NAT64 local-use prefix `64:ff9b:1::/48`. Addresses in the well-known NAT64 prefix `64:ff9b::/96` are judged by the IPv4 address they embed, so DNS64 hosts can still reach public targets. Set `SIMPLEDEPLOY_ALLOW_PRIVATE_WEBHOOKS=1` to opt out (only for trusted internal targets). The S3 backup target uses a similar list (`SIMPLEDEPLOY_ALLOW_PRIVATE_S3`, see [Backup architecture](/architecture/backup/)).
 
-Failed dispatches retry with exponential backoff up to a small bound; persistent failures are recorded but not retried indefinitely.
+Delivery is single-shot: each notification is one POST with a 10 second timeout. A failed send (network error or HTTP status >= 400) is logged and not retried. A metric alert still records its `alert_history` row, so it will not fire again until it resolves.
 
 ## Backup failure alerts
 

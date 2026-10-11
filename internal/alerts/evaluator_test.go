@@ -422,10 +422,13 @@ func TestEvaluateOnce_MultipleRules(t *testing.T) {
 	}
 }
 
-// Edge case: webhook failure should not prevent history creation
+// Edge case: webhook failure should not prevent history creation. Delivery is
+// single-shot: a failed send is not retried.
 func TestEvaluateOnce_WebhookFailure(t *testing.T) {
+	var webhookHits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.ReadAll(r.Body)
+		atomic.AddInt32(&webhookHits, 1)
 		w.WriteHeader(http.StatusInternalServerError) // webhook fails
 	}))
 	defer srv.Close()
@@ -452,6 +455,9 @@ func TestEvaluateOnce_WebhookFailure(t *testing.T) {
 	// history should still be created even though webhook failed
 	if len(ms.histories) != 1 {
 		t.Errorf("histories = %d, want 1 (should create despite webhook failure)", len(ms.histories))
+	}
+	if n := atomic.LoadInt32(&webhookHits); n != 1 {
+		t.Errorf("webhook hits = %d, want 1 (no retry)", n)
 	}
 }
 
