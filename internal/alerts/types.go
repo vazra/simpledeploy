@@ -54,14 +54,22 @@ type BackupAlertEvent struct {
 	AppName   string
 	Strategy  string
 	Message   string
-	EventType string // "backup_failed" or "backup_missed"
+	EventType string // "backup_failed", "backup_success" or "backup_missed"
 	FiredAt   time.Time
 }
 
+var backupEventDisplayNames = map[string]string{
+	"backup_failed":  "Backup Failed",
+	"backup_success": "Backup Succeeded",
+	"backup_missed":  "Backup Missed",
+}
+
+// ToAlertEvent converts b for webhook delivery. Status is always "firing":
+// the matching rule fired, whatever the backup outcome.
 func (b BackupAlertEvent) ToAlertEvent() AlertEvent {
-	metricDisplay := "Backup Failed"
-	if b.EventType == "backup_missed" {
-		metricDisplay = "Backup Missed"
+	metricDisplay, ok := backupEventDisplayNames[b.EventType]
+	if !ok {
+		metricDisplay = b.EventType
 	}
 	return AlertEvent{
 		AppName:       b.AppName,
