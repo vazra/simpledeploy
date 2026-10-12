@@ -10,22 +10,29 @@ package gitsync
 // them into local bot commits so the rebase can run and the server-wins
 // conflict policy decides what is kept.
 //
-// Files SimpleDeploy writes while importing a pull (the sidecar write hook
-// fires while suppress is on, e.g. a pulled sidecar re-rendered from the
-// DB) carry no local edit. They are committed separately under
-// pulledRewriteSubject, and on conflict the rebase takes the remote side for
-// them, as it does for an access restore (see replayingPullFollowUp).
-// Otherwise such a commit, which stays unpushed in pull-only mode, would
-// override every later remote edit to that file. The set is kept in memory
-// only: after a restart such files are committed as ordinary local changes.
+// A pulled sidecar that SimpleDeploy re-renders from the DB after importing
+// it (e.g. a hand-formatted simpledeploy.yml saved back in SimpleDeploy's
+// format) carries no local edit. Right after an import, git sync records the
+// SHA-256 of that render; a write with exactly those bytes is the re-render,
+// whenever it lands, and any other write is a local edit (skipPullRewrites).
+// Re-renders are committed separately under pulledRewriteSubject, and on
+// conflict the rebase takes the remote side for them, as it does for an
+// access restore (see replayingPullFollowUp). Otherwise such a commit, which
+// stays unpushed in pull-only mode, would override every later remote edit
+// to that file. The records are kept in memory only: after a restart such
+// files are committed as ordinary local changes.
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/vazra/simpledeploy/internal/fsutil"
 )
 
 const (
@@ -195,8 +202,80 @@ func (g *Syncer) forgetPullRewrites(paths []string) {
 	for _, p := range paths {
 		if rel, ok := g.repoRel(p); ok {
 			delete(g.pullRewrites, rel)
+			delete(g.rewriteHash, rel)
 		}
 	}
+}
+
+// recordPullRenders records, for each app whose sidecar a pull just
+// imported, the SHA-256 of that sidecar as SimpleDeploy renders it from the
+// DB now.
+func (g *Syncer) recordPullRenders(slugs []string) {
+	if g.cs == nil {
+		return
+	}
+	for _, slug := range slugs {
+		b, err := g.cs.RenderAppSidecar(slug)
+		if err != nil {
+			log.Printf("[gitsync] render pulled sidecar %s: %v", slug, err)
+			continue
+		}
+		sum := sha256.Sum256(b)
+		g.mu.Lock()
+		if g.rewriteHash == nil {
+			g.rewriteHash = map[string]string{}
+		}
+		g.rewriteHash[slug+"/simpledeploy.yml"] = hex.EncodeToString(sum[:])
+		g.mu.Unlock()
+	}
+}
+
+// releaseHeld classifies the commit requests made during an import.
+func (g *Syncer) releaseHeld() {
+	g.mu.Lock()
+	held := g.held
+	g.held = nil
+	g.mu.Unlock()
+	for _, r := range held {
+		g.EnqueueCommit(r.paths, r.reason)
+	}
+}
+
+// skipPullRewrites records the paths whose file holds exactly SimpleDeploy's
+// render of a pulled sidecar as pull rewrites and returns the others, which
+// are local changes. ok is false when nothing is left to commit. nil (stage
+// everything) passes through: staging leaves pull rewrites out.
+func (g *Syncer) skipPullRewrites(paths []string) ([]string, bool) {
+	if paths == nil {
+		return nil, true
+	}
+	var keep []string
+	for _, p := range paths {
+		if rel, ok := g.repoRel(p); ok && g.matchesPullRender(rel) {
+			g.notePullRewrites([]string{p})
+			continue
+		}
+		g.forgetPullRewrites([]string{p})
+		keep = append(keep, p)
+	}
+	return keep, len(keep) > 0
+}
+
+// matchesPullRender reports whether the file at rel is byte for byte the
+// render recorded by recordPullRenders.
+func (g *Syncer) matchesPullRender(rel string) bool {
+	g.mu.Lock()
+	want, ok := g.rewriteHash[rel]
+	g.mu.Unlock()
+	if !ok {
+		return false
+	}
+	b, err := fsutil.ReadRegularFile(filepath.Join(g.cfg.AppsDir, filepath.FromSlash(rel)))
+	if err != nil {
+		return false
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]) == want
 }
 
 func (g *Syncer) isPullRewrite(rel string) bool {

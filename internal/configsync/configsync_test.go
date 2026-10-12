@@ -1067,11 +1067,18 @@ func TestDebouncedGlobalWritesBothFiles(t *testing.T) {
 
 	syncer.ScheduleGlobalWrite()
 
-	// Wait for debounce to fire (500ms + buffer).
-	time.Sleep(700 * time.Millisecond)
-
 	secretPath := filepath.Join(dataDir, "config.yml")
 	redactedPath := filepath.Join(appsDir, "_global.yml")
+	// Wait for the debounced write (500ms) to land both files.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, e1 := os.Stat(secretPath)
+		_, e2 := os.Stat(redactedPath)
+		if e1 == nil && e2 == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if _, err := os.Stat(secretPath); err != nil {
 		t.Errorf("config.yml missing: %v", err)
