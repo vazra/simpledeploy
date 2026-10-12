@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.5](https://github.com/vazra/simpledeploy/compare/v1.4.4...v1.4.5) (2026-10-11)
+
+
+### Bug Fixes
+
+* actions survive client disconnect, rate-limit burst honored, delete errors shown, sync badge only with git sync ([#124](https://github.com/vazra/simpledeploy/issues/124)) ([946d8ba](https://github.com/vazra/simpledeploy/commit/946d8ba29f313140c9b0cd2946fc41819d734a19))
+* alert rules keep their app; backup views refresh live ([#127](https://github.com/vazra/simpledeploy/issues/127)) ([c86ae4a](https://github.com/vazra/simpledeploy/commit/c86ae4a66fdd0ec07ad832ff91f68f4c41e03f43))
+* **alerts:** scope backup alerts to their app; correct backup alert labels ([#122](https://github.com/vazra/simpledeploy/issues/122)) ([72142ef](https://github.com/vazra/simpledeploy/commit/72142ef716894eab83bd53b2d3480b40af23c02e))
+* **api:** user update wiping profiles, unusable app names, silent endpoint loss, validate-compose gaps ([#123](https://github.com/vazra/simpledeploy/issues/123)) ([a0f1c9d](https://github.com/vazra/simpledeploy/commit/a0f1c9d83b1964dcc148515a89009f4b257de8d1))
+* **backup:** make pre/post hooks run (app-scoped), drop pruned runs, fix days retention ([#121](https://github.com/vazra/simpledeploy/issues/121)) ([677827c](https://github.com/vazra/simpledeploy/commit/677827ca42bf8367f144d3e2c2a6b7ab44de903a))
+* **gitsync:** push commits left behind by a failed push on the next sync ([#119](https://github.com/vazra/simpledeploy/issues/119)) ([ec9fff2](https://github.com/vazra/simpledeploy/commit/ec9fff27e2ff87cf61743a9e5c053b6b3eb97244))
+* **gitsync:** reopen the repository before each commit, fetch and push ([#132](https://github.com/vazra/simpledeploy/issues/132)) ([5c19138](https://github.com/vazra/simpledeploy/commit/5c19138d6b7aa0dbf02135086737fd5f95793067))
+* recover per-app config after database loss instead of deleting it ([#126](https://github.com/vazra/simpledeploy/issues/126)) ([816d632](https://github.com/vazra/simpledeploy/commit/816d632ee1ee4f3e69a02a198a1482d1fd78886b))
+* show why deploys fail; 409 instead of silent no-ops while a deploy runs; retry skipped reconciles ([#128](https://github.com/vazra/simpledeploy/issues/128)) ([7d728c6](https://github.com/vazra/simpledeploy/commit/7d728c6de4b00323b1a62ea3ade7a56899028328))
+* **ui:** templates that could not deploy; delete dialog no longer claims data is deleted ([#125](https://github.com/vazra/simpledeploy/issues/125)) ([3527326](https://github.com/vazra/simpledeploy/commit/3527326518b139637492a73639b6b2f93833b1f8))
+
 ## [1.4.4](https://github.com/vazra/simpledeploy/compare/v1.4.3...v1.4.4) (2026-10-10)
 
 
