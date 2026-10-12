@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.6](https://github.com/vazra/simpledeploy/compare/v1.4.5...v1.4.6) (2026-10-12)
+
+
+### Bug Fixes
+
+* **gitsync:** tell a pulled file's re-render from a local edit by content, not a time window ([#133](https://github.com/vazra/simpledeploy/issues/133)) ([b1ac010](https://github.com/vazra/simpledeploy/commit/b1ac010850bc0ccaf762ac8b8ea66e2608079462))
+
 ## [1.4.5](https://github.com/vazra/simpledeploy/compare/v1.4.4...v1.4.5) (2026-10-11)
 
 
