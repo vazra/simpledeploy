@@ -137,6 +137,9 @@ type commitReq struct {
 type syncReq struct {
 	ctx  context.Context
 	done chan<- error
+	// apply applies fetched commits even when AutoApplyEnabled is off
+	// (ApplyPending).
+	apply bool
 }
 
 // CommitInfo is a summary of a single commit for the status endpoint.
@@ -196,7 +199,7 @@ type Syncer struct {
 	commitCh chan commitReq // buffered
 	syncCh   chan syncReq   // buffered
 
-	suppress atomic.Bool // true while import-from-pull is running
+	suppress atomic.Bool // true while a pull's sidecars are being imported
 
 	mu              sync.Mutex
 	headSHA         string
@@ -205,9 +208,16 @@ type Syncer struct {
 	recentConflicts []Conflict
 	dropped         int64
 	commitsBehind   int
-	// pullRewrites holds repo-relative managed paths written while a pull
-	// was being imported and not changed locally since (see pending.go).
+	// pullRewrites holds repo-relative managed paths SimpleDeploy rewrote
+	// after importing a pull and not changed locally since (see pending.go).
 	pullRewrites map[string]bool
+	// rewriteHash maps a pulled sidecar's path to the SHA-256 of the file
+	// SimpleDeploy renders from the DB right after importing it. A later
+	// write with exactly these bytes is that re-render, not a local edit.
+	rewriteHash map[string]string
+	// held are commit requests made while suppress was on, classified when
+	// the import finishes.
+	held []commitReq
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -217,13 +227,6 @@ const (
 	commitChanSize = 32
 	syncChanSize   = 8
 	maxConflicts   = 20
-
-	// suppressTail is how long to keep suppress=true after an import completes.
-	// The configsync debouncer fires up to 500ms after the last ScheduleAppWrite
-	// call; keeping suppress active for 2x that window ensures the debounced
-	// WriteAppSidecar -> callHook -> EnqueueCommit path is also suppressed,
-	// preventing a spurious bot commit after every remote pull.
-	suppressTail = 1200 * time.Millisecond
 )
 
 // New validates config and constructs a Syncer. Does not touch disk or network.
@@ -307,10 +310,16 @@ func (g *Syncer) EnqueueCommit(paths []string, reason string) {
 		return
 	}
 	if g.suppress.Load() {
-		g.notePullRewrites(paths)
+		// Mid-import: classified once the import's own render is known.
+		g.mu.Lock()
+		g.held = append(g.held, commitReq{paths: paths, reason: reason})
+		g.mu.Unlock()
 		return
 	}
-	g.forgetPullRewrites(paths)
+	paths, ok := g.skipPullRewrites(paths)
+	if !ok {
+		return
+	}
 	select {
 	case g.commitCh <- commitReq{paths: paths, reason: reason}:
 	default:
@@ -345,7 +354,13 @@ func (g *Syncer) recentCommits(n int) []CommitInfo {
 	if g.repo.Load() == nil {
 		return nil
 	}
-	logIter, err := g.repo.Load().Log(&git.LogOptions{})
+	// Status runs on API goroutines while the worker uses g.repo, and a
+	// go-git handle is not safe for concurrent use: read through our own.
+	repo, err := git.PlainOpen(g.cfg.AppsDir)
+	if err != nil {
+		return nil
+	}
+	logIter, err := repo.Log(&git.LogOptions{})
 	if err != nil {
 		return nil
 	}
@@ -458,8 +473,11 @@ func (g *Syncer) worker(ctx context.Context) {
 		case req := <-g.commitCh:
 			g.doCommit(ctx, req)
 		case req := <-g.syncCh:
-			err := g.doPull(req.ctx)
-			req.done <- err
+			if req.apply {
+				req.done <- g.applyPending(req.ctx)
+			} else {
+				req.done <- g.doPull(req.ctx)
+			}
 		}
 	}
 }
@@ -866,6 +884,8 @@ func (g *Syncer) commitsAhead() int {
 
 // ApplyPending runs fetchAndInspect + applyFetched regardless of AutoApplyEnabled.
 // Intended for on-demand application of pending remote changes.
+// It runs on the worker goroutine, like every other git operation: the
+// go-git handle is not safe for concurrent use.
 func (g *Syncer) ApplyPending(ctx context.Context) error {
 	if !g.cfg.Enabled {
 		return errors.New("gitsync: not enabled")
@@ -873,6 +893,22 @@ func (g *Syncer) ApplyPending(ctx context.Context) error {
 	if g.repo.Load() == nil {
 		return errors.New("gitsync: repo not initialized")
 	}
+	done := make(chan error, 1)
+	select {
+	case g.syncCh <- syncReq{ctx: ctx, done: done, apply: true}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// applyPending fetches and applies whatever origin has, then pushes.
+func (g *Syncer) applyPending(ctx context.Context) error {
 	if _, err := g.fetchAndInspect(); err != nil {
 		return err
 	}
@@ -1028,15 +1064,24 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 		return nil
 	}
 
-	// Import sidecar changes; suppress new commits during this window.
-	// Keep suppress active for suppressTail after import so that the
-	// configsync debouncer (500ms) cannot fire a WriteAppSidecar ->
-	// callHook -> EnqueueCommit sequence that would produce a spurious
-	// bot commit rebounding the pulled change.
+	// Hold commit requests while the pulled sidecars are imported. The
+	// import rewrites the DB, which re-renders those sidecars (store
+	// mutation hook -> debounced sidecar write). Once it is done, record
+	// what that render looks like, so it is told apart from a local edit by
+	// content however late it lands (see skipPullRewrites).
 	g.suppress.Store(true)
-	defer func() {
-		time.AfterFunc(suppressTail, func() { g.suppress.Store(false) })
-	}()
+	var imported []string
+	importDone := false
+	finishImport := func() {
+		if importDone {
+			return
+		}
+		importDone = true
+		g.recordPullRenders(imported)
+		g.suppress.Store(false)
+		g.releaseHeld()
+	}
+	defer finishImport()
 
 	chk := g.securePulledTree(prevSHA, newSHA, snap)
 	changedPaths := chk.changed
@@ -1069,9 +1114,12 @@ func (g *Syncer) applyFetched(ctx context.Context) error {
 			// Access grants are dashboard-managed: never apply them from a pull.
 			if importErr := g.cs.ImportAppSidecarWithOptions(sidecar, configsync.ImportOptions{SkipAccess: true}); importErr != nil {
 				log.Printf("[gitsync] import app sidecar %s: %v", slug, importErr)
+				continue
 			}
+			imported = append(imported, slug)
 		}
 	}
+	finishImport()
 
 	// A commit of pull rewrites alone is not pushed here; it goes out with
 	// the next push, so a pull does not echo straight back to the remote.

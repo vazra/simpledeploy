@@ -263,9 +263,9 @@ func handFormattedAliceSidecar(threshold string) string {
 
 // TestPullOnlyRewriteOfPulledSidecarYieldsToRemote: after a pull imports a
 // hand-written sidecar, the server re-renders it from the DB (store mutation
-// hook -> debounced sidecar write) while the import is suppressed. That
-// rewrite is committed locally before the next rebase, but it must not win
-// over later remote edits to the same file.
+// hook -> debounced sidecar write), byte for byte as recorded after the
+// import. That rewrite is committed locally before the next rebase, but it
+// must not win over later remote edits to the same file.
 func TestPullOnlyRewriteOfPulledSidecarYieldsToRemote(t *testing.T) {
 	var app *store.App
 	e := newSecEnv(t, func(e *secEnv) { app = seedAliceApp(t, e) }, pullOnly)
@@ -307,12 +307,12 @@ func TestPullOnlyRewriteOfPulledSidecarYieldsToRemote(t *testing.T) {
 			b, _ := os.ReadFile(sidecar)
 			return !strings.Contains(string(b), "# app1 settings")
 		})
-		waitFor(t, 5*time.Second, "import suppress window to end", func() bool { return !e.gs.suppress.Load() })
+		// The write hook records the rewrite just after the file lands.
+		waitFor(t, 5*time.Second, "re-render recorded as a rewrite of pulled config", func() bool {
+			return e.gs.isPullRewrite("app1/simpledeploy.yml")
+		})
 		if got := readFile(t, sidecar); !strings.Contains(got, "threshold: "+want) {
 			t.Errorf("re-rendered sidecar lost threshold %s:\n%s", want, got)
-		}
-		if !e.gs.isPullRewrite("app1/simpledeploy.yml") {
-			t.Error("re-rendered sidecar not recorded as a rewrite of pulled config")
 		}
 		if hasConflict(e.gs, "app1/simpledeploy.yml") {
 			t.Errorf("rewrite of pulled config reported as a conflict: %+v", e.gs.Status().RecentConflicts)
@@ -465,5 +465,50 @@ func TestPullOnlyLocalDeletionWinsOverRemoteEdit(t *testing.T) {
 	}
 	if got := remoteHead(t, e.bareDir); got != remote {
 		t.Errorf("pull-only mode pushed: remote main %s, want %s", got, remote)
+	}
+}
+
+// A dashboard edit made right after a pull is applied is a local change, not
+// a re-render of the pulled file: it is committed and pushed like any other
+// edit (it used to be swallowed by a time window after each import).
+func TestDashboardEditRightAfterPullIsPushed(t *testing.T) {
+	var app *store.App
+	e := newSecEnv(t, func(e *secEnv) { app = seedAliceApp(t, e) }, nil)
+	e.st.SetMutationHook(func(scope store.MutationScope, slug string) {
+		if scope == store.ScopeApp && slug != "" {
+			e.cs.ScheduleAppWrite(slug)
+		}
+	})
+	t.Cleanup(func() { e.st.SetMutationHook(nil) })
+	e.cs.SetSidecarWriteHook(func(path, reason string) {
+		if path == "" {
+			e.gs.EnqueueCommit(nil, reason)
+			return
+		}
+		e.gs.EnqueueCommit([]string{path}, reason)
+	})
+
+	pushFromClone(t, e.bareDir, func(dir string) {
+		writeFile(t, filepath.Join(dir, "app1", "simpledeploy.yml"), handFormattedAliceSidecar("90"))
+	})
+	if err := e.gs.SyncNow(e.ctx); err != nil {
+		t.Fatalf("SyncNow: %v", err)
+	}
+	rules, err := e.st.ListAlertRules(&app.ID)
+	if err != nil || len(rules) != 1 || rules[0].Threshold != 90 {
+		t.Fatalf("alert rules after pull = %+v (err %v)", rules, err)
+	}
+
+	// Dashboard edit while the import's own re-render is still pending.
+	rules[0].Threshold = 42
+	if err := e.st.UpdateAlertRule(&rules[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, 10*time.Second, "dashboard edit pushed to the remote", func() bool {
+		return strings.Contains(gitOut(t, e.bareDir, "show", "main:app1/simpledeploy.yml"), "threshold: 42")
+	})
+	if e.gs.isPullRewrite("app1/simpledeploy.yml") {
+		t.Error("dashboard edit recorded as a rewrite of pulled config")
 	}
 }

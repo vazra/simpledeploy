@@ -419,7 +419,8 @@ func TestPullConflictServerWins(t *testing.T) {
 	}
 }
 
-// TestSuppressDuringImport: suppress flag blocks EnqueueCommit.
+// TestSuppressDuringImport: requests made while an import runs are held,
+// then classified (and here enqueued) when it finishes.
 func TestSuppressDuringImport(t *testing.T) {
 	s := &Syncer{
 		cfg:      Config{Enabled: true, AutoPushEnabled: true},
@@ -427,15 +428,18 @@ func TestSuppressDuringImport(t *testing.T) {
 	}
 
 	s.suppress.Store(true)
-	s.EnqueueCommit(nil, "should be dropped")
-
+	s.EnqueueCommit(nil, "held")
 	if len(s.commitCh) != 0 {
-		t.Fatal("expected commit to be dropped when suppress=true")
+		t.Fatal("expected the request to be held while suppress=true")
 	}
 
 	s.suppress.Store(false)
-	s.EnqueueCommit(nil, "should enqueue")
+	s.releaseHeld()
 	if len(s.commitCh) != 1 {
+		t.Fatal("expected the held request to enqueue once the import finished")
+	}
+	s.EnqueueCommit(nil, "direct")
+	if len(s.commitCh) != 2 {
 		t.Fatal("expected commit to enqueue when suppress=false")
 	}
 }
@@ -622,7 +626,7 @@ func TestStopFlushesPending(t *testing.T) {
 }
 
 // TestPullDoesNotRebound: a remote change pulled via SyncNow must not produce
-// a follow-up bot commit. Waits 2x suppressTail after the pull to be sure.
+// a follow-up bot commit. Waits out the sidecar write debounce after the pull.
 func TestPullDoesNotRebound(t *testing.T) {
 	appsDir := makeAppsDir(t)
 	bareDir := makeBareRemote(t)
@@ -676,8 +680,9 @@ func TestPullDoesNotRebound(t *testing.T) {
 		t.Fatalf("SyncNow: %v", err)
 	}
 
-	// Wait longer than suppressTail + debounceDelay to let any spurious commit fire.
-	time.Sleep(suppressTail + 700*time.Millisecond)
+	// Wait well past the 500ms sidecar write debounce to let any spurious
+	// commit fire.
+	time.Sleep(1500 * time.Millisecond)
 
 	// Drain any pending commit work.
 	drainCommits(t, s, 2*time.Second)

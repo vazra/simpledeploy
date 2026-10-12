@@ -353,6 +353,17 @@ func (s *Syncer) WriteAppSidecar(slug string) error {
 	return nil
 }
 
+// RenderAppSidecar returns the bytes WriteAppSidecar would write for slug
+// now, without writing. Git sync uses it to recognize its own re-render of a
+// pulled sidecar.
+func (s *Syncer) RenderAppSidecar(slug string) ([]byte, error) {
+	sidecar, err := s.buildAppSidecar(slug)
+	if err != nil {
+		return nil, fmt.Errorf("RenderAppSidecar %s: %w", slug, err)
+	}
+	return encodeYAML(*sidecar)
+}
+
 // buildAppSidecarPair returns both the non-secret AppSidecar and the AppSecrets
 // for the slug. Used by WriteAppSidecar; callers that only need the sidecar
 // (archive tombstones) can use buildAppSidecar.
@@ -1116,16 +1127,25 @@ func atomicWriteYAMLMode(path string, mode os.FileMode, v any) error {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 
+	b, err := encodeYAML(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return atomicWriteFile(path, b, mode)
+}
+
+// encodeYAML renders v the way every sidecar file is written.
+func encodeYAML(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(v); err != nil {
-		return fmt.Errorf("yaml encode %s: %w", path, err)
+		return nil, fmt.Errorf("yaml encode: %w", err)
 	}
 	if err := enc.Close(); err != nil {
-		return fmt.Errorf("yaml encode close %s: %w", path, err)
+		return nil, fmt.Errorf("yaml encode close: %w", err)
 	}
-	return atomicWriteFile(path, buf.Bytes(), mode)
+	return buf.Bytes(), nil
 }
 
 // staleTmpAge is how old a leftover temp file must be before
