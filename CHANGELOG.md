@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.6](https://github.com/vazra/simpledeploy/compare/v1.4.5...v1.4.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* bump go to 1.26.11 and klauspost/compress to 1.20.2 for govulncheck ([#152](https://github.com/vazra/simpledeploy/issues/152)) ([80a793f](https://github.com/vazra/simpledeploy/commit/80a793ff2a0ef4cba37b37ac60d83c41099c4b06))
+* **gitsync:** tell a pulled file's re-render from a local edit by content, not a time window ([#133](https://github.com/vazra/simpledeploy/issues/133)) ([b1ac010](https://github.com/vazra/simpledeploy/commit/b1ac010850bc0ccaf762ac8b8ea66e2608079462))
+
 ## [1.4.5](https://github.com/vazra/simpledeploy/compare/v1.4.4...v1.4.5) (2026-10-11)
 
 
