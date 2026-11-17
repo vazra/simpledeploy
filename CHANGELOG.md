@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.7](https://github.com/vazra/simpledeploy/compare/v1.4.6...v1.4.7) (2026-11-17)
+
+
+### Bug Fixes
+
+* install apt-utils in release apt job, allow manual apt publish ([#160](https://github.com/vazra/simpledeploy/issues/160)) ([9e96c5a](https://github.com/vazra/simpledeploy/commit/9e96c5a8200b99566dae34bb4d5e569689e60b48))
+
 ## [1.4.6](https://github.com/vazra/simpledeploy/compare/v1.4.5...v1.4.6) (2026-11-12)
 
 
