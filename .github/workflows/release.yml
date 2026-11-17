@@ -3,12 +3,19 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual re-publish of an existing release's debs to the apt repo.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish to apt (e.g. v1.4.6)
+        required: true
 
 permissions:
   contents: read
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -70,12 +77,14 @@ jobs:
 
   update-apt-repo:
     needs: [release-please, goreleaser]
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' ||
+      (needs.goreleaser.result == 'success' && needs.release-please.outputs.release_created == 'true'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
-      TAG: ${{ needs.release-please.outputs.tag_name }}
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
     steps:
       - name: Download .deb files from release
         env:
@@ -103,6 +112,9 @@ jobs:
 
       - name: Update APT repository
         run: |
+          # ubuntu-latest no longer ships apt-utils (apt-ftparchive)
+          sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils
+
           # Copy debs to pool
           mkdir -p apt-repo/pool/main/s/simpledeploy
           cp debs/*.deb apt-repo/pool/main/s/simpledeploy/
