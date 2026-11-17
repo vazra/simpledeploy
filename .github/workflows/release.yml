@@ -103,6 +103,9 @@ jobs:
 
       - name: Update APT repository
         run: |
+          # ubuntu-latest no longer ships apt-utils (apt-ftparchive)
+          sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils
+
           # Copy debs to pool
           mkdir -p apt-repo/pool/main/s/simpledeploy
           cp debs/*.deb apt-repo/pool/main/s/simpledeploy/
