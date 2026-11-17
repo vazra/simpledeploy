@@ -14,15 +14,15 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/markdown-remark": "7.3.6",
+    "@astrojs/markdown-remark": "7.3.7",
     "@astrojs/starlight": "0.42.10",
-    "@astrojs/svelte": "9.1.2",
-    "astro": "7.4.7",
+    "@astrojs/svelte": "9.1.4",
+    "astro": "7.4.10",
     "sharp": "0.35.5",
     "starlight-blog": "0.30.2",
     "starlight-image-zoom": "0.16.2",
     "starlight-links-validator": "0.27.0",
-    "starlight-openapi": "0.27.0",
+    "starlight-openapi": "0.27.1",
     "svelte": "5.57.3"
   },
   "devDependencies": {
