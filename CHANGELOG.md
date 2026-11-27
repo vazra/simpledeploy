@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.7](https://github.com/vazra/simpledeploy/compare/v1.4.6...v1.4.7) (2026-11-27)
+
+
+### Bug Fixes
+
+* bump opentelemetry to 1.47.0 and gorilla/websocket past mask-key fix for govulncheck ([#169](https://github.com/vazra/simpledeploy/issues/169)) ([41abb63](https://github.com/vazra/simpledeploy/commit/41abb63a4073d7c58dab30399b94cfd049bcc88e))
+* install apt-utils in release apt job, allow manual apt publish ([#160](https://github.com/vazra/simpledeploy/issues/160)) ([9e96c5a](https://github.com/vazra/simpledeploy/commit/9e96c5a8200b99566dae34bb4d5e569689e60b48))
+
 ## [1.4.6](https://github.com/vazra/simpledeploy/compare/v1.4.5...v1.4.6) (2026-11-12)
 
 
