@@ -2,14 +2,14 @@ package proxy
 
 import (
 	"context"
+	dockerclient "github.com/moby/moby/client"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/moby/moby/api/types/container"
 )
 
 // dockerInspector is the narrow subset of docker.Client needed by DockerResolver.
 type dockerInspector interface {
-	ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error)
+	ContainerList(ctx context.Context, opts dockerclient.ContainerListOptions) ([]container.Summary, error)
 	ContainerInspect(ctx context.Context, id string) (container.InspectResponse, error)
 }
 
@@ -28,11 +28,11 @@ func (r *DockerResolver) ContainerIP(project, service, netName string) (string, 
 		return "", nil
 	}
 	ctx := context.Background()
-	f := filters.NewArgs()
+	f := make(dockerclient.Filters)
 	f.Add("label", "com.docker.compose.project="+project)
 	f.Add("label", "com.docker.compose.service="+service)
 	f.Add("status", "running")
-	list, err := r.Client.ContainerList(ctx, container.ListOptions{Filters: f, All: false})
+	list, err := r.Client.ContainerList(ctx, dockerclient.ContainerListOptions{Filters: f, All: false})
 	if err != nil {
 		return "", err
 	}
@@ -50,5 +50,8 @@ func (r *DockerResolver) ContainerIP(project, service, netName string) (string, 
 	if !ok || net == nil {
 		return "", nil
 	}
-	return net.IPAddress, nil
+	if !net.IPAddress.IsValid() {
+		return "", nil
+	}
+	return net.IPAddress.String(), nil
 }

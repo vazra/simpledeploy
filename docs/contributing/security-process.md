@@ -25,7 +25,7 @@ This page is for maintainers. Reporters should follow [`SECURITY.md`](https://gi
 
 | Check | Where |
 |---|---|
-| `govulncheck` (blocking; only the unfixable `docker/docker` findings are allowed) | CI `govulncheck` job, or `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` locally |
+| `govulncheck` (blocking; only IDs in the job's `ALLOWED` list pass, currently none) | CI `govulncheck` job, or `go run golang.org/x/vuln/cmd/govulncheck@latest ./...` locally |
 | Dependency updates | Dependabot PRs (gomod, npm, GitHub Actions) |
 | UI dependencies | `cd ui && npm audit --omit=dev` |
 | Lint and race detector | `golangci-lint run ./...`, `go test -race ./...` |

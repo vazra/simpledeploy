@@ -224,11 +224,11 @@ func TestUpdateBackupConfig_ManageWithGrant(t *testing.T) {
 	}
 
 	body := map[string]any{
-		"strategy":         "postgres",
-		"target":           "local",
-		"schedule_cron":    "0 3 * * *",
-		"retention_mode":   "count",
-		"retention_count":  7,
+		"strategy":        "postgres",
+		"target":          "local",
+		"schedule_cron":   "0 3 * * *",
+		"retention_mode":  "count",
+		"retention_count": 7,
 	}
 	req := authedRequest(t, http.MethodPut, fmt.Sprintf("/api/backups/configs/%d", cfgID), body, manageCookie)
 	w := httptest.NewRecorder()

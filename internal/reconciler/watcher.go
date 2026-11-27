@@ -17,10 +17,10 @@ const debounceDuration = time.Second
 
 // sidecar file basenames recognized by the watcher.
 const (
-	appSidecarBase     = "simpledeploy.yml"
-	appSecretsBase     = "simpledeploy.secrets.yml"
-	globalSidecarBase  = "config.yml"
-	globalSecretsBase  = "secrets.yml"
+	appSidecarBase    = "simpledeploy.yml"
+	appSecretsBase    = "simpledeploy.secrets.yml"
+	globalSidecarBase = "config.yml"
+	globalSecretsBase = "secrets.yml"
 )
 
 // Watch runs an fsnotify watcher on appsDir (and dataDir, for global sidecar

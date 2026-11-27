@@ -3,20 +3,21 @@ package backup
 import (
 	"context"
 	"errors"
+	dockerclient "github.com/moby/moby/client"
 	"strings"
 	"testing"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/api/types/container"
 )
 
 // fakeLister returns every container regardless of filters, like a daemon
 // that ignored them, so the executor's own label checks are exercised.
 type fakeLister struct {
 	containers []container.Summary
-	opts       []container.ListOptions
+	opts       []dockerclient.ContainerListOptions
 }
 
-func (f *fakeLister) ContainerList(_ context.Context, opts container.ListOptions) ([]container.Summary, error) {
+func (f *fakeLister) ContainerList(_ context.Context, opts dockerclient.ContainerListOptions) ([]container.Summary, error) {
 	f.opts = append(f.opts, opts)
 	return f.containers, nil
 }
@@ -32,7 +33,7 @@ func ctr(id, project, service, state string, extra ...string) container.Summary 
 	for i := 0; i+1 < len(extra); i += 2 {
 		labels[extra[i]] = extra[i+1]
 	}
-	return container.Summary{ID: id, Names: []string{"/" + id}, Labels: labels, State: state}
+	return container.Summary{ID: id, Names: []string{"/" + id}, Labels: labels, State: container.ContainerState(state)}
 }
 
 func newTestExecutor(containers ...container.Summary) (*DockerHookExecutor, *fakeLister, *[][]string) {
@@ -73,7 +74,7 @@ func TestDockerHookExecutorExecUsesOwnServiceContainer(t *testing.T) {
 		t.Fatalf("docker calls = %q, want [%q]", *calls, want)
 	}
 	f := lister.opts[0].Filters
-	if !lister.opts[0].All || !f.ExactMatch("label", composeProjectLabel+"="+testProject) || !f.ExactMatch("label", composeServiceLabel+"=db") {
+	if !lister.opts[0].All || !f["label"][composeProjectLabel+"="+testProject] || !f["label"][composeServiceLabel+"=db"] {
 		t.Errorf("list options = %+v, want All with project and service label filters", lister.opts[0])
 	}
 }

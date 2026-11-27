@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	dockerclient "github.com/moby/moby/client"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/api/types/container"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/compose"
 	"github.com/vazra/simpledeploy/internal/docker"
@@ -43,7 +44,7 @@ type namedMockDocker struct {
 	names map[string]string // id -> name
 }
 
-func (d *namedMockDocker) ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error) {
+func (d *namedMockDocker) ContainerList(ctx context.Context, opts dockerclient.ContainerListOptions) ([]container.Summary, error) {
 	list, err := d.MockClient.ContainerList(ctx, opts)
 	for i := range list {
 		if n, ok := d.names[list[i].ID]; ok {

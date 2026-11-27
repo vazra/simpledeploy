@@ -2,9 +2,8 @@ package docker
 
 import (
 	"context"
+	dockerclient "github.com/moby/moby/client"
 	"testing"
-
-	"github.com/docker/docker/api/types/container"
 )
 
 // compile-time interface conformance checks
@@ -51,7 +50,7 @@ func TestMockClientRecordsCalls(t *testing.T) {
 		"com.docker.compose.service": "web",
 	})
 
-	containers, err := m.ContainerList(ctx, container.ListOptions{})
+	containers, err := m.ContainerList(ctx, dockerclient.ContainerListOptions{})
 	if err != nil {
 		t.Fatalf("ContainerList: %v", err)
 	}

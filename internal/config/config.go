@@ -34,20 +34,20 @@ func expandHome(p string) string {
 }
 
 type Config struct {
-	DataDir        string          `yaml:"data_dir"`
-	AppsDir        string          `yaml:"apps_dir"`
-	ListenAddr     string          `yaml:"listen_addr"`
-	HTTPListenAddr string          `yaml:"http_listen_addr"`
+	DataDir        string `yaml:"data_dir"`
+	AppsDir        string `yaml:"apps_dir"`
+	ListenAddr     string `yaml:"listen_addr"`
+	HTTPListenAddr string `yaml:"http_listen_addr"`
 	// ExtraListenAddrs are additional addresses for the HTTPS proxy server
 	// (e.g. [":50051"]). They serve the same routes, TLS policies and certs
 	// as ListenAddr. Empty by default.
 	ExtraListenAddrs []string `yaml:"extra_listen_addrs"`
-	ManagementPort int             `yaml:"management_port"`
+	ManagementPort   int      `yaml:"management_port"`
 	// ManagementAddr is the bind address for the dashboard listener.
 	// Defaults to "127.0.0.1" so the plain-HTTP dashboard is not exposed
 	// to the network without an explicit operator decision (front it with
 	// Caddy, or set ManagementAddr: "" to bind all interfaces).
-	ManagementAddr string `yaml:"management_addr"`
+	ManagementAddr string          `yaml:"management_addr"`
 	Domain         string          `yaml:"domain"`
 	TLS            TLSConfig       `yaml:"tls"`
 	MasterSecret   string          `yaml:"master_secret"`
@@ -59,11 +59,11 @@ type Config struct {
 	// AllowedBindPaths are host folders apps may bind-mount even though they
 	// sit under a protected system folder (e.g. /home/media). SimpleDeploy's
 	// data folder and other apps' folders stay protected.
-	AllowedBindPaths []string `yaml:"allowed_bind_paths"`
-	LogBufferSize  int             `yaml:"log_buffer_size"`
-	PublicHost      string          `yaml:"public_host"`
-	RecipesIndexURL string          `yaml:"recipes_index_url"`
-	GitSync         GitSyncConfig   `yaml:"git_sync"`
+	AllowedBindPaths []string      `yaml:"allowed_bind_paths"`
+	LogBufferSize    int           `yaml:"log_buffer_size"`
+	PublicHost       string        `yaml:"public_host"`
+	RecipesIndexURL  string        `yaml:"recipes_index_url"`
+	GitSync          GitSyncConfig `yaml:"git_sync"`
 }
 
 // GitSyncConfig controls optional git-backed config sync.

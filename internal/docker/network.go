@@ -2,10 +2,9 @@ package docker
 
 import (
 	"context"
+	dockerclient "github.com/moby/moby/client"
 	"log"
 	"strings"
-
-	"github.com/docker/docker/api/types/network"
 )
 
 // EnsureNetwork inspects the named network; if not found, creates it as a bridge
@@ -16,7 +15,7 @@ func EnsureNetwork(ctx context.Context, c Client, name string) error {
 	} else if !isNotFound(err) {
 		return err
 	}
-	if _, err := c.NetworkCreate(ctx, name, network.CreateOptions{
+	if _, err := c.NetworkCreate(ctx, name, dockerclient.NetworkCreateOptions{
 		Driver:     "bridge",
 		Attachable: true,
 	}); err != nil {

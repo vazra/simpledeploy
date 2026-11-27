@@ -143,4 +143,3 @@ func TestListUserAccess(t *testing.T) {
 		t.Errorf("unknown user status = %d, want 404", w.Code)
 	}
 }
-

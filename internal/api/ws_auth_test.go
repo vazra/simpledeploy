@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	dockerclient "github.com/moby/moby/client"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/gorilla/websocket"
+	"github.com/moby/moby/api/types/container"
 
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/deployer"
@@ -175,7 +176,7 @@ type stubLogsDocker struct {
 	open func(ctx context.Context) (io.ReadCloser, error)
 }
 
-func (d *stubLogsDocker) ContainerLogs(ctx context.Context, _ string, _ container.LogsOptions) (io.ReadCloser, error) {
+func (d *stubLogsDocker) ContainerLogs(ctx context.Context, _ string, _ dockerclient.ContainerLogsOptions) (io.ReadCloser, error) {
 	return d.open(ctx)
 }
 
