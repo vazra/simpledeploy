@@ -239,7 +239,8 @@ func TestRawRefsCoverJobsAndPreStartHooks(t *testing.T) {
 	}
 
 	// A job may extend a service from a file inside the app folder.
-	writeFile(t, filepath.Join(appsDir, "app", "common", "base.yml"), "services:\n  base:\n    image: alpine\n")
+	// compose-go >= 2.17 resolves a job's extends against the jobs section.
+	writeFile(t, filepath.Join(appsDir, "app", "common", "base.yml"), "jobs:\n  base:\n    image: alpine\n")
 	path := writeApp(t, appsDir, "app", "services:\n  web:\n    image: nginx\njobs:\n  task:\n    triggers:\n      manual: true\n    extends:\n      file: common/base.yml\n      service: base\n", "")
 	cfg, err := ParseFile(path, "app")
 	if err != nil {
