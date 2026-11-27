@@ -3,10 +3,12 @@ package proxy
 import (
 	"context"
 	"errors"
+	dockerclient "github.com/moby/moby/client"
+	"net/netip"
 	"testing"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 )
 
 type fakeInspector struct {
@@ -18,7 +20,7 @@ type fakeInspector struct {
 	inspectCalls  int
 }
 
-func (f *fakeInspector) ContainerList(_ context.Context, _ container.ListOptions) ([]container.Summary, error) {
+func (f *fakeInspector) ContainerList(_ context.Context, _ dockerclient.ContainerListOptions) ([]container.Summary, error) {
 	f.listCalls++
 	return f.listResult, f.listErr
 }
@@ -30,10 +32,10 @@ func (f *fakeInspector) ContainerInspect(_ context.Context, _ string) (container
 
 func inspectOn(netName, ip string) container.InspectResponse {
 	return container.InspectResponse{
-		ContainerJSONBase: &container.ContainerJSONBase{ID: "c1"},
+		ID: "c1",
 		NetworkSettings: &container.NetworkSettings{
 			Networks: map[string]*network.EndpointSettings{
-				netName: {IPAddress: ip},
+				netName: {IPAddress: netip.MustParseAddr(ip)},
 			},
 		},
 	}

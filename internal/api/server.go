@@ -43,19 +43,19 @@ func httpError(w http.ResponseWriter, err error, code int) {
 }
 
 type Server struct {
-	mux               *http.ServeMux
-	port              int
-	bindAddr          string
-	store             *store.Store
-	jwt               *auth.JWTManager
-	rateLimiter       *auth.RateLimiter
+	mux         *http.ServeMux
+	port        int
+	bindAddr    string
+	store       *store.Store
+	jwt         *auth.JWTManager
+	rateLimiter *auth.RateLimiter
 	// loginLimiter is a tighter, separate per-IP limiter for the login
 	// endpoint so abuse there does not deplete the global request budget
 	// (and vice versa). Default 10/min/IP.
 	loginLimiter *auth.RateLimiter
 	// setupMu serializes /api/setup so concurrent first-install requests
 	// cannot race past the UserCount() check before either inserts.
-	setupMu sync.Mutex
+	setupMu           sync.Mutex
 	backupScheduler   *backup.Scheduler
 	docker            docker.Client
 	appsDir           string

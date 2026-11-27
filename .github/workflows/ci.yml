@@ -53,11 +53,12 @@ jobs:
       - run: go test -race ./...
 
   # Blocking. Fails on any vulnerability whose vulnerable code is actually
-  # called, except the two docker/docker advisories that have no fixed
-  # release yet (GO-2026-4887, GO-2026-4883). The log lists the called IDs.
+  # called, except IDs in ALLOWED (regex alternation, currently empty: the
+  # docker/docker advisories went away with the moby/moby/client migration).
+  # The log lists the called IDs.
   # Findings that are only imported or required (not reachable) do not fail
   # the job and are not listed; run `govulncheck -show verbose ./...` locally
-  # to see them. Drop an ID from ALLOWED once docker ships a fix.
+  # to see them. Only allowlist an ID when no fixed release exists; drop it once one ships.
   govulncheck:
     runs-on: ubuntu-latest
     steps:
@@ -73,9 +74,9 @@ jobs:
       # cmd/simpledeploy embeds ui_dist, so the UI must be built first.
       - run: make ui-build
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-      - name: govulncheck (called findings, docker allowlist)
+      - name: govulncheck (called findings)
         env:
-          ALLOWED: GO-2026-4887|GO-2026-4883
+          ALLOWED: ""
         run: |
           set -o pipefail
           # JSON mode exits 0 even with findings, so a non-zero exit here is a
@@ -85,7 +86,11 @@ jobs:
           jq -r 'select(.finding) | .finding | select(.trace[0].function != null) | .osv' vuln.json | sort -u > called.txt
           echo "Called vulnerabilities:"
           cat called.txt
-          unexpected=$(grep -vxE "$ALLOWED" called.txt || true)
+          if [ -n "$ALLOWED" ]; then
+            unexpected=$(grep -vxE "$ALLOWED" called.txt || true)
+          else
+            unexpected=$(cat called.txt)
+          fi
           if [ -n "$unexpected" ]; then
             echo "::error::govulncheck found called vulnerabilities outside the allowlist: $(tr '\n' ' ' <<< "$unexpected")"
             govulncheck ./... || true

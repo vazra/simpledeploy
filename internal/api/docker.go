@@ -6,12 +6,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/volume"
-	dockerclient "github.com/docker/docker/client"
+	dockerclient "github.com/moby/moby/client"
 )
 
 func (s *Server) dockerRaw() (*dockerclient.Client, bool) {
@@ -31,11 +26,12 @@ func (s *Server) handleDockerInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	info, err := cli.Info(r.Context())
+	res, err := cli.Info(r.Context(), dockerclient.InfoOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	info := res.Info
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"server_version":     info.ServerVersion,
@@ -76,13 +72,22 @@ func (s *Server) handleDockerDiskUsage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	du, err := cli.DiskUsage(r.Context(), types.DiskUsageOptions{})
+	du, err := cli.DiskUsage(r.Context(), dockerclient.DiskUsageOptions{
+		Containers: true, Images: true, BuildCache: true, Volumes: true, Verbose: true,
+	})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	// Keep the legacy /system/df response shape the UI expects.
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(du)
+	json.NewEncoder(w).Encode(map[string]any{
+		"LayersSize": du.Images.TotalSize,
+		"Images":     du.Images.Items,
+		"Containers": du.Containers.Items,
+		"Volumes":    du.Volumes.Items,
+		"BuildCache": du.BuildCache.Items,
+	})
 }
 
 func (s *Server) handleDockerPruneContainers(w http.ResponseWriter, r *http.Request) {
@@ -91,13 +96,13 @@ func (s *Server) handleDockerPruneContainers(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	report, err := cli.ContainersPrune(r.Context(), filters.NewArgs())
+	res, err := cli.ContainerPrune(r.Context(), dockerclient.ContainerPruneOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(report)
+	json.NewEncoder(w).Encode(res.Report)
 }
 
 func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request) {
@@ -106,13 +111,13 @@ func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	report, err := cli.ImagesPrune(r.Context(), filters.NewArgs(filters.Arg("dangling", "false")))
+	res, err := cli.ImagePrune(r.Context(), dockerclient.ImagePruneOptions{Filters: make(dockerclient.Filters).Add("dangling", "false")})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(report)
+	json.NewEncoder(w).Encode(res.Report)
 }
 
 func (s *Server) handleDockerPruneVolumes(w http.ResponseWriter, r *http.Request) {
@@ -121,13 +126,13 @@ func (s *Server) handleDockerPruneVolumes(w http.ResponseWriter, r *http.Request
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	report, err := cli.VolumesPrune(r.Context(), filters.NewArgs())
+	res, err := cli.VolumePrune(r.Context(), dockerclient.VolumePruneOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(report)
+	json.NewEncoder(w).Encode(res.Report)
 }
 
 func (s *Server) handleDockerPruneBuildCache(w http.ResponseWriter, r *http.Request) {
@@ -136,13 +141,13 @@ func (s *Server) handleDockerPruneBuildCache(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	report, err := cli.BuildCachePrune(r.Context(), types.BuildCachePruneOptions{})
+	res, err := cli.BuildCachePrune(r.Context(), dockerclient.BuildCachePruneOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(report)
+	json.NewEncoder(w).Encode(res.Report)
 }
 
 func (s *Server) handleDockerPruneAll(w http.ResponseWriter, r *http.Request) {
@@ -152,28 +157,28 @@ func (s *Server) handleDockerPruneAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	empty := filters.NewArgs()
-
-	containers, err := cli.ContainersPrune(ctx, empty)
+	containersRes, err := cli.ContainerPrune(ctx, dockerclient.ContainerPruneOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	images, err := cli.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false")))
+	imagesRes, err := cli.ImagePrune(ctx, dockerclient.ImagePruneOptions{Filters: make(dockerclient.Filters).Add("dangling", "false")})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	volumes, err := cli.VolumesPrune(ctx, empty)
+	volumesRes, err := cli.VolumePrune(ctx, dockerclient.VolumePruneOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
-	buildCache, err := cli.BuildCachePrune(ctx, types.BuildCachePruneOptions{})
+	buildCacheRes, err := cli.BuildCachePrune(ctx, dockerclient.BuildCachePruneOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
+	containers, images := containersRes.Report, imagesRes.Report
+	volumes, buildCache := volumesRes.Report, buildCacheRes.Report
 
 	totalReclaimed := containers.SpaceReclaimed + images.SpaceReclaimed +
 		volumes.SpaceReclaimed + buildCache.SpaceReclaimed
@@ -194,13 +199,13 @@ func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	imgs, err := cli.ImageList(r.Context(), image.ListOptions{})
+	res, err := cli.ImageList(r.Context(), dockerclient.ImageListOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(imgs)
+	json.NewEncoder(w).Encode(res.Items)
 }
 
 func (s *Server) handleDockerImageRemove(w http.ResponseWriter, r *http.Request) {
@@ -214,13 +219,13 @@ func (s *Server) handleDockerImageRemove(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid image id", http.StatusBadRequest)
 		return
 	}
-	dels, err := cli.ImageRemove(r.Context(), id, image.RemoveOptions{})
+	res, err := cli.ImageRemove(r.Context(), id, dockerclient.ImageRemoveOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(dels)
+	json.NewEncoder(w).Encode(res.Items)
 }
 
 func (s *Server) handleDockerNetworks(w http.ResponseWriter, r *http.Request) {
@@ -229,13 +234,13 @@ func (s *Server) handleDockerNetworks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	nets, err := cli.NetworkList(r.Context(), network.ListOptions{})
+	res, err := cli.NetworkList(r.Context(), dockerclient.NetworkListOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nets)
+	json.NewEncoder(w).Encode(res.Items)
 }
 
 func (s *Server) handleDockerVolumes(w http.ResponseWriter, r *http.Request) {
@@ -244,13 +249,13 @@ func (s *Server) handleDockerVolumes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "docker not available", http.StatusServiceUnavailable)
 		return
 	}
-	vols, err := cli.VolumeList(r.Context(), volume.ListOptions{})
+	res, err := cli.VolumeList(r.Context(), dockerclient.VolumeListOptions{})
 	if err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(vols)
+	json.NewEncoder(w).Encode(map[string]any{"Volumes": res.Items, "Warnings": res.Warnings})
 }
 
 func (s *Server) handleDockerNetworkRemove(w http.ResponseWriter, r *http.Request) {
@@ -260,7 +265,7 @@ func (s *Server) handleDockerNetworkRemove(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	id := r.PathValue("id")
-	if err := cli.NetworkRemove(r.Context(), id); err != nil {
+	if _, err := cli.NetworkRemove(r.Context(), id, dockerclient.NetworkRemoveOptions{}); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -275,7 +280,7 @@ func (s *Server) handleDockerVolumeRemove(w http.ResponseWriter, r *http.Request
 		return
 	}
 	name := r.PathValue("name")
-	if err := cli.VolumeRemove(r.Context(), name, false); err != nil {
+	if _, err := cli.VolumeRemove(r.Context(), name, dockerclient.VolumeRemoveOptions{}); err != nil {
 		httpError(w, err, http.StatusInternalServerError)
 		return
 	}

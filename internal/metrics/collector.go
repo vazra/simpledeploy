@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	dockerclient "github.com/moby/moby/client"
 	"log"
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/moby/moby/api/types/container"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/vazra/simpledeploy/internal/docker"
@@ -67,8 +67,8 @@ func (c *Collector) syncStatus(ctx context.Context) {
 		return
 	}
 
-	f := filters.NewArgs(filters.Arg("label", "com.docker.compose.project"))
-	containers, err := c.docker.ContainerList(ctx, container.ListOptions{Filters: f})
+	f := make(dockerclient.Filters).Add("label", "com.docker.compose.project")
+	containers, err := c.docker.ContainerList(ctx, dockerclient.ContainerListOptions{Filters: f})
 	if err != nil {
 		log.Printf("metrics: syncStatus ContainerList: %v", err)
 		return
@@ -83,8 +83,8 @@ func (c *Collector) syncStatus(ctx context.Context) {
 	}
 
 	// Get all containers (including stopped/exited) to determine total per app
-	allContainers, err := c.docker.ContainerList(ctx, container.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("label", "com.docker.compose.project")),
+	allContainers, err := c.docker.ContainerList(ctx, dockerclient.ContainerListOptions{
+		Filters: make(dockerclient.Filters).Add("label", "com.docker.compose.project"),
 		All:     true,
 	})
 	if err != nil {
@@ -151,8 +151,8 @@ func (c *Collector) CollectSystem() (MetricPoint, error) {
 
 // CollectContainers collects metrics for all simpledeploy containers.
 func (c *Collector) CollectContainers(ctx context.Context) ([]MetricPoint, error) {
-	f := filters.NewArgs(filters.Arg("label", "com.docker.compose.project"))
-	containers, err := c.docker.ContainerList(ctx, container.ListOptions{Filters: f})
+	f := make(dockerclient.Filters).Add("label", "com.docker.compose.project")
+	containers, err := c.docker.ContainerList(ctx, dockerclient.ContainerListOptions{Filters: f})
 	if err != nil {
 		return nil, fmt.Errorf("ContainerList: %w", err)
 	}
@@ -183,10 +183,10 @@ func (c *Collector) collectContainer(ctx context.Context, ctr container.Summary,
 	if err != nil {
 		return MetricPoint{}, fmt.Errorf("ContainerStats: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Close()
 
 	var stats container.StatsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+	if err := json.NewDecoder(resp).Decode(&stats); err != nil {
 		return MetricPoint{}, fmt.Errorf("decode stats: %w", err)
 	}
 

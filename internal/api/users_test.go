@@ -89,7 +89,7 @@ func TestCreateUser(t *testing.T) {
 	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
 		"username": "newuser",
 		"password": "pass1234",
-		"role": "manage",
+		"role":     "manage",
 	}, cookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)
@@ -121,7 +121,7 @@ func TestCreateUserForbidden(t *testing.T) {
 	req := authedRequest(t, http.MethodPost, "/api/users", map[string]string{
 		"username": "anotheruser",
 		"password": "pass1234",
-		"role": "manage",
+		"role":     "manage",
 	}, adminCookie)
 	w := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(w, req)

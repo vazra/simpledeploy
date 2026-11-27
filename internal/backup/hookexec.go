@@ -3,13 +3,13 @@ package backup
 import (
 	"context"
 	"fmt"
+	dockerclient "github.com/moby/moby/client"
 	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/moby/moby/api/types/container"
 )
 
 const (
@@ -21,7 +21,7 @@ const (
 
 // ContainerLister is the part of docker.Client the hook executor needs.
 type ContainerLister interface {
-	ContainerList(ctx context.Context, opts container.ListOptions) ([]container.Summary, error)
+	ContainerList(ctx context.Context, opts dockerclient.ContainerListOptions) ([]container.Summary, error)
 }
 
 // DockerHookExecutor runs backup hooks with the docker CLI. It finds
@@ -49,12 +49,9 @@ func (e *DockerHookExecutor) serviceContainers(ctx context.Context, project, ser
 	if project == "" || service == "" {
 		return nil, fmt.Errorf("hook needs an app and a service")
 	}
-	list, err := e.client.ContainerList(ctx, container.ListOptions{
-		All: true,
-		Filters: filters.NewArgs(
-			filters.Arg("label", composeProjectLabel+"="+project),
-			filters.Arg("label", composeServiceLabel+"="+service),
-		),
+	list, err := e.client.ContainerList(ctx, dockerclient.ContainerListOptions{
+		All:     true,
+		Filters: make(dockerclient.Filters).Add("label", composeProjectLabel+"="+project).Add("label", composeServiceLabel+"="+service),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)

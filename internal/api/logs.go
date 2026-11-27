@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	dockerclient "github.com/moby/moby/client"
 	"io"
 	"log"
 	"net"
@@ -13,8 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/gorilla/websocket"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
@@ -327,11 +326,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Find container by compose labels
 	project := fmt.Sprintf("simpledeploy-%s", slug)
-	f := filters.NewArgs(
-		filters.Arg("label", fmt.Sprintf("com.docker.compose.project=%s", project)),
-		filters.Arg("label", fmt.Sprintf("com.docker.compose.service=%s", service)),
-	)
-	ctrs, err := s.docker.ContainerList(ctx, container.ListOptions{Filters: f, All: true})
+	f := make(dockerclient.Filters).Add("label", fmt.Sprintf("com.docker.compose.project=%s", project)).Add("label", fmt.Sprintf("com.docker.compose.service=%s", service))
+	ctrs, err := s.docker.ContainerList(ctx, dockerclient.ContainerListOptions{Filters: f, All: true})
 	if err != nil || len(ctrs) == 0 {
 		conn.WriteJSON(map[string]string{"error": "container not found"})
 		return
@@ -348,7 +344,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	tty := info.Config != nil && info.Config.Tty
 
-	logOpts := container.LogsOptions{
+	logOpts := dockerclient.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true,
 		Follow: follow, Tail: tail, Timestamps: true,
 	}

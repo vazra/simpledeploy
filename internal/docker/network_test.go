@@ -3,15 +3,16 @@ package docker
 import (
 	"context"
 	"errors"
+	dockerclient "github.com/moby/moby/client"
 	"testing"
 
-	"github.com/docker/docker/api/types/network"
+	"github.com/moby/moby/api/types/network"
 )
 
 func TestEnsureNetworkExists(t *testing.T) {
 	m := NewMockClient()
 	m.NetworkInspectFn = func(_ context.Context, id string) (network.Inspect, error) {
-		return network.Inspect{Name: id}, nil
+		return network.Inspect{Network: network.Network{Name: id}}, nil
 	}
 	if err := EnsureNetwork(context.Background(), m, "simpledeploy-public"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -26,8 +27,8 @@ func TestEnsureNetworkCreates(t *testing.T) {
 	m.NetworkInspectFn = func(_ context.Context, id string) (network.Inspect, error) {
 		return network.Inspect{}, errors.New("Error: No such network: " + id)
 	}
-	var gotOpts network.CreateOptions
-	m.NetworkCreateFn = func(_ context.Context, name string, opts network.CreateOptions) (network.CreateResponse, error) {
+	var gotOpts dockerclient.NetworkCreateOptions
+	m.NetworkCreateFn = func(_ context.Context, name string, opts dockerclient.NetworkCreateOptions) (network.CreateResponse, error) {
 		gotOpts = opts
 		return network.CreateResponse{ID: name}, nil
 	}
@@ -63,7 +64,7 @@ func TestEnsureNetworkCreateErrorPropagates(t *testing.T) {
 	m.NetworkInspectFn = func(_ context.Context, _ string) (network.Inspect, error) {
 		return network.Inspect{}, errors.New("No such network: foo")
 	}
-	m.NetworkCreateFn = func(_ context.Context, _ string, _ network.CreateOptions) (network.CreateResponse, error) {
+	m.NetworkCreateFn = func(_ context.Context, _ string, _ dockerclient.NetworkCreateOptions) (network.CreateResponse, error) {
 		return network.CreateResponse{}, errors.New("create failed")
 	}
 	if err := EnsureNetwork(context.Background(), m, "simpledeploy-public"); err == nil {

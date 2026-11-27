@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"encoding/json"
+	"errors"
 	"fmt"
+	dockerclient "github.com/moby/moby/client"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -19,27 +20,26 @@ import (
 	"bufio"
 	"bytes"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	"github.com/vazra/simpledeploy/internal/alerts"
-	"github.com/vazra/simpledeploy/internal/configsync"
-	"github.com/vazra/simpledeploy/internal/logbuf"
-	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/api"
+	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
 	"github.com/vazra/simpledeploy/internal/client"
 	"github.com/vazra/simpledeploy/internal/config"
+	"github.com/vazra/simpledeploy/internal/configsync"
 	"github.com/vazra/simpledeploy/internal/deployer"
 	"github.com/vazra/simpledeploy/internal/docker"
 	"github.com/vazra/simpledeploy/internal/events"
 	"github.com/vazra/simpledeploy/internal/gitsync"
+	"github.com/vazra/simpledeploy/internal/logbuf"
 	"github.com/vazra/simpledeploy/internal/metrics"
 	"github.com/vazra/simpledeploy/internal/proxy"
 	"github.com/vazra/simpledeploy/internal/recipes"
 	"github.com/vazra/simpledeploy/internal/reconciler"
 	"github.com/vazra/simpledeploy/internal/store"
+	"golang.org/x/term"
 	"sync"
 	"sync/atomic"
 )
@@ -1297,7 +1297,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	tty := info.Config != nil && info.Config.Tty
 
-	reader, err := dc.ContainerLogs(cmd.Context(), containerName, container.LogsOptions{
+	reader, err := dc.ContainerLogs(cmd.Context(), containerName, dockerclient.ContainerLogsOptions{
 		ShowStdout: true, ShowStderr: true,
 		Follow: follow, Tail: tail, Timestamps: true,
 	})

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	dockerclient "github.com/moby/moby/client"
 	"io"
 	"log"
 	"net/http"
@@ -17,8 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
+	"github.com/moby/moby/api/types/container"
 	"github.com/vazra/simpledeploy/internal/audit"
 	"github.com/vazra/simpledeploy/internal/auth"
 	"github.com/vazra/simpledeploy/internal/backup"
@@ -882,9 +882,9 @@ func (s *Server) resolveRestoreContainer(ctx context.Context, app *store.App, re
 
 	// Compose projects are named after the slug; app.Name can be a display name.
 	project := "simpledeploy-" + app.Slug
-	list, err := s.docker.ContainerList(ctx, container.ListOptions{
+	list, err := s.docker.ContainerList(ctx, dockerclient.ContainerListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+project)),
+		Filters: make(dockerclient.Filters).Add("label", "com.docker.compose.project="+project),
 	})
 	if err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("list app containers: %w", err)
