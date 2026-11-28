@@ -99,6 +99,17 @@ App containers stay running across the upgrade. The dashboard is briefly unavail
 
 Read the [CHANGELOG](https://github.com/vazra/simpledeploy/blob/main/CHANGELOG.md) before any minor version bump. Compose label renames or config field changes will be called out there with migration steps.
 
+### 1.4.8: jobs that extend another file
+
+A top-level `jobs` entry that uses `extends` with `file:` now looks up the target in that file's `jobs:` section, not `services:` (matches current docker compose). If such an app fails to load after upgrading, move the base definition under `jobs:` in the referenced file:
+
+```yaml
+# common/base.yml
+jobs:
+  base:
+    image: alpine
+```
+
 ## Rollback
 
 If a new version misbehaves:
