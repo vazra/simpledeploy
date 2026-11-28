@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.8](https://github.com/vazra/simpledeploy/compare/v1.4.7...v1.4.8) (2026-11-28)
+
+
+### Bug Fixes
+
+* job extends from another file reads its jobs section (compose-go 2.17) ([#170](https://github.com/vazra/simpledeploy/issues/170)) ([4987cfb](https://github.com/vazra/simpledeploy/commit/4987cfb52632a433e62a5944bba02db652c3db55))
+
 ## [1.4.7](https://github.com/vazra/simpledeploy/compare/v1.4.6...v1.4.7) (2026-11-27)
 
 
