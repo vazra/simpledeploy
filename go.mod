@@ -4,9 +4,9 @@ go 1.26.11
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.48.0
-	github.com/aws/aws-sdk-go-v2/credentials v1.21.1
-	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.23.26
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.115.0
+	github.com/aws/aws-sdk-go-v2/credentials v1.21.3
+	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.23.28
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.116.0
 	github.com/caddyserver/caddy/v2 v2.11.9
 	github.com/compose-spec/compose-go/v2 v2.17.0
 	github.com/fsnotify/fsnotify v1.10.1
@@ -24,7 +24,7 @@ require (
 	golang.org/x/term v0.48.0
 	google.golang.org/grpc v1.85.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
